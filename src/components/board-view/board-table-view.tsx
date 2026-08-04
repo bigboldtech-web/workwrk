@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
+  isDoneStatus,
   type BoardItemRow,
   type StatusOption,
   type ItemTag,
@@ -35,6 +36,7 @@ import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { DatePlanner } from "./date-planner";
 import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 
@@ -85,7 +87,7 @@ interface BoardTableViewProps {
 /** Patch shape rows can emit. `owner`/`tags` only update the local
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
-type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "dueAt" | "itemTypeId">> & { tagIds?: string[]; metadata?: Record<string, unknown> };
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "startAt" | "dueAt" | "itemTypeId" | "recurRule">> & { tagIds?: string[]; metadata?: Record<string, unknown> };
 
 // Toolbar sort (ported from the Personal List).
 type SortKey = "none" | "title" | "due" | "created" | "priority";
@@ -1744,7 +1746,7 @@ function Row({
       ) : null}
       {showDue ? (
         <MetaCell>
-          <DueDateCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+          <DueDateCell row={row} canEdit={canEdit} statuses={statuses} onUpdate={onUpdate} />
         </MetaCell>
       ) : null}
       {showPriority ? (
@@ -1861,40 +1863,20 @@ function EditableFieldCell({ field, value, canEdit, onChange }: {
   return <FieldValue field={field} value={value} mode="edit" onChange={onChange} />;
 }
 
-// Inline due-date cell — a faint calendar+ affordance when empty (ClickUp
-// style), the date when set, click to edit via a native date input.
-function DueDateCell({ row, canEdit, onUpdate }: { row: BoardItemRow; canEdit: boolean; onUpdate: (id: string, patch: RowPatch) => void }) {
-  const [editing, setEditing] = useState(false);
-  const due = row.dueAt ? new Date(row.dueAt) : null;
-  const overdue = due ? due.getTime() < new Date().setHours(0, 0, 0, 0) : false;
-  const inputVal = due
-    ? `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`
-    : "";
-
-  if (editing && canEdit) {
-    return (
-      <input
-        type="date"
-        autoFocus
-        value={inputVal}
-        onChange={(e) => onUpdate(row.id, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null })}
-        onBlur={() => setEditing(false)}
-        className="h-6 px-1 text-[12px] border border-zinc-200 rounded bg-white focus:outline-none focus:border-[var(--os-brand)]"
-      />
-    );
-  }
+// Inline due-date cell — the full ClickUp DatePlanner (Date / Reminder / Repeat)
+// reachable straight from the row's date affordance, so recurrence + reminders
+// are one click away without opening the task.
+function DueDateCell({ row, canEdit, statuses, onUpdate }: { row: BoardItemRow; canEdit: boolean; statuses: StatusOption[]; onUpdate: (id: string, patch: RowPatch) => void }) {
+  const done = isDoneStatus(statuses, row.status);
   return (
-    <button
-      type="button"
-      disabled={!canEdit}
-      onClick={() => setEditing(true)}
-      className={`inline-flex items-center gap-1 text-[12px] disabled:cursor-default ${
-        due ? (overdue ? "text-red-500" : "text-zinc-600 hover:text-zinc-900") : "text-zinc-400 hover:text-zinc-600"
-      }`}
-      title={due ? "Edit due date" : "Set due date"}
-    >
-      {due ? <span>{due.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-[17px] h-[17px]" />}
-    </button>
+    <DatePlanner
+      item={row}
+      canEdit={canEdit}
+      statuses={statuses}
+      done={done}
+      compact
+      onPatch={(body) => onUpdate(row.id, body as unknown as RowPatch)}
+    />
   );
 }
 

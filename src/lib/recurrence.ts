@@ -11,10 +11,33 @@
 
 export type RecurFreq = "DAY" | "WEEK" | "MONTH" | "QUARTER" | "YEAR";
 
+/** When the next cycle fires:
+ *  - SCHEDULE    — date/cron driven (Item.recurNextAt). Default.
+ *  - ON_COMPLETE — fires the moment the task is marked done (ClickUp's
+ *                  "On status change: Complete"); recurNextAt stays null. */
+export type RecurTrigger = "SCHEDULE" | "ON_COMPLETE";
+
 export interface RecurrenceRule {
   freq: RecurFreq;
   /** Repeat every N units (>= 1). */
   interval: number;
+  /** What advances the series. Default SCHEDULE. */
+  trigger?: RecurTrigger;
+  /** true  = spawn a fresh copy each cycle (each period gets its own record);
+   *  false = roll THIS same task forward. Default true (back-compat). */
+  createNew?: boolean;
+  /** false = the series ends after `count` occurrences or once a cycle passes
+   *  `until`. Default true (never ends until Repeat is turned off). */
+  forever?: boolean;
+  /** Remaining occurrences when !forever (decremented as each cycle runs). */
+  count?: number | null;
+  /** ISO end date when !forever. Once a cycle would land after this, stop. */
+  until?: string | null;
+  /** Status value to set when the task recurs (the new copy, or the rolled-
+   *  forward task). null/absent = the board's first open status. */
+  resetStatus?: string | null;
+  /** Keep the due date in step with the recurrence each cycle. Default true. */
+  syncDue?: boolean;
 }
 
 const FREQS: readonly RecurFreq[] = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"];
@@ -22,7 +45,10 @@ const UNIT_LABEL: Record<RecurFreq, string> = { DAY: "day", WEEK: "week", MONTH:
 
 /** Validate an arbitrary blob (Item.recurRule column or legacy
  *  metadata.recurrence) into a rule. Returns null when absent/malformed so
- *  callers can treat "no recurrence" uniformly. */
+ *  callers can treat "no recurrence" uniformly. Extra ClickUp-parity options
+ *  (trigger / createNew / forever / count / until / resetStatus / syncDue) are
+ *  read when present and defaulted otherwise, so old {freq,interval} rules keep
+ *  their original spawn-a-copy-on-schedule behavior. */
 export function parseRecurrence(raw: unknown): RecurrenceRule | null {
   if (!raw || typeof raw !== "object") return null;
   // Tolerate a legacy metadata wrapper ({ recurrence: {...} }).
@@ -30,11 +56,33 @@ export function parseRecurrence(raw: unknown): RecurrenceRule | null {
     ? (raw as Record<string, unknown>).recurrence
     : raw;
   if (!obj || typeof obj !== "object") return null;
-  const freq = (obj as Record<string, unknown>).freq;
+  const o = obj as Record<string, unknown>;
+  const freq = o.freq;
   if (typeof freq !== "string" || !FREQS.includes(freq as RecurFreq)) return null;
-  const rawInterval = (obj as Record<string, unknown>).interval;
+  const rawInterval = o.interval;
   const interval = typeof rawInterval === "number" && rawInterval >= 1 ? Math.floor(rawInterval) : 1;
-  return { freq: freq as RecurFreq, interval };
+
+  const trigger: RecurTrigger = o.trigger === "ON_COMPLETE" ? "ON_COMPLETE" : "SCHEDULE";
+  const createNew = typeof o.createNew === "boolean" ? o.createNew : true;
+  const forever = typeof o.forever === "boolean" ? o.forever : true;
+  const count = typeof o.count === "number" && o.count >= 0 ? Math.floor(o.count) : null;
+  const until = typeof o.until === "string" && o.until ? o.until : null;
+  const resetStatus = typeof o.resetStatus === "string" && o.resetStatus ? o.resetStatus : null;
+  const syncDue = typeof o.syncDue === "boolean" ? o.syncDue : true;
+
+  return { freq: freq as RecurFreq, interval, trigger, createNew, forever, count, until, resetStatus, syncDue };
+}
+
+/** True once the series has run its course under a non-forever rule: the
+ *  occurrence count is exhausted, or `nextCycle` would fall past `until`. */
+export function seriesEnded(rule: RecurrenceRule, nextCycle: Date): boolean {
+  if (rule.forever !== false) return false;
+  if (typeof rule.count === "number" && rule.count <= 0) return true;
+  if (rule.until) {
+    const end = new Date(rule.until);
+    if (!Number.isNaN(end.getTime()) && nextCycle.getTime() > end.getTime()) return true;
+  }
+  return false;
 }
 
 /** Advance a date by one cycle of the rule. Calendar-aware (setMonth /

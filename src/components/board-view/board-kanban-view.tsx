@@ -9,13 +9,14 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
+import { CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
 import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { AssigneePicker } from "./assignee-picker";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
+import { DatePlanner } from "./date-planner";
 import { ItemRowMoreMenu } from "./item-row-more-menu";
 import { type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -326,7 +327,6 @@ function KanbanCard({
 }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(card.title);
-  const [dueOpen, setDueOpen] = useState(false);
   const moreRef = useRef<ContextMenuHandle>(null);
   // Seed the input from the current title only when entering edit mode — avoids
   // a prop-sync effect (which cascades renders).
@@ -340,16 +340,11 @@ function KanbanCard({
   }, [autoEdit, canEdit]);
 
   const done = isDoneStatus(statuses, card.status);
-  const due = card.dueAt ? new Date(card.dueAt) : null;
-  const overdue = !!due && due < new Date() && !done;
   const tags = card.tags ?? [];
   const fieldChips = chipFields.filter((f) => {
     const v = card.metadata?.[f.key];
     return v != null && v !== "" && (!Array.isArray(v) || v.length > 0);
   });
-  const dueInput = due
-    ? `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`
-    : "";
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const iconBtn = "inline-flex items-center justify-center w-5 h-5 rounded text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100";
 
@@ -443,30 +438,16 @@ function KanbanCard({
           />
         </span>
 
-        {/* Due */}
-        <span className={`relative ${due ? "inline-flex" : "hidden group-hover:inline-flex"}`}>
-          <button
-            type="button"
-            disabled={!canEdit}
-            onClick={() => canEdit && setDueOpen((v) => !v)}
-            className={`inline-flex items-center gap-1 rounded text-[10.5px] font-medium ${
-              due ? `px-1.5 py-0.5 ${overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"}` : "text-zinc-400 hover:text-zinc-600"
-            }`}
-            title={due ? "Edit due date" : "Set due date"}
-          >
-            <CalendarPlus className={due ? "w-3 h-3" : "w-[17px] h-[17px]"} />
-            {due ? due.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null}
-          </button>
-          {dueOpen && canEdit ? (
-            <input
-              type="date"
-              autoFocus
-              value={dueInput}
-              onChange={(e) => { onPatch(card.id, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null }, { dueAt: e.target.value ? `${e.target.value}T00:00:00.000Z` : null }); setDueOpen(false); }}
-              onBlur={() => setDueOpen(false)}
-              className="absolute left-0 top-6 z-20 h-7 px-1 text-[12px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
-            />
-          ) : null}
+        {/* Due — full DatePlanner (Date / Reminder / Repeat) from the card icon. */}
+        <span className={`relative ${card.dueAt ? "inline-flex" : "hidden group-hover:inline-flex"}`}>
+          <DatePlanner
+            item={card}
+            canEdit={canEdit}
+            statuses={statuses}
+            done={done}
+            compact
+            onPatch={(body, opt) => onPatch(card.id, body as unknown as Record<string, unknown>, (opt ?? {}) as Partial<BoardItemRow>)}
+          />
         </span>
 
         {/* Priority */}

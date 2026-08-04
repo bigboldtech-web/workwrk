@@ -151,8 +151,8 @@ export function BoardItemDetail({
             <TagPicker value={item.tags ?? []} canEdit={canEdit} onChange={(tags) => onPatch({ tagIds: tags.map((t) => t.id) }, { tags })} />
           </Row>
         ) : null}
-        <Row label="Schedule">
-          <DatePlanner item={item} canEdit={canEdit} onPatch={onPatch} />
+        <Row label="Dates">
+          <DatePlanner item={item} canEdit={canEdit} onPatch={onPatch} statuses={statusOptions} />
         </Row>
         <Row label="Alignment">
           <AlignmentField item={item} canEdit={canEdit} onPatch={onPatch} />
