@@ -15,7 +15,7 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock } from "lucide-react";
+import { Check, Plus, Trash2, Archive, Flag, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock } from "lucide-react";
 import {
   PRIORITY_OPTIONS,
   isDoneStatus,
@@ -696,14 +696,32 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     });
   };
 
-  const toggleRow = useCallback((id: string) => {
+  // Shift-click range anchor — the last row toggled without shift.
+  const lastSelectedRef = useRef<string | null>(null);
+  const toggleRow = useCallback((id: string, shiftKey?: boolean) => {
+    // Shift-click: select every visible row between the anchor and this one.
+    // Range runs over the filtered/sorted top-level order (grouping caveat: the
+    // range follows list order, not the on-screen group order).
+    if (shiftKey && lastSelectedRef.current && lastSelectedRef.current !== id) {
+      const order = topLevel.map((r) => r.id);
+      const a = order.indexOf(lastSelectedRef.current);
+      const b = order.indexOf(id);
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        const range = order.slice(lo, hi + 1);
+        setSelected((prev) => { const next = new Set(prev); range.forEach((rid) => next.add(rid)); return next; });
+        lastSelectedRef.current = id;
+        return;
+      }
+    }
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
-  }, []);
-  const clearSelection = useCallback(() => setSelected(new Set()), []);
+    lastSelectedRef.current = id;
+  }, [topLevel]);
+  const clearSelection = useCallback(() => { setSelected(new Set()); lastSelectedRef.current = null; }, []);
   const selectAllVisible = useCallback(() => {
     setSelected(new Set(items.map((i) => i.id)));
   }, [items]);
@@ -820,6 +838,39 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setSelected(new Set());
     setBulkBusy(false);
   }, [selected]);
+
+  const bulkPriority = useCallback(async (priority: string | null) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    await Promise.allSettled(
+      ids.map((id) =>
+        fetch(`/api/items/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ priority }),
+        }),
+      ),
+    );
+    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, priority } : r)));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }, [selected]);
+
+  const bulkTrash = useCallback(async () => {
+    if (selected.size === 0) return;
+    if (!(await confirm({ title: "Delete tasks", description: `Delete ${selected.size} task${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    const results = await Promise.allSettled(
+      ids.map((id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" })),
+    );
+    const failed = results.filter((r) => r.status === "rejected").length;
+    if (failed > 0) setError(`${failed} failed to delete`);
+    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }, [selected, confirm]);
 
   // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
   // due / priority / tags) chosen inline before saving.
@@ -1370,11 +1421,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         selectedCount={selected.size}
         busy={bulkBusy}
         statuses={statuses}
+        priorities={PRIORITY_OPTIONS}
         onClear={clearSelection}
         onArchive={bulkArchive}
         onStatus={bulkStatus}
         onDueAt={bulkDueAt}
         onOwner={bulkOwner}
+        onPriority={bulkPriority}
+        onTrash={bulkTrash}
       />
     </div>
   );
@@ -1384,22 +1438,29 @@ function BulkActionBar({
   selectedCount,
   busy,
   statuses,
+  priorities,
   onClear,
   onArchive,
   onStatus,
   onDueAt,
   onOwner,
+  onPriority,
+  onTrash,
 }: {
   selectedCount: number;
   busy: boolean;
   statuses: StatusOption[];
+  priorities: readonly { value: string; label: string; color?: string }[];
   onClear: () => void;
   onArchive: () => void;
   onStatus: (status: string) => void;
   onDueAt: (iso: string | null) => void;
   onOwner: (ownerId: string | null) => void;
+  onPriority: (priority: string | null) => void;
+  onTrash: () => void;
 }) {
   if (selectedCount === 0) return null;
+  const pill = "list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] hover:bg-white/10 select-none";
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-1 rounded-full bg-zinc-900 text-white px-2 py-1.5 shadow-2xl">
       <span className="px-3 text-[12px] font-medium tabular-nums">
@@ -1407,7 +1468,7 @@ function BulkActionBar({
       </span>
       <span className="w-px h-5 bg-white/20" aria-hidden />
       <details className="relative">
-        <summary className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] hover:bg-white/10 select-none">
+        <summary className={pill}>
           Set status
           <ChevronDown className="w-3 h-3" />
         </summary>
@@ -1426,16 +1487,37 @@ function BulkActionBar({
           ))}
         </div>
       </details>
-      <BulkDueDate onSet={onDueAt} busy={busy} />
       <BulkOwner onSet={onOwner} busy={busy} />
-      <button
-        type="button"
-        onClick={onArchive}
-        disabled={busy}
-        className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] hover:bg-white/10"
-      >
-        <Trash2 className="w-3 h-3" />
+      <BulkDueDate onSet={onDueAt} busy={busy} />
+      <details className="relative">
+        <summary className={pill}>
+          <Flag className="w-3 h-3" />
+          Priority
+          <ChevronDown className="w-3 h-3" />
+        </summary>
+        <div className="absolute left-0 bottom-full mb-1 w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1 text-zinc-900">
+          {priorities.map((p) => (
+            <button
+              key={p.value}
+              type="button"
+              onClick={() => onPriority(p.value)}
+              disabled={busy}
+              className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-[12.5px] hover:bg-zinc-50"
+            >
+              <Flag className="w-3 h-3 shrink-0" style={{ color: p.color ?? "#a1a1aa" }} />
+              {p.label}
+            </button>
+          ))}
+          <button type="button" onClick={() => onPriority(null)} disabled={busy} className="w-full text-left px-3 py-1.5 text-[12.5px] text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">Clear priority</button>
+        </div>
+      </details>
+      <span className="w-px h-5 bg-white/20" aria-hidden />
+      <button type="button" onClick={onArchive} disabled={busy} className="inline-flex items-center gap-1.5 h-7 px-3 rounded-full text-[12px] hover:bg-white/10">
+        <Archive className="w-3 h-3" />
         Archive
+      </button>
+      <button type="button" onClick={onTrash} disabled={busy} className="inline-flex items-center justify-center w-7 h-7 rounded-full text-red-300 hover:bg-red-500/20 hover:text-red-200" aria-label="Delete" title="Delete (move to Trash)">
+        <Trash2 className="w-3.5 h-3.5" />
       </button>
       <button
         type="button"
@@ -1619,7 +1701,7 @@ function Row({
   canEdit: boolean;
   monday?: boolean;
   selected: boolean;
-  onToggleSelect: (id: string) => void;
+  onToggleSelect: (id: string, shiftKey?: boolean) => void;
   onUpdate: (id: string, patch: RowPatch) => void;
   onArchive: (id: string) => void;
   timeTrackingEnabled?: boolean;
@@ -1690,7 +1772,7 @@ function Row({
           {canEdit ? (
             <CheckBox
               checked={selected}
-              onChange={() => onToggleSelect(row.id)}
+              onChange={(shift) => onToggleSelect(row.id, shift)}
               className={selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}
             />
           ) : null}
@@ -1841,6 +1923,8 @@ function Row({
             onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
             onArchive={() => onArchive(row.id)}
             onDeleted={() => onDeleted(row.id)}
+            itemTypeId={row.itemTypeId ?? null}
+            onSetType={(t) => onUpdate(row.id, { itemTypeId: t })}
             timeTrackingEnabled={timeTrackingEnabled}
           />
         ) : null}
@@ -2106,7 +2190,7 @@ function SortMenu({ sortKey, onChange }: { sortKey: SortKey; onChange: (k: SortK
 function CheckBox({ checked, indeterminate, onChange, className = "" }: {
   checked: boolean;
   indeterminate?: boolean;
-  onChange: () => void;
+  onChange: (shiftKey?: boolean) => void;
   className?: string;
 }) {
   const on = checked || !!indeterminate;
@@ -2115,8 +2199,8 @@ function CheckBox({ checked, indeterminate, onChange, className = "" }: {
       role="checkbox"
       aria-checked={indeterminate ? "mixed" : checked}
       tabIndex={0}
-      onClick={(e) => { e.stopPropagation(); onChange(); }}
-      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(); } }}
+      onClick={(e) => { e.stopPropagation(); onChange(e.shiftKey); }}
+      onKeyDown={(e) => { if (e.key === " " || e.key === "Enter") { e.preventDefault(); onChange(false); } }}
       style={{ backgroundColor: on ? "var(--os-brand)" : "#fff", border: on ? "1px solid var(--os-brand)" : "1px solid #d4d4d8" }}
       className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded cursor-pointer shrink-0 transition-colors ${className}`}
     >

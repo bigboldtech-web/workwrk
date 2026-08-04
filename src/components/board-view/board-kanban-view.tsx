@@ -415,6 +415,8 @@ function KanbanCard({
             onDuplicate={onDuplicate}
             onArchive={onArchive}
             onDeleted={onDeleted}
+            itemTypeId={card.itemTypeId ?? null}
+            onSetType={(t) => onPatch(card.id, { itemTypeId: t }, { itemTypeId: t })}
             timeTrackingEnabled={timeTrackingEnabled}
           />
         </div>

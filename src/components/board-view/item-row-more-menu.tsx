@@ -1,20 +1,22 @@
 "use client";
 
-// ItemRowMoreMenu — the ClickUp task-row "..." menu. Portaled (MorePortal) so it
-// escapes the table's overflow, built from the shared MenuList/MenuItem. Wires
-// the actions that have real endpoints (Copy link / Copy ID / New tab / Rename /
-// Duplicate / Start timer / Archive / Delete) and stubs the rest with a toast so
-// the menu reads complete without pretending unbuilt features work.
+// ItemRowMoreMenu — the ClickUp task-row "..." + right-click menu. Portaled
+// (MorePortal) so it escapes the table's overflow, built from the shared
+// MenuList / MenuItem / MenuSubmenu. Wires the actions that have real endpoints
+// (Copy link / Copy ID / New tab / Rename / Task type / Remind me / Duplicate /
+// Start timer / Archive / Delete) and stubs the few with no backend yet.
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import {
   MoreHorizontal, Copy, Pencil, Trash2, Archive, Clock, Star,
-  CornerUpRight, ExternalLink, Box,
+  CornerUpRight, ExternalLink, Box, Bell,
 } from "lucide-react";
-import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { useItemTypes } from "./use-item-types";
+import { itemTypeIcon } from "@/lib/item-type-icons";
 
 export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   item: { id: string; boardId?: string | null; title: string };
@@ -26,6 +28,10 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   onArchive?: () => void;
   /** Local removal after a hard delete succeeds. */
   onDeleted?: () => void;
+  /** Current task type id (for the check in the Task type submenu). */
+  itemTypeId?: string | null;
+  /** Apply a task type (optimistic in the parent). Enables the submenu. */
+  onSetType?: (itemTypeId: string | null) => void;
   /** Time Tracking module — hides "Start timer" when false. */
   timeTrackingEnabled?: boolean;
   className?: string;
@@ -37,6 +43,8 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   onDuplicate,
   onArchive,
   onDeleted,
+  itemTypeId,
+  onSetType,
   timeTrackingEnabled = true,
   className,
 }, ref) {
@@ -96,6 +104,24 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
     finally { setBusy(null); close(); }
   };
 
+  const setType = (id: string | null) => { onSetType?.(id); toast("Task type updated"); close(); };
+
+  const remind = async (at: Date, label: string) => {
+    close();
+    try {
+      const res = await fetch("/api/reminders", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: item.title || "Task reminder",
+          remindAt: at.toISOString(),
+          entityType: "BOARD_ITEM", entityId: item.id,
+        }),
+      });
+      toast(res.ok ? `Reminder set — ${label}` : "Couldn't set reminder");
+    } catch { toast("Couldn't set reminder"); }
+  };
+
   const archive = () => { close(); onArchive?.(); };
 
   const del = async () => {
@@ -142,10 +168,26 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
           <MenuItem icon={Star} label="Favorite" onClick={() => soon("Favorite")} />
           {onOpen ? <MenuItem icon={ExternalLink} label="Open" onClick={() => { onOpen(); close(); }} /> : null}
           {canEdit && onRename ? <MenuItem icon={Pencil} label="Rename" onClick={() => { onRename(); close(); }} /> : null}
-          {canEdit ? <MenuItem icon={CornerUpRight} label="Move to" onClick={() => soon("Move to")} /> : null}
-          {canEdit && onDuplicate ? <MenuItem icon={Copy} label="Duplicate" onClick={() => { onDuplicate(); close(); }} /> : null}
-          {canEdit ? <MenuItem icon={Box} label="Task type" onClick={() => soon("Task type")} /> : null}
-          {canEdit && timeTrackingEnabled ? <MenuItem icon={Clock} label="Start timer" onClick={startTimer} busy={busy === "timer"} /> : null}
+          {canEdit ? (
+            <MenuSubmenu icon={Bell} label="Remind me">
+              <RemindSubmenu onPick={remind} />
+            </MenuSubmenu>
+          ) : null}
+          {canEdit ? (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={CornerUpRight} label="Move to" onClick={() => soon("Move to")} />
+              {onDuplicate ? <MenuItem icon={Copy} label="Duplicate" onClick={() => { onDuplicate(); close(); }} /> : null}
+              {onSetType ? (
+                <MenuSubmenu icon={Box} label="Task type">
+                  <TaskTypeSubmenu currentId={itemTypeId ?? null} onSet={setType} />
+                </MenuSubmenu>
+              ) : (
+                <MenuItem icon={Box} label="Task type" onClick={() => soon("Task type")} />
+              )}
+              {timeTrackingEnabled ? <MenuItem icon={Clock} label="Start timer" onClick={startTimer} busy={busy === "timer"} /> : null}
+            </>
+          ) : null}
           {canEdit ? (
             <>
               <MenuSeparator />
@@ -158,3 +200,40 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
     </span>
   );
 });
+
+// Task type submenu — org item types (lazily fetched, one shared 60s cache),
+// with the current one checked. "Default" clears the type.
+function TaskTypeSubmenu({ currentId, onSet }: { currentId: string | null; onSet: (id: string | null) => void }) {
+  const { list } = useItemTypes();
+  return (
+    <>
+      <MenuItem label="Default" selected={currentId === null} onClick={() => onSet(null)} />
+      {list.map((t) => (
+        <MenuItem
+          key={t.id}
+          icon={itemTypeIcon(t.icon)}
+          label={t.singular}
+          selected={currentId === t.id}
+          onClick={() => onSet(t.id)}
+        />
+      ))}
+    </>
+  );
+}
+
+// Remind-me submenu — quick reminders that create real Reminder rows so they
+// fire through the same ticker/cron + topbar bell as due-date reminders.
+function RemindSubmenu({ onPick }: { onPick: (at: Date, label: string) => void }) {
+  const inHour = () => { const d = new Date(); d.setHours(d.getHours() + 1, 0, 0, 0); return d; };
+  const thisEvening = () => { const d = new Date(); d.setHours(18, 0, 0, 0); if (d < new Date()) d.setDate(d.getDate() + 1); return d; };
+  const tomorrow = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; };
+  const nextWeek = () => { const d = new Date(); const day = d.getDay(); d.setDate(d.getDate() + ((8 - day) % 7 || 7)); d.setHours(9, 0, 0, 0); return d; };
+  return (
+    <>
+      <MenuItem label="In 1 hour" onClick={() => onPick(inHour(), "in 1 hour")} />
+      <MenuItem label="This evening" onClick={() => onPick(thisEvening(), "this evening")} />
+      <MenuItem label="Tomorrow" onClick={() => onPick(tomorrow(), "tomorrow")} />
+      <MenuItem label="Next week" onClick={() => onPick(nextWeek(), "next week")} />
+    </>
+  );
+}
