@@ -31,6 +31,16 @@ import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { SidebarQuickStar } from "./sidebar-quick-star";
 
+// Session-persistent expand state for the sidebar tree, keyed by id. The rail's
+// hover-preview swaps out (unmounts) the Home sidebar and remounts it when the
+// cursor leaves the rail — without this, every Space/Folder would collapse on
+// that cycle. Lives for the session; a full page reload starts collapsed.
+const spaceExpandStore = new Map<string, boolean>();
+const folderExpandStore = new Map<string, boolean>();
+// Cache a Space's loaded children too, so a remount restores the tree instantly
+// instead of flashing "Loading…" and refetching. Refreshed live via onSidebarRefresh.
+const spaceChildrenStore = new Map<string, ChildrenPayload>();
+
 // ---------------------------------------------------------------------------
 // Drag-and-drop: move sidebar items between folders / to the Space root.
 // Only the entities a folder can physically hold are draggable today: lists
@@ -213,10 +223,12 @@ export function SpaceTreeRow({
   reorderable = false,
 }: Props) {
   const router = useRouter();
-  const [expanded, setExpanded] = useState(false);
-  const [data, setData] = useState<ChildrenPayload | null>(null);
+  const [expanded, setExpanded] = useState(() => spaceExpandStore.get(space.id) ?? false);
+  const [data, setData] = useState<ChildrenPayload | null>(() => spaceChildrenStore.get(space.id) ?? null);
   const [loading, setLoading] = useState(false);
   const [rootDragOver, setRootDragOver] = useState(false);
+  // Persist expand state across the rail hover-preview remount.
+  useEffect(() => { spaceExpandStore.set(space.id, expanded); }, [expanded, space.id]);
   // Reorder drop indicator: which edge of this row the dragged Space would land on.
   const [spaceDropEdge, setSpaceDropEdge] = useState<"before" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
@@ -232,13 +244,15 @@ export function SpaceTreeRow({
             docs: f.docs ?? [],
             childFolders: (f.childFolders ?? []).map(normalizeFolder),
           });
-          setData({
+          const payload: ChildrenPayload = {
             folders: (d.folders ?? []).map(normalizeFolder),
             boards: d.boards ?? [],
             tables: d.tables ?? [],
             docs: d.docs ?? [],
             whiteboards: d.whiteboards ?? [],
-          });
+          };
+          spaceChildrenStore.set(space.id, payload);
+          setData(payload);
         }
       })
       .catch(() => {})
@@ -249,6 +263,13 @@ export function SpaceTreeRow({
     if (!expanded && data === null) loadChildren();
     setExpanded((v) => !v);
   };
+
+  // If we remounted already-expanded (restored from the store), the children
+  // aren't loaded yet — fetch them so the tree shows its contents, not a blank.
+  useEffect(() => {
+    if (expanded && data === null) loadChildren();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refresh = () => {
     if (expanded) loadChildren();
@@ -418,7 +439,9 @@ function FolderTreeRow({
   spaceName: string;
   onChanged: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? false);
+  // Persist expand state across the rail hover-preview remount.
+  useEffect(() => { folderExpandStore.set(folder.id, expanded); }, [expanded, folder.id]);
   // Which drop zone the cursor is in: "inside" nests, "before"/"after" reorder
   // this folder relative to the dragged one. null = not a drop target right now.
   const [dropZone, setDropZone] = useState<"before" | "inside" | "after" | null>(null);
