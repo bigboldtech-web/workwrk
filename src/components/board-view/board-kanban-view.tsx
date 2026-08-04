@@ -9,8 +9,8 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
-import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { Check, CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
+import { PRIORITY_OPTIONS, isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { AssigneePicker } from "./assignee-picker";
@@ -18,6 +18,7 @@ import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
 import { DatePlanner } from "./date-planner";
 import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { BulkActionBar } from "./bulk-action-bar";
 import { type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
@@ -50,6 +51,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const [error, setError] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [hoverColumn, setHoverColumn] = useState<string | null>(null);
+  // Multi-select for bulk actions (shared bar with the List view).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const lastSelectedRef = useRef<string | null>(null);
 
   useEffect(() => { setItems(initialItems); }, [initialItems]);
 
@@ -70,6 +75,61 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     }
     return map;
   }, [items, statusOrder]);
+
+  // Visible card order (column order, top→bottom) — the axis shift-select
+  // ranges over.
+  const orderedIds = useMemo(
+    () => statusOrder.flatMap((s) => (grouped.get(s) ?? []).map((c) => c.id)),
+    [statusOrder, grouped],
+  );
+  const toggleSelect = useCallback((id: string, shiftKey?: boolean) => {
+    if (shiftKey && lastSelectedRef.current && lastSelectedRef.current !== id) {
+      const a = orderedIds.indexOf(lastSelectedRef.current);
+      const b = orderedIds.indexOf(id);
+      if (a !== -1 && b !== -1) {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        const range = orderedIds.slice(lo, hi + 1);
+        setSelected((prev) => { const next = new Set(prev); range.forEach((rid) => next.add(rid)); return next; });
+        lastSelectedRef.current = id;
+        return;
+      }
+    }
+    setSelected((prev) => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+    lastSelectedRef.current = id;
+  }, [orderedIds]);
+  const clearSelection = useCallback(() => { setSelected(new Set()); lastSelectedRef.current = null; }, []);
+
+  // Bulk actions — fan out over /api/items/[id] (no server bulk endpoint yet),
+  // optimistic local update, then clear selection.
+  const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })));
+    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, ...local } : r)));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }, [selected]);
+  const bulkArchive = useCallback(async () => {
+    if (selected.size === 0) return;
+    if (!(await confirm({ title: "Archive cards", description: `Archive ${selected.size} card${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "DELETE" })));
+    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }, [selected, confirm]);
+  const bulkTrash = useCallback(async () => {
+    if (selected.size === 0) return;
+    if (!(await confirm({ title: "Delete cards", description: `Delete ${selected.size} card${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
+    setBulkBusy(true);
+    const ids = Array.from(selected);
+    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" })));
+    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    setSelected(new Set());
+    setBulkBusy(false);
+  }, [selected, confirm]);
 
   // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
   const subtaskCountByParent = useMemo(() => {
@@ -248,6 +308,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     onDragStart={() => setDragId(card.id)}
                     onDragEnd={() => { setDragId(null); setHoverColumn(null); }}
                     isDragging={dragId === card.id}
+                    selected={selected.has(card.id)}
+                    onToggleSelect={toggleSelect}
                     onOpen={onOpenItem ? () => onOpenItem(card.id) : undefined}
                     onPatch={patchCard}
                     onToggleComplete={() => toggleComplete(card)}
@@ -276,6 +338,20 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           );
         })}
       </div>
+
+      <BulkActionBar
+        selectedCount={selected.size}
+        busy={bulkBusy}
+        statuses={statuses}
+        priorities={PRIORITY_OPTIONS}
+        onClear={clearSelection}
+        onArchive={bulkArchive}
+        onStatus={(status) => bulkPatch({ status }, { status })}
+        onDueAt={(iso) => bulkPatch({ dueAt: iso }, { dueAt: iso })}
+        onOwner={(ownerId) => bulkPatch({ ownerId }, { ownerId })}
+        onPriority={(priority) => bulkPatch({ priority }, { priority })}
+        onTrash={bulkTrash}
+      />
     </div>
   );
 }
@@ -290,6 +366,8 @@ function KanbanCard({
   onDragStart,
   onDragEnd,
   isDragging,
+  selected,
+  onToggleSelect,
   onOpen,
   onPatch,
   onToggleComplete,
@@ -312,6 +390,8 @@ function KanbanCard({
   onDragStart: () => void;
   onDragEnd: () => void;
   isDragging: boolean;
+  selected: boolean;
+  onToggleSelect: (id: string, shiftKey?: boolean) => void;
   onOpen?: () => void;
   onPatch: (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => void;
   onToggleComplete: () => void;
@@ -362,12 +442,27 @@ function KanbanCard({
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing) onOpen?.(); }}
       onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-      className={`group relative rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 text-sm ${
+      className={`group relative rounded-md border bg-white px-2.5 py-1.5 text-sm ${
+        selected ? "border-[var(--os-brand)] ring-1 ring-[var(--os-brand)]" : "border-zinc-200"
+      } ${
         canEdit && !editing ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
       } ${isDragging ? "opacity-40" : ""} hover:shadow-sm transition-shadow`}
     >
       {/* Title + action rail */}
       <div className="flex items-start gap-1">
+        {canEdit ? (
+          <button
+            type="button"
+            role="checkbox"
+            aria-checked={selected}
+            aria-label={selected ? "Deselect card" : "Select card"}
+            onClick={(e) => { stop(e); onToggleSelect(card.id, e.shiftKey); }}
+            className={`mt-0.5 inline-flex items-center justify-center w-3.5 h-3.5 rounded shrink-0 transition-opacity ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+            style={{ backgroundColor: selected ? "var(--os-brand)" : "#fff", border: selected ? "1px solid var(--os-brand)" : "1px solid #d4d4d8" }}
+          >
+            {selected ? <Check className="w-2.5 h-2.5 text-white" /> : null}
+          </button>
+        ) : null}
         <div className="flex-1 min-w-0">
           {editing ? (
             <input

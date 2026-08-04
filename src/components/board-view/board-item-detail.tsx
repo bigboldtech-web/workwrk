@@ -56,6 +56,9 @@ interface BoardItemDetailProps {
   /** Drawer hosts the Comments/Activity thread in its right rail — suppress the
    *  inline copy so it isn't rendered twice. */
   hideActivity?: boolean;
+  /** Drawer hosts relations/attachments in its right rail "Related" tab —
+   *  suppress the inline widget + its Relate/Attach action rows. */
+  hideRelations?: boolean;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -76,6 +79,7 @@ export function BoardItemDetail({
   onOpenItem,
   moduleGating,
   hideActivity = false,
+  hideRelations = false,
 }: BoardItemDetailProps) {
   // Absent gating (legacy / non-board context) = everything shown.
   const priorityOn = moduleGating ? moduleGating.priority : true;
@@ -116,9 +120,9 @@ export function BoardItemDetail({
   const actionRows = [
     hasCustomFields && !showFields ? { key: "fields", icon: Pencil, label: "Add fields", onClick: () => reveal("fields") } : null,
     !showSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
-    !showAttach ? { key: "related", icon: Link2, label: "Relate items or add dependencies", onClick: () => reveal("attach") } : null,
+    !hideRelations && !showAttach ? { key: "related", icon: Link2, label: "Relate items or add dependencies", onClick: () => reveal("attach") } : null,
     !showChecklist ? { key: "checklist", icon: ClipboardList, label: "Create checklist", onClick: () => reveal("checklist") } : null,
-    !showAttach ? { key: "attach", icon: Paperclip, label: "Attach file", onClick: () => reveal("attach") } : null,
+    !hideRelations && !showAttach ? { key: "attach", icon: Paperclip, label: "Attach file", onClick: () => reveal("attach") } : null,
   ].filter((r): r is { key: string; icon: typeof Pencil; label: string; onClick: () => void } => r !== null);
 
   return (
@@ -232,10 +236,13 @@ export function BoardItemDetail({
       ) : null}
 
       {/* Linked notes + whiteboards + files + relations — always mounted for the
-          count; hidden until it has content or is revealed. */}
-      <div className={showAttach ? "" : "hidden"}>
-        <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} onCountChange={setAttachCount} />
-      </div>
+          count; hidden until it has content or is revealed. In the drawer this
+          lives in the right-rail "Related" tab instead (hideRelations). */}
+      {!hideRelations ? (
+        <div className={showAttach ? "" : "hidden"}>
+          <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} onCountChange={setAttachCount} />
+        </div>
+      ) : null}
 
       {/* ClickUp action rows for the still-collapsed sections. */}
       {canEdit && actionRows.length > 0 ? (

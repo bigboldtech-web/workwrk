@@ -14,12 +14,13 @@
 // hierarchy. Drawer slides from the right at 480px, full-height.
 
 import { useCallback, useEffect, useState } from "react";
-import { Trash2, X, ExternalLink } from "lucide-react";
+import { Trash2, X, ExternalLink, MessageSquare, Link2 } from "lucide-react";
 import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardItemDetail, type DetailPatch, type ItemModuleGating } from "./board-item-detail";
 import { ItemThread } from "./item-thread";
+import { LinkedAttachments } from "./linked-attachments";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
 interface BoardItemDrawerProps {
@@ -230,21 +231,56 @@ export function BoardItemDrawer({
                       onOpenItem={onOpenItem}
                       moduleGating={moduleGating}
                       hideActivity
+                      hideRelations
                     />
                   </div>
                 </div>
-                {/* Activity rail (ClickUp) — comments + activity pinned right. */}
-                <aside className="flex w-[360px] shrink-0 border-l border-zinc-200 flex-col min-h-0">
-                  <div className="h-11 px-4 flex items-center border-b border-zinc-100 text-[13px] font-semibold text-zinc-800">Activity</div>
-                  <div className="flex-1 overflow-y-auto px-4 py-3">
-                    <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
-                  </div>
-                </aside>
+                {/* Right rail (ClickUp) — Activity + Related tabs pinned right. */}
+                <DetailRail item={item} canEdit={canEdit} currentUserId={currentUserId} statuses={statusOptions} />
               </div>
             )}
           </div>
         </div>
       ) : null}
     </>
+  );
+}
+
+// Right rail — Activity (comments + activity) and Related (relations, deps,
+// linked notes/whiteboards/files) tabs, matching the ClickUp task view.
+function DetailRail({
+  item, canEdit, currentUserId, statuses,
+}: {
+  item: BoardItemRow;
+  canEdit: boolean;
+  currentUserId: string | null;
+  statuses: StatusOption[];
+}) {
+  const [tab, setTab] = useState<"activity" | "related">("activity");
+  const tabBtn = (key: "activity" | "related", Icon: typeof MessageSquare, label: string) => (
+    <button
+      type="button"
+      onClick={() => setTab(key)}
+      className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] font-medium transition-colors ${
+        tab === key ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50"
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5" /> {label}
+    </button>
+  );
+  return (
+    <aside className="flex w-[360px] shrink-0 border-l border-zinc-200 flex-col min-h-0">
+      <div className="h-11 px-2 flex items-center gap-1 border-b border-zinc-100">
+        {tabBtn("activity", MessageSquare, "Activity")}
+        {tabBtn("related", Link2, "Related")}
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-3">
+        {tab === "activity" ? (
+          <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statuses} />
+        ) : (
+          <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} />
+        )}
+      </div>
+    </aside>
   );
 }
