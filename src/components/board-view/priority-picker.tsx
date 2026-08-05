@@ -57,7 +57,7 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1 rounded px-1 py-0.5 -mx-1 hover:bg-zinc-100"
+        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 -mx-1 hover:bg-zinc-100 transition-colors"
         aria-label="Set priority"
       >
         {display}
@@ -65,7 +65,7 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       {open && menuPos ? (
         <div
           style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 170 }}
-          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1"
+          className="z-[200] rounded-xl border border-zinc-200 bg-white shadow-2xl py-1.5"
           onClick={(e) => e.stopPropagation()}
         >
           {PRIORITY_OPTIONS.map((p) => {

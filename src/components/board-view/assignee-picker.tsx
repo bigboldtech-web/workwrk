@@ -138,7 +138,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1.5 rounded px-1 py-0.5 -mx-1 hover:bg-zinc-100 max-w-full"
+        className="inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 -mx-1 hover:bg-zinc-100 transition-colors max-w-full"
         aria-label="Set assignee"
       >
         {trigger}
@@ -147,20 +147,20 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
       {open && menuPos ? (
         <div
           style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 260 }}
-          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg"
+          className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-100">
+          <div className="flex h-9 items-center gap-2 px-3 border-b border-zinc-100">
             <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or enter email…"
-              className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-[13px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
-          <div className="max-h-[260px] overflow-y-auto py-1">
+          <div className="max-h-[260px] overflow-y-auto py-1.5">
             {value ? (
               <>
                 <MenuItem
@@ -172,9 +172,9 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               </>
             ) : null}
             {people === null || loading ? (
-              <div className="px-3 py-3 text-[11.5px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-[12px] text-zinc-400">Loading…</div>
             ) : people.length === 0 ? (
-              <div className="px-3 py-3 text-[11.5px] text-zinc-400">No people found</div>
+              <div className="px-3 py-4 text-[12px] text-zinc-400">No people found</div>
             ) : (
               people.map((p) => {
                 const isMe = p.id === meId;

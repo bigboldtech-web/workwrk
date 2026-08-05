@@ -6,7 +6,7 @@
 // create-task modal. Values are Tag ids; display uses the tag's color.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, Tag as TagIcon, X } from "lucide-react";
+import { Plus, Search, Tag as TagIcon, X } from "lucide-react";
 import type { ItemTag } from "@/lib/board-items-shared";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
@@ -17,7 +17,7 @@ export function TagChip({ tag, onRemove }: { tag: ItemTag; onRemove?: () => void
   const color = tag.color || FALLBACK_COLOR;
   return (
     <span
-      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium max-w-[140px]"
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium max-w-[140px]"
       style={{ background: `${color}22`, color }}
     >
       <span className="truncate">{tag.name}</span>
@@ -133,7 +133,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1 rounded px-1 py-0.5 -mx-1 hover:bg-zinc-100 max-w-full"
+        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 -mx-1 hover:bg-zinc-100 transition-colors max-w-full"
         aria-label="Edit tags"
       >
         {display}
@@ -141,10 +141,11 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
       {open && menuPos ? (
         <div
           style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 240 }}
-          className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg"
+          className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="px-3 py-2 border-b border-zinc-100">
+          <div className="flex h-9 items-center gap-2 px-3 border-b border-zinc-100">
+            <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
             <input
               ref={inputRef}
               value={query}
@@ -156,12 +157,12 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
                 }
               }}
               placeholder="Search or add a tag…"
-              className="w-full text-[13px] bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-[13px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
-          <div className="max-h-[220px] overflow-y-auto py-1">
+          <div className="max-h-[220px] overflow-y-auto py-1.5">
             {all === null ? (
-              <div className="px-3 py-3 text-[11.5px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-[12px] text-zinc-400">Loading…</div>
             ) : (
               <>
                 {filtered.map((t) => {
@@ -188,7 +189,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
                   </>
                 ) : null}
                 {!filtered.length && !q ? (
-                  <div className="px-3 py-3 text-[11.5px] text-zinc-400">No tags yet — type to create one</div>
+                  <div className="px-3 py-4 text-[12px] text-zinc-400">No tags yet — type to create one</div>
                 ) : null}
               </>
             )}
