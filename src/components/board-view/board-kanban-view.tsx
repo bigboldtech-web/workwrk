@@ -277,8 +277,8 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
             >
               <div className="flex items-center gap-2 px-1 pt-0.5 pb-2.5">
                 <span
-                  className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-md text-[11px] font-semibold uppercase tracking-wide"
-                  style={{ background: `${meta.color}1a`, color: meta.color }}
+                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-[10.5px] font-bold uppercase tracking-wider text-white"
+                  style={{ background: meta.color }}
                 >
                   {meta.label}
                 </span>
@@ -288,7 +288,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     type="button"
                     onClick={() => addCard(status)}
                     className="ml-auto inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/70 opacity-0 group-hover/col:opacity-100 focus-visible:opacity-100 transition-opacity"
-                    aria-label={`Add card to ${meta.label}`}
+                    aria-label={`Add task to ${meta.label}`}
                   >
                     <Plus className="w-3.5 h-3.5" />
                   </button>
@@ -331,7 +331,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
                     className="w-full inline-flex items-center gap-1.5 text-left text-xs font-medium text-zinc-400 hover:text-zinc-700 py-1.5 px-2 rounded-md hover:bg-zinc-200/60 transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Add card
+                    Add Task
                   </button>
                 ) : null}
               </div>
@@ -578,16 +578,15 @@ function KanbanCard({
         ))}
       </div>
 
-      {/* Footer — subtask count (ClickUp) + created date. */}
-      <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-400">
-        {subtaskCount > 0 ? (
+      {/* Footer — subtask count only (ClickUp cards carry no created date). */}
+      {subtaskCount > 0 ? (
+        <div className="mt-2 flex items-center text-[11px] text-zinc-400">
           <span className="inline-flex items-center gap-1">
             <Network className="w-3 h-3" />
             {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}
           </span>
-        ) : <span />}
-        <span>{new Date(card.createdAt).toLocaleDateString()}</span>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
