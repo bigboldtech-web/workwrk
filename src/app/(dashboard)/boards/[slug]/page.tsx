@@ -195,7 +195,11 @@ export default async function BoardPage(props: {
           canEdit={canEdit}
           currentUserId={u.id}
           addTaskSlot={
+            // key: this server-created element lands inside BoardCanvas's
+            // toolbar children array; RSC-deserialized elements skip jsx-time
+            // key validation, so an explicit key keeps React's list check quiet.
             <BoardAddTaskButton
+              key="add-task"
               boardId={board.id}
               boardSlug={board.slug}
               boardName={board.name}

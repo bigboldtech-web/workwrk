@@ -73,7 +73,9 @@ export default async function PersonalListPage(props: {
           canEdit={true}
           currentUserId={u.id}
           addTaskSlot={
+            // key: same reason as /boards/[slug] — see that call site.
             <BoardAddTaskButton
+              key="add-task"
               boardId={board.id}
               boardSlug={board.slug}
               boardName={board.name}
