@@ -14,8 +14,10 @@ import {
   Settings, GripVertical, MoreHorizontal, Maximize2, Plus,
   List as ListIcon, CheckSquare, MessageSquare, Bell, X,
   Calendar as CalendarIcon, Sparkles, Filter, Users as UsersIcon, Target, Activity,
+  FileText, ChevronLeft, ChevronRight, Clock3, UserCheck, Flag,
 } from "lucide-react";
 import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
+import { STATUS_LOOKUP } from "@/lib/board-items-shared";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 
@@ -58,48 +60,49 @@ interface ApiMyKra {
 type LayoutShape = Record<string, Layout[]>;
 
 // Uniform 2-column grid: every card is the same width (half) and the same
-// height (h:5) so the page reads as an even set of boxes. my-work spans the
-// full width as a footer row. minW/minH stop resizing into ragged shapes.
+// height (h:5) so the page reads as an even set of boxes. ClickUp's Home
+// order: Recents+Agenda, then My Work beside Assigned to me, then comments
+// + AI StandUp; alignment cards follow. minW/minH stop ragged resizes.
 const COL_H = 5;
 const DEFAULT_LAYOUTS: LayoutShape = {
   lg: [
     { i: "recents",           x: 0, y: 0,  w: 6,  h: COL_H, minW: 3, minH: 4 },
     { i: "agenda",            x: 6, y: 0,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "okrs",              x: 0, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "kras",              x: 6, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "personal-list",     x: 0, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "assigned-to-me",    x: 6, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "reminders",         x: 0, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "assigned-comments", x: 6, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "ai-standup",        x: 0, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "priorities",        x: 6, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "my-work",           x: 0, y: 25, w: 12, h: COL_H, minW: 4, minH: 4 },
+    { i: "my-work",           x: 0, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "assigned-to-me",    x: 6, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "assigned-comments", x: 0, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "ai-standup",        x: 6, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "okrs",              x: 0, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "kras",              x: 6, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "personal-list",     x: 0, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "reminders",         x: 6, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "priorities",        x: 0, y: 25, w: 6,  h: COL_H, minW: 3, minH: 4 },
   ],
   md: [
     { i: "recents",           x: 0, y: 0,  w: 6,  h: COL_H, minW: 3, minH: 4 },
     { i: "agenda",            x: 6, y: 0,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "okrs",              x: 0, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "kras",              x: 6, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "personal-list",     x: 0, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "assigned-to-me",    x: 6, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "reminders",         x: 0, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "assigned-comments", x: 6, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "ai-standup",        x: 0, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "priorities",        x: 6, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
-    { i: "my-work",           x: 0, y: 25, w: 12, h: COL_H, minW: 4, minH: 4 },
+    { i: "my-work",           x: 0, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "assigned-to-me",    x: 6, y: 5,  w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "assigned-comments", x: 0, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "ai-standup",        x: 6, y: 10, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "okrs",              x: 0, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "kras",              x: 6, y: 15, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "personal-list",     x: 0, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "reminders",         x: 6, y: 20, w: 6,  h: COL_H, minW: 3, minH: 4 },
+    { i: "priorities",        x: 0, y: 25, w: 6,  h: COL_H, minW: 3, minH: 4 },
   ],
   sm: [
     { i: "recents",           x: 0, y: 0,  w: 12, h: COL_H, minW: 12, minH: 4 },
     { i: "agenda",            x: 0, y: 5,  w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "okrs",              x: 0, y: 10, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "kras",              x: 0, y: 15, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "personal-list",     x: 0, y: 20, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "assigned-to-me",    x: 0, y: 25, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "reminders",         x: 0, y: 30, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "assigned-comments", x: 0, y: 35, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "ai-standup",        x: 0, y: 40, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "priorities",        x: 0, y: 45, w: 12, h: COL_H, minW: 12, minH: 4 },
-    { i: "my-work",           x: 0, y: 50, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "my-work",           x: 0, y: 10, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "assigned-to-me",    x: 0, y: 15, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "assigned-comments", x: 0, y: 20, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "ai-standup",        x: 0, y: 25, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "okrs",              x: 0, y: 30, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "kras",              x: 0, y: 35, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "personal-list",     x: 0, y: 40, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "reminders",         x: 0, y: 45, w: 12, h: COL_H, minW: 12, minH: 4 },
+    { i: "priorities",        x: 0, y: 50, w: 12, h: COL_H, minW: 12, minH: 4 },
   ],
 };
 
@@ -274,7 +277,7 @@ export default function MyTasksPage() {
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-[12px] bg-[#a78b80] text-white hover:bg-[#977c72] font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-[12px] bg-zinc-900 text-white hover:bg-zinc-800 font-medium transition-colors"
           >
             Manage cards
           </button>
@@ -352,19 +355,23 @@ function RecentsCard({ recents }: { recents: RecentItem[] | null }) {
       {recents === null ? <CardLoading /> :
         recents.length === 0 ? <CardEmpty>Nothing recent yet.</CardEmpty> : (
           <ul className="-mx-2">
-            {recents.map((r) => (
+            {recents.map((r) => {
+              // ClickUp's Recents mixes doc/task/list glyphs per row type.
+              const RowIcon = r.type === "doc" ? FileText : r.type === "item" ? CheckSquare : ListIcon;
+              return (
               <li key={r.id}>
                 <Link
                   href={r.href}
                   className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
                 >
-                  <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                  <RowIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                   <span className="text-zinc-900 truncate">{r.title}</span>
                   <span className="text-zinc-400 shrink-0">·</span>
                   <span className="text-zinc-500 truncate">in {r.parent}</span>
                 </Link>
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
     </DashCard>
@@ -372,8 +379,29 @@ function RecentsCard({ recents }: { recents: RecentItem[] | null }) {
 }
 
 function AgendaCard() {
+  const todayLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" });
   return (
     <DashCard title="Agenda" actions={<CardEyebrow />}>
+      {/* ClickUp's date-nav strip — chrome only until a calendar is connected. */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="Previous day" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-[12px] font-medium text-zinc-900">{todayLabel}</span>
+          <button type="button" aria-label="Next day" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        <div className="flex items-center gap-1">
+          <button type="button" className="inline-flex items-center h-6 px-2 rounded border border-zinc-200 text-[11.5px] text-zinc-700 hover:bg-zinc-50">
+            Today
+          </button>
+          <button type="button" aria-label="Open calendar" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
+            <CalendarIcon className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
       <div className="flex flex-col items-center justify-center text-center py-2">
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-zinc-100 mb-2">
           <CalendarIcon className="w-5 h-5 text-zinc-500" />
@@ -453,10 +481,18 @@ function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
                   href={it.board ? `/boards/${it.board.slug}?item=${it.id}` : "#"}
                   className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
                 >
-                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: (it.status ? STATUS_LOOKUP[it.status]?.color : undefined) ?? "#d4d4d8" }}
+                  />
                   <span className="text-zinc-900 truncate flex-1">{it.title}</span>
                   {it.board ? (
                     <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">{it.board.name}</span>
+                  ) : null}
+                  {it.dueAt ? (
+                    <span className="text-[11px] text-zinc-500 shrink-0">
+                      {new Date(it.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </span>
                   ) : null}
                 </Link>
               </li>
@@ -533,18 +569,14 @@ function AiStandUpCard({ firstName }: { firstName: string }) {
       }
     >
       <div className="space-y-3">
-        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[11px]">
-          <Sparkles className="w-3 h-3" />
-          Brain
-        </div>
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Overview</p>
+          <p className="text-[12.5px] font-semibold text-zinc-900 mb-1">Overview</p>
           <p className="text-[12.5px] text-zinc-700">
             There is no recorded activity for {firstName} in the last 7 days.
           </p>
         </div>
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Key Highlights</p>
+          <p className="text-[12.5px] font-semibold text-zinc-900 mb-1">Key Highlights</p>
           <ul className="text-[12.5px] text-zinc-700 list-disc pl-4 space-y-0.5">
             <li>No tasks or updates to report for this period.</li>
           </ul>
@@ -676,8 +708,22 @@ function KrasKpisCard({ kras }: { kras: ApiMyKra[] | null }) {
 }
 
 function MyWorkCard() {
+  const [tab, setTab] = useState<"todo" | "done" | "delegated">("todo");
   return (
     <DashCard title="My Work">
+      {/* ClickUp's signature To Do / Done / Delegated underline tabs. */}
+      <div className="flex items-center gap-4 border-b border-zinc-100 -mx-3 px-3 mb-2">
+        {([["todo", "To Do"], ["done", "Done"], ["delegated", "Delegated"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`pb-1.5 text-[12px] border-b-2 -mb-px transition-colors ${tab === key ? "border-zinc-900 text-zinc-900 font-medium" : "border-transparent text-zinc-500 hover:text-zinc-700"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="flex flex-col items-center justify-center text-center py-8">
         <span className="inline-flex items-center justify-center w-12 h-12 rounded-lg border border-zinc-200 mb-2">
           <UsersIcon className="w-5 h-5 text-zinc-400" />
@@ -765,18 +811,20 @@ function CardEmpty({ children }: { children: React.ReactNode }) {
   return <p className="text-[12px] text-zinc-500 px-2 py-3">{children}</p>;
 }
 
-const CARD_CATALOG: Array<{ key: string; label: string; description: string; accent: string }> = [
-  { key: "ai-standup",        label: "AI StandUp",        description: "AI generated standup.", accent: "from-violet-500 to-indigo-500" },
-  { key: "recents",           label: "Recents",           description: "A list of all the objects and locations you've recently viewed.", accent: "from-sky-500 to-blue-500" },
-  { key: "okrs",              label: "OKRs / Goals",      description: "Keep track of your active OKRs and goals.", accent: "from-rose-500 to-red-500" },
-  { key: "kras",              label: "KRAs & KPIs",       description: "View the KRAs and KPIs assigned to your role.", accent: "from-emerald-500 to-green-500" },
-  { key: "agenda",            label: "Agenda",            description: "Visualize tasks and events on your different calendars in one place.", accent: "from-purple-500 to-fuchsia-500" },
-  { key: "my-work",           label: "My Wrk",            description: "A list for all of your assigned tasks and reminders.", accent: "from-indigo-500 to-violet-500" },
-  { key: "assigned-to-me",    label: "Assigned to me",    description: "Consolidate your tasks across different lists that you have as an assignee.", accent: "from-indigo-500 to-violet-500" },
-  { key: "personal-list",     label: "Personal List",     description: "Keep track of your personal tasks in a list that is only visible to you.", accent: "from-indigo-500 to-violet-500" },
-  { key: "assigned-comments", label: "Assigned Comments", description: "Resolve and view any comment that has been assigned to you.", accent: "from-teal-500 to-cyan-500" },
-  { key: "priorities",        label: "Priorities",        description: "Prioritize your most important tasks into one concise list.", accent: "from-indigo-500 to-violet-500" },
-  { key: "reminders",         label: "Reminders",         description: "Add reminders that sit alongside tasks.", accent: "from-orange-500 to-amber-500" },
+// Flat per-card identity icons (Monday-clean, no gradients) — ClickUp's
+// Manage-cards panel shows each card's own glyph, not a repeated tile.
+const CARD_CATALOG: Array<{ key: string; label: string; description: string; icon: typeof Sparkles }> = [
+  { key: "ai-standup",        label: "AI StandUp",        description: "AI generated standup.", icon: Sparkles },
+  { key: "recents",           label: "Recents",           description: "A list of all the objects and locations you've recently viewed.", icon: Clock3 },
+  { key: "okrs",              label: "OKRs / Goals",      description: "Keep track of your active OKRs and goals.", icon: Target },
+  { key: "kras",              label: "KRAs & KPIs",       description: "View the KRAs and KPIs assigned to your role.", icon: Activity },
+  { key: "agenda",            label: "Agenda",            description: "Visualize tasks and events on your different calendars in one place.", icon: CalendarIcon },
+  { key: "my-work",           label: "My Wrk",            description: "A list for all of your assigned tasks and reminders.", icon: CheckSquare },
+  { key: "assigned-to-me",    label: "Assigned to me",    description: "Consolidate your tasks across different lists that you have as an assignee.", icon: UserCheck },
+  { key: "personal-list",     label: "Personal List",     description: "Keep track of your personal tasks in a list that is only visible to you.", icon: ListIcon },
+  { key: "assigned-comments", label: "Assigned Comments", description: "Resolve and view any comment that has been assigned to you.", icon: MessageSquare },
+  { key: "priorities",        label: "Priorities",        description: "Prioritize your most important tasks into one concise list.", icon: Flag },
+  { key: "reminders",         label: "Reminders",         description: "Add reminders that sit alongside tasks.", icon: Bell },
 ];
 
 function filterLayouts(layouts: LayoutShape, hidden: Set<string>): LayoutShape {
@@ -848,8 +896,8 @@ function ManageCardsModal({
               <li key={c.key}>
                 <article className="rounded-lg border border-zinc-200 bg-white p-4 transition-shadow hover:shadow-sm">
                   <div className="mb-4 flex items-center justify-between gap-3">
-                    <span className={`flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br ${c.accent} text-white shadow-sm`}>
-                      <Sparkles className="h-4 w-4" />
+                    <span className="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-100 text-zinc-600">
+                      <c.icon className="h-4 w-4" />
                     </span>
                     <Switch checked={!isHidden} onChange={() => onToggle(c.key)} />
                   </div>
@@ -880,7 +928,7 @@ function CalendarConnect({ provider, tone }: { provider: string; tone: "multicol
         type="button"
         disabled
         title="Coming soon"
-        className="text-[11.5px] px-2.5 py-1 rounded bg-zinc-100 text-zinc-500 cursor-not-allowed"
+        className="text-[11.5px] font-medium text-[#0073EA] hover:underline disabled:opacity-60"
       >
         Connect
       </button>
