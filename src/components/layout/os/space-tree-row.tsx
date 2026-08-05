@@ -329,7 +329,7 @@ export function SpaceTreeRow({
           if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-2 px-2 rounded-md ${
+        className={`relative flex h-7 items-center gap-1.5 px-2 rounded-md ${
           rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
         } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
       >
@@ -350,13 +350,13 @@ export function SpaceTreeRow({
           <span className="group-hover/space:opacity-0 transition-opacity">
             <EntityTile size="xs" icon={space.icon} color={space.color} name={space.name} />
           </span>
-          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-600">
+          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-500">
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </span>
         </button>
         <Link
           href={`/spaces/${space.slug}`}
-          className={`flex items-center gap-2 text-[12px] flex-1 min-w-0 ${
+          className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 ${
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
@@ -491,7 +491,7 @@ function FolderTreeRow({
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
       >
         {dropZone === "before" || dropZone === "after" ? (
           <span
@@ -518,7 +518,7 @@ function FolderTreeRow({
             );
           })()}
           {hasChildren ? (
-            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-600">
+            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-500">
               {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
             </span>
           ) : null}
@@ -588,12 +588,12 @@ function BoardTreeRow({
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
       >
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <ListChecks className="h-3.5 w-3.5 shrink-0" style={{ color: board.color ?? "#10B981" }} />
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
@@ -627,12 +627,12 @@ function TableTreeRow({
     <li className="group/tablerow relative">
       <div
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80"
+        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80"
       >
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
-          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <TableIcon className="h-3.5 w-3.5 shrink-0 text-sky-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
@@ -655,12 +655,12 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
         onContextMenu={(e) => noteMenu.open(e, { id: doc.id, title: doc.title })}
-        className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
       >
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
-          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <FileText className="h-3.5 w-3.5 shrink-0 text-blue-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
@@ -671,7 +671,7 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
             type="button"
             aria-label="Note actions"
             onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: doc.id, title: doc.title }); }}
-            className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+            className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -694,11 +694,11 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   return (
     <li className="group/wbrow relative">
-      <div className="relative flex h-7 items-center gap-2 pl-1 pr-1.5 rounded-md hover:bg-white/80">
+      <div className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80">
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
-          className="flex items-center gap-2 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
         >
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-amber-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
@@ -825,9 +825,9 @@ function FolderAddTrigger({
         title="Create"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 inline-flex items-center justify-center"
+        className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/70"
       >
-        <Plus className="h-3 w-3" />
+        <Plus className="h-3.5 w-3.5" />
       </button>
       <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="below">
         <MenuList className="min-w-[260px]">

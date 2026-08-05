@@ -181,7 +181,7 @@ export function ClickAppRail() {
           return (
             <div
               key={app.key}
-              className="relative mb-2"
+              className="relative mb-1.5"
               onMouseEnter={() => scheduleOpen(app.key)}
               onMouseLeave={scheduleClose}
               draggable
@@ -204,8 +204,8 @@ export function ClickAppRail() {
                 aria-current={active ? "page" : undefined}
               >
                 <span
-                  className={`flex items-center justify-center w-[26px] h-[26px] rounded-md transition-colors ${
-                    active ? "" : isHovered ? railHoverBg : ""
+                  className={`flex items-center justify-center w-[28px] h-[28px] rounded-lg transition-colors ${
+                    active ? "" : isHovered ? railHoverBg : "group-hover:bg-white/10"
                   }`}
                   style={active ? {
                     background: "rgba(255,255,255,0.95)",
@@ -222,7 +222,7 @@ export function ClickAppRail() {
 
         {ghostApp ? (
           <div
-            className="relative mb-1.5 mt-2 pt-2 border-t border-dashed border-white/30"
+            className="relative mb-1.5 mt-2 pt-2 border-t border-dashed border-white/25"
             onMouseEnter={() => scheduleOpen(ghostApp.key)}
             onMouseLeave={scheduleClose}
           >
@@ -236,7 +236,7 @@ export function ClickAppRail() {
               title={`${ghostApp.label.replace(/\.\.$/, "")} (not pinned — right-click to pin)`}
               className="group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none text-white/70 hover:text-white"
             >
-              <span className="flex items-center justify-center w-[26px] h-[26px] rounded-md border border-dashed border-white/40 group-hover:bg-white/10">
+              <span className="flex items-center justify-center w-[28px] h-[28px] rounded-lg border border-dashed border-white/40 group-hover:bg-white/10">
                 {hasAppGlyph(ghostApp.key) ? <AppGlyph appKey={ghostApp.key} size={20} /> : <ghostApp.Icon className="w-[16px] h-[16px]" />}
               </span>
               {iconsOnly ? null : <RailLabel italic>{ghostApp.label}</RailLabel>}
@@ -256,7 +256,7 @@ export function ClickAppRail() {
             aria-expanded={appsGridOpen}
           >
             <span
-              className={`flex items-center justify-center w-[26px] h-[26px] rounded-md transition-colors ${
+              className={`flex items-center justify-center w-[28px] h-[28px] rounded-lg transition-colors ${
                 appsGridOpen ? "" : "group-hover:bg-white/15"
               }`}
               style={appsGridOpen ? {
@@ -271,11 +271,11 @@ export function ClickAppRail() {
         </div>
       </nav>
 
-      <div className="pb-2 pt-1 border-t border-white/20">
+      <div className="pb-2 pt-1.5 border-t border-white/15">
         <Link
           href="/people"
           title="Invite teammates"
-          className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
+          className="mx-1 flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-white hover:bg-white/10 transition-colors"
         >
           <UserPlus className="w-[16px] h-[16px]" />
           {iconsOnly ? null : <RailLabel>Invite</RailLabel>}
@@ -283,7 +283,7 @@ export function ClickAppRail() {
         <Link
           href="/settings"
           title="Upgrade workspace"
-          className="w-full flex flex-col items-center gap-0.5 py-1.5 text-white hover:bg-white/15"
+          className="mx-1 flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-white hover:bg-white/10 transition-colors"
         >
           <ArrowUpCircle className="w-[16px] h-[16px]" />
           {iconsOnly ? null : <RailLabel>Upgrade</RailLabel>}
