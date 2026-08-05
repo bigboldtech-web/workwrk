@@ -16,7 +16,7 @@ import {
   Inbox as InboxIcon, Heart, AtSign, CheckSquare, Circle, Clock, MessageCircle,
   ClipboardCheck, BookOpen, ShieldAlert, Bell, ChevronRight, Check,
   ArrowDownWideNarrow, Eye, Keyboard, Layers, ListFilter, MailOpen,
-  Maximize2, Settings, Settings2, UserRound, X, type LucideIcon,
+  Settings, Settings2, UserRound, X, type LucideIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
