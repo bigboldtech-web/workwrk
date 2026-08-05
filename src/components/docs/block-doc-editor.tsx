@@ -851,7 +851,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           <button type="button" className="bdoc__conflict-dismiss" onClick={() => setConflict(false)}>Dismiss</button>
         </div>
       )}
-      <div className={`bdoc__page ${hasCover ? "has-cover" : ""}`}>
+      <div className={`bdoc__page mx-auto max-w-[920px] ${hasCover ? "has-cover" : ""}`}>
         {/* Emoji + add-cover-row */}
         <div className="bdoc__chrome">
           {meta.icon ? (
@@ -898,7 +898,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
         <input
           type="text"
-          className="bdoc__title"
+          className="bdoc__title text-[40px]! font-bold! tracking-[-0.02em]! pt-1.5! pb-2!"
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled note"
@@ -1211,7 +1211,7 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
   }, [doc.updatedAt, now]);
 
   return (
-    <div className="bdoc__meta">
+    <div className="bdoc__meta mb-6!">
       <span>{stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}</span>
       <span className="bdoc__meta-sep" aria-hidden>·</span>
       <span>{stats.minutes} min read</span>
