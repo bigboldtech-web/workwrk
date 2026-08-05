@@ -87,14 +87,21 @@ status boxes as surfaces land.
    - [x] Kanban — 2026-08-05: solid status-pill column headers, cards drop the
          created-date footer (subtask count only), "Add Task" labels. Hover
          cluster (check/+/pencil/…) verified.
-   - [ ] Calendar + Gantt polish.
+   - [x] Calendar polish — 2026-08-05 (workflow-audited vs Mobbin): tinted
+         chips w/ left color edge + assignee avatar, ghost-chevron toolbar,
+         mixed-case weekday header, adjacent-month grey day numbers, weekend
+         tint, 4-chip cells.
+   - [x] Gantt polish — 2026-08-05: two-tier month-band header, rose today
+         bubble+line, weekend shading, 24px bars w/ hover resize handles +
+         short-bar label spill, Today-first toolbar, floating zoom stack.
 3. **Task detail (drawer + `/item/[id]`)** — Schedule/Repeat/Reminders done.
    - [x] Verified 2026-08-05 vs Mobbin ClickUp task view: type chip, title,
          two-column field grid (Status/Dates/Estimate/Track | Assignees/Priority/
          Tags/Alignment), description, Add subtask / Relate / Checklist / Attach
          sections, Comments+Activity tabs — structure already matches; no change.
-   - [ ] Polish candidates: status advance ✓ next to the status chip, "Custom
-         Fields" section header, Ask Brain strip on the full page.
+   - [x] Polish trio shipped 2026-08-05: solid status pill + "›" advance +
+         ✓ complete button; collapsible "Custom Fields" header; Ask Brain
+         strip wired on /item/[id].
 
 ## Wave 2 — content + creation
 4. **Docs / Notes editor (BlockNote)** — align to ClickUp Docs (cover, title, slash
@@ -114,6 +121,14 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-05 (evening): **Wave 2/3 sweep via workflow audits.** 5 parallel
+  agents pulled fresh Mobbin ClickUp references and produced file-anchored
+  diffs; all implemented + browser-verified: task-detail trio (d68e676),
+  Home (6168455), Inbox rows/tabs/hover-actions (79992b0), Calendar chips +
+  chrome (bbb50ab), Gantt header/bars/zoom (57527b4). Also fixed the React
+  key warning on Board view (9bde868, keyed addTaskSlot at both call sites).
+  Remaining ClickUp-parity queue: Docs editor chrome (Wave 2), Dashboards
+  widget gallery, Settings nav consistency, dark-mode verification pass.
 - 2026-08-05: **Mobbin MCP connected** — reference screens now pulled directly.
   Wave 1 core shipped against real ClickUp references: List view (status-pill
   group headers, per-group column labels, labeled toolbar, bulk bar verified),
