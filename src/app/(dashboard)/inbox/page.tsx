@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Switch } from "@/components/ui/switch";
 import {
-  Inbox as InboxIcon, Heart, AtSign, CheckSquare, Clock, MessageCircle,
+  Inbox as InboxIcon, Heart, AtSign, CheckSquare, Circle, Clock, MessageCircle,
   ClipboardCheck, BookOpen, ShieldAlert, Bell, ChevronRight, Check,
   ArrowDownWideNarrow, Eye, Keyboard, Layers, ListFilter, MailOpen,
   Maximize2, Settings, Settings2, UserRound, X, type LucideIcon,
@@ -46,16 +46,13 @@ function visualFor(t: string): TypeVisual {
   return TYPE_VISUAL[t] ?? { Icon: Bell, color: "#71717a", label: t.replace(/_/g, " "), bucket: "other" };
 }
 
-function relTime(iso: string): string {
+// ClickUp row timestamps are short + absolute: same-day shows the time,
+// anything older shows "Oct 28".
+function shortDate(iso: string): string {
   const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
+  if (d.toDateString() === new Date().toDateString()) {
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
@@ -153,6 +150,20 @@ export default function InboxPage() {
     return result;
   }, [rows, tab, filterType, prefs]);
 
+  // Unread-per-bucket counts for the tab sublines (ClickUp's "N unread").
+  const unreadCounts = useMemo(() => {
+    const counts = { primary: 0, other: 0 };
+    if (rows) {
+      const now = Date.now();
+      for (const n of rows) {
+        if (n.read) continue;
+        if (n.snoozedUntil && new Date(n.snoozedUntil).getTime() > now) continue;
+        counts[visualFor(n.type).bucket] += 1;
+      }
+    }
+    return counts;
+  }, [rows]);
+
   async function markRead(id: string) {
     setRows((prev) => prev?.map((n) => n.id === id ? { ...n, read: true } : n) ?? prev);
     try {
@@ -161,6 +172,22 @@ export default function InboxPage() {
         body: JSON.stringify({ id }),
       });
     } catch { toast("Couldn't mark read"); void load(); }
+  }
+
+  // Snooze to tomorrow 9:00 local. Sent via the `ids` array — the API's
+  // single-`id` branch marks read before the snooze branch can run.
+  async function snooze(id: string) {
+    const until = new Date();
+    until.setDate(until.getDate() + 1);
+    until.setHours(9, 0, 0, 0);
+    setRows((prev) => prev?.map((n) => n.id === id ? { ...n, snoozedUntil: until.toISOString() } : n) ?? prev);
+    try {
+      await fetch("/api/notifications", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [id], snoozeUntil: until.toISOString() }),
+      });
+      toast("Snoozed until tomorrow 9 AM");
+    } catch { toast("Couldn't snooze"); void load(); }
   }
 
   async function clearAll() {
@@ -180,28 +207,28 @@ export default function InboxPage() {
       <div className="flex min-w-0 flex-1 flex-col bg-white">
         <div className="border-b border-zinc-200">
           <h1 className="sr-only">Inbox</h1>
-          <div className="grid grid-cols-4 h-[68px]">
-            <InboxTab active={tab === "primary"} onClick={() => setTab("primary")} Icon={InboxIcon} label="Primary" />
-            <InboxTab active={tab === "other"}   onClick={() => setTab("other")}   Icon={ListFilter} label="Other" divided />
+          <div className="grid grid-cols-4 h-14">
+            <InboxTab active={tab === "primary"} onClick={() => setTab("primary")} Icon={InboxIcon} label="Primary" count={unreadCounts.primary} />
+            <InboxTab active={tab === "other"}   onClick={() => setTab("other")}   Icon={ListFilter} label="Other" count={unreadCounts.other} divided />
             <InboxTab active={tab === "later"}   onClick={() => setTab("later")}   Icon={Clock} label="Later" divided />
             <InboxTab active={tab === "cleared"} onClick={() => setTab("cleared")} Icon={Check} label="Cleared" divided />
           </div>
         </div>
 
-        <div className="px-7 py-4 flex items-center gap-1">
+        <div className="px-7 py-2.5 flex items-center gap-1">
           <div className="relative">
             <button
               type="button"
               onClick={() => setFilterOpen((v) => !v)}
               aria-expanded={filterOpen}
               aria-haspopup="menu"
-              className={`inline-flex items-center gap-1.5 h-7 !px-3 rounded-full text-[13px] border hover:bg-zinc-50 transition-colors ${
+              className={`inline-flex items-center gap-1.5 h-6 !px-2 rounded-md text-[12px] border hover:bg-zinc-50 transition-colors ${
                 filterOpen || filterType
                   ? "bg-zinc-100 border-[var(--os-brand-rail)] text-[var(--os-brand-rail)] font-medium"
                   : "bg-white border-zinc-200 text-zinc-600"
               }`}
             >
-              <ListFilter className="w-3.5 h-3.5" />
+              <ListFilter className="w-3 h-3" />
               {filterType ? filterType : "Filter"}
             </button>
             {filterOpen ? (
@@ -248,7 +275,7 @@ export default function InboxPage() {
           ) : filteredRows.length === 0 ? (
             <InboxEmpty tab={tab} />
           ) : (
-            <div className="max-w-[860px] mx-auto">
+            <div>
               {prefs.groupByDate ? (
                 // Group by date logic
                 (() => {
@@ -262,24 +289,24 @@ export default function InboxPage() {
                   const groups = {
                     "Today": [] as ApiNotification[],
                     "Yesterday": [] as ApiNotification[],
-                    "Older": [] as ApiNotification[],
+                    "Last 7 days": [] as ApiNotification[],
                   };
 
                   filteredRows.forEach(n => {
                     const d = new Date(n.createdAt).toDateString();
                     if (d === todayStr) groups["Today"].push(n);
                     else if (d === yesterdayStr) groups["Yesterday"].push(n);
-                    else groups["Older"].push(n);
+                    else groups["Last 7 days"].push(n);
                   });
 
                   return Object.entries(groups).map(([label, items]) => {
                     if (items.length === 0) return null;
                     return (
                       <div key={label} className="mb-6">
-                        <h3 className="text-[13px] font-semibold text-zinc-900 mb-2 px-1 sticky top-0 bg-white z-10 py-1">{label}</h3>
+                        <h3 className="text-[12px] font-medium text-zinc-500 sticky top-0 bg-white z-10 py-2 px-1">{label}</h3>
                         <ul className="divide-y divide-zinc-100">
                           {items.map(n => (
-                            <NotifEntry key={n.id} n={n} onMarkRead={markRead} cleared={tab === "cleared"} mode={prefs.mode} />
+                            <NotifEntry key={n.id} n={n} onMarkRead={markRead} onSnooze={snooze} cleared={tab === "cleared"} mode={prefs.mode} />
                           ))}
                         </ul>
                       </div>
@@ -289,7 +316,7 @@ export default function InboxPage() {
               ) : (
                 <ul className="divide-y divide-zinc-100">
                   {filteredRows.map((n) => (
-                    <NotifEntry key={n.id} n={n} onMarkRead={markRead} cleared={tab === "cleared"} mode={prefs.mode} />
+                    <NotifEntry key={n.id} n={n} onMarkRead={markRead} onSnooze={snooze} cleared={tab === "cleared"} mode={prefs.mode} />
                   ))}
                 </ul>
               )}
@@ -512,28 +539,34 @@ function InboxTab({
   onClick,
   Icon,
   label,
+  count,
   divided = false,
 }: {
   active: boolean;
   onClick: () => void;
   Icon: LucideIcon;
   label: string;
+  /** Unread count — rendered as ClickUp's "N unread" subline under the label. */
+  count?: number;
   divided?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`relative inline-flex items-center justify-start gap-4 !pl-14 !pr-10 text-[15px] transition-colors ${
-        divided ? "before:absolute before:left-0 before:top-4 before:bottom-4 before:w-px before:bg-zinc-300 before:content-['']" : ""
+      className={`relative inline-flex items-center justify-start gap-3 !pl-14 !pr-10 transition-colors ${
+        divided ? "before:absolute before:left-0 before:top-3 before:bottom-3 before:w-px before:bg-zinc-300 before:content-['']" : ""
       } ${
         active
           ? "text-zinc-900 font-medium after:absolute after:left-0 after:right-0 after:bottom-[-1px] after:h-0.5 after:bg-zinc-900"
           : "text-zinc-500 hover:text-zinc-900"
       }`}
     >
-      <Icon className="w-3.5 h-3.5" />
-      {label}
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      <span className="flex flex-col items-start leading-tight">
+        <span className="text-[14px]">{label}</span>
+        {count ? <span className="text-[11px] font-normal text-zinc-400">{count} unread</span> : null}
+      </span>
     </button>
   );
 }
@@ -561,8 +594,8 @@ function InboxEmpty({ tab }: { tab: Tab }) {
   return (
     <div className="flex min-h-[calc(100vh-245px)] flex-col items-center text-center">
       <div className="flex flex-1 flex-col items-center justify-center pt-10">
-        <span className="inline-flex items-center justify-center w-[84px] h-[62px] rounded-xl bg-violet-50 shadow-[0_12px_30px_rgba(124,58,237,0.12)] mb-7">
-          <InboxIcon className="w-9 h-9 text-violet-200" />
+        <span className="inline-flex items-center justify-center w-[84px] h-[62px] rounded-xl bg-blue-50 shadow-[0_12px_30px_rgba(0,115,234,0.12)] mb-7">
+          <InboxIcon className="w-9 h-9 text-blue-200" />
         </span>
         <p className="text-[20px] font-semibold text-zinc-900 mb-2">Inbox Zero</p>
         <p className="text-[15px] text-zinc-500">
@@ -572,7 +605,7 @@ function InboxEmpty({ tab }: { tab: Tab }) {
       <div className="w-full max-w-none pb-12">
         <div className="relative mx-auto max-w-[760px] border-t border-zinc-100 pt-20">
           <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 inline-flex h-7 items-center rounded-full border border-zinc-200 bg-white px-4 text-[13px] text-zinc-500">
-            ClickTip
+            Tip
           </span>
           <p className="mx-auto max-w-[520px] text-[20px] font-semibold leading-snug text-zinc-900">
             Pin your Favorites bar to the top of your screen to interact with them faster than ever!
@@ -604,98 +637,107 @@ function EmptyState({ Icon, title, sub }: { Icon: LucideIcon; title: string; sub
 function NotifEntry({
   n,
   onMarkRead,
+  onSnooze,
   cleared,
   mode = "fullscreen",
 }: {
   n: ApiNotification;
   onMarkRead: (id: string) => void;
+  onSnooze: (id: string) => void;
   cleared: boolean;
   mode?: "fullscreen" | "inline";
 }) {
   const v = visualFor(n.type);
 
-  const IconCircle = (
-    <span
-      className="inline-flex items-center justify-center w-8 h-8 rounded-full shrink-0"
-      style={{ background: `color-mix(in srgb, ${v.color} 12%, transparent)`, color: v.color }}
-    >
-      <v.Icon className="w-4 h-4" />
-    </span>
+  // ClickUp row: plain open status circle leads; the type icon rides inline
+  // after the title in small gray. No tinted bubble.
+  const LeadCircle = (
+    <Circle className="w-[15px] h-[15px] shrink-0 text-zinc-400 group-hover:text-zinc-500" strokeWidth={1.75} />
+  );
+
+  // Right cluster: unread dot + short date at rest; hover swaps in the
+  // action buttons ending with ClickUp's dark "Clear" pill.
+  const RightCluster = (
+    <div className="ml-auto flex items-center gap-2 shrink-0">
+      <div className={`flex items-center gap-2 ${cleared ? "" : "group-hover:hidden"}`}>
+        {!n.read && !cleared ? <span className="w-1.5 h-1.5 rounded-full bg-[#0073EA] shrink-0" aria-hidden /> : null}
+        <time className="text-[12px] text-zinc-400 shrink-0" dateTime={n.createdAt}>{shortDate(n.createdAt)}</time>
+      </div>
+      {!cleared ? (
+        <div className="hidden group-hover:flex items-center gap-1">
+          <button
+            type="button"
+            aria-label="Mark read"
+            title="Mark read"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkRead(n.id); }}
+            className="p-1 rounded text-zinc-500 hover:bg-zinc-200/60"
+          >
+            <MailOpen className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Snooze until tomorrow"
+            title="Snooze until tomorrow"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSnooze(n.id); }}
+            className="p-1 rounded text-zinc-500 hover:bg-zinc-200/60"
+          >
+            <Clock className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkRead(n.id); }}
+            className="inline-flex items-center gap-1 h-6 rounded-md bg-zinc-900 !px-2 text-[12px] font-medium text-white hover:bg-zinc-800"
+          >
+            <Check className="w-3 h-3" strokeWidth={2.5} />
+            Clear
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 
   const FullscreenBody = (
-    <div className="flex-1 min-w-0">
-      <div className="flex items-center gap-2">
-        <span className="text-[13px] text-zinc-900 truncate font-medium">{n.title}</span>
-        {!n.read ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden /> : null}
-      </div>
+    <>
+      <span className="text-[13px] font-medium text-zinc-800 truncate shrink-0 max-w-[38%]">{n.title}</span>
+      <v.Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       {n.message ? (
-        <p className="text-[12px] text-zinc-500 line-clamp-1 mt-0.5">{n.message}</p>
-      ) : null}
-      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 mt-1">
-        <span style={{ color: v.color }}>{v.label}</span>
-        <span>·</span>
-        <time dateTime={n.createdAt}>{relTime(n.createdAt)}</time>
-        {n.link ? (
-          <>
-            <span>·</span>
-            <span className="inline-flex items-center gap-0.5">
-              Open <ChevronRight className="w-3 h-3" />
-            </span>
-          </>
-        ) : null}
-      </div>
-    </div>
+        <p className={`flex-1 min-w-0 truncate text-[13px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-rail)]" : "text-zinc-500"}`}>
+          {n.message}
+        </p>
+      ) : (
+        <span className="flex-1" />
+      )}
+      {RightCluster}
+    </>
   );
 
   const InlineBody = (
-    <div className="flex-1 min-w-0 flex items-center justify-between gap-4">
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        <span className="text-[13px] text-zinc-900 truncate font-medium max-w-[200px] shrink-0">{n.title}</span>
-        {n.message ? (
-          <p className="text-[13px] text-zinc-500 truncate min-w-0">
-            {n.message}
-          </p>
-        ) : (
-          <span className="flex-1" />
-        )}
-      </div>
-      <div className="flex items-center gap-3 shrink-0">
-        {!n.read ? <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden /> : null}
-        <time className="text-[12px] text-zinc-400 w-16 text-right" dateTime={n.createdAt}>{relTime(n.createdAt)}</time>
-      </div>
-    </div>
+    <>
+      <span className="text-[13px] text-zinc-900 truncate font-medium max-w-[200px] shrink-0">{n.title}</span>
+      {n.message ? (
+        <p className="text-[13px] text-zinc-500 truncate min-w-0 flex-1">{n.message}</p>
+      ) : (
+        <span className="flex-1" />
+      )}
+      {RightCluster}
+    </>
   );
 
-
-  const className = `flex items-start gap-3 py-3 px-2 -mx-2 rounded hover:bg-zinc-50 transition-colors ${
-    n.read ? "opacity-60" : ""
+  const className = `group flex h-10 items-center gap-2.5 px-2 -mx-2 rounded hover:bg-zinc-50 transition-colors ${
+    n.read && !cleared ? "opacity-60" : ""
   }`;
-
-
 
   return (
     <li>
       {n.link ? (
         <Link href={n.link} className={className} onClick={() => { if (!n.read) onMarkRead(n.id); }}>
-          {IconCircle}
+          {LeadCircle}
           {mode === "inline" ? InlineBody : FullscreenBody}
         </Link>
       ) : (
         <div className={className}>
-          {IconCircle}
+          {LeadCircle}
           {mode === "inline" ? InlineBody : FullscreenBody}
-          {!cleared && !n.read ? (
-            <button
-              type="button"
-              onClick={() => onMarkRead(n.id)}
-              aria-label="Mark read"
-              title="Mark read"
-              className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 shrink-0"
-            >
-              <Check className="w-3.5 h-3.5" />
-            </button>
-          ) : null}
         </div>
       )}
     </li>
