@@ -174,18 +174,18 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
   return (
     <section>
       {error ? (
-        <div className="mb-2 px-4 py-2 text-xs text-red-500 bg-red-500/10 rounded-md flex items-center justify-between">
+        <div className="mb-3 flex items-center justify-between rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
           {error}
-          <button onClick={() => setError(null)} className="text-zinc-500 hover:text-zinc-900"><X className="w-3 h-3" /></button>
+          <button onClick={() => setError(null)} className="text-red-400 transition-colors hover:text-red-600"><X className="w-3 h-3" /></button>
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2 mb-3">
-        <div className="inline-flex items-center rounded-md border border-zinc-200 bg-white">
+      <div className="mb-3 flex items-center gap-3">
+        <div className="inline-flex items-center overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
           <button
             type="button"
             onClick={() => setMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
-            className="inline-flex items-center justify-center h-7 w-7 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-l-md"
+            className="inline-flex h-7 w-7 items-center justify-center text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
             aria-label="Previous month"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
@@ -193,7 +193,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
           <button
             type="button"
             onClick={() => setMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}
-            className="inline-flex items-center justify-center h-7 w-7 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 border-l border-zinc-200"
+            className="inline-flex h-7 w-7 items-center justify-center border-l border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
             aria-label="Next month"
           >
             <ChevronRight className="w-3.5 h-3.5" />
@@ -202,14 +202,14 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
             type="button"
             disabled={isCurrentMonth}
             onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}
-            className={`h-7 px-2.5 text-[11px] font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
+            className={`inline-flex h-7 items-center border-l border-zinc-200 px-2.5 text-[11px] font-medium transition-colors ${
               isCurrentMonth ? "text-zinc-400 cursor-default" : "text-zinc-700 hover:bg-zinc-50"
             }`}
           >
             Today
           </button>
         </div>
-        <h2 className="text-[13px] font-semibold text-zinc-900">{monthLabel}</h2>
+        <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-900">{monthLabel}</h2>
         <div className="flex-1" />
         {dateFields.length > 0 ? (
           <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
@@ -217,7 +217,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
             <select
               value={dateSourceLocal}
               onChange={(e) => persistDateSource(e.target.value)}
-              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[11.5px] text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[11.5px] text-zinc-700 transition-colors hover:border-zinc-300 focus:outline-none focus:border-[var(--os-brand)]"
             >
               <option value="__auto">Auto (Due + date fields)</option>
               <option value="__due">Due date</option>
@@ -233,14 +233,14 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="grid grid-cols-7 bg-zinc-50 border-b border-zinc-200">
+        <div className="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50/60">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2 py-2 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div key={d} className="px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               {d}
             </div>
           ))}
         </div>
-        <div className="grid grid-cols-7">
+        <div className="grid grid-cols-7 [&>div:nth-child(7n)]:border-r-0 [&>div:nth-last-child(-n+7)]:border-b-0">
           {cells.map((cell) => {
             const dayItems = cell.day !== null ? buckets.get(cell.key) ?? [] : [];
             const isToday = cell.key === todayKey;
@@ -248,9 +248,13 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
             return (
               <div
                 key={cell.key}
-                className={`group min-h-[96px] border-r border-b border-zinc-100 p-1.5 ${
-                  cell.inMonth ? "bg-white" : "bg-zinc-50/40"
-                } last:border-r-0 ${isDropTarget ? "outline-2 outline-dashed outline-[var(--os-brand)] -outline-offset-2" : ""}`}
+                className={`group min-h-[104px] border-r border-b border-zinc-100 p-1.5 ${
+                  isDropTarget
+                    ? "bg-[var(--os-brand)]/5 outline-2 outline-dashed outline-[var(--os-brand)] -outline-offset-2"
+                    : cell.inMonth
+                      ? "bg-white"
+                      : "bg-zinc-50/50"
+                }`}
                 onDragOver={(e) => {
                   if (!canEdit || !dragId || !cell.inMonth) return;
                   e.preventDefault();
@@ -266,26 +270,26 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                 }}
               >
                 {cell.day !== null ? (
-                  <div className="flex items-center justify-between mb-1">
+                  <div className="mb-1.5 flex items-center justify-between">
                     <span
-                      className={`text-[11px] tabular-nums ${
+                      className={`text-[11px] tabular-nums leading-5 ${
                         isToday
-                          ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--os-brand)] text-white font-semibold"
-                          : "text-zinc-700"
+                          ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--os-brand)] font-semibold text-white"
+                          : "font-medium text-zinc-500"
                       }`}
                     >
                       {cell.day}
                     </span>
                     <span className="inline-flex items-center gap-1">
                       {dayItems.length > 0 ? (
-                        <span className="text-[10px] text-zinc-400 tabular-nums">{dayItems.length}</span>
+                        <span className="text-[10px] font-medium tabular-nums text-zinc-400">{dayItems.length}</span>
                       ) : null}
                       {canEdit && cell.inMonth ? (
                         <button
                           type="button"
                           disabled={busyDay === cell.key}
                           onClick={() => void addOnDay(cell.key)}
-                          className="opacity-0 group-hover:opacity-100 inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 disabled:opacity-50"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-md text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-100 hover:text-zinc-600 disabled:opacity-50"
                           aria-label={`Add item on day ${cell.day}`}
                         >
                           <Plus className="w-3 h-3" />
@@ -309,7 +313,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           }}
                           onDragEnd={() => { setDragId(null); setDragOverDay(null); }}
                           onClick={() => onOpenItem?.(it.id)}
-                          className={`w-full flex items-center gap-1.5 px-1 py-0.5 rounded text-[10.5px] text-zinc-700 hover:bg-zinc-50 truncate text-left ${
+                          className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[11px] leading-4 text-zinc-700 transition-colors hover:bg-zinc-100/70 ${
                             canEdit ? "cursor-grab active:cursor-grabbing" : ""
                           } ${dragId === it.id ? "opacity-40" : ""}`}
                           title={canEdit ? "Drag to another day to reschedule" : undefined}
@@ -321,7 +325,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                     );
                   })}
                   {dayItems.length > 3 ? (
-                    <li className="px-1 text-[10px] text-zinc-400">+{dayItems.length - 3} more</li>
+                    <li className="px-1.5 pt-0.5 text-[10.5px] font-medium text-zinc-400">+{dayItems.length - 3} more</li>
                   ) : null}
                 </ul>
               </div>
