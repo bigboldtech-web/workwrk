@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronDown, Search, UserX, UserRoundPlus } from "lucide-react";
+import { ChevronDown, Search, UserX, CircleUserRound } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
 
@@ -121,11 +121,11 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      // UserRoundPlus (rounded, denser glyph) at the SAME 17px as the calendar/
-      // flag/tag affordances — the thin UserPlus read small even when enlarged,
-      // and the enlargement broke row alignment on Kanban cards. Same size for
-      // all affordance icons = one weight, aligned on one line.
-      <UserRoundPlus className="w-[17px] h-[17px] text-zinc-400" />
+      // CircleUserRound (person inside a full circle) fills the 17px box edge to
+      // edge, so the empty-assignee affordance reads at the SAME visual weight as
+      // the calendar / flag / tag icons. UserRoundPlus packed a small person + a
+      // plus into the box with lots of padding, so it looked tiny beside them.
+      <CircleUserRound className="w-[17px] h-[17px] text-zinc-400" />
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )
