@@ -14,7 +14,7 @@
 // hierarchy. Drawer slides from the right at 480px, full-height.
 
 import { useCallback, useEffect, useState } from "react";
-import { Trash2, X, ExternalLink, MessageSquare, Link2 } from "lucide-react";
+import { Trash2, X, ExternalLink, MessageSquare, Link2, ChevronsLeft, ChevronsRight } from "lucide-react";
 import Link from "next/link";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -252,8 +252,20 @@ export function BoardItemDrawer({
   );
 }
 
-// Right rail — Activity (comments + activity) and Related (relations, deps,
-// linked notes/whiteboards/files) tabs, matching the ClickUp task view.
+// Right rail — ClickUp-style: a slim vertical icon strip pinned to the
+// rail's left edge (collapse chevron + one icon per panel, each with a
+// hover tooltip) driving the panel to its right. Activity → ItemThread,
+// Related → LinkedAttachments (relations, notes, whiteboards, files, SOPs
+// — all add/link affordances live inside it). Collapsing hides the panel
+// and leaves just the 48px strip; clicking any panel icon re-expands.
+
+type RailPanel = "activity" | "related";
+
+const RAIL_PANEL_TITLES: Record<RailPanel, string> = {
+  activity: "Activity",
+  related: "Related items",
+};
+
 function DetailRail({
   item, canEdit, currentUserId, statuses,
 }: {
@@ -262,31 +274,91 @@ function DetailRail({
   currentUserId: string | null;
   statuses: StatusOption[];
 }) {
-  const [tab, setTab] = useState<"activity" | "related">("activity");
-  const tabBtn = (key: "activity" | "related", Icon: typeof MessageSquare, label: string) => (
-    <button
-      type="button"
-      onClick={() => setTab(key)}
-      className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] font-medium transition-colors ${
-        tab === key ? "bg-zinc-100 text-zinc-900" : "text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50"
+  const [panel, setPanel] = useState<RailPanel>("activity");
+  const [collapsed, setCollapsed] = useState(false);
+
+  const openPanel = (key: RailPanel) => {
+    setPanel(key);
+    setCollapsed(false);
+  };
+
+  return (
+    <aside
+      className={`flex shrink-0 border-l border-zinc-200 min-h-0 transition-[width] duration-150 ${
+        collapsed ? "w-12" : "w-[400px]"
       }`}
     >
-      <Icon className="w-3.5 h-3.5" /> {label}
-    </button>
-  );
-  return (
-    <aside className="flex w-[360px] shrink-0 border-l border-zinc-200 flex-col min-h-0">
-      <div className="h-11 px-2 flex items-center gap-1 border-b border-zinc-100">
-        {tabBtn("activity", MessageSquare, "Activity")}
-        {tabBtn("related", Link2, "Related")}
+      {/* Icon strip */}
+      <div
+        className={`w-12 shrink-0 flex flex-col items-center gap-1 pt-2.5 ${
+          collapsed ? "" : "border-r border-zinc-100"
+        }`}
+      >
+        <RailIconButton
+          Icon={collapsed ? ChevronsLeft : ChevronsRight}
+          label={collapsed ? "Expand" : "Collapse"}
+          active={false}
+          onClick={() => setCollapsed((v) => !v)}
+        />
+        <div className="w-6 h-px bg-zinc-200 my-1" aria-hidden />
+        <RailIconButton
+          Icon={MessageSquare}
+          label="Activity"
+          active={!collapsed && panel === "activity"}
+          onClick={() => openPanel("activity")}
+        />
+        <RailIconButton
+          Icon={Link2}
+          label="Related items"
+          active={!collapsed && panel === "related"}
+          onClick={() => openPanel("related")}
+        />
       </div>
-      <div className="flex-1 overflow-y-auto px-4 py-3">
-        {tab === "activity" ? (
-          <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statuses} />
-        ) : (
-          <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} />
-        )}
-      </div>
+
+      {/* Panel */}
+      {!collapsed ? (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <div className="h-11 shrink-0 px-4 flex items-center border-b border-zinc-100">
+            <span className="text-[13px] font-semibold text-zinc-800">
+              {RAIL_PANEL_TITLES[panel]}
+            </span>
+          </div>
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            {panel === "activity" ? (
+              <ItemThread itemId={item.id} canEdit={canEdit} currentUserId={currentUserId} statuses={statuses} />
+            ) : (
+              <LinkedAttachments sourceType="BOARD_ITEM" sourceId={item.id} spaceId={item.spaceId ?? null} canEdit={canEdit} />
+            )}
+          </div>
+        </div>
+      ) : null}
     </aside>
+  );
+}
+
+// One square icon in the rail strip — muted at rest, soft zinc highlight
+// when its panel is active, small dark hover tooltip floating to the left.
+function RailIconButton({
+  Icon, label, active, onClick,
+}: {
+  Icon: typeof MessageSquare;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className={`relative group w-8 h-8 shrink-0 inline-flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-brand)] ${
+        active ? "bg-zinc-100 text-zinc-900" : "text-zinc-400 hover:bg-zinc-50 hover:text-zinc-700"
+      }`}
+    >
+      <Icon className="w-4 h-4" />
+      <span className="pointer-events-none absolute right-full top-1/2 -translate-y-1/2 mr-2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity duration-100 z-10">
+        {label}
+      </span>
+    </button>
   );
 }
