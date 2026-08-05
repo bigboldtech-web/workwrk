@@ -15,15 +15,17 @@
 // onItemChanged. Undated markers open a date picker (or drag) to set dueAt.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { CalendarPlus, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
 import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { StatusGlyph } from "./status-glyph";
 
-const WEEK_COUNT = 12;
+// Zoom steps for the visible window (fewer weeks = zoomed in). ClickUp
+// exposes this as the floating +/− stack on the canvas.
+const WEEK_STEPS = [8, 12, 16, 24] as const;
 const MS_PER_DAY = 86_400_000;
 const ROW_H = 34;      // per-task lane height (matches the left name rows)
-const HEAD_H = 34;     // week-header / name-header height
+const HEAD_H = 44;     // two-tier timeline header (month band + day row)
 const NAME_W = 240;    // left Name column width
 
 type DragMode = "move" | "resize-start" | "resize-end";
@@ -94,6 +96,7 @@ export function BoardGanttView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [anchor, setAnchor] = useState<Date>(defaultAnchor);
+  const [weekCount, setWeekCount] = useState<number>(12);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -162,7 +165,7 @@ export function BoardGanttView({
     }),
   );
 
-  const totalDays = WEEK_COUNT * 7;
+  const totalDays = weekCount * 7;
   const windowEnd = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + totalDays);
   const todayCol = Math.floor(
     (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() - anchor.getTime()) / MS_PER_DAY,
@@ -302,9 +305,17 @@ export function BoardGanttView({
     }
   }, [newTitle, boardId, firstStatus, onItemCreated]);
 
-  const weeks = Array.from({ length: WEEK_COUNT }, (_, i) =>
+  const weeks = Array.from({ length: weekCount }, (_, i) =>
     new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i * 7),
   );
+  // Consecutive weeks grouped by month for the header's month band.
+  const monthBands: Array<{ label: string; span: number }> = [];
+  for (const w of weeks) {
+    const label = w.toLocaleString("default", { month: "long", year: "numeric" });
+    const last = monthBands[monthBands.length - 1];
+    if (last && last.label === label) last.span += 1;
+    else monthBands.push({ label, span: 1 });
+  }
   const rangeLabel = `${anchor.toLocaleString("default", { month: "short", day: "numeric" })} — ${
     new Date(windowEnd.getTime() - MS_PER_DAY).toLocaleString("default", { month: "short", day: "numeric", year: "numeric" })
   }`;
@@ -323,36 +334,35 @@ export function BoardGanttView({
         </div>
       ) : null}
 
+      {/* ClickUp toolbar grammar: standalone Today pill first, then ghost
+          chevrons; period lives in the timeline header, so the range label
+          stays quiet. */}
       <div className="flex items-center gap-2 mb-3">
-        <div className="inline-flex items-center rounded-md border border-zinc-200 bg-white">
-          <button
-            type="button"
-            onClick={() => shift(-4)}
-            className="inline-flex items-center justify-center h-7 w-7 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 rounded-l-md"
-            aria-label="Earlier"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => shift(4)}
-            className="inline-flex items-center justify-center h-7 w-7 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 border-l border-zinc-200"
-            aria-label="Later"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            disabled={isCurrentWindow}
-            onClick={() => setAnchor(defaultAnchor)}
-            className={`h-7 px-2.5 text-[11px] font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
-              isCurrentWindow ? "text-zinc-400 cursor-default" : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-          >
-            Today
-          </button>
-        </div>
-        <h2 className="text-[13px] font-semibold text-zinc-900">{rangeLabel}</h2>
+        <button
+          type="button"
+          disabled={isCurrentWindow}
+          onClick={() => setAnchor(defaultAnchor)}
+          className="h-7 px-3 rounded-md border border-zinc-200 bg-white text-[11.5px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-white inline-flex items-center"
+        >
+          Today
+        </button>
+        <button
+          type="button"
+          onClick={() => shift(-4)}
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          aria-label="Earlier"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => shift(4)}
+          className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
+          aria-label="Later"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <h2 className="text-[12px] font-medium text-zinc-500">{rangeLabel}</h2>
         <div className="flex-1" />
         {dateFields.length > 0 ? (
           <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
@@ -370,11 +380,11 @@ export function BoardGanttView({
             </select>
           </label>
         ) : null}
-        <span className="text-[10.5px] text-zinc-400 hidden lg:inline">
-          {undatedCount > 0
-            ? `${undatedCount} unscheduled · drag or click a marker to schedule`
-            : canEdit ? "Drag a bar to move it · drag an edge to resize" : "Start + Due dates render as duration bars"}
-        </span>
+        {undatedCount > 0 ? (
+          <span className="inline-flex items-center h-5 rounded-full bg-zinc-100 px-2 text-[10.5px] font-medium text-zinc-500">
+            {undatedCount} unscheduled
+          </span>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
@@ -383,17 +393,38 @@ export function BoardGanttView({
           <p className="text-xs text-zinc-500">Add a task below and it shows up here, ready to schedule.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-zinc-200 bg-white overflow-x-auto">
+        <div className="relative rounded-xl border border-zinc-200 bg-white overflow-x-auto">
+          {/* ClickUp's floating zoom stack (fewer weeks = zoom in). */}
+          <div className="absolute right-2 z-30 flex flex-col rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden" style={{ top: HEAD_H + 8 }}>
+            <button
+              type="button"
+              aria-label="Zoom in"
+              disabled={weekCount === WEEK_STEPS[0]}
+              onClick={() => setWeekCount((c) => WEEK_STEPS[Math.max(0, WEEK_STEPS.indexOf(c as typeof WEEK_STEPS[number]) - 1)])}
+              className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300"
+            >
+              <Plus className="w-3 h-3" />
+            </button>
+            <button
+              type="button"
+              aria-label="Zoom out"
+              disabled={weekCount === WEEK_STEPS[WEEK_STEPS.length - 1]}
+              onClick={() => setWeekCount((c) => WEEK_STEPS[Math.min(WEEK_STEPS.length - 1, WEEK_STEPS.indexOf(c as typeof WEEK_STEPS[number]) + 1)])}
+              className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300 border-t border-zinc-100"
+            >
+              <Minus className="w-3 h-3" />
+            </button>
+          </div>
           <div className="flex" style={{ minWidth: NAME_W + 720 }}>
             {/* Left Name column (sticky) */}
             <div className="shrink-0 sticky left-0 z-20 bg-white border-r border-zinc-200" style={{ width: NAME_W }}>
-              <div className="flex items-center h-[34px] px-3 border-b border-zinc-200 bg-zinc-50 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">
+              <div className="flex items-center px-3 border-b border-zinc-200 bg-white text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500" style={{ height: HEAD_H }}>
                 Name
               </div>
               {rows.map(({ item, start, end }) => {
                 const current = item.status ? statusLookup[item.status] ?? null : null;
                 return (
-                  <div key={item.id} className="flex items-center gap-2 px-3 border-b border-zinc-100" style={{ height: ROW_H }}>
+                  <div key={item.id} className="flex items-center gap-2 px-3 border-b border-zinc-100 hover:bg-zinc-50" style={{ height: ROW_H }}>
                     <StatusGlyph current={current} statuses={statuses} />
                     <button
                       type="button"
@@ -420,48 +451,81 @@ export function BoardGanttView({
 
             {/* Right timeline */}
             <div className="flex-1 min-w-[720px]">
-              {/* Week header */}
-              <div
-                className="grid border-b border-zinc-200 bg-zinc-50"
-                style={{ height: HEAD_H, gridTemplateColumns: `repeat(${WEEK_COUNT}, minmax(60px, 1fr))` }}
-              >
-                {weeks.map((w, i) => {
-                  const isThisWeek = startOfWeek(today).getTime() === w.getTime();
-                  return (
+              {/* Two-tier header: month band over per-week day numbers. */}
+              <div className="border-b border-zinc-200 bg-white" style={{ height: HEAD_H }}>
+                <div
+                  className="grid h-[18px]"
+                  style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(60px, 1fr))` }}
+                >
+                  {monthBands.map((band, i) => (
                     <div
-                      key={i}
-                      className={`border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px] font-medium ${
-                        isThisWeek ? "text-zinc-900" : "text-zinc-500"
-                      }`}
+                      key={`${band.label}-${i}`}
+                      className="px-2 flex items-center text-[10.5px] font-medium text-zinc-500 truncate"
+                      style={{ gridColumn: `span ${band.span}` }}
                     >
-                      {w.toLocaleString("default", { month: "short", day: "numeric" })}
+                      {band.label}
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+                <div
+                  className="grid h-[26px]"
+                  style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(60px, 1fr))` }}
+                >
+                  {weeks.map((w, i) => {
+                    const isThisWeek = startOfWeek(today).getTime() === w.getTime();
+                    return (
+                      <div key={i} className="border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px]">
+                        {isThisWeek ? (
+                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-rose-500 text-white text-[10px] font-semibold">
+                            {w.getDate()}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400">{w.getDate()}</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               {/* Lanes */}
               <div ref={lanesRef} className="relative" style={{ height: chartHeight }}>
+                {/* Weekend shading (behind gridlines/bars) */}
+                {Array.from({ length: weekCount }, (_, i) => (
+                  <span key={`wknd-${i}`} aria-hidden>
+                    <span
+                      className="absolute top-0 bottom-0 bg-zinc-50 pointer-events-none"
+                      style={{ left: `${((i * 7) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
+                    />
+                    <span
+                      className="absolute top-0 bottom-0 bg-zinc-50 pointer-events-none"
+                      style={{ left: `${((i * 7 + 6) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
+                    />
+                  </span>
+                ))}
                 {/* Week gridlines */}
-                {Array.from({ length: WEEK_COUNT - 1 }, (_, i) => (
+                {Array.from({ length: weekCount - 1 }, (_, i) => (
                   <span
                     key={i}
                     aria-hidden
                     className="absolute top-0 bottom-0 w-px bg-zinc-100"
-                    style={{ left: `${((i + 1) / WEEK_COUNT) * 100}%` }}
+                    style={{ left: `${((i + 1) / weekCount) * 100}%` }}
                   />
                 ))}
                 {/* Row separators */}
                 {rows.map((_, i) => (
                   <span key={`sep-${i}`} aria-hidden className="absolute left-0 right-0 h-px bg-zinc-100" style={{ top: (i + 1) * ROW_H }} />
                 ))}
-                {/* Today line */}
+                {/* Today line — rose, centered in the day column, dot on top. */}
                 {todayInWindow ? (
-                  <span aria-hidden className="absolute top-0 bottom-0 w-px bg-red-400" style={{ left: `${(todayCol / totalDays) * 100}%` }} />
+                  <>
+                    <span aria-hidden className="absolute top-0 bottom-0 w-px bg-rose-500" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />
+                    <span aria-hidden className="absolute w-[5px] h-[5px] rounded-full bg-rose-500 -translate-x-1/2" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%`, top: -2 }} />
+                  </>
                 ) : null}
 
                 {rows.map(({ item, start, end }, rowIndex) => {
                   const color = (item.status ? statusLookup[item.status]?.color : null) ?? "#94a3b8";
-                  const top = rowIndex * ROW_H + (ROW_H - 22) / 2;
+                  const top = rowIndex * ROW_H + (ROW_H - 24) / 2;
 
                   // Undated → a schedule marker parked on today (draggable / clickable).
                   if (!start && !end) {
@@ -515,16 +579,18 @@ export function BoardGanttView({
                   }
                   const leftPct = (dispStartCol / totalDays) * 100;
                   const widthPct = (dispSpan / totalDays) * 100;
+                  // ClickUp spills short bars' names to the right of the bar.
+                  const spillLabel = dispSpan <= 2;
                   return (
                     <div
                       key={item.id}
-                      className={`absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded" : ""}`}
-                      style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, top, height: 22 }}
+                      className={`group absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded-[6px]" : ""}`}
+                      style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, top, height: 24 }}
                     >
                       {canEdit ? (
                         <div
                           onPointerDown={(e) => beginDrag(e, item.id, "resize-start")}
-                          className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-l"
+                          className="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-l-[6px] bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
                           aria-hidden
                         />
                       ) : null}
@@ -538,17 +604,22 @@ export function BoardGanttView({
                         title={`${item.title} — ${s.toLocaleDateString()}${
                           s.getTime() !== e.getTime() ? ` → ${e.toLocaleDateString()}` : ""
                         }`}
-                        className={`w-full h-full px-2 rounded text-[10.5px] font-medium text-white truncate hover:opacity-90 leading-[22px] text-left ${
+                        className={`w-full h-full px-2 rounded-[6px] text-[11px] font-medium text-white truncate hover:brightness-95 leading-[24px] text-left ${
                           canEdit ? "cursor-grab active:cursor-grabbing" : ""
                         }`}
                         style={{ backgroundColor: color }}
                       >
-                        {item.title}
+                        {spillLabel ? null : item.title}
                       </button>
+                      {spillLabel ? (
+                        <span className="absolute left-full top-0 ml-1.5 text-[11px] text-zinc-600 whitespace-nowrap leading-[24px] pointer-events-none">
+                          {item.title}
+                        </span>
+                      ) : null}
                       {canEdit ? (
                         <div
                           onPointerDown={(e) => beginDrag(e, item.id, "resize-end")}
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-r"
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize z-10 rounded-r-[6px] bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity"
                           aria-hidden
                         />
                       ) : null}
