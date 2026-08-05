@@ -155,7 +155,7 @@ export function BoardItemDetail({
           <button
             type="button"
             onClick={onAskAi}
-            className="flex w-full items-center gap-2.5 h-9 px-3 rounded-lg text-left transition-colors bg-[color-mix(in_srgb,var(--os-brand)_5%,transparent)] hover:bg-[color-mix(in_srgb,var(--os-brand)_9%,transparent)]"
+            className="flex w-full items-center gap-2 h-9 px-3 rounded-lg text-left transition-colors bg-[color-mix(in_srgb,var(--os-brand)_5%,transparent)] hover:bg-[color-mix(in_srgb,var(--os-brand)_9%,transparent)]"
           >
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--os-brand)]" />
             <span className="truncate text-[12.5px] text-zinc-500">
@@ -226,12 +226,12 @@ export function BoardItemDetail({
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fields</h3>
             <div className="flex items-center gap-1.5">
               <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
-                <Search className="w-3 h-3 text-zinc-400" />
+                <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
                 <input value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search fields…" className="w-[110px] text-[12px] bg-transparent outline-none" />
               </div>
               {emptyCount > 0 ? (
                 <button type="button" onClick={() => setHideEmpty((v) => !v)} className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-zinc-500 hover:bg-zinc-100">
-                  {hideEmpty ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  {hideEmpty ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <EyeOff className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
                   {hideEmpty ? `Show ${emptyCount} empty` : `Hide ${emptyCount} empty`}
                 </button>
               ) : null}
@@ -293,7 +293,7 @@ export function BoardItemDetail({
               key={r.key}
               type="button"
               onClick={r.onClick}
-              className="flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+              className="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[13px] text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
             >
               <r.icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
               {r.label}

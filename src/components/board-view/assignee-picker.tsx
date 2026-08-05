@@ -7,7 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
-import { ChevronDown, Search, UserX, CircleUserRound } from "lucide-react";
+import { ChevronDown, Search, UserX, UserRound } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
 
@@ -121,11 +121,16 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
     </span>
   ) : (
     compact ? (
-      // CircleUserRound (person inside a full circle) fills the 17px box edge to
-      // edge, so the empty-assignee affordance reads at the SAME visual weight as
-      // the calendar / flag / tag icons. UserRoundPlus packed a small person + a
-      // plus into the box with lots of padding, so it looked tiny beside them.
-      <CircleUserRound className="w-[17px] h-[17px] text-zinc-400" />
+      // Empty-assignee affordance = a dashed-circle avatar SLOT (ClickUp style),
+      // sized to the assigned avatar (18px). A bordered circle has real visual
+      // presence, so it reads at full weight next to the calendar / flag icons —
+      // a bare person glyph kept looking tiny because it had no surrounding mass.
+      <span
+        className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full border border-dashed border-zinc-300 text-zinc-400 shrink-0"
+        aria-label="Assign"
+      >
+        <UserRound className="w-2.5 h-2.5" />
+      </span>
     ) : (
       <span className="text-xs text-zinc-500">Unassigned</span>
     )
