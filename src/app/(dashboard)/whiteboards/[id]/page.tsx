@@ -244,7 +244,7 @@ export default function WhiteboardCanvasPage() {
               <Loader2 className="wbc__spin" /> Saving…
             </span>
           ) : saveError ? (
-            <span className="wbc__status-dirty" title="We'll keep retrying. Don't close until it saves.">
+            <span className="wbc__status-error" title="We'll keep retrying. Don't close until it saves.">
               <Cloud /> Save failed — retrying
             </span>
           ) : dirty ? (
