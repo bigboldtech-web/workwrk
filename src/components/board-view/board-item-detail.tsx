@@ -1,15 +1,21 @@
 "use client";
 
 // BoardItemDetail — the shared body of a task's detail view. Rendered by
-// both BoardItemDrawer (480px side panel) and the full-page task route
-// (/tasks/[id]). Owns no data fetching: the host loads the item and passes
-// it down with an onPatch callback. Sections: core field grid (status,
-// owner, priority, tags, dates, type), custom fields (with search +
-// hide-empty), description, subtasks, checklist, relations, linked
-// attachments, time tracking, comments/activity.
+// both BoardItemDrawer (centered modal) and the full-page task route
+// (/item/[id]). Owns no data fetching: the host loads the item and passes
+// it down with an onPatch callback. Layout (ClickUp task view): type pill,
+// large title, optional Ask Brain row, a two-column field grid
+// (Status|Assignees, Dates|Priority, Time estimate|Track time,
+// Tags|Alignment), description, collapsed action rows, then subtasks /
+// checklist / custom fields / relations / comments when revealed.
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban, Pencil, GitBranch, Link2, ClipboardList, Paperclip } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban, Pencil, GitBranch,
+  Link2, ClipboardList, Paperclip, CircleDashed, Users, CalendarDays, Hourglass,
+  Clock, Tag, Sparkles, Play, Square, Loader2,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { RecurrenceRule } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -59,6 +65,10 @@ interface BoardItemDetailProps {
   /** Drawer hosts relations/attachments in its right rail "Related" tab —
    *  suppress the inline widget + its Relate/Attach action rows. */
   hideRelations?: boolean;
+  /** When set, renders the "Ask Brain" suggestion row under the title.
+   *  The drawer wires this to the OS-shell sidekick; the full-page route
+   *  omits it. */
+  onAskAi?: () => void;
 }
 
 function isEmptyValue(v: unknown): boolean {
@@ -66,6 +76,13 @@ function isEmptyValue(v: unknown): boolean {
   if (Array.isArray(v)) return v.length === 0;
   if (typeof v === "object") return Object.keys(v as object).length === 0;
   return false;
+}
+
+function fmtStamp(v: string | Date): string {
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "";
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en-US", sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function BoardItemDetail({
@@ -80,6 +97,7 @@ export function BoardItemDetail({
   moduleGating,
   hideActivity = false,
   hideRelations = false,
+  onAskAi,
 }: BoardItemDetailProps) {
   // Absent gating (legacy / non-board context) = everything shown.
   const priorityOn = moduleGating ? moduleGating.priority : true;
@@ -126,21 +144,35 @@ export function BoardItemDetail({
   ].filter((r): r is { key: string; icon: typeof Pencil; label: string; onClick: () => void } => r !== null);
 
   return (
-    <div className={`space-y-5 ${pageWide ? "max-w-[760px]" : ""}`}>
-      {/* Type pill (ClickUp top-left) + title */}
-      <div className="space-y-2">
-        <div className="inline-flex items-center h-7 px-2 rounded-md border border-zinc-200">
+    <div className={`space-y-6 ${pageWide ? "max-w-[760px]" : ""}`}>
+      {/* Type pill (ClickUp top-left) + title + Ask Brain suggestion row */}
+      <div className="space-y-3">
+        <div className="inline-flex items-center h-7 px-2 rounded-md border border-zinc-200 bg-white">
           <ItemTypePicker value={item.itemTypeId ?? null} canEdit={canEdit} onChange={(id) => onPatch({ itemTypeId: id })} />
         </div>
         <TitleField item={item} canEdit={canEdit} onSave={(t) => onPatch({ title: t })} />
+        {onAskAi ? (
+          <button
+            type="button"
+            onClick={onAskAi}
+            className="flex w-full items-center gap-2.5 h-9 px-3 rounded-lg text-left transition-colors bg-[color-mix(in_srgb,var(--os-brand)_5%,transparent)] hover:bg-[color-mix(in_srgb,var(--os-brand)_9%,transparent)]"
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--os-brand)]" />
+            <span className="truncate text-[12.5px] text-zinc-500">
+              <span className="font-medium text-[var(--os-brand)]">Ask Brain</span>
+              {" "}to plan, summarize or draft next steps for this task
+            </span>
+          </button>
+        ) : null}
       </div>
 
-      {/* Core field grid */}
-      <div className="space-y-3">
-        <Row label="Status">
+      {/* Core field grid — ClickUp two-column pairing:
+          Status|Assignees, Dates|Priority, Time estimate|Track time, Tags|Alignment. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-0.5">
+        <FieldRow icon={CircleDashed} label="Status">
           <StatusPicker value={item.status} statuses={statusOptions} canEdit={canEdit} onChange={(v) => onPatch({ status: v })} />
-        </Row>
-        <Row label="Assignees">
+        </FieldRow>
+        <FieldRow icon={Users} label="Assignees">
           <AssigneePicker
             value={item.owner ? { ...item.owner, email: null } : null}
             canEdit={canEdit}
@@ -151,29 +183,38 @@ export function BoardItemDetail({
               )
             }
           />
-        </Row>
+        </FieldRow>
+        <FieldRow icon={CalendarDays} label="Dates">
+          <DatePlanner item={item} canEdit={canEdit} onPatch={onPatch} statuses={statusOptions} />
+        </FieldRow>
         {priorityOn ? (
-          <Row label="Priority">
+          <FieldRow icon={Flag} label="Priority">
             <PriorityPicker value={item.priority ?? null} canEdit={canEdit} onChange={(priority) => onPatch({ priority })} />
-          </Row>
+          </FieldRow>
+        ) : null}
+        <FieldRow icon={Hourglass} label="Time estimate">
+          <TimeEstimateField item={item} canEdit={canEdit} onPatch={onPatch} />
+        </FieldRow>
+        {timeTrackingOn ? (
+          <FieldRow icon={Clock} label="Track time">
+            <TrackTimeField itemId={item.id} canEdit={canEdit} />
+          </FieldRow>
         ) : null}
         {tagsOn ? (
-          <Row label="Tags">
+          <FieldRow icon={Tag} label="Tags">
             <TagPicker value={item.tags ?? []} canEdit={canEdit} onChange={(tags) => onPatch({ tagIds: tags.map((t) => t.id) }, { tags })} />
-          </Row>
+          </FieldRow>
         ) : null}
-        <Row label="Dates">
-          <DatePlanner item={item} canEdit={canEdit} onPatch={onPatch} statuses={statusOptions} />
-        </Row>
-        <Row label="Alignment">
+        <FieldRow icon={Target} label="Alignment">
           <AlignmentField item={item} canEdit={canEdit} onPatch={onPatch} />
-        </Row>
+        </FieldRow>
       </div>
 
-      <div className="space-y-1 text-[11px] text-zinc-400">
-        <div>Created {new Date(item.createdAt).toLocaleString()}</div>
-        <div>Updated {new Date(item.updatedAt).toLocaleString()}</div>
+      <div className="text-[11px] text-zinc-400">
+        Created {fmtStamp(item.createdAt)} <span className="mx-1 text-zinc-300">·</span> Updated {fmtStamp(item.updatedAt)}
       </div>
+
+      <div className="border-t border-zinc-100" />
 
       {/* Description */}
       <DescriptionField item={item} canEdit={canEdit} onSave={(desc) => onPatch({ metadata: { ...item.metadata, description: desc } })} />
@@ -196,12 +237,12 @@ export function BoardItemDetail({
               ) : null}
             </div>
           </div>
-          <div className="space-y-3">
-            {shown.length === 0 ? (
-              <p className="text-[12.5px] text-zinc-400">{fieldSearch ? "No matching fields." : "All fields empty."}</p>
-            ) : (
-              shown.map((f) => (
-                <Row key={f.key} label={f.label}>
+          {shown.length === 0 ? (
+            <p className="text-[12.5px] text-zinc-400">{fieldSearch ? "No matching fields." : "All fields empty."}</p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-0.5">
+              {shown.map((f) => (
+                <FieldRow key={f.key} label={f.label}>
                   <FieldValue
                     field={f}
                     value={item.metadata?.[f.key]}
@@ -210,10 +251,10 @@ export function BoardItemDetail({
                     currentUserId={currentUserId}
                     onChange={(next) => onPatch({ metadata: { ...item.metadata, [f.key]: next } })}
                   />
-                </Row>
-              ))
-            )}
-          </div>
+                </FieldRow>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -246,24 +287,19 @@ export function BoardItemDetail({
 
       {/* ClickUp action rows for the still-collapsed sections. */}
       {canEdit && actionRows.length > 0 ? (
-        <div className="grid max-w-[380px] gap-0.5 text-[13px] text-zinc-700">
+        <div className="grid max-w-[420px] gap-0.5">
           {actionRows.map((r) => (
             <button
               key={r.key}
               type="button"
               onClick={r.onClick}
-              className="flex h-8 items-center gap-2 rounded-md px-1.5 text-left hover:bg-zinc-50"
+              className="flex h-8 items-center gap-2.5 rounded-md px-2 text-left text-[13px] text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
             >
-              <r.icon className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+              <r.icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
               {r.label}
             </button>
           ))}
         </div>
-      ) : null}
-
-      {/* Time tracking */}
-      {timeTrackingOn ? (
-        <TimeTracker entityType="BOARD_ITEM" entityId={item.id} canEdit={canEdit} />
       ) : null}
 
       {/* Comments + Activity — hidden inline when the drawer hosts it in the rail. */}
@@ -274,16 +310,238 @@ export function BoardItemDetail({
   );
 }
 
-// ── Subcomponents (moved from BoardItemDrawer) ────────────────────
+// ── Field-grid primitive ──────────────────────────────────────────
 
-export function Row({ label, children }: { label: string; children: React.ReactNode }) {
+/** One row of the ClickUp field grid: [muted icon + muted label] left,
+ *  value right with a hover highlight. No icon (custom fields) renders a
+ *  small dot so labels stay aligned with the core grid. */
+function FieldRow({ icon: Icon, label, children }: { icon?: LucideIcon; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-baseline gap-3">
-      <span className="text-xs text-zinc-500 w-[88px] flex-shrink-0">{label}</span>
-      <div className="flex-1 min-w-0">{children}</div>
+    <div className="flex min-h-[38px] items-center gap-3">
+      <div className="flex w-[122px] shrink-0 items-center gap-2">
+        {Icon ? (
+          <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+        ) : (
+          <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden>
+            <span className="h-1 w-1 rounded-full bg-zinc-300" />
+          </span>
+        )}
+        <span className="truncate text-[12.5px] text-zinc-500">{label}</span>
+      </div>
+      <div className="flex min-h-[30px] min-w-0 flex-1 items-center rounded-md px-2 py-1 transition-colors hover:bg-zinc-50">
+        {children}
+      </div>
     </div>
   );
 }
+
+// ── Time estimate (Item.metadata.timeEstimate, minutes) ───────────
+
+function formatMinutes(m: number): string {
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (h > 0) return r > 0 ? `${h}h ${r}m` : `${h}h`;
+  return `${r}m`;
+}
+
+/** Accepts "2h 30m", "2h", "90m", "1.5h", or a bare number (minutes). */
+function parseEstimate(text: string): number | null {
+  const t = text.trim().toLowerCase();
+  if (!t) return null;
+  const hm = t.match(/(\d+(?:\.\d+)?)\s*h/);
+  const mm = t.match(/(\d+(?:\.\d+)?)\s*m/);
+  let total = 0;
+  if (hm) total += parseFloat(hm[1]) * 60;
+  if (mm) total += parseFloat(mm[1]);
+  if (!hm && !mm) {
+    const n = parseFloat(t);
+    if (!Number.isFinite(n)) return null;
+    total = n;
+  }
+  const rounded = Math.round(total);
+  return rounded > 0 ? rounded : null;
+}
+
+function TimeEstimateField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdit: boolean; onPatch: (b: DetailPatch) => void }) {
+  const raw = item.metadata?.timeEstimate;
+  const minutes = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? Math.round(raw) : null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const commit = () => {
+    const next = parseEstimate(draft);
+    setEditing(false);
+    if (next === minutes) return;
+    const md = { ...((item.metadata as Record<string, unknown> | undefined) ?? {}) };
+    if (next) md.timeEstimate = next;
+    else delete md.timeEstimate;
+    onPatch({ metadata: md });
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="text"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
+        placeholder="e.g. 2h 30m"
+        className="h-7 w-[110px] rounded-md border border-[var(--os-brand)] bg-white px-2 text-[13px] outline-none placeholder:text-zinc-400"
+      />
+    );
+  }
+
+  if (!canEdit) {
+    return minutes ? <span className="text-[13px] text-zinc-700 tabular-nums">{formatMinutes(minutes)}</span> : <span className="text-[13px] text-zinc-400">Empty</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => { setDraft(minutes ? formatMinutes(minutes) : ""); setEditing(true); }}
+      className="text-left text-[13px]"
+      title="Set time estimate"
+    >
+      {minutes ? (
+        <span className="text-zinc-700 tabular-nums">{formatMinutes(minutes)}</span>
+      ) : (
+        <span className="text-zinc-400 hover:text-zinc-600">Empty</span>
+      )}
+    </button>
+  );
+}
+
+// ── Track time (compact start/stop + popover with full tracker) ───
+
+function formatTrackedMs(ms: number): string {
+  if (ms < 1000) return "0m";
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
+}
+
+function formatRunningClock(startedAt: string, nowMs: number): string {
+  const ms = Math.max(0, nowMs - new Date(startedAt).getTime());
+  const totalSecs = Math.floor(ms / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+interface TimerState {
+  active: { id: string; startedAt: string } | null;
+  totalMs: number;
+  sessions: { id: string; stoppedAt: string | null; durationMs: number }[];
+}
+
+/** Compact grid-cell tracker: play/stop button + live total. The total
+ *  opens a popover hosting the full TimeTracker (manual entry + sessions),
+ *  so nothing is lost by removing the old bottom section. */
+function TrackTimeField({ itemId, canEdit }: { itemId: string; canEdit: boolean }) {
+  const [state, setState] = useState<TimerState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  const load = useCallback(() => {
+    fetch(`/api/timers?entityType=BOARD_ITEM&entityId=${itemId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: TimerState | null) => { if (d) setState(d); })
+      .catch(() => {});
+  }, [itemId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!state?.active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [state?.active]);
+
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      await fetch(state?.active ? "/api/timers/stop" : "/api/timers/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entityType: "BOARD_ITEM", entityId: itemId }),
+      });
+      load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const running = Boolean(state?.active);
+  const liveTotalMs = state
+    ? state.totalMs +
+      (state.active
+        ? Math.max(0, now - new Date(state.active.startedAt).getTime() - state.sessions
+            .filter((s) => !s.stoppedAt && s.id === state.active?.id)
+            .reduce((acc, s) => acc + s.durationMs, 0))
+        : 0)
+    : 0;
+
+  const closePopover = () => { setOpen(false); load(); };
+
+  return (
+    <div className="relative flex items-center gap-2">
+      {canEdit ? (
+        <button
+          type="button"
+          onClick={toggle}
+          disabled={busy}
+          title={running ? "Stop timer" : "Start timer"}
+          className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-colors disabled:opacity-50 ${
+            running
+              ? "bg-red-500 text-white hover:bg-red-600"
+              : "border border-zinc-300 text-zinc-500 hover:border-[var(--os-brand)] hover:text-[var(--os-brand)]"
+          }`}
+        >
+          {busy ? (
+            <Loader2 className="h-3 w-3 animate-spin" />
+          ) : running ? (
+            <Square className="h-2.5 w-2.5 fill-current" />
+          ) : (
+            <Play className="ml-px h-3 w-3 fill-current" />
+          )}
+        </button>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => (open ? closePopover() : setOpen(true))}
+        title="Time entries"
+        className="text-left text-[13px] tabular-nums"
+      >
+        {running && state?.active ? (
+          <span className="font-mono text-red-600">{formatRunningClock(state.active.startedAt, now)}</span>
+        ) : liveTotalMs > 0 ? (
+          <span className="text-zinc-700 hover:text-zinc-900">{formatTrackedMs(liveTotalMs)}</span>
+        ) : (
+          <span className="text-zinc-400 hover:text-zinc-600">Add time</span>
+        )}
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-10" onClick={closePopover} aria-hidden="true" />
+          <div className="absolute right-0 top-full z-20 mt-1 w-[340px] rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)]">
+            <TimeTracker entityType="BOARD_ITEM" entityId={itemId} canEdit={canEdit} />
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// ── Alignment (KRA/KPI) ───────────────────────────────────────────
 
 // Alignment — the KRA/KPI this task serves. KPI-first: picking a KPI
 // carries its parent KRA; a KRA can be chosen alone. Persisted into
@@ -346,7 +604,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
           <Flag className="w-3 h-3" />{kraName ?? "KRA"}
         </span>
       ) : null}
-      {!kraId && !kpiId ? <span className="text-xs text-zinc-400">Not set</span> : null}
+      {!kraId && !kpiId ? <span className="text-[13px] text-zinc-400">Empty</span> : null}
     </span>
   );
 
@@ -361,7 +619,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute z-20 mt-1 left-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] p-2">
+          <div className="absolute z-20 mt-1 right-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] p-2">
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
               <Search className="w-3.5 h-3.5 text-zinc-400" />
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
@@ -424,7 +682,7 @@ function TitleField({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: bo
   };
 
   if (!canEdit || !editing) {
-    return <button type="button" onClick={() => canEdit && setEditing(true)} className="w-full text-left text-lg font-semibold">{item.title}</button>;
+    return <button type="button" onClick={() => canEdit && setEditing(true)} className="w-full text-left text-[22px] font-semibold leading-snug tracking-[-0.01em] text-zinc-900">{item.title}</button>;
   }
   return (
     <input
@@ -434,7 +692,7 @@ function TitleField({ item, canEdit, onSave }: { item: BoardItemRow; canEdit: bo
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(item.title); setEditing(false); } }}
-      className="w-full text-lg font-semibold bg-transparent outline-none border-b border-[var(--os-brand)]"
+      className="w-full text-[22px] font-semibold leading-snug tracking-[-0.01em] text-zinc-900 bg-transparent outline-none border-b border-[var(--os-brand)]"
     />
   );
 }
@@ -454,7 +712,7 @@ function DescriptionField({ item, canEdit, onSave }: { item: BoardItemRow; canEd
         disabled={!canEdit}
         rows={4}
         placeholder={canEdit ? "Add a description…" : "No description"}
-        className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)] disabled:opacity-60"
+        className="w-full px-3 py-2 rounded-lg border border-transparent hover:border-zinc-200 bg-transparent text-sm leading-relaxed resize-y transition-colors focus:outline-none focus:border-[var(--os-brand)] focus:bg-white disabled:opacity-60 placeholder:text-zinc-400"
       />
     </div>
   );
@@ -466,7 +724,7 @@ function StatusPicker({ value, statuses, canEdit, onChange }: { value: string | 
   const pill = current ? (
     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${current.color}22`, color: current.color }}>{current.label}</span>
   ) : (
-    <span className="text-xs text-zinc-500">—</span>
+    <span className="text-[13px] text-zinc-400">Empty</span>
   );
   if (!canEdit) return pill;
   return (

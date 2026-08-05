@@ -22,6 +22,7 @@ import { BoardItemDetail, type DetailPatch, type ItemModuleGating } from "./boar
 import { ItemThread } from "./item-thread";
 import { LinkedAttachments } from "./linked-attachments";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { useOsShell } from "@/components/layout/os/shell-context";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -58,6 +59,9 @@ export function BoardItemDrawer({
   moduleGating,
 }: BoardItemDrawerProps) {
   const confirm = useConfirm();
+  // The drawer always mounts inside the OS shell — safe to read the shell
+  // context here. Wires the detail body's "Ask Brain" row to the sidekick.
+  const { openSidekick } = useOsShell();
   const customFields: FieldDef[] = fields ?? [];
   const statusOptions: StatusOption[] = statuses ?? [...DEFAULT_STATUS_OPTIONS];
   const [item, setItem] = useState<BoardItemRow | null>(null);
@@ -171,22 +175,23 @@ export function BoardItemDrawer({
             role="dialog"
             aria-modal="true"
           >
-            {/* Header */}
-            <div className="px-5 py-3 border-b border-zinc-200 flex items-center gap-2">
+            {/* Header — airy toolbar: close + context left, actions right. */}
+            <div className="h-12 shrink-0 px-4 border-b border-zinc-100 flex items-center gap-2.5">
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex items-center justify-center w-7 h-7 rounded text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
+                className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
                 aria-label="Close"
               >
                 <X className="w-4 h-4" />
               </button>
-              <span className="text-xs text-zinc-500">Item</span>
+              <div className="h-4 w-px bg-zinc-200" aria-hidden />
+              <span className="text-[12px] font-medium text-zinc-400">Task</span>
               <div className="ml-auto flex items-center gap-1">
                 {item ? (
                   <Link
                     href={`/item/${item.id}`}
-                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 px-2 py-1 rounded hover:bg-zinc-100"
+                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                     title="Open full page"
                   >
                     <ExternalLink className="w-3.5 h-3.5" /> Full page
@@ -196,7 +201,7 @@ export function BoardItemDrawer({
                   <button
                     type="button"
                     onClick={archive}
-                    className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-red-500 px-2 py-1 rounded hover:bg-red-500/10"
+                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Archive
                   </button>
@@ -218,7 +223,7 @@ export function BoardItemDrawer({
             ) : (
               <div className="flex-1 flex min-h-0">
                 {/* Main column */}
-                <div className="flex-1 overflow-y-auto px-8 py-6 min-w-0">
+                <div className="flex-1 overflow-y-auto px-9 pt-7 pb-10 min-w-0">
                   <div className="max-w-[760px] mx-auto">
                     <BoardItemDetail
                       item={item}
@@ -232,6 +237,7 @@ export function BoardItemDrawer({
                       moduleGating={moduleGating}
                       hideActivity
                       hideRelations
+                      onAskAi={() => openSidekick(`Help me with the task: ${item.title}`)}
                     />
                   </div>
                 </div>
