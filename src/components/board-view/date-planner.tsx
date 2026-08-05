@@ -41,6 +41,10 @@ type TaskReminder = {
   notifyEmail: boolean;
 };
 
+// One width for every tab — must match the value handed to useAnchorPos so the
+// clamp/flip math stays correct when the panel opens near the right edge.
+const PANEL_WIDTH = 520;
+
 // ── date <-> datetime-local helpers ────────────────────────────────
 function pad(n: number) { return String(n).padStart(2, "0"); }
 function toLocalInput(v: Date | string | null | undefined): string {
@@ -91,6 +95,13 @@ function quickDate(kind: string): Date {
   }
   return d;
 }
+// Right-aligned hint on each quick row (ClickUp shows the resolved day/time).
+function quickHint(kind: string): string {
+  const d = quickDate(kind);
+  if (kind === "later") return d.toLocaleTimeString("en-US", { hour: "numeric" }).toLowerCase();
+  if (kind === "2weeks" || kind === "4weeks") return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { weekday: "short" });
+}
 const QUICK_CHIPS: { key: string; label: string }[] = [
   { key: "today", label: "Today" },
   { key: "later", label: "Later" },
@@ -101,6 +112,10 @@ const QUICK_CHIPS: { key: string; label: string }[] = [
   { key: "2weeks", label: "2 weeks" },
   { key: "4weeks", label: "4 weeks" },
 ];
+
+// Shared micro-styles.
+const LABEL = "text-[10.5px] font-medium uppercase tracking-wide text-zinc-400";
+const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700 outline-none focus:border-[var(--os-brand)] transition-colors";
 
 export function DatePlanner({
   item, canEdit, onPatch, statuses = [], compact = false, done = false,
@@ -119,7 +134,7 @@ export function DatePlanner({
   const [tab, setTab] = useState<Tab>("date");
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const pos = useAnchorPos(btnRef, open, 360);
+  const pos = useAnchorPos(btnRef, open, PANEL_WIDTH);
 
   const [reminders, setReminders] = useState<TaskReminder[]>([]);
   const [remLoading, setRemLoading] = useState(false);
@@ -195,14 +210,14 @@ export function DatePlanner({
     <button
       type="button"
       onClick={() => setTab(key)}
-      className={`flex-1 inline-flex items-center justify-center gap-1.5 h-8 text-[12px] font-medium border-b-2 transition-colors ${
+      className={`flex-1 inline-flex items-center justify-center gap-1.5 h-9 text-[12px] font-medium border-b-2 transition-colors ${
         tab === key ? "border-[var(--os-brand)] text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"
       }`}
     >
-      <Icon className="w-3.5 h-3.5" /> {label}
+      <Icon className={`w-3.5 h-3.5 ${tab === key ? "text-[var(--os-brand)]" : ""}`} /> {label}
     </button>
   );
-  const chip = "px-2 py-1 rounded-md text-[11.5px] border border-zinc-200 text-zinc-600 hover:bg-zinc-50";
+  const chip = "inline-flex items-center h-7 px-2.5 rounded-md text-[12px] border border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 transition-colors";
 
   // ── trigger button ───────────────────────────────────────────────
   const trigger = compact ? (
@@ -246,8 +261,8 @@ export function DatePlanner({
         ? createPortal(
             <div
               ref={panelRef}
-              style={{ position: "fixed", top: pos.top, left: pos.left, width: 360, maxHeight: "78vh" }}
-              className="z-[120] rounded-xl bg-white border border-zinc-200 shadow-2xl overflow-hidden flex flex-col"
+              style={{ position: "fixed", top: pos.top, left: pos.left, width: PANEL_WIDTH, maxHeight: "78vh" }}
+              className="z-[120] rounded-xl bg-white border border-zinc-200 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col"
               // Keep popover interactions from bubbling (React tree) to the row /
               // card that hosts this planner — otherwise a click here can trigger
               // the ancestor's open/select handlers.
@@ -255,13 +270,13 @@ export function DatePlanner({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Tab strip */}
-              <div className="flex items-stretch border-b border-zinc-100 shrink-0">
+              <div className="flex items-stretch border-b border-zinc-100 px-2 shrink-0">
                 {tabBtn("date", CalendarDays, "Date")}
                 {tabBtn("reminder", Bell, "Reminder")}
                 {tabBtn("repeat", Repeat, "Repeat")}
               </div>
 
-              <div className="p-3 overflow-y-auto">
+              <div className="p-4 overflow-y-auto">
                 {tab === "date" ? (
                   <DateTab
                     start={start}
@@ -276,30 +291,37 @@ export function DatePlanner({
                 ) : null}
 
                 {tab === "reminder" ? (
-                  <div className="space-y-3">
-                    {due ? (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <button type="button" className={chip} onClick={() => addReminder(new Date(due))}>At due time</button>
-                        <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 10 * 60000))}>10m before</button>
-                        <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 60 * 60000))}>1h before</button>
-                        <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 24 * 60 * 60000))}>1d before</button>
-                      </div>
-                    ) : (
-                      <p className="text-[11.5px] text-zinc-400">Set a due date to use quick reminders, or pick a custom time below.</p>
-                    )}
-                    <CustomReminder onAdd={addReminder} />
-                    <div className="pt-1 border-t border-zinc-100">
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <span className={`block ${LABEL}`}>Quick reminders</span>
+                      {due ? (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(due))}>At due time</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 10 * 60000))}>10m before</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 60 * 60000))}>1h before</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 24 * 60 * 60000))}>1d before</button>
+                        </div>
+                      ) : (
+                        <p className="text-[12px] text-zinc-400">Set a due date to use quick reminders, or pick a custom time below.</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className={`block ${LABEL}`}>Custom</span>
+                      <CustomReminder onAdd={addReminder} />
+                    </div>
+                    <div className="pt-3 border-t border-zinc-100 space-y-1.5">
+                      <span className={`block ${LABEL}`}>Scheduled</span>
                       {remLoading ? (
                         <div className="flex items-center gap-2 text-[12px] text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
                       ) : reminders.length === 0 ? (
                         <p className="text-[12px] text-zinc-400 py-1">No reminders set.</p>
                       ) : (
-                        <ul className="space-y-1">
+                        <ul>
                           {reminders.map((r) => (
-                            <li key={r.id} className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+                            <li key={r.id} className="flex items-center gap-2 h-8 px-2 -mx-2 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-50 transition-colors">
                               <Bell className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
                               <span className="flex-1 truncate">{fmtWhen(r.remindAt)}</span>
-                              <button type="button" onClick={() => removeReminder(r.id)} className="text-zinc-400 hover:text-red-600" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
+                              <button type="button" onClick={() => removeReminder(r.id)} className="text-zinc-300 hover:text-red-600 transition-colors" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
                             </li>
                           ))}
                         </ul>
@@ -309,7 +331,14 @@ export function DatePlanner({
                 ) : null}
 
                 {tab === "repeat" ? (
-                  <RepeatTab rule={recurrence} statuses={statuses} onSave={(r) => { setRecurrence(r); }} />
+                  <RepeatTab
+                    rule={recurrence}
+                    statuses={statuses}
+                    due={due}
+                    onPickDay={(d) => setDates({ dueAt: d.toISOString() })}
+                    onCancel={() => setTab("date")}
+                    onSave={(r) => { setRecurrence(r); }}
+                  />
                 ) : null}
               </div>
             </div>,
@@ -320,7 +349,72 @@ export function DatePlanner({
   );
 }
 
-// ── Date tab: quick chips + month grid + Start/Due inputs ──────────
+// ── Month calendar — shared by the Date and Repeat tabs ────────────
+// Airy ClickUp-style grid: weekday header, adjacent-month days muted, today
+// ringed with the accent, the due day filled with the accent.
+function MonthCalendar({ due, onPickDay }: { due: Date | string | null; onPickDay: (d: Date) => void }) {
+  const parsed = due ? new Date(due) : null;
+  const dueDate = parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+  const [cursor, setCursor] = useState(() => {
+    const base = dueDate ?? new Date();
+    return new Date(base.getFullYear(), base.getMonth(), 1);
+  });
+  const today = new Date();
+
+  const cells = useMemo(() => {
+    const year = cursor.getFullYear();
+    const month = cursor.getMonth();
+    const startPad = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const list: { d: Date; inMonth: boolean }[] = [];
+    for (let i = startPad; i > 0; i--) list.push({ d: new Date(year, month, 1 - i), inMonth: false });
+    for (let day = 1; day <= daysInMonth; day++) list.push({ d: new Date(year, month, day), inMonth: true });
+    let trailing = 1;
+    while (list.length % 7 !== 0) { list.push({ d: new Date(year, month + 1, trailing), inMonth: false }); trailing++; }
+    return list;
+  }, [cursor]);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[13px] font-semibold text-zinc-800">
+          {cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+        </span>
+        <div className="flex items-center gap-0.5">
+          <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
+          <button type="button" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); }} className="px-1.5 h-6 inline-flex items-center rounded-md text-[11px] text-zinc-500 hover:bg-zinc-100 transition-colors">Today</button>
+          <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"><ChevronRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 mb-1.5 text-center text-[10px] font-medium uppercase tracking-wide text-zinc-400">
+        {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => <span key={d}>{d}</span>)}
+      </div>
+      <div className="grid grid-cols-7 gap-y-1">
+        {cells.map(({ d, inMonth }, i) => {
+          const isToday = sameDay(d, today);
+          const isDue = dueDate ? sameDay(d, dueDate) : false;
+          return (
+            <button
+              key={i}
+              type="button"
+              onClick={() => { const nd = new Date(d); nd.setHours(17, 0, 0, 0); onPickDay(nd); }}
+              className={`h-8 w-8 mx-auto inline-flex items-center justify-center rounded-full text-[12px] transition-colors ${
+                isDue ? "bg-[var(--os-brand)] text-white font-semibold"
+                : isToday ? "text-[var(--os-brand)] font-semibold ring-1 ring-inset ring-[var(--os-brand)] hover:bg-zinc-100"
+                : inMonth ? "text-zinc-700 hover:bg-zinc-100"
+                : "text-zinc-300 hover:bg-zinc-50 hover:text-zinc-500"
+              }`}
+            >
+              {d.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Date tab: Start/Due inputs up top, quick list + month grid below ─
 function DateTab({
   start, due, onQuick, onPickDay, onStart, onDue, onRepeat, recurrence,
 }: {
@@ -333,103 +427,67 @@ function DateTab({
   onRepeat: () => void;
   recurrence: RecurrenceRule | null;
 }) {
-  const dueDate = due ? new Date(due) : null;
-  const [cursor, setCursor] = useState(() => (dueDate && !Number.isNaN(dueDate.getTime()) ? new Date(dueDate.getFullYear(), dueDate.getMonth(), 1) : (() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); })()));
-  const today = new Date();
-
-  const cells = useMemo(() => {
-    const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-    const startPad = first.getDay();
-    const daysInMonth = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
-    const list: (Date | null)[] = [];
-    for (let i = 0; i < startPad; i++) list.push(null);
-    for (let d = 1; d <= daysInMonth; d++) list.push(new Date(cursor.getFullYear(), cursor.getMonth(), d));
-    while (list.length % 7 !== 0) list.push(null);
-    return list;
-  }, [cursor]);
-
-  const chip = "px-2 py-1 rounded-md text-[11.5px] border border-zinc-200 text-zinc-600 hover:bg-zinc-50";
-
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-1.5 flex-wrap">
-        {QUICK_CHIPS.map((q) => (
-          <button key={q.key} type="button" className={chip} onClick={() => onQuick(q.key)}>{q.label}</button>
-        ))}
-      </div>
-
-      {/* Month grid */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-[12.5px] font-semibold text-zinc-800">
-            {cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+    <div className="space-y-4">
+      {/* Start / Due across the top, ClickUp-style */}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="block min-w-0">
+          <span className={`flex items-center justify-between h-4 ${LABEL}`}>
+            Start date
+            {start ? <button type="button" onClick={() => onStart(null)} className="text-zinc-300 hover:text-zinc-600 transition-colors" title="Clear"><X className="w-3 h-3" /></button> : null}
           </span>
-          <div className="flex items-center gap-0.5">
-            <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><ChevronLeft className="w-4 h-4" /></button>
-            <button type="button" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); }} className="px-1.5 h-6 inline-flex items-center rounded text-[11px] text-zinc-500 hover:bg-zinc-100">Today</button>
-            <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><ChevronRight className="w-4 h-4" /></button>
-          </div>
-        </div>
-        <div className="grid grid-cols-7 text-center text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
-          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => <span key={d}>{d}</span>)}
-        </div>
-        <div className="grid grid-cols-7 gap-0.5">
-          {cells.map((d, i) => {
-            if (!d) return <span key={i} />;
-            const isToday = sameDay(d, today);
-            const isDue = dueDate && !Number.isNaN(dueDate.getTime()) && sameDay(d, dueDate);
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => { const nd = new Date(d); nd.setHours(17, 0, 0, 0); onPickDay(nd); }}
-                className={`h-8 rounded-md text-[12.5px] transition-colors ${
-                  isDue ? "bg-[var(--os-brand)] text-white font-semibold"
-                  : isToday ? "text-red-600 font-semibold hover:bg-zinc-100"
-                  : "text-zinc-700 hover:bg-zinc-100"
-                }`}
-              >
-                {d.getDate()}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <label className="block">
-        <span className="text-[11px] uppercase tracking-wide text-zinc-500">Start</span>
-        <div className="mt-1 flex items-center gap-1.5">
           <input
             type="datetime-local"
             value={toLocalInput(start)}
             onChange={(e) => onStart(localToIso(e.target.value))}
-            className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] outline-none focus:border-zinc-400"
+            className={`${FIELD} mt-1 w-full`}
           />
-          {start ? <button type="button" onClick={() => onStart(null)} className="text-zinc-400 hover:text-zinc-700" title="Clear"><X className="w-3.5 h-3.5" /></button> : null}
-        </div>
-      </label>
-      <label className="block">
-        <span className="text-[11px] uppercase tracking-wide text-zinc-500">Due</span>
-        <div className="mt-1 flex items-center gap-1.5">
+        </label>
+        <label className="block min-w-0">
+          <span className={`flex items-center justify-between h-4 ${LABEL}`}>
+            Due date
+            {due ? <button type="button" onClick={() => onDue(null)} className="text-zinc-300 hover:text-zinc-600 transition-colors" title="Clear"><X className="w-3 h-3" /></button> : null}
+          </span>
           <input
             type="datetime-local"
             value={toLocalInput(due)}
             onChange={(e) => onDue(localToIso(e.target.value))}
-            className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] outline-none focus:border-zinc-400"
+            className={`${FIELD} mt-1 w-full`}
           />
-          {due ? <button type="button" onClick={() => onDue(null)} className="text-zinc-400 hover:text-zinc-700" title="Clear"><X className="w-3.5 h-3.5" /></button> : null}
+        </label>
+      </div>
+
+      {/* Quick options on the left, month calendar on the right */}
+      <div className="flex gap-4">
+        <div className="w-[150px] shrink-0 border-r border-zinc-100 pr-3 space-y-0.5">
+          {QUICK_CHIPS.map((q) => (
+            <button
+              key={q.key}
+              type="button"
+              onClick={() => onQuick(q.key)}
+              className="w-full h-7 px-2 rounded-md flex items-center justify-between gap-2 text-[12px] text-zinc-700 hover:bg-zinc-100 transition-colors"
+            >
+              <span className="truncate">{q.label}</span>
+              <span className="text-[11px] text-zinc-400 shrink-0">{quickHint(q.key)}</span>
+            </button>
+          ))}
         </div>
-      </label>
+        <div className="flex-1 min-w-0">
+          <MonthCalendar due={due} onPickDay={onPickDay} />
+        </div>
+      </div>
 
       {/* Set Recurring entry (ClickUp routes into the Repeat tab from here). */}
-      <button
-        type="button"
-        onClick={onRepeat}
-        className="w-full flex items-center justify-between h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
-      >
-        <span className="inline-flex items-center gap-1.5"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
-        <span className="text-[11.5px] text-zinc-400">{recurrence ? describeRecurrence(recurrence) : ""}</span>
-      </button>
+      <div className="pt-2 border-t border-zinc-100">
+        <button
+          type="button"
+          onClick={onRepeat}
+          className="w-full flex items-center justify-between h-8 px-2 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-100 transition-colors"
+        >
+          <span className="inline-flex items-center gap-2"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
+          <span className="text-[11.5px] font-medium text-[var(--os-brand)]">{recurrence ? describeRecurrence(recurrence) : ""}</span>
+        </button>
+      </div>
     </div>
   );
 }
@@ -438,18 +496,18 @@ function DateTab({
 function CustomReminder({ onAdd }: { onAdd: (at: Date) => void }) {
   const [val, setVal] = useState("");
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-2">
       <input
         type="datetime-local"
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] outline-none focus:border-zinc-400"
+        className={`${FIELD} flex-1`}
       />
       <button
         type="button"
         disabled={!val}
         onClick={() => { const d = new Date(val); if (!Number.isNaN(d.getTime())) { onAdd(d); setVal(""); } }}
-        className="inline-flex items-center gap-1 h-8 px-2 rounded-md text-[12px] text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40"
+        className="inline-flex items-center gap-1 h-8 px-3 rounded-md text-[12px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
       >
         <Plus className="w-3.5 h-3.5" /> Add
       </button>
@@ -458,12 +516,16 @@ function CustomReminder({ onAdd }: { onAdd: (at: Date) => void }) {
 }
 
 // ── Repeat tab: the full "Set Recurring" panel ─────────────────────
-// Buffered — nothing is written until Save, matching ClickUp.
+// Buffered — nothing is written until Save, matching ClickUp. Options live on
+// the left; the month calendar (same due-date picker) sits on the right.
 function RepeatTab({
-  rule, statuses, onSave,
+  rule, statuses, due, onPickDay, onCancel, onSave,
 }: {
   rule: RecurrenceRule | null;
   statuses: StatusOption[];
+  due: Date | string | null;
+  onPickDay: (d: Date) => void;
+  onCancel: () => void;
   onSave: (r: RecurrenceRule | null) => void;
 }) {
   const [freq, setFreq] = useState<RecurFreq>(rule?.freq ?? "WEEK");
@@ -490,83 +552,90 @@ function RepeatTab({
     });
   };
 
-  const field = "h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] outline-none focus:border-zinc-400 bg-white";
-  const check = "w-3.5 h-3.5 rounded border-zinc-300 text-[var(--os-brand)] focus:ring-0 focus:ring-offset-0";
+  const check = "w-3.5 h-3.5 rounded border-zinc-300 accent-[var(--os-brand)]";
 
   return (
-    <div className="space-y-3">
-      {/* Frequency */}
-      <div className="space-y-1">
-        <span className="text-[11px] uppercase tracking-wide text-zinc-500">Recurring</span>
-        <select value={freq} onChange={(e) => setFreq(e.target.value as RecurFreq)} className={`${field} w-full`}>
-          {FREQS.map((f) => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
-        </select>
-      </div>
-
-      {/* Interval */}
-      <label className="flex items-center gap-2 text-[12.5px] text-zinc-600">
-        Every
-        <input
-          type="number" min={1} max={365} value={interval}
-          onChange={(e) => setIntervalN(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
-          className={`${field} w-16`}
-        />
-        {FREQ_UNIT[freq]}{interval > 1 ? "s" : ""}
-      </label>
-
-      {/* Trigger */}
-      <select value={trigger} onChange={(e) => setTrigger(e.target.value as RecurTrigger)} className={`${field} w-full`}>
-        <option value="SCHEDULE">On due date</option>
-        <option value="ON_COMPLETE">On status change: Complete</option>
-      </select>
-
-      {/* Options */}
-      <div className="space-y-2">
-        <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-          <input type="checkbox" className={check} checked={createNew} onChange={(e) => setCreateNew(e.target.checked)} />
-          Create new task
-        </label>
-        <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-          <input type="checkbox" className={check} checked={forever} onChange={(e) => setForever(e.target.checked)} />
-          Recur forever
-        </label>
-        {!forever ? (
-          <label className="flex items-center gap-2 text-[12.5px] text-zinc-600 pl-6">
-            Ends after
-            <input
-              type="number" min={1} max={999} value={count}
-              onChange={(e) => setCount(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
-              className={`${field} w-16`}
-            />
-            times
-          </label>
-        ) : null}
-        <div>
-          <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-            <input type="checkbox" className={check} checked={resetOn} onChange={(e) => setResetOn(e.target.checked)} disabled={statuses.length === 0} />
-            Update status to:
-          </label>
-          {resetOn ? (
-            <select value={resetStatus} onChange={(e) => setResetStatus(e.target.value)} className={`${field} w-full mt-1.5 ml-6 max-w-[calc(100%-1.5rem)]`}>
-              {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+    <div>
+      <div className="flex gap-4">
+        {/* Recurrence options */}
+        <div className="flex-1 min-w-0 space-y-3.5">
+          <div className="space-y-1">
+            <span className={`block ${LABEL}`}>Recurring</span>
+            <select value={freq} onChange={(e) => setFreq(e.target.value as RecurFreq)} className={`${FIELD} w-full`}>
+              {FREQS.map((f) => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
             </select>
-          ) : null}
+          </div>
+
+          <label className="flex items-center gap-2 text-[12px] text-zinc-600">
+            Every
+            <input
+              type="number" min={1} max={365} value={interval}
+              onChange={(e) => setIntervalN(Math.max(1, Math.min(365, Number(e.target.value) || 1)))}
+              className={`${FIELD} w-14`}
+            />
+            {FREQ_UNIT[freq]}{interval > 1 ? "s" : ""}
+          </label>
+
+          <select value={trigger} onChange={(e) => setTrigger(e.target.value as RecurTrigger)} className={`${FIELD} w-full`}>
+            <option value="SCHEDULE">On due date</option>
+            <option value="ON_COMPLETE">On status change: Complete</option>
+          </select>
+
+          <div className="space-y-2.5 pt-0.5">
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="checkbox" className={check} checked={createNew} onChange={(e) => setCreateNew(e.target.checked)} />
+              Create new task
+            </label>
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="checkbox" className={check} checked={forever} onChange={(e) => setForever(e.target.checked)} />
+              Recur forever
+            </label>
+            {!forever ? (
+              <label className="flex items-center gap-2 text-[12px] text-zinc-600 pl-[22px]">
+                Ends after
+                <input
+                  type="number" min={1} max={999} value={count}
+                  onChange={(e) => setCount(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
+                  className={`${FIELD} w-14`}
+                />
+                times
+              </label>
+            ) : null}
+            <div>
+              <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+                <input type="checkbox" className={check} checked={resetOn} onChange={(e) => setResetOn(e.target.checked)} disabled={statuses.length === 0} />
+                Update status to:
+              </label>
+              {resetOn ? (
+                <select value={resetStatus} onChange={(e) => setResetStatus(e.target.value)} className={`${FIELD} mt-1.5 ml-[22px] w-[calc(100%-22px)]`}>
+                  {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                </select>
+              ) : null}
+            </div>
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="checkbox" className={check} checked={syncDue} onChange={(e) => setSyncDue(e.target.checked)} />
+              Sync recurrence to due date
+            </label>
+          </div>
         </div>
-        <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-          <input type="checkbox" className={check} checked={syncDue} onChange={(e) => setSyncDue(e.target.checked)} />
-          Sync recurrence to due date
-        </label>
+
+        {/* Month calendar (picks the due date the recurrence anchors to) */}
+        <div className="w-[248px] shrink-0 border-l border-zinc-100 pl-4">
+          <MonthCalendar due={due} onPickDay={onPickDay} />
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+      {/* Footer: Don't Recur · Cancel · Save */}
+      <div className="flex items-center gap-2 pt-3 mt-4 border-t border-zinc-100">
         {rule ? (
-          <button type="button" onClick={() => onSave(null)} className="text-[12px] text-red-600 hover:underline">Don&apos;t repeat</button>
-        ) : <span />}
+          <button type="button" onClick={() => onSave(null)} className="text-[12px] font-medium text-red-600 hover:text-red-700 transition-colors">Don&apos;t Recur</button>
+        ) : null}
+        <div className="flex-1" />
+        <button type="button" onClick={onCancel} className="inline-flex items-center h-8 px-3 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
         <button
           type="button"
           onClick={save}
-          className="inline-flex items-center h-8 px-4 rounded-md text-[12.5px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90"
+          className="inline-flex items-center h-8 px-4 rounded-md text-[12.5px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 transition-opacity"
         >
           Save
         </button>
