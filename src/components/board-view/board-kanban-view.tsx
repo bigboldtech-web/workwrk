@@ -9,8 +9,9 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Network, Pencil, Plus, X } from "lucide-react";
+import { Check, CheckCircle2, Network, Pencil, Plus, Repeat, X } from "lucide-react";
 import { PRIORITY_OPTIONS, isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { describeRecurrence } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { AssigneePicker } from "./assignee-picker";
@@ -476,7 +477,18 @@ function KanbanCard({
               className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-[13px] font-medium text-zinc-900 focus:outline-none"
             />
           ) : (
-            <div className="break-words text-[13px] font-medium leading-snug text-zinc-800">{card.title}</div>
+            <div className="break-words text-[13px] font-medium leading-snug text-zinc-800">
+              {card.title}
+              {card.recurRule ? (
+                <span
+                  className="inline-flex items-center align-middle ml-1 text-zinc-400"
+                  title={`Repeats · ${describeRecurrence(card.recurRule)}`}
+                  aria-label="Recurring task"
+                >
+                  <Repeat className="w-3 h-3" />
+                </span>
+              ) : null}
+            </div>
           )}
         </div>
         {/* Mark complete — filled when done (always), else in the hover rail. */}

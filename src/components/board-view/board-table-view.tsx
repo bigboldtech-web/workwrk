@@ -15,7 +15,8 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, ListFilter, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat } from "lucide-react";
+import { describeRecurrence } from "@/lib/recurrence";
 import {
   PRIORITY_OPTIONS,
   isDoneStatus,
@@ -2870,6 +2871,15 @@ function TitleCell({
         title={row.title}
       >
         <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
+        {row.recurRule ? (
+          <span
+            className="inline-flex items-center text-zinc-400 shrink-0"
+            title={`Repeats · ${describeRecurrence(row.recurRule)}`}
+            aria-label="Recurring task"
+          >
+            <Repeat className="w-3 h-3" />
+          </span>
+        ) : null}
         {(row.commentCount ?? 0) > 0 ? (
           <span
             className="inline-flex items-center gap-0.5 text-[10.5px] text-zinc-400 tabular-nums shrink-0"
