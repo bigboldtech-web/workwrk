@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Check, ChevronDown, Search, EyeOff, Eye, Target, Flag, Ban, Pencil, GitBranch,
+  Check, ChevronDown, ChevronRight, Search, EyeOff, Eye, Target, Flag, Ban, Pencil, GitBranch,
   Link2, ClipboardList, Paperclip, CircleDashed, Users, CalendarDays, Hourglass,
   Clock, Tag, Sparkles, Play, Square, Loader2,
 } from "lucide-react";
@@ -66,8 +66,7 @@ interface BoardItemDetailProps {
    *  suppress the inline widget + its Relate/Attach action rows. */
   hideRelations?: boolean;
   /** When set, renders the "Ask Brain" suggestion row under the title.
-   *  The drawer wires this to the OS-shell sidekick; the full-page route
-   *  omits it. */
+   *  Both hosts wire it to the OS-shell sidekick (drawer + /item/[id]). */
   onAskAi?: () => void;
 }
 
@@ -106,6 +105,7 @@ export function BoardItemDetail({
   const customFieldsOn = moduleGating ? moduleGating.customFields : true;
   const [fieldSearch, setFieldSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(false);
+  const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
 
   const { shown, emptyCount } = useMemo(() => {
     const q = fieldSearch.trim().toLowerCase();
@@ -136,7 +136,7 @@ export function BoardItemDetail({
 
   // The ClickUp action-row list, in order, for whichever sections are collapsed.
   const actionRows = [
-    hasCustomFields && !showFields ? { key: "fields", icon: Pencil, label: "Add fields", onClick: () => reveal("fields") } : null,
+    hasCustomFields && !showFields ? { key: "fields", icon: Pencil, label: "Custom Fields", onClick: () => reveal("fields") } : null,
     !showSubtasks ? { key: "subtasks", icon: GitBranch, label: "Add subtask", onClick: () => reveal("subtasks") } : null,
     !hideRelations && !showAttach ? { key: "related", icon: Link2, label: "Relate items or add dependencies", onClick: () => reveal("attach") } : null,
     !showChecklist ? { key: "checklist", icon: ClipboardList, label: "Create checklist", onClick: () => reveal("checklist") } : null,
@@ -223,21 +223,31 @@ export function BoardItemDetail({
       {showFields ? (
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fields</h3>
-            <div className="flex items-center gap-1.5">
-              <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
-                <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                <input value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search fields…" className="w-[110px] text-[12px] bg-transparent outline-none" />
+            {/* ClickUp: collapsible "Custom Fields" section header with caret. */}
+            <button
+              type="button"
+              onClick={() => setFieldsCollapsed((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-zinc-800"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${fieldsCollapsed ? "-rotate-90" : ""}`} />
+              Custom Fields
+            </button>
+            {!fieldsCollapsed ? (
+              <div className="flex items-center gap-1.5">
+                <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
+                  <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                  <input value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search fields…" className="w-[110px] text-[12px] bg-transparent outline-none" />
+                </div>
+                {emptyCount > 0 ? (
+                  <button type="button" onClick={() => setHideEmpty((v) => !v)} className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-zinc-500 hover:bg-zinc-100">
+                    {hideEmpty ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <EyeOff className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
+                    {hideEmpty ? `Show ${emptyCount} empty` : `Hide ${emptyCount} empty`}
+                  </button>
+                ) : null}
               </div>
-              {emptyCount > 0 ? (
-                <button type="button" onClick={() => setHideEmpty((v) => !v)} className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-zinc-500 hover:bg-zinc-100">
-                  {hideEmpty ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <EyeOff className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
-                  {hideEmpty ? `Show ${emptyCount} empty` : `Hide ${emptyCount} empty`}
-                </button>
-              ) : null}
-            </div>
+            ) : null}
           </div>
-          {shown.length === 0 ? (
+          {fieldsCollapsed ? null : shown.length === 0 ? (
             <p className="text-[12.5px] text-zinc-400">{fieldSearch ? "No matching fields." : "All fields empty."}</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-0.5">
@@ -721,15 +731,50 @@ function DescriptionField({ item, canEdit, onSave }: { item: BoardItemRow; canEd
 function StatusPicker({ value, statuses, canEdit, onChange }: { value: string | null; statuses: StatusOption[]; canEdit: boolean; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const current = value ? statuses.find((o) => o.value === value) ?? null : null;
+  // ClickUp's status control: solid pill (opens dropdown) + attached "›"
+  // next-status segment + a separate ✓ complete button.
+  const currentIdx = current ? statuses.findIndex((o) => o.value === current.value) : -1;
+  const next = currentIdx >= 0 ? statuses[currentIdx + 1] : undefined;
+  const showAdvance = !!current && !!next && current.group !== "DONE";
+  const doneStatus = statuses.find((o) => o.group === "DONE") ?? statuses[statuses.length - 1];
+  const isDone = current?.group === "DONE";
   const pill = current ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${current.color}22`, color: current.color }}>{current.label}</span>
+    <span
+      className={`inline-flex items-center h-5 ${showAdvance && canEdit ? "rounded-l-[5px]" : "rounded-[5px]"} px-2 text-[10.5px] font-bold uppercase tracking-wider text-white whitespace-nowrap shrink-0`}
+      style={{ background: current.color }}
+    >
+      {current.label}
+    </span>
   ) : (
     <span className="text-[13px] text-zinc-400">Empty</span>
   );
   if (!canEdit) return pill;
   return (
     <div className="relative inline-block">
-      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1.5">{pill}<ChevronDown className="w-3 h-3 text-zinc-500" /></button>
+      <span className="inline-flex items-center">
+        <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center">{pill}</button>
+        {showAdvance ? (
+          <button
+            type="button"
+            title={`Next status: ${next!.label}`}
+            onClick={() => onChange(next!.value)}
+            className="inline-flex h-5 items-center rounded-r-[5px] px-1 text-white border-l border-white/25 hover:bg-black/10"
+            style={{ background: current!.color }}
+          >
+            <ChevronRight className="h-3 w-3" strokeWidth={2.5} />
+          </button>
+        ) : null}
+        {doneStatus ? (
+          <button
+            type="button"
+            title={isDone ? "Completed" : "Mark complete"}
+            onClick={() => { if (!isDone) onChange(doneStatus.value); }}
+            className={`ml-1.5 inline-flex h-5 w-6 shrink-0 items-center justify-center rounded-[5px] transition-colors ${isDone ? "border border-transparent bg-emerald-500 text-white" : "border border-zinc-300 text-zinc-500 hover:border-emerald-500 hover:text-emerald-600"}`}
+          >
+            <Check className="h-3 w-3" strokeWidth={2.5} />
+          </button>
+        ) : null}
+      </span>
       {open ? (
         <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
           {statuses.map((opt) => (

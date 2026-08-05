@@ -10,6 +10,7 @@ import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
 import { BoardItemDetail, type DetailPatch } from "@/components/board-view/board-item-detail";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -22,6 +23,7 @@ export default function ItemDetailPage() {
   const router = useRouter();
   const { data: session } = useSession();
   const confirm = useConfirm();
+  const { openSidekick } = useOsShell();
   const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
   const [item, setItem] = useState<BoardItemRow | null>(null);
@@ -105,6 +107,7 @@ export default function ItemDetailPage() {
             onPatch={patch}
             layout="page"
             onOpenItem={(itemId) => router.push(`/item/${itemId}`)}
+            onAskAi={() => openSidekick(`Help me with the task: ${item.title}`)}
           />
         ) : null}
       </div>
