@@ -11,6 +11,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { FieldDef } from "@/lib/field-catalog";
 
 interface BoardCalendarViewProps {
@@ -151,16 +152,25 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     }
   }, [canEdit, initialItems, onItemChanged]);
 
-  // 6-week grid starting Sunday.
+  // 6-week grid starting Sunday. Lead/trail cells carry the adjacent
+  // month's real greyed day numbers (ClickUp), but stay inert.
   const { cells, monthLabel, isCurrentMonth } = useMemo(() => {
     const firstDow = new Date(month.y, month.m, 1).getDay();
     const daysInMonth = new Date(month.y, month.m + 1, 0).getDate();
     const out: Array<{ key: string; day: number | null; inMonth: boolean }> = [];
-    for (let i = 0; i < firstDow; i++) out.push({ key: `lead-${i}`, day: null, inMonth: false });
+    for (let i = 0; i < firstDow; i++) {
+      const d = new Date(month.y, month.m, 1 - (firstDow - i));
+      out.push({ key: dateKey(d), day: d.getDate(), inMonth: false });
+    }
     for (let d = 1; d <= daysInMonth; d++) {
       out.push({ key: dateKey(new Date(month.y, month.m, d)), day: d, inMonth: true });
     }
-    while (out.length % 7 !== 0) out.push({ key: `trail-${out.length}`, day: null, inMonth: false });
+    let trail = 0;
+    while (out.length % 7 !== 0) {
+      trail += 1;
+      const d = new Date(month.y, month.m + 1, trail);
+      out.push({ key: dateKey(d), day: d.getDate(), inMonth: false });
+    }
     return {
       cells: out,
       monthLabel: new Date(month.y, month.m, 1).toLocaleString("default", { month: "long", year: "numeric" }),
@@ -180,36 +190,34 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
         </div>
       ) : null}
 
-      <div className="mb-3 flex items-center gap-3">
-        <div className="inline-flex items-center overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-[0_1px_1px_rgba(0,0,0,0.03)]">
-          <button
-            type="button"
-            onClick={() => setMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
-            className="inline-flex h-7 w-7 items-center justify-center text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
-            aria-label="Previous month"
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}
-            className="inline-flex h-7 w-7 items-center justify-center border-l border-zinc-200 text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
-            aria-label="Next month"
-          >
-            <ChevronRight className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            disabled={isCurrentMonth}
-            onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}
-            className={`inline-flex h-7 items-center border-l border-zinc-200 px-2.5 text-[11px] font-medium transition-colors ${
-              isCurrentMonth ? "text-zinc-400 cursor-default" : "text-zinc-700 hover:bg-zinc-50"
-            }`}
-          >
-            Today
-          </button>
-        </div>
-        <h2 className="text-sm font-semibold tracking-[-0.01em] text-zinc-900">{monthLabel}</h2>
+      {/* ClickUp toolbar grammar: ghost ‹ › chevrons, month title, then a
+          standalone bordered Today button. */}
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setMonth(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }))}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          aria-label="Previous month"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setMonth(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }))}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+          aria-label="Next month"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900">{monthLabel}</h2>
+        <button
+          type="button"
+          disabled={isCurrentMonth}
+          onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}
+          className="inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-[11.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:text-zinc-400 disabled:hover:bg-white"
+        >
+          Today
+        </button>
         <div className="flex-1" />
         {dateFields.length > 0 ? (
           <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
@@ -233,26 +241,27 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="grid grid-cols-7 border-b border-zinc-200 bg-zinc-50/60">
+        <div className="grid grid-cols-7 border-b border-zinc-200">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2.5 py-1.5 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+            <div key={d} className="px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
               {d}
             </div>
           ))}
         </div>
         <div className="grid grid-cols-7 [&>div:nth-child(7n)]:border-r-0 [&>div:nth-last-child(-n+7)]:border-b-0">
-          {cells.map((cell) => {
-            const dayItems = cell.day !== null ? buckets.get(cell.key) ?? [] : [];
+          {cells.map((cell, idx) => {
+            const dayItems = cell.inMonth ? buckets.get(cell.key) ?? [] : [];
             const isToday = cell.key === todayKey;
             const isDropTarget = dragOverDay === cell.key && cell.inMonth;
+            const isWeekend = idx % 7 === 0 || idx % 7 === 6;
             return (
               <div
                 key={cell.key}
-                className={`group min-h-[104px] border-r border-b border-zinc-100 p-1.5 ${
+                className={`group min-h-[120px] border-r border-b border-zinc-100 p-1.5 ${
                   isDropTarget
-                    ? "bg-[var(--os-brand)]/5 outline-2 outline-dashed outline-[var(--os-brand)] -outline-offset-2"
+                    ? "bg-[var(--os-brand)]/[0.06] ring-2 ring-inset ring-[var(--os-brand)]/40"
                     : cell.inMonth
-                      ? "bg-white"
+                      ? isWeekend ? "bg-zinc-50/40" : "bg-white"
                       : "bg-zinc-50/50"
                 }`}
                 onDragOver={(e) => {
@@ -275,7 +284,9 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                       className={`text-[11px] tabular-nums leading-5 ${
                         isToday
                           ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--os-brand)] font-semibold text-white"
-                          : "font-medium text-zinc-500"
+                          : cell.inMonth
+                            ? "font-medium text-zinc-500"
+                            : "font-medium text-zinc-300"
                       }`}
                     >
                       {cell.day}
@@ -299,10 +310,11 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                   </div>
                 ) : null}
                 <ul className="space-y-0.5">
-                  {dayItems.slice(0, 3).map((it) => {
+                  {dayItems.slice(0, 4).map((it) => {
                     const dot = (it.status ? statusLookup[it.status]?.color : null) ?? "#A1A1AA";
                     return (
                       <li key={it.id}>
+                        {/* ClickUp chip: status-tinted wash + saturated left edge. */}
                         <button
                           type="button"
                           draggable={canEdit}
@@ -313,19 +325,27 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           }}
                           onDragEnd={() => { setDragId(null); setDragOverDay(null); }}
                           onClick={() => onOpenItem?.(it.id)}
-                          className={`flex w-full items-center gap-1.5 rounded-md px-1.5 py-[3px] text-left text-[11px] leading-4 text-zinc-700 transition-colors hover:bg-zinc-100/70 ${
+                          className={`flex w-full items-center gap-1.5 rounded-[4px] border-l-2 px-1.5 py-[3px] text-left text-[11px] font-medium leading-4 text-zinc-700 transition-[filter] hover:brightness-[0.96] ${
                             canEdit ? "cursor-grab active:cursor-grabbing" : ""
                           } ${dragId === it.id ? "opacity-40" : ""}`}
+                          style={{ borderLeftColor: dot, backgroundColor: `${dot}14` }}
                           title={canEdit ? "Drag to another day to reschedule" : undefined}
                         >
-                          <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: dot }} aria-hidden />
                           <span className="truncate">{it.title}</span>
+                          {it.owner ? (
+                            <Avatar className="ml-auto h-4 w-4 shrink-0">
+                              <AvatarImage src={it.owner.avatar ?? undefined} />
+                              <AvatarFallback className="text-[7px]">
+                                {`${it.owner.firstName?.[0] ?? ""}${it.owner.lastName?.[0] ?? ""}`}
+                              </AvatarFallback>
+                            </Avatar>
+                          ) : null}
                         </button>
                       </li>
                     );
                   })}
-                  {dayItems.length > 3 ? (
-                    <li className="px-1.5 pt-0.5 text-[10.5px] font-medium text-zinc-400">+{dayItems.length - 3} more</li>
+                  {dayItems.length > 4 ? (
+                    <li className="px-1.5 pt-0.5 text-[10.5px] font-medium text-zinc-500 hover:text-zinc-700 cursor-default">+ {dayItems.length - 4} more</li>
                   ) : null}
                 </ul>
               </div>
