@@ -1186,7 +1186,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Group-by selector — ClickUp parity (2026-06-07). Toolbar pill
           shows the active field; click → "Group by" popover with field +
           direction dropdowns + trash to clear. */}
-      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-1.5 flex items-center gap-0.5`}>
+      <div className={`${monday ? "px-3 border-b border-zinc-100" : "px-1"} py-2 flex items-center gap-0.5`}>
         {/* 1 — Group by */}
         <GroupByPill
           groupBy={groupBy}
@@ -1330,8 +1330,8 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 const collapsed = collapsedGroups.has(b.key);
                 return (
                   <React.Fragment key={b.key}>
-                    <tr className="bg-zinc-100/60 border-y border-zinc-200">
-                      <td colSpan={colCount} className="px-3 py-1.5" style={b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
+                    <tr className="group/ghdr bg-zinc-50/80 border-y border-zinc-100">
+                      <td colSpan={colCount} className="px-3 py-2" style={b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
                         <div className="inline-flex items-center gap-2">
                           <button
                             type="button"
@@ -1349,7 +1349,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             ) : (
                               <span className="text-[12px] font-semibold text-zinc-700">{b.label}</span>
                             )}
-                            <span className="text-[10.5px] text-zinc-500 tabular-nums">{b.rows.length}</span>
+                            <span className="text-[11px] font-medium text-zinc-400 tabular-nums">{b.rows.length}</span>
                           </button>
                           <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
                           {canEdit ? (
@@ -1558,9 +1558,9 @@ function Row({
       }}
       onDragEnd={onDragEnd}
       className={`border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 group ${
-        selected ? "bg-violet-50/40" : ""
+        selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""
       } ${isDragging ? "opacity-40" : ""} ${
-        isDragOver ? "outline outline-2 outline-violet-400 outline-offset-[-2px]" : ""
+        isDragOver ? "outline outline-2 outline-[var(--os-brand)] outline-offset-[-2px]" : ""
       }`}
     >
       <td className="pl-1 pr-0 py-1.5 w-[34px]">
@@ -1664,42 +1664,42 @@ function Row({
         </MetaCell>
       ))}
       {showCreated ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-2 text-xs text-zinc-500">
           {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showStart ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-2 text-xs text-zinc-500">
           {row.startAt ? new Date(row.startAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showUpdated ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-2 text-xs text-zinc-500">
           {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showTaskId ? (
-        <td className="px-4 py-2 text-[11px] font-mono text-zinc-400">
+        <td className="px-3 py-2 text-[11px] font-mono text-zinc-400">
           {row.id.slice(-6)}
         </td>
       ) : null}
       {showComments ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-2 text-xs text-zinc-500">
           {row.commentCount ? (
             <span className="inline-flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-zinc-400" />{row.commentCount}</span>
           ) : "—"}
         </td>
       ) : null}
       {showTimeline ? (
-        <td className="px-4 py-2"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
+        <td className="px-3 py-2"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
       ) : null}
       {showTime ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-2 text-xs text-zinc-500">
           {row.timeTrackedMs ? <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" />{formatDuration(row.timeTrackedMs)}</span> : "—"}
         </td>
       ) : null}
       {showCreatedBy ? (
-        <td className="px-4 py-2">
+        <td className="px-3 py-2">
           {row.createdBy ? (
             <span className="inline-flex items-center gap-1.5">
               <PersonAvatar person={{ ...row.createdBy, email: null }} size={18} />
@@ -1709,13 +1709,13 @@ function Row({
         </td>
       ) : null}
       {showDocs ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-amber-600" />{row.linkedDocCount}</span> : "—"}</td>
+        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-zinc-400" />{row.linkedDocCount}</span> : "—"}</td>
       ) : null}
       {showLinked ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-amber-600" />{row.linkedTaskCount}</span> : "—"}</td>
+        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-zinc-400" />{row.linkedTaskCount}</span> : "—"}</td>
       ) : null}
       {showSops ? (
-        <td className="px-4 py-2 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-amber-600" />{row.linkedSopCount}</span> : "—"}</td>
+        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
       ) : null}
       <td className="px-2 py-1.5 text-right">
         {canEdit ? (
@@ -2058,11 +2058,11 @@ function MetaCell({ children }: { children: React.ReactNode }) {
     if (btn && t !== btn && !btn.contains(t)) btn.click();
   };
   return (
-    <td className="px-1.5 py-1 align-middle overflow-hidden">
+    <td className="px-1 py-1 align-middle overflow-hidden">
       <div
         ref={ref}
         onClick={forwardClick}
-        className="flex items-center min-w-0 min-h-[28px] rounded-md px-2 border border-transparent cursor-pointer hover:bg-zinc-100 hover:border-zinc-300 transition-colors [&>*]:min-w-0"
+        className="flex items-center min-w-0 min-h-[28px] rounded-md px-2 border border-transparent cursor-pointer hover:bg-zinc-100/70 hover:border-zinc-200 transition-colors [&>*]:min-w-0"
       >
         {children}
       </div>
@@ -2341,7 +2341,7 @@ function AddTaskInline({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-900"
+          className="inline-flex items-center gap-1.5 text-[13px] text-zinc-400 hover:text-zinc-700 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           Add Task
@@ -2753,7 +2753,7 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
   return (
     <details className="relative inline-block">
       <summary
-        className="list-none cursor-pointer inline-flex items-center text-[10px] text-zinc-400 hover:text-zinc-700 w-4 h-4 rounded hover:bg-zinc-100 justify-center select-none"
+        className="list-none cursor-pointer inline-flex items-center text-[10px] text-zinc-400 hover:text-zinc-700 w-4 h-4 rounded hover:bg-zinc-200/70 justify-center select-none opacity-0 group-hover/ghdr:opacity-100 focus-within:opacity-100 transition-opacity"
         title="Status breakdown"
       >
         …
@@ -2866,7 +2866,7 @@ function TitleCell({
             setEditing(true);
           }
         }}
-        className="w-full text-left truncate hover:text-[var(--os-brand)] transition-colors inline-flex items-center gap-2"
+        className="w-full text-left truncate text-zinc-800 hover:text-[var(--os-brand)] transition-colors inline-flex items-center gap-2"
         title={row.title}
       >
         <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
@@ -2935,7 +2935,7 @@ function GroupHeaderMenu({
   const act = (fn?: () => void) => () => { fn?.(); setOpen(false); };
   return (
     <div className="relative inline-block" ref={ref}>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700" aria-label="Group options">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700 opacity-0 group-hover/ghdr:opacity-100 focus-within:opacity-100 transition-opacity" aria-label="Group options">
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
       {open && menuPos ? (
