@@ -6,9 +6,10 @@ status boxes as surfaces land.
 
 ## Principles
 - **Match a real reference, never invent.** For each surface, work from an actual
-  ClickUp/Monday screenshot (Mobbin export or a direct screenshot). Mobbin is not
-  reachable from the Claude Code CLI session, so the human drops the screenshots;
-  Claude matches them. This is the standing parity rule.
+  ClickUp/Monday screenshot. **Mobbin is now connected to the Claude Code session
+  as an MCP connector** (`search_screens` / `search_flows`, platform: web) — pull
+  ClickUp reference screens per surface directly; no more waiting on pasted
+  screenshots. This is the standing parity rule.
 - **Honest "Soon", no fake toggles.** Show the full ClickUp option set for parity,
   but wire only what's backed; unbuilt items are disabled/"coming soon" (the
   established pattern), never dead controls that pretend to work.
@@ -72,15 +73,28 @@ status boxes as surfaces land.
          drag affordance — match ClickUp exactly.
    - [ ] Instant updates on every rename/delete/move (folder + notes done; verify all).
 2. **Board / List views** — the product's heart.
-   - [ ] View tabs (List/Board/Calendar/Gantt/…) — icons, active state, "+ View".
-   - [ ] Toolbar row (Group by / Filter / Sort / Fields / Assignee / search / "+ Task").
-   - [ ] Table view: column headers (type icon + menu), row hover, inline edit,
-         group headers, subtasks, add-row, bulk bar.
-   - [ ] Kanban: column header (count, WIP, "..."), card layout, add-card, drag.
+   - [x] View tabs (List/Board/Calendar/Gantt/…) — verified 2026-08-05 vs Mobbin:
+         icons, active underline, "+ View" already match.
+   - [x] Toolbar row — 2026-08-05: left cluster now labeled ClickUp-style
+         ("Group: Status" / "Subtasks" / "Columns" + item count); right side
+         (Filter/assignee/sort/search/Statuses/Fields/+ Task) verified.
+   - [x] Table view group headers — 2026-08-05: solid status pills (white on
+         status color) + count; column labels repeat inside every group like
+         ClickUp (colgroup pins fixed-layout widths); wider Assignee/Due/Priority
+         defaults so labels don't truncate. Monday table style untouched.
+   - [x] Bulk bar — verified: dark floating pill (N selected / Set status / Set
+         owner / Set due date / Priority / Archive / Trash / clear).
+   - [x] Kanban — 2026-08-05: solid status-pill column headers, cards drop the
+         created-date footer (subtask count only), "Add Task" labels. Hover
+         cluster (check/+/pencil/…) verified.
    - [ ] Calendar + Gantt polish.
 3. **Task detail (drawer + `/item/[id]`)** — Schedule/Repeat/Reminders done.
-   - [ ] Header (breadcrumb, status pill, actions), two-column field grid, activity,
-         subtasks, checklist, custom fields, comments — align to ClickUp task view.
+   - [x] Verified 2026-08-05 vs Mobbin ClickUp task view: type chip, title,
+         two-column field grid (Status/Dates/Estimate/Track | Assignees/Priority/
+         Tags/Alignment), description, Add subtask / Relate / Checklist / Attach
+         sections, Comments+Activity tabs — structure already matches; no change.
+   - [ ] Polish candidates: status advance ✓ next to the status chip, "Custom
+         Fields" section header, Ask Brain strip on the full page.
 
 ## Wave 2 — content + creation
 4. **Docs / Notes editor (BlockNote)** — align to ClickUp Docs (cover, title, slash
@@ -100,6 +114,21 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-05: **Mobbin MCP connected** — reference screens now pulled directly.
+  Wave 1 core shipped against real ClickUp references: List view (status-pill
+  group headers, per-group column labels, labeled toolbar, bulk bar verified),
+  Kanban (solid pills, clean cards, Add Task), task detail verified at parity.
+  Sidebar Space tree expansion verified (nested lists, ClickUp-style).
+  Local dev env note: `.env` points DATABASE_URL at the prod SSH tunnel
+  (127.0.0.1:5433, currently down); created gitignored `.env.local` overriding
+  to local brew Postgres `workwrk` DB (schema via `prisma db push`, seeded
+  users incl. admin@workwrk.com + demo Design Team space/board). Delete
+  `.env.local` to return to the tunnel workflow. Never point local dev at prod.
+  Known pre-existing issues (not from this pass): React key warning in
+  BoardCanvas children (chip spawned), eslint set-state-in-effect in
+  AddSubtaskRow (deliberate pattern).
+  Next: Home /today cards, Inbox tabs, Calendar/Gantt polish, task-detail
+  polish candidates above.
 - 2026-07-18: Roadmap created. Wave 1 sidebar folder "..." menu + folder "+" create
   menu shipped to ClickUp parity. Audited the rest of the sidebar menu layer:
   Space / Board / Table "..." menus and the Space "+" were **already** comprehensive
@@ -109,6 +138,6 @@ status boxes as surfaces land.
   (Mobbin/ClickUp screenshots) and dev-server visual verification to match pixel-for-pixel.
 
 ## Notes
-- Mobbin is NOT connected to the Claude Code CLI session; screenshots must be pasted in.
-- Local dev server needs to be up for visual verification (currently down).
+- Mobbin IS connected as an MCP connector — pull references with search_screens.
+- Local dev server: `npm run dev` (port 3000) with `.env.local` → local Postgres.
 - Keep commits small and typecheck/lint-clean; batch deploys; human spot-checks each surface.
