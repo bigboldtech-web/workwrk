@@ -47,8 +47,14 @@ status boxes as surfaces land.
 - [ ] **Empty states**: one `EmptyState` component (icon + title + subtitle + CTA),
       used everywhere, matching ClickUp's friendly empties.
 - [ ] **Loading / skeleton states**: shared skeletons for lists/boards/cards.
-- [ ] **Dark mode**: verify every new surface themes (light + dark) via the accent
-      tokens; the app already supports `data-accent` + `.workwrk-os`.
+- [x] **Dark mode** — 2026-08-06 pass (ce822d0): walked every reshipped surface
+      with data-theme=dark via the real preference flow. Fixed light-only
+      chrome (List group-label borders, Calendar weekend/adjacent-month
+      tints, Gantt Today/zoom/weekend/spill-labels, Inbox unread accent,
+      Home greeting). Everything else themes via tokens + the .dark
+      guardrail. NB: the "violet Switch" audits flagged was the demo
+      account's user-picked purple ACCENT (legit theme-picker option);
+      code default is brand blue.
 - [ ] **Toasts, dialogs, confirms**: already shared (`useOsToast`, dialog-provider);
       keep everything on them.
 
