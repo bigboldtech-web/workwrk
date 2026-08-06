@@ -214,7 +214,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
           type="button"
           disabled={isCurrentMonth}
           onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}
-          className="inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-[11.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:text-zinc-400 disabled:hover:bg-white"
+          className="inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-[11.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:text-zinc-400 disabled:hover:bg-white dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5 dark:disabled:text-zinc-600"
         >
           Today
         </button>
@@ -261,8 +261,8 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                   isDropTarget
                     ? "bg-[var(--os-brand)]/[0.06] ring-2 ring-inset ring-[var(--os-brand)]/40"
                     : cell.inMonth
-                      ? isWeekend ? "bg-zinc-50/40" : "bg-white"
-                      : "bg-zinc-50/50"
+                      ? isWeekend ? "bg-zinc-50/40 dark:bg-white/[0.03]" : "bg-white dark:bg-transparent"
+                      : "bg-zinc-50/50 dark:bg-white/[0.04]"
                 }`}
                 onDragOver={(e) => {
                   if (!canEdit || !dragId || !cell.inMonth) return;

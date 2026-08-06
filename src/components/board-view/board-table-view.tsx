@@ -1331,7 +1331,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               Grouped Lists repeat the labels inside each group (ClickUp). */}
           {monday || !buckets ? (
             <thead>
-              <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 ${monday ? "uppercase tracking-wide" : ""}`}>
+              <tr className={`text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 ${monday ? "uppercase tracking-wide" : ""}`}>
                 <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
                   {canEdit ? (
                     <div className="flex items-center gap-1">
@@ -1404,7 +1404,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             group; the clean List follows suit (Monday keeps the
                             single global header). */}
                         {!monday ? (
-                          <tr className="text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-50">
+                          <tr className="text-left text-[11px] font-medium text-zinc-400 border-b border-zinc-50 dark:border-zinc-800">
                             <th className="pl-1 pr-0 py-1" style={{ width: LEADING_W }} aria-hidden />
                             {headerCells}
                           </tr>

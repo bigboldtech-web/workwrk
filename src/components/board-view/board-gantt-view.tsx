@@ -342,7 +342,7 @@ export function BoardGanttView({
           type="button"
           disabled={isCurrentWindow}
           onClick={() => setAnchor(defaultAnchor)}
-          className="h-7 px-3 rounded-md border border-zinc-200 bg-white text-[11.5px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-white inline-flex items-center"
+          className="h-7 px-3 rounded-md border border-zinc-200 bg-white text-[11.5px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-white dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5 dark:disabled:text-zinc-600 dark:disabled:hover:bg-transparent inline-flex items-center"
         >
           Today
         </button>
@@ -395,7 +395,7 @@ export function BoardGanttView({
       ) : (
         <div className="relative rounded-xl border border-zinc-200 bg-white overflow-x-auto">
           {/* ClickUp's floating zoom stack (fewer weeks = zoom in). */}
-          <div className="absolute right-2 z-30 flex flex-col rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden" style={{ top: HEAD_H + 8 }}>
+          <div className="absolute right-2 z-30 flex flex-col rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden dark:border-zinc-700 dark:bg-zinc-900" style={{ top: HEAD_H + 8 }}>
             <button
               type="button"
               aria-label="Zoom in"
@@ -493,11 +493,11 @@ export function BoardGanttView({
                 {Array.from({ length: weekCount }, (_, i) => (
                   <span key={`wknd-${i}`} aria-hidden>
                     <span
-                      className="absolute top-0 bottom-0 bg-zinc-50 pointer-events-none"
+                      className="absolute top-0 bottom-0 bg-zinc-50 dark:bg-white/[0.03] pointer-events-none"
                       style={{ left: `${((i * 7) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
                     />
                     <span
-                      className="absolute top-0 bottom-0 bg-zinc-50 pointer-events-none"
+                      className="absolute top-0 bottom-0 bg-zinc-50 dark:bg-white/[0.03] pointer-events-none"
                       style={{ left: `${((i * 7 + 6) / totalDays) * 100}%`, width: `${(1 / totalDays) * 100}%` }}
                     />
                   </span>
@@ -612,7 +612,7 @@ export function BoardGanttView({
                         {spillLabel ? null : item.title}
                       </button>
                       {spillLabel ? (
-                        <span className="absolute left-full top-0 ml-1.5 text-[11px] text-zinc-600 whitespace-nowrap leading-[24px] pointer-events-none">
+                        <span className="absolute left-full top-0 ml-1.5 text-[11px] text-zinc-600 dark:text-zinc-300 whitespace-nowrap leading-[24px] pointer-events-none">
                           {item.title}
                         </span>
                       ) : null}

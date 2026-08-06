@@ -701,7 +701,7 @@ function NotifEntry({
       <span className="text-[13px] font-medium text-zinc-800 truncate shrink-0 max-w-[38%]">{n.title}</span>
       <v.Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       {n.message ? (
-        <p className={`flex-1 min-w-0 truncate text-[13px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-rail)]" : "text-zinc-500"}`}>
+        <p className={`flex-1 min-w-0 truncate text-[13px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-rail)] dark:text-blue-400" : "text-zinc-500"}`}>
           {n.message}
         </p>
       ) : (

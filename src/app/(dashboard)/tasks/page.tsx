@@ -312,7 +312,7 @@ export default function MyTasksPage() {
       {/* Greeting */}
       {showGreeting ? (
         <div className="px-6 pt-4 pb-3">
-          <p className="text-[20px] font-semibold text-zinc-900 tracking-[-0.01em]">
+          <p className="text-[20px] font-semibold text-zinc-900 dark:text-zinc-100 tracking-[-0.01em]">
             {timeGreeting()}, {firstName}
           </p>
         </div>
