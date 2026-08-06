@@ -127,7 +127,7 @@ export function ChartWidget({
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: "currentColor" }} tickLine={false} axisLine={false} />
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "currentColor" }} tickLine={false} axisLine={false} />
           <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: "currentColor", fillOpacity: 0.06 }} />
-          <Bar dataKey="value" name="Tasks" radius={[4, 4, 0, 0]}>
+          <Bar dataKey="value" name="Tasks" radius={[4, 4, 0, 0]} isAnimationActive={false}>
             {slices.map((s) => (
               <Cell key={s.key} fill={s.color} />
             ))}
@@ -140,7 +140,9 @@ export function ChartWidget({
       <div className="min-h-0 flex-1">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={slices} dataKey="value" nameKey="label" innerRadius="48%" outerRadius="88%" paddingAngle={2}>
+            {/* No mount animation: grid cards resize while hydrating, which
+                can abort recharts' pie animation and leave zero sectors. */}
+            <Pie data={slices} dataKey="value" nameKey="label" innerRadius="48%" outerRadius="88%" paddingAngle={2} isAnimationActive={false}>
               {slices.map((s) => (
                 <Cell key={s.key} fill={s.color} />
               ))}

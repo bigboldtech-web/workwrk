@@ -26,15 +26,17 @@ const CATEGORIES: Array<{ key: string; label: string; icon: LucideIcon }> = [
 ];
 
 // ClickUp's real Featured card copy; flat single-accent preview tints only.
+// Tints deliberately stay light in dark mode (preview-image look, matching
+// ClickUp) — bg-slate-50 instead of bg-zinc-50 so the dark catchalls skip it.
 // `widget` maps a tile to the DashWidget type it creates (with an optional
 // title/config preset); tiles without a mapping stay honest (toast) until
 // their widget renderer ships in a later wave.
 const FEATURED: Array<{ name: string; desc: string; tint: string; widget?: WidgetType; preset?: WidgetPreset }> = [
-  { name: "Task List",          desc: "Create a List view using tasks from any location.", tint: "bg-zinc-50", widget: "task-list" },
+  { name: "Task List",          desc: "Create a List view using tasks from any location.", tint: "bg-slate-50", widget: "task-list" },
   { name: "Workload by Status", desc: "Display the distribution of your statuses usage across locations.", tint: "bg-sky-50", widget: "battery" },
   { name: "Calculation",        desc: "Calculate sums, averages, and so much more for your tasks.", tint: "bg-amber-50", widget: "stat" },
   { name: "Time Reporting",     desc: "See tasks that have time tracked.", tint: "bg-emerald-50" },
-  { name: "Portfolio",          desc: "Categorize and track progress of Lists & Folders.", tint: "bg-zinc-50" },
+  { name: "Portfolio",          desc: "Categorize and track progress of Lists & Folders.", tint: "bg-slate-50" },
   {
     name: "Tasks by Assignee",
     desc: "See open tasks grouped by each assignee.",

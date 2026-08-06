@@ -58,7 +58,7 @@ export function TaskListWidget({ widget }: { widget: DashWidget }) {
         {rows.map((it) => {
           const overdue = isItemOverdue(it);
           return (
-            <li key={it.id} className="flex h-7 items-center gap-2 border-b border-zinc-50 last:border-b-0">
+            <li key={it.id} className="flex h-7 items-center gap-2 border-b border-zinc-100 last:border-b-0">
               <span
                 aria-hidden
                 className="h-2 w-2 shrink-0 rounded-full"
