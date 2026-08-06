@@ -32,11 +32,41 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json({ dashboard });
 }
 
+// Widget shape mirrors DashWidget in components/dashboard/widget-types.ts.
+// Non-strict objects strip unknown keys on parse, so foreign props never
+// land in the JSON column.
+const widgetSourceSchema = z.union([
+  z.object({ kind: z.literal("all") }),
+  z.object({
+    kind: z.literal("board"),
+    boardId: z.string().min(1).max(60),
+    boardName: z.string().max(160).optional(),
+  }),
+]);
+
+const widgetSchema = z.object({
+  id: z.string().min(1).max(60),
+  type: z.enum(["task-list", "stat", "notes", "battery", "chart"]),
+  title: z.string().min(1).max(120),
+  config: z.object({
+    source: widgetSourceSchema.optional(),
+    statScope: z.enum(["open", "total", "completed", "overdue"]).optional(),
+    chartBy: z.enum(["status", "assignee", "priority"]).optional(),
+    chartKind: z.enum(["pie", "bar"]).optional(),
+    noteText: z.string().max(20000).optional(),
+  }),
+  layout: z.object({
+    x: z.number().int().min(0).max(11),
+    y: z.number().int().min(0).max(10000),
+    w: z.number().int().min(1).max(12),
+    h: z.number().int().min(1).max(60),
+  }),
+});
+
 const patchSchema = z.object({
   name: z.string().min(1).max(160).optional(),
   description: z.string().max(2000).optional(),
-  // Widget list is opaque to the server — the canvas owns the shape.
-  widgets: z.unknown().optional(),
+  widgets: z.array(widgetSchema).max(30).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

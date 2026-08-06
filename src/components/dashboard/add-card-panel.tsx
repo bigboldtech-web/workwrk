@@ -1,8 +1,8 @@
 "use client";
 
 // AddCardPanel — ClickUp's "Add Card" gallery chrome (left category rail +
-// searchable preview-tile grid). Chrome only for now: picking a tile toasts
-// until the widget build lands; no data model behind it yet.
+// searchable preview-tile grid). Task List / Calculation / Notes tiles add
+// a live widget via onAdd; the rest toast until their widget types land.
 
 import { useState } from "react";
 import {
@@ -10,6 +10,7 @@ import {
   Table, AppWindow, Search, X, type LucideIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import type { WidgetType } from "@/components/dashboard/widget-types";
 
 const CATEGORIES: Array<{ key: string; label: string; icon: LucideIcon }> = [
   { key: "featured",  label: "Featured",        icon: Star },
@@ -25,18 +26,29 @@ const CATEGORIES: Array<{ key: string; label: string; icon: LucideIcon }> = [
 ];
 
 // ClickUp's real Featured card copy; flat single-accent preview tints only.
-const FEATURED: Array<{ name: string; desc: string; tint: string }> = [
-  { name: "Task List",          desc: "Create a List view using tasks from any location.", tint: "bg-zinc-50" },
+// `widget` maps a tile to the DashWidget type it creates; tiles without a
+// mapping stay honest-Soon (toast) until their widget renderer ships.
+const FEATURED: Array<{ name: string; desc: string; tint: string; widget?: WidgetType }> = [
+  { name: "Task List",          desc: "Create a List view using tasks from any location.", tint: "bg-zinc-50", widget: "task-list" },
   { name: "Workload by Status", desc: "Display a pie chart of your statuses usage across locations.", tint: "bg-sky-50" },
-  { name: "Calculation",        desc: "Calculate sums, averages, and so much more for your tasks.", tint: "bg-amber-50" },
+  { name: "Calculation",        desc: "Calculate sums, averages, and so much more for your tasks.", tint: "bg-amber-50", widget: "stat" },
   { name: "Time Reporting",     desc: "See tasks that have time tracked.", tint: "bg-emerald-50" },
   { name: "Portfolio",          desc: "Categorize and track progress of Lists & Folders.", tint: "bg-zinc-50" },
   { name: "Tasks by Assignee",  desc: "See open tasks grouped by each assignee.", tint: "bg-sky-50" },
-  { name: "Notes",              desc: "Jot down quick notes right on your dashboard.", tint: "bg-amber-50" },
+  { name: "Notes",              desc: "Jot down quick notes right on your dashboard.", tint: "bg-amber-50", widget: "notes" },
   { name: "Discussion",         desc: "Start a conversation with your team.", tint: "bg-emerald-50" },
 ];
 
-export function AddCardPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function AddCardPanel({
+  open,
+  onClose,
+  onAdd,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Adds a widget of the given type to the dashboard. Absent = all tiles toast. */
+  onAdd?: (type: WidgetType) => void;
+}) {
   const [category, setCategory] = useState("featured");
   const [query, setQuery] = useState("");
   const { toast } = useOsToast();
@@ -109,7 +121,14 @@ export function AddCardPanel({ open, onClose }: { open: boolean; onClose: () => 
                   <button
                     key={t.name}
                     type="button"
-                    onClick={() => toast("Cards land with the widget build")}
+                    onClick={() => {
+                      if (t.widget && onAdd) {
+                        onAdd(t.widget);
+                        onClose();
+                      } else {
+                        toast("This card type lands soon");
+                      }
+                    }}
                     className="group rounded-lg border border-zinc-200 bg-white text-left transition-colors hover:border-zinc-300 hover:shadow-sm"
                   >
                     <div className={`h-28 rounded-t-lg border-b border-zinc-100 ${t.tint}`} />

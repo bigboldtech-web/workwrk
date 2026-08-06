@@ -4,23 +4,26 @@
 // in: white card, 13px semibold title, hover drag-grip + "..." cluster.
 // StatCard is the number-tile variant (Open Tasks / Total Tasks style).
 
-import { type ReactNode } from "react";
+import { type ReactNode, type RefObject } from "react";
 import { GripVertical, MoreHorizontal, RefreshCw } from "lucide-react";
 
 export function WidgetCard({
   title,
   onRefresh,
   onMore,
+  moreRef,
   children,
 }: {
   title: string;
   onRefresh?: () => void;
   onMore?: () => void;
+  /** Anchor ref for a MorePortal menu hung off the "..." button. */
+  moreRef?: RefObject<HTMLButtonElement | null>;
   children: ReactNode;
 }) {
   return (
-    <div className="group relative flex flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
+    <div className="group relative flex h-full flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex shrink-0 items-center gap-1.5 px-3 pt-2.5 pb-1">
         <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100" />
         <span className="truncate text-[13px] font-semibold text-zinc-900">{title}</span>
         <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -36,6 +39,7 @@ export function WidgetCard({
           ) : null}
           {onMore ? (
             <button
+              ref={moreRef}
               type="button"
               onClick={onMore}
               aria-label="Card options"
@@ -46,7 +50,7 @@ export function WidgetCard({
           ) : null}
         </span>
       </div>
-      <div className="flex-1 px-3 pb-3">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">{children}</div>
     </div>
   );
 }

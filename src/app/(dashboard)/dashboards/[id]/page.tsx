@@ -3,23 +3,35 @@
 /* Dashboard detail — ClickUp-parity chrome: breadcrumb header (Dashboards /
  * inline-rename + star), Share + "..." actions, Edit-mode toolbar row
  * (Refreshed just now · Auto refresh · Filters · dark Add card), the Add
- * Card gallery (AddCardPanel), and a centered empty-state canvas. Widget
- * data itself lands with the Dashboard view phase; the shared WidgetCard
- * shell in components/dashboard/widget-card.tsx is ready for it.
+ * Card gallery (AddCardPanel), and the widget canvas: a react-grid-layout
+ * grid of WidgetShell cards persisted (debounce-PATCH) into
+ * Dashboard.widgets. Widget model lives in components/dashboard/widget-types.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
 import {
   Filter, LayoutDashboard, Loader2, MoreHorizontal, Pencil, Plus,
   RefreshCw, Share2, Star, Trash2,
 } from "lucide-react";
+import "react-grid-layout/css/styles.css";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { Switch } from "@/components/ui/switch";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { AddCardPanel } from "@/components/dashboard/add-card-panel";
+import {
+  createWidget, parseWidgets, serializeWidgets, WIDGET_LIMIT,
+  type DashWidget, type WidgetSource, type WidgetType,
+} from "@/components/dashboard/widget-types";
+import { WidgetShell, type BoardOption } from "@/components/dashboard/widgets/widget-shell";
+import { StatWidget } from "@/components/dashboard/widgets/stat-widget";
+import { NotesWidget } from "@/components/dashboard/widgets/notes-widget";
+import { TaskListWidget } from "@/components/dashboard/widgets/task-list-widget";
+
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 type Dashboard = {
   id: string;
@@ -43,6 +55,14 @@ export default function DashboardDetailPage() {
   const moreRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
 
+  // Widget canvas state. widgetsRef always mirrors the latest list so the
+  // debounced PATCH never persists a stale snapshot.
+  const [widgets, setWidgets] = useState<DashWidget[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+  const [boards, setBoards] = useState<BoardOption[]>([]);
+  const widgetsRef = useRef<DashWidget[]>([]);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/dashboards/${params.id}`);
@@ -50,6 +70,10 @@ export default function DashboardDetailPage() {
       const d = await res.json();
       setDashboard(d.dashboard);
       setRenameValue(d.dashboard?.name ?? "");
+      const parsed = parseWidgets(d.dashboard?.widgets);
+      setWidgets(parsed);
+      widgetsRef.current = parsed;
+      setHydrated(true);
     } catch {
       toast("Couldn't load dashboard");
     } finally {
@@ -58,6 +82,97 @@ export default function DashboardDetailPage() {
   }, [params.id, toast]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // Boards for the widget Source pickers — fetched once per page.
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/boards?all=1", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : { boards: [] }))
+      .then((data) => {
+        if (!alive) return;
+        const list = Array.isArray(data?.boards) ? data.boards : [];
+        setBoards(list.map((b: { id: string; name: string }) => ({ id: b.id, name: b.name })));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // ─── Widget persistence (optimistic UI + debounce-PATCH + retry) ───
+
+  const pushWidgets = useCallback(async (attempt = 0) => {
+    try {
+      const res = await fetch(`/api/dashboards/${params.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ widgets: serializeWidgets(widgetsRef.current) }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      if (attempt === 0) {
+        toast("Couldn't save dashboard — retrying…");
+        setTimeout(() => { void pushWidgets(1); }, 1500);
+      } else {
+        toast("Couldn't save dashboard changes. Check your connection.");
+      }
+    }
+  }, [params.id, toast]);
+
+  const persistWidgets = useCallback((next: DashWidget[]) => {
+    widgetsRef.current = next;
+    setWidgets(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { void pushWidgets(); }, 750);
+  }, [pushWidgets]);
+
+  // Flush a pending debounce on unmount so the last edit isn't lost.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        void pushWidgets();
+      }
+    };
+  }, [pushWidgets]);
+
+  const addWidget = useCallback((type: WidgetType) => {
+    const current = widgetsRef.current;
+    if (current.length >= WIDGET_LIMIT) {
+      toast(`Dashboard card limit reached (${WIDGET_LIMIT})`);
+      return;
+    }
+    const bottom = current.reduce((m, w) => Math.max(m, w.layout.y + w.layout.h), 0);
+    persistWidgets([...current, createWidget(type, bottom)]);
+  }, [persistWidgets, toast]);
+
+  const patchWidget = useCallback((id: string, patch: (w: DashWidget) => DashWidget) => {
+    persistWidgets(widgetsRef.current.map((w) => (w.id === id ? patch(w) : w)));
+  }, [persistWidgets]);
+
+  const removeWidget = useCallback((id: string) => {
+    persistWidgets(widgetsRef.current.filter((w) => w.id !== id));
+  }, [persistWidgets]);
+
+  const onLayoutChange = useCallback((current: Layout[]) => {
+    if (!hydrated) return;
+    const byId = new Map(current.map((l) => [l.i, l] as const));
+    const prev = widgetsRef.current;
+    const changed = prev.some((w) => {
+      const l = byId.get(w.id);
+      return l && (l.x !== w.layout.x || l.y !== w.layout.y || l.w !== w.layout.w || l.h !== w.layout.h);
+    });
+    if (!changed) return;
+    persistWidgets(prev.map((w) => {
+      const l = byId.get(w.id);
+      return l ? { ...w, layout: { x: l.x, y: l.y, w: l.w, h: l.h } } : w;
+    }));
+  }, [hydrated, persistWidgets]);
+
+  const gridLayout = useMemo<Layout[]>(
+    () => widgets.map((w) => ({
+      i: w.id, x: w.layout.x, y: w.layout.y, w: w.layout.w, h: w.layout.h, minW: 2, minH: 2,
+    })),
+    [widgets],
+  );
 
   const rename = async () => {
     const trimmed = renameValue.trim();
@@ -217,19 +332,85 @@ export default function DashboardDetailPage() {
         </div>
       </div>
 
-      {/* Canvas — centered ClickUp empty state until widgets land. */}
-      <div className="flex-1 overflow-y-auto bg-zinc-50 p-6">
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-center">
-          <LayoutDashboard className="h-8 w-8 text-zinc-300" />
-          <div className="text-[13.5px] font-semibold text-zinc-800">This Dashboard is empty</div>
-          <p className="max-w-sm text-[12.5px] text-zinc-500">
-            Add cards to visualize work across your boards.
-          </p>
-          <div className="mt-1">{addCardPill}</div>
-        </div>
+      {/* Canvas — widget grid, or the centered empty state when bare. */}
+      <div className="flex-1 overflow-y-auto bg-zinc-50">
+        {widgets.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+            <LayoutDashboard className="h-8 w-8 text-zinc-300" />
+            <div className="text-[13.5px] font-semibold text-zinc-800">This Dashboard is empty</div>
+            <p className="max-w-sm text-[12.5px] text-zinc-500">
+              Add cards to visualize work across your boards.
+            </p>
+            <div className="mt-1">{addCardPill}</div>
+          </div>
+        ) : (
+          <div className="px-3 py-2">
+            <ResponsiveGridLayout
+              className="layout mytasks-grid"
+              layouts={{ lg: gridLayout }}
+              breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+              cols={{ lg: 12, md: 12, sm: 12, xs: 12, xxs: 12 }}
+              rowHeight={52}
+              margin={[12, 12]}
+              draggableCancel="a,button,input,textarea,select"
+              resizeHandles={["s", "e", "se"]}
+              compactType="vertical"
+              isDraggable={editMode}
+              isResizable={editMode}
+              onLayoutChange={onLayoutChange}
+            >
+              {widgets.map((w) => (
+                <div key={w.id}>
+                  <WidgetShell
+                    widget={w}
+                    boards={boards}
+                    onRename={(title) => patchWidget(w.id, (prev) => ({ ...prev, title }))}
+                    onRemove={() => removeWidget(w.id)}
+                    onSourceChange={(source: WidgetSource) =>
+                      patchWidget(w.id, (prev) => ({ ...prev, config: { ...prev.config, source } }))}
+                  >
+                    <WidgetBody
+                      widget={w}
+                      editMode={editMode}
+                      onConfigChange={(patch) =>
+                        patchWidget(w.id, (prev) => ({ ...prev, config: { ...prev.config, ...patch } }))}
+                    />
+                  </WidgetShell>
+                </div>
+              ))}
+            </ResponsiveGridLayout>
+          </div>
+        )}
       </div>
 
-      <AddCardPanel open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddCardPanel open={addOpen} onClose={() => setAddOpen(false)} onAdd={addWidget} />
     </div>
   );
+}
+
+/** Per-type widget body. battery/chart parse from stored JSON but their
+ *  renderers land with part 2 — honest-Soon body until then. */
+function WidgetBody({
+  widget,
+  editMode,
+  onConfigChange,
+}: {
+  widget: DashWidget;
+  editMode: boolean;
+  onConfigChange: (patch: Partial<DashWidget["config"]>) => void;
+}) {
+  switch (widget.type) {
+    case "task-list":
+      return <TaskListWidget widget={widget} />;
+    case "stat":
+      return <StatWidget widget={widget} editMode={editMode} onConfigChange={onConfigChange} />;
+    case "notes":
+      return <NotesWidget widget={widget} onConfigChange={onConfigChange} />;
+    default:
+      return (
+        <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
+          This card type lands soon
+        </div>
+      );
+  }
 }
