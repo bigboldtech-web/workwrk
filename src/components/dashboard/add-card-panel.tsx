@@ -10,7 +10,7 @@ import {
   Table, AppWindow, Search, X, type LucideIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
-import type { WidgetType } from "@/components/dashboard/widget-types";
+import type { WidgetPreset, WidgetType } from "@/components/dashboard/widget-types";
 
 const CATEGORIES: Array<{ key: string; label: string; icon: LucideIcon }> = [
   { key: "featured",  label: "Featured",        icon: Star },
@@ -26,15 +26,22 @@ const CATEGORIES: Array<{ key: string; label: string; icon: LucideIcon }> = [
 ];
 
 // ClickUp's real Featured card copy; flat single-accent preview tints only.
-// `widget` maps a tile to the DashWidget type it creates; tiles without a
-// mapping stay honest-Soon (toast) until their widget renderer ships.
-const FEATURED: Array<{ name: string; desc: string; tint: string; widget?: WidgetType }> = [
+// `widget` maps a tile to the DashWidget type it creates (with an optional
+// title/config preset); tiles without a mapping stay honest (toast) until
+// their widget renderer ships in a later wave.
+const FEATURED: Array<{ name: string; desc: string; tint: string; widget?: WidgetType; preset?: WidgetPreset }> = [
   { name: "Task List",          desc: "Create a List view using tasks from any location.", tint: "bg-zinc-50", widget: "task-list" },
-  { name: "Workload by Status", desc: "Display a pie chart of your statuses usage across locations.", tint: "bg-sky-50" },
+  { name: "Workload by Status", desc: "Display the distribution of your statuses usage across locations.", tint: "bg-sky-50", widget: "battery" },
   { name: "Calculation",        desc: "Calculate sums, averages, and so much more for your tasks.", tint: "bg-amber-50", widget: "stat" },
   { name: "Time Reporting",     desc: "See tasks that have time tracked.", tint: "bg-emerald-50" },
   { name: "Portfolio",          desc: "Categorize and track progress of Lists & Folders.", tint: "bg-zinc-50" },
-  { name: "Tasks by Assignee",  desc: "See open tasks grouped by each assignee.", tint: "bg-sky-50" },
+  {
+    name: "Tasks by Assignee",
+    desc: "See open tasks grouped by each assignee.",
+    tint: "bg-sky-50",
+    widget: "chart",
+    preset: { title: "Tasks by Assignee", config: { chartBy: "assignee", chartKind: "bar" } },
+  },
   { name: "Notes",              desc: "Jot down quick notes right on your dashboard.", tint: "bg-amber-50", widget: "notes" },
   { name: "Discussion",         desc: "Start a conversation with your team.", tint: "bg-emerald-50" },
 ];
@@ -47,7 +54,7 @@ export function AddCardPanel({
   open: boolean;
   onClose: () => void;
   /** Adds a widget of the given type to the dashboard. Absent = all tiles toast. */
-  onAdd?: (type: WidgetType) => void;
+  onAdd?: (type: WidgetType, preset?: WidgetPreset) => void;
 }) {
   const [category, setCategory] = useState("featured");
   const [query, setQuery] = useState("");
@@ -123,10 +130,10 @@ export function AddCardPanel({
                     type="button"
                     onClick={() => {
                       if (t.widget && onAdd) {
-                        onAdd(t.widget);
+                        onAdd(t.widget, t.preset);
                         onClose();
                       } else {
-                        toast("This card type lands soon");
+                        toast("Coming with a later wave");
                       }
                     }}
                     className="group rounded-lg border border-zinc-200 bg-white text-left transition-colors hover:border-zinc-300 hover:shadow-sm"

@@ -24,12 +24,14 @@ import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { AddCardPanel } from "@/components/dashboard/add-card-panel";
 import {
   createWidget, parseWidgets, serializeWidgets, WIDGET_LIMIT,
-  type DashWidget, type WidgetSource, type WidgetType,
+  type DashWidget, type WidgetPreset, type WidgetSource, type WidgetType,
 } from "@/components/dashboard/widget-types";
 import { WidgetShell, type BoardOption } from "@/components/dashboard/widgets/widget-shell";
 import { StatWidget } from "@/components/dashboard/widgets/stat-widget";
 import { NotesWidget } from "@/components/dashboard/widgets/notes-widget";
 import { TaskListWidget } from "@/components/dashboard/widgets/task-list-widget";
+import { BatteryWidget } from "@/components/dashboard/widgets/battery-widget";
+import { ChartWidget } from "@/components/dashboard/widgets/chart-widget";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -134,14 +136,14 @@ export default function DashboardDetailPage() {
     };
   }, [pushWidgets]);
 
-  const addWidget = useCallback((type: WidgetType) => {
+  const addWidget = useCallback((type: WidgetType, preset?: WidgetPreset) => {
     const current = widgetsRef.current;
     if (current.length >= WIDGET_LIMIT) {
       toast(`Dashboard card limit reached (${WIDGET_LIMIT})`);
       return;
     }
     const bottom = current.reduce((m, w) => Math.max(m, w.layout.y + w.layout.h), 0);
-    persistWidgets([...current, createWidget(type, bottom)]);
+    persistWidgets([...current, createWidget(type, bottom, preset)]);
   }, [persistWidgets, toast]);
 
   const patchWidget = useCallback((id: string, patch: (w: DashWidget) => DashWidget) => {
@@ -388,8 +390,7 @@ export default function DashboardDetailPage() {
   );
 }
 
-/** Per-type widget body. battery/chart parse from stored JSON but their
- *  renderers land with part 2 — honest-Soon body until then. */
+/** Per-type widget body — all five widget types render live. */
 function WidgetBody({
   widget,
   editMode,
@@ -406,11 +407,9 @@ function WidgetBody({
       return <StatWidget widget={widget} editMode={editMode} onConfigChange={onConfigChange} />;
     case "notes":
       return <NotesWidget widget={widget} onConfigChange={onConfigChange} />;
-    default:
-      return (
-        <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
-          This card type lands soon
-        </div>
-      );
+    case "battery":
+      return <BatteryWidget widget={widget} />;
+    case "chart":
+      return <ChartWidget widget={widget} editMode={editMode} onConfigChange={onConfigChange} />;
   }
 }

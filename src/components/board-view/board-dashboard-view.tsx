@@ -13,6 +13,7 @@ import {
   type BoardItemRow,
   type StatusOption,
 } from "@/lib/board-items-shared";
+import { StatusDistribution } from "@/components/dashboard/widgets/battery-widget";
 import { PersonAvatar } from "./assignee-picker";
 
 interface BoardDashboardViewProps {
@@ -125,6 +126,8 @@ function StatCard({ label, value, Icon, tint }: { label: string; value: number; 
   );
 }
 
+/** Bar + legend render via the shared StatusDistribution from the
+ *  standalone-dashboard BatteryWidget so both surfaces stay identical. */
 function BreakdownCard({ title, segs, total, emptyHint }: { title: string; segs: Seg[]; total: number; emptyHint?: string }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -132,23 +135,7 @@ function BreakdownCard({ title, segs, total, emptyHint }: { title: string; segs:
       {segs.length === 0 || total === 0 ? (
         <p className="text-[12px] text-zinc-400">{emptyHint ?? "Nothing here yet."}</p>
       ) : (
-        <>
-          <div className="flex h-3 w-full rounded-sm overflow-hidden ring-1 ring-black/5 mb-3">
-            {segs.map((s) => (
-              <span key={s.key} style={{ width: `${(s.count / total) * 100}%`, background: s.color }} title={`${s.label}: ${s.count}`} aria-hidden />
-            ))}
-          </div>
-          <ul className="space-y-1.5">
-            {segs.map((s) => (
-              <li key={s.key} className="flex items-center gap-2 text-[12px]">
-                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} aria-hidden />
-                <span className="flex-1 text-zinc-600">{s.label}</span>
-                <span className="tabular-nums text-zinc-700">{s.count}</span>
-                <span className="tabular-nums text-zinc-400 w-10 text-right">{Math.round((s.count / total) * 100)}%</span>
-              </li>
-            ))}
-          </ul>
-        </>
+        <StatusDistribution segs={segs} total={total} />
       )}
     </div>
   );

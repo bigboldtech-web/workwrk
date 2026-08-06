@@ -122,21 +122,28 @@ export function serializeWidgets(widgets: DashWidget[]): unknown[] {
 
 /** Default size + title per widget type for a freshly added card. */
 const WIDGET_DEFAULTS: Record<WidgetType, { title: string; w: number; h: number }> = {
-  "task-list": { title: "Task List",   w: 6, h: 6 },
-  stat:        { title: "Calculation", w: 3, h: 3 },
-  notes:       { title: "Notes",       w: 4, h: 5 },
-  battery:     { title: "Battery",     w: 3, h: 3 },
-  chart:       { title: "Chart",       w: 6, h: 6 },
+  "task-list": { title: "Task List",          w: 6, h: 6 },
+  stat:        { title: "Calculation",        w: 3, h: 3 },
+  notes:       { title: "Notes",              w: 4, h: 5 },
+  battery:     { title: "Workload by Status", w: 4, h: 5 },
+  chart:       { title: "Chart",              w: 6, h: 6 },
 };
 
+/** Gallery tiles can preset a title/config (e.g. "Tasks by Assignee" =
+ *  a chart widget pre-grouped by assignee). */
+export interface WidgetPreset {
+  title?: string;
+  config?: Partial<DashWidget["config"]>;
+}
+
 /** New widget with sane defaults, placed at grid-bottom row `y`. */
-export function createWidget(type: WidgetType, y: number): DashWidget {
+export function createWidget(type: WidgetType, y: number, preset?: WidgetPreset): DashWidget {
   const d = WIDGET_DEFAULTS[type];
   return {
     id: `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     type,
-    title: d.title,
-    config: { source: { kind: "all" } },
+    title: preset?.title ?? d.title,
+    config: { source: { kind: "all" }, ...(preset?.config ?? {}) },
     layout: { x: 0, y, w: d.w, h: d.h },
   };
 }

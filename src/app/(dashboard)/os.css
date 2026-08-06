@@ -34392,3 +34392,20 @@ table.os-tbl {
 .workwrk-os .mytasks-grid .react-resizable-handle-nw { top: -7px; left: -7px; cursor: nwse-resize; }
 .workwrk-os .mytasks-grid .react-resizable-handle-se { bottom: -7px; right: -7px; cursor: nwse-resize; }
 .workwrk-os .mytasks-grid .react-resizable-handle-sw { bottom: -7px; left: -7px; cursor: nesw-resize; }
+
+/* ════════════════════════════════════════════════════════════════
+ * RECHARTS — dark repaint (dashboard widgets + board Chart view).
+ * Tooltip inline contentStyle is light-only, so the dark overrides
+ * need !important. Pie slices default to a white stroke; on dark it
+ * flips to the card surface so slice gaps blend instead of glowing.
+ * ════════════════════════════════════════════════════════════════ */
+:root.dark .workwrk-os .recharts-default-tooltip {
+  background: #1B1F26 !important;
+  border-color: #2A2F38 !important;
+}
+:root.dark .workwrk-os .recharts-default-tooltip .recharts-tooltip-label {
+  color: #E5E7EB !important;
+}
+:root.dark .workwrk-os .recharts-pie .recharts-sector {
+  stroke: #14171D;
+}
