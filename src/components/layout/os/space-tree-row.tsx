@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useRef, type DragEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
@@ -331,7 +331,7 @@ export function SpaceTreeRow({
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-7 items-center gap-1.5 px-2 rounded-md ${
           rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
-        } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
+        } ${reorderable ? "cursor-pointer" : ""}`}
       >
         {spaceDropEdge ? (
           <span
@@ -383,7 +383,7 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="ml-[13px] mt-0.5 mb-1 border-l border-zinc-200/70 pl-1.5">
+        <ul className="mt-0.5 mb-1 pl-[19px]">
           {loading && data === null ? (
             <li className="px-2 py-1 inline-flex items-center gap-1.5 text-[11.5px] text-zinc-400">
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -440,6 +440,8 @@ function FolderTreeRow({
   onChanged: () => void;
 }) {
   const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? false);
+  const pathname = usePathname();
+  const isActive = pathname === `/folders/${folder.id}`;
   // Persist expand state across the rail hover-preview remount.
   useEffect(() => { folderExpandStore.set(folder.id, expanded); }, [expanded, folder.id]);
   // Which drop zone the cursor is in: "inside" nests, "before"/"after" reorder
@@ -491,7 +493,7 @@ function FolderTreeRow({
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-grab active:cursor-grabbing ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : "hover:bg-white/80"}`}
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
       >
         {dropZone === "before" || dropZone === "after" ? (
           <span
@@ -512,7 +514,7 @@ function FolderTreeRow({
             const FolderGlyph = expanded && hasChildren ? FolderOpen : FolderIcon;
             return (
               <FolderGlyph
-                className={`h-3.5 w-3.5 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity " : ""}${hasChildren ? "text-amber-500 fill-amber-300" : "text-zinc-400"}`}
+                className={`h-3.5 w-3.5 text-zinc-500 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity" : ""}`}
                 style={folder.color ? { color: folder.color } : undefined}
               />
             );
@@ -528,11 +530,11 @@ function FolderTreeRow({
             inline tree expansion. */}
         <Link
           href={`/folders/${folder.id}`}
-          className="min-w-0 flex-1 truncate text-[12px] text-zinc-700 text-left hover:text-zinc-900"
+          className={`min-w-0 flex-1 truncate text-[12px] text-left hover:text-zinc-900 ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           {folder.name}
         </Link>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity">
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
             ref={moreRef}
@@ -551,7 +553,7 @@ function FolderTreeRow({
        (folder.boards.length > 0 ||
         folder.docs.length > 0 ||
         folder.childFolders.length > 0) ? (
-        <ul className="ml-[13px] mt-0.5 border-l border-zinc-200/70 pl-1.5">
+        <ul className="mt-0.5 pl-[19px]">
           {folder.childFolders.map((cf) => (
             <FolderTreeRow
               key={cf.id}
@@ -581,27 +583,31 @@ function BoardTreeRow({
   onChanged: () => void;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const moreRef = useRef<ContextMenuHandle>(null);
+  // ClickUp highlights the currently-open List with the same grey pill the
+  // Space row uses; child icons stay monochrome unless user-colored.
+  const isActive = pathname === `/boards/${board.slug}`;
   return (
     <li className="group/boardrow relative">
       <div
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
-          <ListChecks className="h-3.5 w-3.5 shrink-0" style={{ color: board.color ?? "#10B981" }} />
+          <ListChecks className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
         </button>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/boardrow:opacity-100 transition-opacity">
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/boardrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="board" id={board.id} />
           <BoardMoreTrigger
             ref={moreRef}
@@ -622,22 +628,24 @@ function TableTreeRow({
   onChanged: () => void;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const moreRef = useRef<ContextMenuHandle>(null);
+  const isActive = pathname === `/tables/${table.id}`;
   return (
     <li className="group/tablerow relative">
       <div
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80"
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
-          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
-          <TableIcon className="h-3.5 w-3.5 shrink-0 text-sky-500" />
+          <TableIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity">
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="table" id={table.id} />
           <TableMoreTrigger ref={moreRef} table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
         </span>
@@ -648,24 +656,26 @@ function TableTreeRow({
 
 function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void }) {
   const router = useRouter();
+  const pathname = usePathname();
   const noteMenu = useNoteMenu();
+  const isActive = pathname === `/docs/${doc.id}`;
   return (
     <li className="group/docrow relative">
       <div
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
         onContextMenu={(e) => noteMenu.open(e, { id: doc.id, title: doc.title })}
-        className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80 cursor-grab active:cursor-grabbing"
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
-          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
-          <FileText className="h-3.5 w-3.5 shrink-0 text-blue-500" />
+          <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity">
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="doc" id={doc.id} />
           <button
             type="button"
@@ -692,20 +702,21 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
 
 function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isActive = pathname === `/whiteboards/${whiteboard.id}`;
   return (
     <li className="group/wbrow relative">
-      <div className="relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md hover:bg-white/80">
+      <div className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}>
         <button
           type="button"
           onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
-          className="flex items-center gap-1.5 text-[12px] text-zinc-700 flex-1 min-w-0 text-left"
+          className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
-          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
         </button>
-        <span className="absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded bg-white pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity">
-          <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
-        </span>
+        {/* Hover cluster returns when whiteboard rows grow a real "..." menu;
+            the retired quick-star alone painted an empty white sliver. */}
       </div>
     </li>
   );
