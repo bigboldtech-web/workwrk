@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
@@ -144,10 +144,8 @@ export default function WhiteboardsPage() {
       <OsTitleBar
         title="Whiteboards"
         Icon={Frame}
-        iconGradient={GRAD.indigoBlue}
+        iconGradient="linear-gradient(135deg, #a78b80, #8e7165)"
         description={boards === null ? "Loading…" : `${total} board${total === 1 ? "" : "s"} · ${grouped.length} categor${grouped.length === 1 ? "y" : "ies"}`}
-        people={[PEOPLE.bb, PEOPLE.sc]}
-        morePeople={6}
         actions={
           <div className="wb__head-actions">
             <div className="wb__search">
@@ -171,7 +169,7 @@ export default function WhiteboardsPage() {
       ) : boards === null ? (
         <div className="wb__loading">Loading whiteboards…</div>
       ) : total === 0 ? (
-        <OsEmptyView Icon={Frame} iconGradient={GRAD.indigoBlue} title="No whiteboards yet" subtitle="Sketch flows, map architectures, brainstorm anything. Drag, draw, drop sticky notes — your canvas lives one click away." chips={["Flows", "Architecture", "Brainstorms", "Sticky notes"]} cta="New whiteboard" />
+        <OsEmptyView Icon={Frame} iconGradient="linear-gradient(135deg, #a78b80, #8e7165)" title="Create your first Whiteboard" subtitle="Brainstorm, diagram, plan and more! A freeform canvas for you and your team." cta="New whiteboard" />
       ) : filtered.length === 0 ? (
         <div className="wb__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
       ) : (

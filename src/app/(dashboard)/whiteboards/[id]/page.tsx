@@ -13,9 +13,13 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, CheckCircle2, Cloud } from "lucide-react";
+import { ArrowLeft, Frame, Loader2, CheckCircle2, Cloud, MoreHorizontal, Pencil, Link2, Share2, Trash2 } from "lucide-react";
 import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import "@excalidraw/excalidraw/index.css";
 
 const Excalidraw = dynamic(
@@ -55,6 +59,33 @@ export default function WhiteboardCanvasPage() {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const { toast } = useOsToast();
+  const confirm = useConfirm();
+
+  const copyLink = useCallback(() => {
+    void navigator.clipboard.writeText(window.location.href).then(
+      () => toast("Link copied"),
+      () => toast("Couldn't copy link"),
+    );
+  }, [toast]);
+
+  const deleteBoard = useCallback(async () => {
+    const id = params?.id;
+    if (!id) return;
+    const ok = await confirm({
+      title: "Delete whiteboard?",
+      description: "This whiteboard and its canvas will be deleted.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/whiteboards/${id}`, { method: "DELETE" });
+    if (res.ok) { refreshSidebar(); router.push("/whiteboards"); }
+    else toast("Couldn't delete whiteboard");
+  }, [params?.id, confirm, router, toast]);
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [api, setApi] = useState<ExcalidrawAPI | null>(null);
@@ -227,7 +258,13 @@ export default function WhiteboardCanvasPage() {
           <ArrowLeft />
         </button>
 
+        {/* ClickUp shows a small brand-tinted whiteboard glyph before the name. */}
+        <span className="grid h-5 w-5 shrink-0 place-items-center rounded-[5px] bg-[#0073EA]/10">
+          <Frame className="h-3 w-3 text-[#0073EA]" />
+        </span>
+
         <input
+          ref={titleRef}
           className="wbc__title"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
@@ -261,6 +298,32 @@ export default function WhiteboardCanvasPage() {
             </span>
           )}
         </div>
+
+        {/* ClickUp's right cluster: ghost Share + "..." menu. */}
+        <button
+          type="button"
+          onClick={copyLink}
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 text-[12.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900 shrink-0"
+        >
+          <Share2 className="h-3.5 w-3.5" /> Share
+        </button>
+        <button
+          ref={moreRef}
+          type="button"
+          aria-label="Whiteboard actions"
+          onClick={() => setMoreOpen((v) => !v)}
+          className="w-7 h-7 grid place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 shrink-0"
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+        <MorePortal anchorRef={moreRef} width={200} open={moreOpen} placement="below">
+          <MenuList onMouseLeave={() => setMoreOpen(false)}>
+            <MenuItem icon={Pencil} label="Rename" onClick={() => { setMoreOpen(false); titleRef.current?.focus(); titleRef.current?.select(); }} />
+            <MenuItem icon={Link2} label="Copy link" onClick={() => { setMoreOpen(false); copyLink(); }} />
+            <MenuSeparator />
+            <MenuItem icon={Trash2} label="Delete" destructive onClick={() => { setMoreOpen(false); void deleteBoard(); }} />
+          </MenuList>
+        </MorePortal>
       </header>
 
       {/* Canvas */}
