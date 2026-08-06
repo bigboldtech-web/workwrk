@@ -22,6 +22,7 @@ import type { FieldDef } from "@/lib/field-catalog";
 import type { PersonRef } from "./assignee-picker";
 import { useItemTypes } from "./use-item-types";
 import { Switch } from "@/components/ui/switch";
+import { MorePortal } from "@/components/layout/os/more-portal";
 
 // ── Model ──────────────────────────────────────────────────────────
 
@@ -325,10 +326,18 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
   const [open, setOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    // Panel is portaled to body (MorePortal) so check both the trigger
+    // wrapper and the portaled panel before treating a click as outside.
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
@@ -396,6 +405,7 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
   return (
     <div className="relative" ref={ref}>
       <button
+        ref={anchorRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="Filter"
@@ -411,8 +421,10 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
         {active ? <span className="tabular-nums">{count} Filter{count === 1 ? "" : "s"}</span> : null}
       </button>
 
-      {open ? (
-        <div className="absolute z-30 mt-1 right-0 w-[480px] max-w-[90vw] rounded-lg border border-zinc-200 bg-white shadow-xl p-2.5">
+      {/* Portaled so it escapes the view canvas' overflow clipping and
+          clamps to the viewport (was: absolute right-0, clipped left). */}
+      <MorePortal anchorRef={anchorRef} panelRef={panelRef} width={480} open={open} placement="below">
+        <div className="rounded-lg border border-zinc-200 bg-white shadow-xl p-2.5">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Filters</div>
           {filters.rules.length === 0 ? (
             <p className="text-[12px] text-zinc-500 px-0.5 pb-2">No filters. Add one to narrow the list.</p>
@@ -559,7 +571,7 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
             </div>
           ) : null}
         </div>
-      ) : null}
+      </MorePortal>
     </div>
   );
 }

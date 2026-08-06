@@ -34,7 +34,9 @@ type Row = { key: NotifKey; label: string; sub: string; live: boolean };
 
 const INBOX_ROWS: Row[] = [
   { key: "task_assigned", label: "Task assigned to me", sub: "When a task is created for you or reassigned to you", live: true },
-  { key: "mentions", label: "@Mentions", sub: "When someone mentions you in a comment or doc", live: false },
+  // Live since the comment @mention build — the updates route filters
+  // recipients through this toggle (filterNotifyUsers "mentions").
+  { key: "mentions", label: "@Mentions", sub: "When someone mentions you in a comment or doc", live: true },
   { key: "comments", label: "Comments on my tasks", sub: "When someone comments on a task assigned to you", live: true },
   { key: "status_changes", label: "Status changes on my tasks", sub: "When a task you're assigned changes status", live: false },
   { key: "due_reminders", label: "Due-date reminders", sub: "When a task assigned to you is due today", live: true },
