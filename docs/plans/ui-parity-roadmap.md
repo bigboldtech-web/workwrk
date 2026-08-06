@@ -127,6 +127,29 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-06 (later): **Coverage matrix + Waves A & B shipped.**
+  Coverage matrix 24fc2ff (docs/plans/coverage-matrix.md, 135 surfaces from an
+  8-agent ClickUp/Monday inventory: 23 parity / 66 partial / 32 missing / 14
+  product-decision) with wave plan A–E.
+  **Wave A** (gap fills): per-user notification settings page + shouldNotify
+  gate (51f01e4), Invite People modal honoring the KRA/SOP invitation contract
+  (c02ff4b), comment @mention typeahead + mention notifications + edit-own
+  (a8edc03), board filter rules {field,operator,value} + AND/OR + saved
+  filters, Everything view (read-gated cross-board list at /everything);
+  seam fixes 1788c59 (filter panel through MorePortal, @Mentions toggle live).
+  **Wave B** (live dashboard widgets): widget model + defensive parse +
+  zod-validated PATCH + react-grid-layout canvas (debounce-PATCH, retry,
+  unmount flush) + Stat/Notes/TaskList widgets + shared per-source item cache
+  (07d920f); Battery + Chart (pie/bar by status/assignee/priority, avatar-hue
+  slices) + Add Card gallery wiring + shared StatusDistribution now also
+  powering the board Dashboard view's breakdown cards (0f9ac61); dark seams
+  from live verification 91e2a0e (zinc-50 hairlines, pie mount animation
+  zero-sector flake, gallery preview tints stay light). Verified live both
+  themes: add/drag/resize/persist round-trip, source switch to board scope,
+  single shared fetch per source, menus/popovers dark-clean.
+  Remaining honest-toast tiles: Time Reporting, Portfolio, Discussion.
+  Next: Wave C (Workload capacity grid, Timeline drag/zoom, Team cards,
+  Sprints), Wave D (doc sharing/permissions, subpages), Wave E (Automations).
 - 2026-08-06: **Wave 3 sweep shipped** (6 workflow audits → 7 commits):
   sidebar tree rows c8fb029 (active pill, no guide lines, zinc icons),
   create-modals 862603e (shared shell, dark pills, ui/dialog flat scrim +
