@@ -17,6 +17,7 @@ import { useSession } from "next-auth/react";
 import { MenuItem, MenuList } from "@/components/ui/menu";
 import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
 import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
+import { InviteModal } from "./invite-modal";
 import { useOsShell } from "./shell-context";
 
 const HOVER_OPEN_MS = 180;
@@ -52,6 +53,7 @@ export function ClickAppRail() {
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -272,14 +274,16 @@ export function ClickAppRail() {
       </nav>
 
       <div className="pb-2 pt-1.5 border-t border-white/15">
-        <Link
-          href="/people"
+        <button
+          type="button"
+          onClick={() => setInviteOpen(true)}
           title="Invite teammates"
-          className="mx-1 flex flex-col items-center gap-0.5 rounded-lg py-1.5 text-white hover:bg-white/10 transition-colors"
+          className="mx-1 flex w-[calc(100%-8px)] flex-col items-center gap-0.5 rounded-lg py-1.5 text-white hover:bg-white/10 transition-colors"
         >
           <UserPlus className="w-[16px] h-[16px]" />
           {iconsOnly ? null : <RailLabel>Invite</RailLabel>}
-        </Link>
+        </button>
+        <InviteModal open={inviteOpen} onOpenChange={setInviteOpen} />
         <Link
           href="/settings"
           title="Upgrade workspace"

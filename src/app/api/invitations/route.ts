@@ -44,7 +44,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
     }
 
-    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds } = await req.json();
+    const { email, accessLevel: inviteLevel, departmentId, roleId, managerId, officeId, kraIds, sopIds, message } = await req.json();
+
+    // Optional personal note from the inviter — capped so the email stays sane.
+    const personalMessage =
+      typeof message === "string" && message.trim() ? message.trim().slice(0, 1000) : undefined;
 
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
@@ -116,6 +120,7 @@ export async function POST(req: Request) {
       companyName: org?.name || "Your team",
       inviteLink,
       accessLevel: inviteLevel || "EMPLOYEE",
+      personalMessage,
     });
 
     try {

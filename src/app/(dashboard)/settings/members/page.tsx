@@ -8,14 +8,37 @@
 // (with last-admin protection), so non-admins see this read-only.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search, Users, ShieldCheck } from "lucide-react";
+import { Loader2, Search, Users, ShieldCheck, UserPlus, MailX } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
+import { InviteModal } from "@/components/layout/os/invite-modal";
+import { useOsToast } from "@/components/layout/os/toast";
 
 // Access levels that count as the "manager / admin side".
 const MANAGER_SIDE = new Set<AccessLevel>([
   "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR", "MANAGER", "TEAM_LEAD",
 ]);
+
+type PendingInvite = {
+  id: string;
+  email: string;
+  accessLevel: AccessLevel;
+  accepted: boolean;
+  createdAt: string;
+  expiresAt: string;
+};
+
+// "3d ago" style stamp for the pending-invites table.
+function timeAgo(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 type Member = {
   id: string;
@@ -36,11 +59,15 @@ const nameOf = (m: { firstName: string | null; lastName: string | null }) =>
 export default function MembersPage() {
   const { accessLevel } = useRole();
   const canEdit = accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
+  const { toast } = useOsToast();
 
   const [members, setMembers] = useState<Member[] | null>(null);
   const [q, setQ] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [invites, setInvites] = useState<PendingInvite[]>([]);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     fetch("/api/users?scope=all&limit=500")
@@ -49,6 +76,39 @@ export default function MembersPage() {
       .catch(() => setMembers([]));
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  const loadInvites = useCallback(() => {
+    fetch("/api/invitations")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) =>
+        setInvites(
+          Array.isArray(d) ? (d as PendingInvite[]).filter((i) => !i.accepted) : [],
+        ),
+      )
+      .catch(() => setInvites([]));
+  }, []);
+  useEffect(() => { loadInvites(); }, [loadInvites]);
+
+  const revoke = async (inv: PendingInvite) => {
+    setRevokingId(inv.id);
+    try {
+      const res = await fetch("/api/invitations", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: inv.id }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d?.error ?? "Revoke failed");
+      }
+      setInvites((prev) => prev.filter((i) => i.id !== inv.id));
+      toast(`Invitation to ${inv.email} revoked`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Revoke failed");
+    } finally {
+      setRevokingId(null);
+    }
+  };
 
   const patch = async (id: string, body: Record<string, unknown>) => {
     setSavingId(id); setErr(null);
@@ -86,8 +146,17 @@ export default function MembersPage() {
 
   return (
     <div className="px-6 pt-6">
-      <header className="mb-1">
+      <header className="mb-1 flex items-center justify-between">
         <h1 className="text-[16px] font-bold text-zinc-900">Members</h1>
+        {canEdit ? (
+          <button
+            type="button"
+            onClick={() => setInviteOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12.5px] font-medium text-white hover:bg-zinc-800"
+          >
+            <UserPlus className="h-3.5 w-3.5" /> Invite
+          </button>
+        ) : null}
       </header>
       <p className="mb-4 text-[12px] text-zinc-500">
         Set each person’s access level and who they report to.
@@ -193,6 +262,71 @@ export default function MembersPage() {
           </table>
         </div>
       )}
+
+      {invites.length > 0 ? (
+        <section className="mt-6">
+          <h2 className="mb-2 text-[13px] font-semibold text-zinc-900">
+            Pending invites <span className="font-normal text-zinc-400">({invites.length})</span>
+          </h2>
+          <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-400">
+                  <th className="px-3 py-2 font-semibold">Email</th>
+                  <th className="px-3 py-2 font-semibold">Access level</th>
+                  <th className="px-3 py-2 font-semibold">Invited</th>
+                  <th className="px-3 py-2 font-semibold">Status</th>
+                  {canEdit ? <th className="px-3 py-2" /> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {invites.map((inv) => {
+                  const expired = new Date(inv.expiresAt).getTime() < Date.now();
+                  return (
+                    <tr key={inv.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50/60">
+                      <td className="px-3 py-2 font-medium text-zinc-900">{inv.email}</td>
+                      <td className="px-3 py-2 text-zinc-600">
+                        {ACCESS_LEVELS.find((l) => l.value === inv.accessLevel)?.label ?? inv.accessLevel}
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600">{timeAgo(inv.createdAt)}</td>
+                      <td className="px-3 py-2">
+                        {expired ? (
+                          <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-[11.5px] font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400">
+                            Expired
+                          </span>
+                        ) : (
+                          <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11.5px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      {canEdit ? (
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => void revoke(inv)}
+                            disabled={revokingId === inv.id}
+                            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/15 dark:hover:text-red-400"
+                          >
+                            {revokingId === inv.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <MailX className="h-3.5 w-3.5" />
+                            )}
+                            Revoke
+                          </button>
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      <InviteModal open={inviteOpen} onOpenChange={setInviteOpen} onSent={loadInvites} />
       <div className="h-10" />
     </div>
   );
