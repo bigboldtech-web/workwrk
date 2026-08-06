@@ -101,6 +101,29 @@ export async function createUpdate(args: {
   };
 }
 
+export async function editUpdate(updateId: string, body: string): Promise<ThreadUpdate> {
+  const trimmed = body.trim();
+  if (!trimmed) throw new Error("Comment cannot be empty");
+  const updated = await prisma.itemUpdate.update({
+    where: { id: updateId },
+    data: { body: trimmed },
+  });
+  const author = updated.authorId
+    ? await prisma.user.findUnique({
+        where: { id: updated.authorId },
+        select: { id: true, firstName: true, lastName: true, avatar: true },
+      })
+    : null;
+  return {
+    id: updated.id,
+    body: updated.body,
+    authorId: updated.authorId,
+    author,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+  };
+}
+
 export async function deleteUpdate(updateId: string): Promise<void> {
   // Soft-delete via archivedAt so threads keep their structure if
   // someone restores; hard-delete only if the API decides to.
