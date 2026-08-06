@@ -30,9 +30,25 @@ import { BoardPivotView } from "./board-pivot-view";
 import { BoardCardsView } from "./board-cards-view";
 import { BoardActivityView } from "./board-activity-view";
 import { BoardItemDrawer } from "./board-item-drawer";
-import { applyFilters, parseFilters } from "./board-filter-bar";
+import {
+  FilterMenu,
+  applyFilters,
+  parseFilters,
+  parseSavedFilters,
+  serializeFilters,
+  type BoardFilters,
+  type SavedFilter,
+} from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
 import { BoardStatusEditor } from "./board-status-editor";
+import { useOsToast } from "@/components/layout/os/toast";
+
+// View types that render the (filterable) item list — only these get the
+// toolbar FilterMenu; content views (FORM / DOC / WHITEBOARD / …) don't.
+const FILTERABLE_VIEWS = new Set<ViewType>([
+  "TABLE", "KANBAN", "CALENDAR", "GANTT", "CHART", "DASHBOARD",
+  "WORKLOAD", "TIMELINE", "MAP", "HIERARCHY", "PIVOT", "CARDS",
+]);
 
 interface BoardCanvasProps {
   boardId: string;
@@ -62,6 +78,7 @@ interface BoardCanvasProps {
 
 export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating }: BoardCanvasProps) {
   const router = useRouter();
+  const { toast } = useOsToast();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [openItemId, setOpenItemId] = useState<string | null>(null);
@@ -127,14 +144,24 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     const raw = viewConfig?.extraColumns;
     return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [];
   });
-  const persistCols = useCallback((hiddenNext: string[], extraNext: string[]) => {
+  // Persist a partial config patch. The server PATCH replaces the whole
+  // config blob, so we merge into the SAME viewConfig object every
+  // persist path spreads from — otherwise the table's groupBy/colWidths
+  // saves and these column/filter saves would clobber each other's keys.
+  const persistViewConfig = useCallback((patch: Record<string, unknown>, label: string) => {
     if (!viewId) return;
+    Object.assign(viewConfig, patch);
     void fetch(`/api/boards/${boardId}/views/${viewId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ config: { ...(viewConfig ?? {}), hiddenFields: hiddenNext, extraColumns: extraNext } }),
-    }).catch(() => {});
-  }, [boardId, viewId, viewConfig]);
+      body: JSON.stringify({ config: { ...viewConfig } }),
+    })
+      .then((res) => { if (!res.ok) toast(`Couldn't save ${label}`); })
+      .catch(() => toast(`Couldn't save ${label}`));
+  }, [boardId, viewId, viewConfig, toast]);
+  const persistCols = useCallback((hiddenNext: string[], extraNext: string[]) => {
+    persistViewConfig({ hiddenFields: hiddenNext, extraColumns: extraNext }, "column layout");
+  }, [persistViewConfig]);
   const toggleHiddenField = useCallback((key: string) => {
     setHiddenFields((prev) => {
       const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
@@ -189,12 +216,34 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     } catch { /* best-effort */ }
   }, [boardId]);
 
-  // Per-view filters (View.config.filters), applied to every renderer. The
-  // search + filter UI was pulled out (it's moving to a new spot), so there's no
-  // live setter right now — the config-level filters still apply.
-  const filters = useMemo(() => parseFilters(viewConfig?.filters), [viewConfig]);
+  // Per-view filters (View.config.filters), applied to every item-driven
+  // renderer. Live state seeded from the saved config; every change
+  // persists back through the shared config PATCH. Saved filter sets
+  // (View.config.savedFilters) ride the same path.
+  const [filters, setFiltersState] = useState<BoardFilters>(() => parseFilters(viewConfig?.filters));
+  const [savedFilters, setSavedFiltersState] = useState<SavedFilter[]>(() => parseSavedFilters(viewConfig?.savedFilters));
+  const setFilters = useCallback((next: BoardFilters) => {
+    setFiltersState(next);
+    persistViewConfig({ filters: serializeFilters(next) }, "filters");
+  }, [persistViewConfig]);
+  const setSavedFilters = useCallback((next: SavedFilter[]) => {
+    setSavedFiltersState(next);
+    persistViewConfig({ savedFilters: next }, "saved filters");
+  }, [persistViewConfig]);
 
   const filteredItems = useMemo(() => applyFilters(items, filters, statuses), [items, filters, statuses]);
+
+  const filterMenu = FILTERABLE_VIEWS.has(viewType) ? (
+    <FilterMenu
+      filters={filters}
+      onChange={setFilters}
+      statuses={statuses}
+      items={items}
+      customFields={customFieldsOn ? fields : []}
+      savedFilters={savedFilters}
+      onSavedFiltersChange={viewId ? setSavedFilters : undefined}
+    />
+  ) : null;
 
   const handleItemChanged = useCallback((updated: BoardItemRow) => {
     setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
@@ -239,6 +288,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       {viewType !== "TABLE" ? (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <div className="flex-1" />
+          {filterMenu}
           {toolbarActions}
         </div>
       ) : null}
@@ -257,6 +307,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           onOpenFields={customFieldsOn ? () => setShelfOpen(true) : undefined}
           currentUserId={currentUserId}
           toolbarActions={toolbarActions}
+          filterSlot={filterMenu}
           hiddenBuiltins={tableHiddenBuiltins}
           extraColumns={extraColumns}
           onHideField={viewId ? toggleColumn : undefined}
