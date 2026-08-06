@@ -12,7 +12,7 @@
 // otherwise, and inline style beats the reset — same fix as ui/switch.
 
 import { useState } from "react";
-import { LayoutList, Lock } from "lucide-react";
+import { ChevronRight, LayoutList } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,8 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { useOsShell } from "./shell-context";
 
 interface FolderLike {
   id: string;
@@ -36,15 +38,21 @@ export function NewFolderDialog({
   open,
   onOpenChange,
   spaceId,
+  spaceName,
   parentFolderId,
+  parentFolderName,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   spaceId: string;
+  /** Display-only location breadcrumb (ClickUp shows "Space / Folder"). */
+  spaceName?: string;
   parentFolderId?: string | null;
+  parentFolderName?: string | null;
   onCreated?: (f: FolderLike) => void;
 }) {
+  const { openTemplateCenter } = useOsShell();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState<string | null>(null);
@@ -170,10 +178,19 @@ export function NewFolderDialog({
             />
           </div>
 
+          {/* Location breadcrumb — display-only, like ClickUp's "Space / Folder". */}
+          {spaceName ? (
+            <div className="flex items-center gap-1.5 text-[12px] text-zinc-500">
+              <EntityTile size="sm" icon={null} color={null} name={spaceName} />
+              <span className="truncate">{spaceName}</span>
+              {parentFolderName ? <span className="truncate"> / {parentFolderName}</span> : null}
+            </div>
+          ) : null}
+
           {/* Settings — Statuses (folders inherit the Space's statuses) */}
           <div>
             <div className="text-[12.5px] font-medium text-zinc-700 mb-1.5">Settings</div>
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200">
+            <div className="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 hover:bg-zinc-50 cursor-default transition-colors">
               <span className="w-8 h-8 rounded-md bg-zinc-100 flex items-center justify-center flex-shrink-0">
                 <LayoutList className="w-4 h-4 text-zinc-500" />
               </span>
@@ -181,18 +198,16 @@ export function NewFolderDialog({
                 <div className="text-[13px] font-medium text-zinc-800">Statuses</div>
                 <div className="text-[11.5px] text-zinc-500">Use Space statuses</div>
               </div>
+              <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
             </div>
           </div>
 
-          {/* Make private — a PRIVATE folder + its boards are visible only to
-              you and org admins. */}
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-md bg-zinc-100 flex items-center justify-center flex-shrink-0">
-              <Lock className="w-4 h-4 text-zinc-500" />
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="text-[13px] font-medium text-zinc-800">Make private</div>
-              <div className="text-[11.5px] text-zinc-500">Only you and invited members have access</div>
+          {/* Make private — plain title + toggle row, same pattern as the
+              List modal (no leading lock tile). */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <span className="text-[13px] font-medium text-zinc-800">Make private</span>
+              <span className="text-[11.5px] text-zinc-500">Only you and invited members have access</span>
             </div>
             <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make private" />
           </div>
@@ -200,24 +215,23 @@ export function NewFolderDialog({
           {error ? <div className="text-[12px] text-red-500">{error}</div> : null}
         </div>
 
-        {/* Footer */}
-        <div className="px-5 py-4 mt-3 border-t border-zinc-100 flex items-center justify-end gap-2">
+        {/* Footer — Use Templates left, dark Create right (X closes; no Cancel). */}
+        <div className="px-5 py-4 mt-3 border-t border-zinc-100 flex items-center justify-between">
           <button
             type="button"
-            onClick={() => handle(false)}
-            className="text-[12.5px] text-zinc-500 hover:text-zinc-900 px-3 h-8 rounded-md hover:bg-zinc-100"
+            onClick={() => { handle(false); openTemplateCenter({ kind: "FOLDER" }); }}
+            className="px-2.5 h-8 text-[12.5px] font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors"
             disabled={submitting}
           >
-            Cancel
+            Use Templates
           </button>
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !name.trim()}
-            style={{ backgroundColor: "var(--os-brand, #0073EA)" }}
-            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
           >
-            {submitting ? "Creating…" : "Create Folder"}
+            {submitting ? "Creating…" : "Create"}
           </button>
         </div>
       </DialogContent>

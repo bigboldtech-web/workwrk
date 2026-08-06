@@ -17,7 +17,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Info, Users } from "lucide-react";
-import { useOsShell } from "./shell-context";
+import { Switch } from "@/components/ui/switch";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
 import { SpaceWizardStep2, type Step2SubScreen, type UserOption } from "./space-wizard-step2";
@@ -212,7 +212,6 @@ function Step1({
   onCancel: () => void;
   onContinue: () => void;
 }) {
-  const { openTemplateCenter } = useOsShell();
   const showNameError = error === "Space name is required";
 
   return (
@@ -260,7 +259,7 @@ function Step1({
 
         <div>
           <label className="text-[12.5px] font-medium block mb-2">
-            Description <span className="text-muted">(optional)</span>
+            Description
           </label>
           <textarea
             value={state.description}
@@ -288,10 +287,10 @@ function Step1({
               <div className="text-[12.5px] font-medium">Make Private</div>
               <div className="text-[12px] text-muted">Only you and invited members have access</div>
             </div>
-            <Toggle
-              value={state.isPrivate}
+            <Switch
+              checked={state.isPrivate}
               onChange={(v) => onChange("isPrivate", v)}
-              accent={state.color}
+              aria-label="Make space private"
             />
           </label>
         </div>
@@ -301,31 +300,23 @@ function Step1({
         ) : null}
       </div>
 
-      <div className="px-6 py-4 mt-2 border-t border-border flex items-center justify-between">
+      {/* ClickUp's Space modal footer: Cancel + fixed dark Continue pill,
+          right-aligned (templates enter via the "+" menu, not here). */}
+      <div className="px-6 py-4 mt-2 border-t border-border flex items-center justify-end gap-2">
         <button
           type="button"
-          onClick={() => { onCancel(); openTemplateCenter({ kind: "SPACE" }); }}
-          className="text-[12.5px] text-muted hover:text-foreground transition-colors"
+          onClick={onCancel}
+          className="text-[12.5px] text-muted hover:text-foreground px-3 h-8 rounded-md"
         >
-          Use Templates
+          Cancel
         </button>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="text-[12.5px] text-muted hover:text-foreground px-3 h-8 rounded-md"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onContinue}
-            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white transition hover:opacity-90"
-            style={{ backgroundColor: state.color }}
-          >
-            Continue
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onContinue}
+          className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 transition-colors"
+        >
+          Continue
+        </button>
       </div>
     </>
   );
@@ -353,35 +344,3 @@ function PermissionSelect({
   );
 }
 
-function Toggle({
-  value,
-  onChange,
-  accent,
-}: {
-  value: boolean;
-  onChange: (v: boolean) => void;
-  accent: string;
-}) {
-  return (
-    <span
-      role="switch"
-      aria-checked={value}
-      tabIndex={0}
-      onClick={() => onChange(!value)}
-      onKeyDown={(e) => {
-        if (e.key === " " || e.key === "Enter") {
-          e.preventDefault();
-          onChange(!value);
-        }
-      }}
-      className="relative inline-flex w-7 h-4 rounded-full transition-colors cursor-pointer"
-      style={{ backgroundColor: value ? accent : "#d4d4d8" }}
-    >
-      <span
-        className={`absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform ${
-          value ? "translate-x-3.5" : "translate-x-0.5"
-        }`}
-      />
-    </span>
-  );
-}

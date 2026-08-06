@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Trophy, Rocket, Timer, ChevronDown, Check, Loader2, Boxes } from "lucide-react";
+import { X, ChevronDown, Check, Loader2, Boxes } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { useOsShell } from "./shell-context";
@@ -13,6 +13,7 @@ export function CreateListModal() {
   const { createListOpen, closeCreateList, openTemplateCenter, createListPreselect } = useOsShell();
   const router = useRouter();
   const [listName, setListName] = useState("");
+  const [description, setDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [spaceId, setSpaceId] = useState<string>("");
@@ -48,7 +49,7 @@ export function CreateListModal() {
   // the form is clean on the next open (the component stays mounted).
   const doClose = () => {
     loadedRef.current = false;
-    setListName(""); setIsPrivate(false); setSpaceId(""); setError(null); setBusy(false); setSpaceMenuOpen(false);
+    setListName(""); setDescription(""); setIsPrivate(false); setSpaceId(""); setError(null); setBusy(false); setSpaceMenuOpen(false);
     closeCreateList();
   };
 
@@ -68,6 +69,7 @@ export function CreateListModal() {
           // When opened from a Folder page, drop the new List into that folder.
           ...(createListPreselect?.folderId ? { folderId: createListPreselect.folderId } : {}),
           name: listName.trim(),
+          ...(description.trim() ? { description: description.trim() } : {}),
           visibility: isPrivate ? "PRIVATE" : "WORKSPACE",
         }),
       });
@@ -94,24 +96,14 @@ export function CreateListModal() {
         aria-modal="true"
         aria-labelledby="create-list-title"
       >
-        {/* Header */}
+        {/* Header — ClickUp's Create List modal: title + subtitle, no
+            invented template chips (templates enter via the footer). */}
         <div className="px-5 pt-5 pb-3 flex items-start justify-between">
-          <div className="flex flex-col gap-2.5">
-            <h2 id="create-list-title" className="text-[15px] font-semibold text-zinc-900">Create List</h2>
-            <div className="flex items-center gap-1.5">
-              {/* Quick-start template chips → Template Center (List filter). */}
-              <button type="button" onClick={browseTemplates} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-zinc-200 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
-                <Trophy className="w-3.5 h-3.5" /> Goals
-              </button>
-              <button type="button" onClick={browseTemplates} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-zinc-200 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
-                <Rocket className="w-3.5 h-3.5" /> Roadmap
-              </button>
-              <button type="button" onClick={browseTemplates} className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full border border-zinc-200 text-[12.5px] font-medium text-zinc-600 hover:bg-zinc-50 transition-colors">
-                <Timer className="w-3.5 h-3.5" /> Tracker
-              </button>
-            </div>
+          <div>
+            <h2 id="create-list-title" className="text-[16px] font-semibold text-zinc-900">Create List</h2>
+            <p className="text-[12.5px] text-zinc-500 mt-1">All Lists are located within a Space. Lists can house any type of task.</p>
           </div>
-          <button type="button" onClick={doClose} className="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-zinc-500 hover:bg-zinc-200 transition-colors shrink-0">
+          <button type="button" onClick={doClose} className="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -122,7 +114,7 @@ export function CreateListModal() {
         <div className="px-5 py-3 flex flex-col gap-4">
           {/* Name */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12.5px] font-medium text-zinc-700">Name <span className="text-red-500">*</span></label>
+            <label className="text-[12.5px] font-medium text-zinc-700">Name</label>
             <input
               type="text"
               value={listName}
@@ -130,13 +122,25 @@ export function CreateListModal() {
               onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
               placeholder="Your list or project name"
               autoFocus
-              className="w-full h-8 px-3 text-[13px] bg-white border border-[var(--os-brand)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
+              className="w-full h-8 px-3 text-[13px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
+            />
+          </div>
+
+          {/* Description */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[12.5px] font-medium text-zinc-700">Description</label>
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Add a description"
+              className="w-full h-8 px-3 text-[13px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
             />
           </div>
 
           {/* Space (location) picker */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12.5px] font-medium text-zinc-700">Space (location) <span className="text-red-500">*</span></label>
+            <label className="text-[12.5px] font-medium text-zinc-700">Space (location)</label>
             <div className="relative">
               <button
                 type="button"
@@ -188,12 +192,12 @@ export function CreateListModal() {
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="px-5 pt-2 pb-5 flex items-center justify-between bg-white">
-          <button type="button" onClick={browseTemplates} className="px-3 h-8 text-[12.5px] font-medium text-zinc-600 bg-white border border-zinc-200 rounded-md hover:bg-zinc-50 transition-colors">
+        {/* Footer — divider band, text-button Templates, dark Create pill. */}
+        <div className="px-5 pt-3 pb-4 mt-1 border-t border-zinc-100 flex items-center justify-between bg-white">
+          <button type="button" onClick={browseTemplates} className="px-2.5 h-8 text-[12.5px] font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors">
             Use Templates
           </button>
-          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50">
+          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Create
           </button>
         </div>
