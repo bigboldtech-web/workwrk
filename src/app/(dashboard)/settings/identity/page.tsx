@@ -7,13 +7,10 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import {
-  Building, Save, Globe, Calendar as CalendarIcon, Coins, Image as ImageIcon,
-  Hash, CheckCircle2,
+  Building, Globe, Calendar as CalendarIcon, Coins, Image as ImageIcon,
+  CheckCircle2,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Identity = {
@@ -85,20 +82,24 @@ export default function IdentitySettingsPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Identity"
-        Icon={Building}
-        iconGradient={GRAD.indigoBlue}
-        description={data?.orgName ? `${data.orgName}${lastSaved ? ` · saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Configure org identity"}
-        actions={
-          <div className="idn__head-actions">
-            <Link href="/settings" className="idn__nav-link"><Hash /> Settings</Link>
-            <button type="button" className="idn__btn-primary" onClick={save} disabled={saving || data === null}>
-              <Save /> {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
-        }
-      />
+      {/* Plain settings header (ClickUp pages carry no icon tiles/gradients);
+          Save is the shipped dark pill with ClickUp's copy. */}
+      <div className="flex items-start justify-between px-6 pb-2 pt-6">
+        <div>
+          <h1 className="text-[16px] font-bold text-zinc-900">Workspace identity</h1>
+          <p className="mt-0.5 text-[12px] text-zinc-500">
+            {data?.orgName ? `${data.orgName}${lastSaved ? ` · saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Name, logo, locale, and fiscal year."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || data === null}
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save changes"}
+        </button>
+      </div>
 
       <div className="idn">
         {data === null ? (

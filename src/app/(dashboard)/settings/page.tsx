@@ -101,7 +101,7 @@ export default function SettingsPage() {
           href: "/settings",
           title: "Plan & billing",
           description: "Current subscription and billing details.",
-          Icon: Award, color: C.purple,
+          Icon: Award, color: C.blue,
           fields: [
             { label: "Plan", value: org?.plan ?? "Starter" },
             { label: "Status", value: org?.status ?? "Active" },
@@ -117,7 +117,7 @@ export default function SettingsPage() {
           href: "/settings",
           title: "Enabled modules",
           description: "Turn WorkwrK apps on or off for your team.",
-          Icon: Boxes, color: C.indigo,
+          Icon: Boxes, color: C.blue,
           fields: [
             { label: "Active", value: `${moduleCount} modules` },
             { label: "Team size", value: set.teamSize ?? "—" },
@@ -127,14 +127,14 @@ export default function SettingsPage() {
           href: "/settings/tags",
           title: "Tags & labels",
           description: "Shared taxonomy across boards, tasks, and SOPs.",
-          Icon: Tag, color: C.pink,
+          Icon: Tag, color: C.blue,
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
           href: "/settings/task-types",
           title: "Task types",
           description: "Re-skin tasks as Milestones, Bugs, Deals & more.",
-          Icon: Shapes, color: C.indigo,
+          Icon: Shapes, color: C.blue,
           fields: [{ label: "Manage", value: "Open" }],
         },
         {
@@ -160,14 +160,14 @@ export default function SettingsPage() {
           href: "/settings/scoring",
           title: "Review cadence",
           description: "Weekly, monthly, quarterly & annual review rhythms.",
-          Icon: Sparkles, color: C.pink,
+          Icon: Sparkles, color: C.blue,
           fields: [{ label: "Frequency", value: set.reviewFrequency ?? "Quarterly" }],
         },
         {
           href: "/settings/scoring",
           title: "Score weights",
           description: "Weight each metric for composite performance scoring.",
-          Icon: BarChart3, color: C.purple,
+          Icon: BarChart3, color: C.blue,
           fields: set.scoreWeights
             ? Object.entries(set.scoreWeights).slice(0, 3).map(([k, v]) => ({ label: k, value: `${v}%` }))
             : [{ label: "Weights", value: "Default" }],
@@ -176,7 +176,7 @@ export default function SettingsPage() {
           href: "/settings/scoring",
           title: "Performance bands",
           description: "Ranges that map composite scores to labels (e.g. 'Strong').",
-          Icon: Award, color: C.indigo,
+          Icon: Award, color: C.blue,
           fields: [{ label: "Bands", value: `${set.scoringBands?.length ?? 0} configured` }],
         },
       ],
@@ -235,7 +235,7 @@ export default function SettingsPage() {
           href: "/analytics",
           title: "AI usage",
           description: "Sidekick + agent queries this billing period.",
-          Icon: Sparkles, color: C.purple,
+          Icon: Sparkles, color: C.blue,
           fields: [{ label: "AI queries", value: `${usage.aiQueries ?? 0}` }],
         },
       ],
@@ -245,8 +245,8 @@ export default function SettingsPage() {
   return (
     <>
       <div className="px-6 pb-2 pt-6">
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Overview</h1>
-        <p className="mt-0.5 text-[13px] text-zinc-500">
+        <h1 className="text-[16px] font-bold text-zinc-900">Overview</h1>
+        <p className="mt-0.5 text-[12px] text-zinc-500">
           {data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
         </p>
       </div>

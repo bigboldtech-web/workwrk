@@ -86,11 +86,10 @@ export default function MembersPage() {
 
   return (
     <div className="px-6 pt-6">
-      <header className="mb-1 flex items-center gap-2">
-        <Users className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Members</h1>
+      <header className="mb-1">
+        <h1 className="text-[16px] font-bold text-zinc-900">Members</h1>
       </header>
-      <p className="mb-4 text-[13px] text-zinc-500">
+      <p className="mb-4 text-[12px] text-zinc-500">
         Set each person’s access level and who they report to.
         {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
       </p>
