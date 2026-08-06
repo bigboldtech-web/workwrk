@@ -15,7 +15,7 @@ import {
   Plus, ChevronDown, ChevronRight, Pin, Star, X,
   Megaphone, Briefcase, BookOpen, Wrench, Building2,
   HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
-  HardDrive, Boxes,
+  HardDrive, Boxes, Layers,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   ShieldCheck, FileSignature,
@@ -770,6 +770,7 @@ function HomeSidebar() {
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
+        <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
         <MoreNavItem />
       </ul>
 

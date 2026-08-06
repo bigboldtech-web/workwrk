@@ -84,6 +84,9 @@ interface BoardTableViewProps {
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
    *  full-cell colored status fills + always-on group summary. */
   gridStyle?: "list" | "table";
+  /** Everything view — renders after the title inside the Name cell
+   *  (e.g. the source-List chip on cross-board surfaces). */
+  renderTitleSuffix?: (row: BoardItemRow) => React.ReactNode;
 }
 
 /** Patch shape rows can emit. `owner`/`tags` only update the local
@@ -234,7 +237,7 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, timeTrackingEnabled = true, gridStyle = "list" }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // Custom-field columns, ordered by their saved `position` (matches the Fields
@@ -1162,6 +1165,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onArchive={handleArchive}
         onDeleted={(id) => setItems((prev) => prev.filter((r) => r.id !== id))}
         timeTrackingEnabled={timeTrackingEnabled}
+        titleSuffix={renderTitleSuffix?.(row)}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}
         onDuplicate={handleDuplicate}
         onAddSubtask={() => {
@@ -1510,6 +1514,7 @@ function Row({
   onArchive,
   onDeleted,
   timeTrackingEnabled = true,
+  titleSuffix,
   onOpen,
   onDuplicate,
   onAddSubtask,
@@ -1553,6 +1558,8 @@ function Row({
   onUpdate: (id: string, patch: RowPatch) => void;
   onArchive: (id: string) => void;
   timeTrackingEnabled?: boolean;
+  /** Rendered after the title inside the Name cell (source-List chip). */
+  titleSuffix?: React.ReactNode;
   /** Local removal after a hard delete (→ Trash) succeeds. */
   onDeleted: (id: string) => void;
   onOpen?: () => void;
@@ -1654,6 +1661,7 @@ function Row({
           <div className="flex-1 min-w-0">
             <TitleCell row={row} canEdit={canEdit} onUpdate={onUpdate} onOpen={onOpen} editToken={editToken} />
           </div>
+          {titleSuffix}
           <RowHoverActions
             canEdit={canEdit}
             tags={row.tags ?? []}
