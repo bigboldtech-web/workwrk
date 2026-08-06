@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Link as LinkIcon, Sparkles, Loader2, Table as TableIcon,
+  Link as LinkIcon, Sparkles, Loader2, Table as TableIcon,
   ImagePlus, Smile, Trash2, MessageSquare, ListTree, X, Send, Star,
   ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
   MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
@@ -89,7 +89,9 @@ function htmlToBlocks(html: string): Block[] {
 
 // Curated gradient palette — matches the rest of the OS shell tone-set.
 const COVER_GRADIENTS: { key: string; label: string; css: string }[] = [
-  { key: "indigo",  label: "Indigo",  css: "linear-gradient(135deg, #6366f1, #8b5cf6)" },
+  // key stays "indigo" so saved docs keep their cover; values are brand blue
+  // now (violet is off-palette).
+  { key: "indigo",  label: "Blue",    css: "linear-gradient(135deg, #0073EA, #4BA3F5)" },
   { key: "blue",    label: "Blue",    css: "linear-gradient(135deg, #2563eb, #06b6d4)" },
   { key: "teal",    label: "Teal",    css: "linear-gradient(135deg, #14b8a6, #22c55e)" },
   { key: "amber",   label: "Amber",   css: "linear-gradient(135deg, #f59e0b, #ef4444)" },
@@ -637,27 +639,35 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       ].filter(Boolean).join(" ")}
     >
       <header className="bdoc__head">
-        {/* Peek panes have no back button — the surrounding DocSplitView
-            provides Close + Swap controls instead. */}
+        {/* ClickUp breadcrumb: "Docs / [icon] Title ☆" on the left. Peek
+            panes keep it minimal — DocSplitView provides Close + Swap. */}
         {pane !== "peek" && (
-          <button type="button" className="bdoc__back" onClick={() => router.back()} aria-label="Back">
-            <ArrowLeft />
-          </button>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Link href="/docs" className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
+              Docs
+            </Link>
+            <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
+            <span className="inline-flex h-[15px] w-[15px] shrink-0 items-center justify-center [&_svg]:h-[15px] [&_svg]:w-[15px]">
+              {meta.icon ? renderNoteIcon(meta.icon) : <FileText className="text-[var(--os-ink-3)]" />}
+            </span>
+            <span className="truncate max-w-[320px] text-[13px] font-semibold text-[var(--os-ink)]">
+              {title || "Untitled note"}
+            </span>
+            <button
+              type="button"
+              onClick={toggleFavorite}
+              title={favorited ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={!!favorited}
+              aria-label="Favorite"
+              className={`h-6 w-6 grid place-items-center rounded-md shrink-0 hover:bg-[var(--os-surface-1)] ${favorited ? "text-amber-500" : "text-[var(--os-ink-3)]"}`}
+            >
+              <Star className={`h-3.5 w-3.5 ${favorited ? "fill-amber-400" : ""}`} />
+            </button>
+          </div>
         )}
 
-        {/* Tight, icon-only action bar. Primary controls inline; the rest
-            tuck under a More menu so the header never looks crowded. */}
+        {/* Right cluster: labeled Ask + dark Share, then quiet icon controls. */}
         <div className="bdoc__head-actions">
-          <button
-            type="button"
-            className={`bdoc__iact ${favorited ? "is-on" : ""}`}
-            onClick={toggleFavorite}
-            title={favorited ? "Remove from favorites" : "Add to favorites"}
-            aria-pressed={!!favorited}
-            aria-label="Favorite"
-          >
-            <Star />
-          </button>
           <button
             type="button"
             className={`bdoc__iact ${readingMode ? "is-on" : ""}`}
@@ -679,14 +689,22 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <ListTree />
           </button>
           <span className="bdoc__iact-sep" aria-hidden />
+          {/* ClickUp order: labeled Ask ghost + dark Share pill, then icons. */}
           <button
             type="button"
-            className={`bdoc__iact ${panel?.kind === "ask" ? "is-on" : ""}`}
             onClick={() => setPanel(panel?.kind === "ask" ? null : { kind: "ask" })}
             title="Chat with this note"
-            aria-label="Ask"
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-semibold hover:bg-[var(--os-surface-1)] ${panel?.kind === "ask" ? "text-[var(--os-brand)]" : "text-[var(--os-ink-2)]"}`}
           >
-            <MessageSquare />
+            <Sparkles className="h-3.5 w-3.5" /> Ask
+          </button>
+          <button
+            type="button"
+            onClick={copyLink}
+            title="Share (copies link)"
+            className="inline-flex h-7 items-center rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
+          >
+            Share
           </button>
           <button
             type="button"
@@ -696,15 +714,6 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             aria-label="History"
           >
             <History />
-          </button>
-          <button
-            type="button"
-            className="bdoc__iact"
-            onClick={copyLink}
-            title="Copy link"
-            aria-label="Copy link"
-          >
-            <LinkIcon />
           </button>
 
           {/* Open another doc in a side pane. Hidden on peek panes — the
@@ -1194,29 +1203,20 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
     return { words, minutes };
   }, [blocks]);
 
-  // Capture "now" once at mount (lazy init) so the render path stays pure —
-  // a relative timestamp doesn't need to re-tick every render.
-  const [now] = useState(() => Date.now());
+  // ClickUp's owner row: "Last updated Today at 9:51 pm" (absolute, not
+  // relative). Same-day shows "Today at h:mm"; older shows "Mon D at h:mm".
   const updated = useMemo(() => {
     const d = new Date(doc.updatedAt);
-    const diff = now - d.getTime();
-    const mins = Math.floor(diff / 60_000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ago`;
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  }, [doc.updatedAt, now]);
+    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    if (d.toDateString() === new Date().toDateString()) return `Today at ${time}`;
+    return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${time}`;
+  }, [doc.updatedAt]);
 
   return (
     <div className="bdoc__meta mb-6!">
+      <span>Last updated {updated}</span>
+      <span className="bdoc__meta-sep" aria-hidden>·</span>
       <span>{stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}</span>
-      <span className="bdoc__meta-sep" aria-hidden>·</span>
-      <span>{stats.minutes} min read</span>
-      <span className="bdoc__meta-sep" aria-hidden>·</span>
-      <span>Edited {updated}</span>
     </div>
   );
 }
