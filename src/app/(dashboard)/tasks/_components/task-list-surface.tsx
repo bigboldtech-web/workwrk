@@ -943,7 +943,7 @@ export function TaskListSurface({
                 type="button"
                 className={`inline-flex h-6 items-center gap-1.5 rounded-full !px-2.5 text-[11px] font-medium ${
                   groupMenuOpen || groupBy !== "none"
-                    ? "border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] text-[var(--os-brand-rail)]"
+                    ? "border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] text-[var(--os-brand-ink)]"
                     : "text-zinc-600 hover:bg-zinc-100"
                 }`}
                 onClick={() => setGroupMenuOpen((open) => !open)}
@@ -2345,7 +2345,7 @@ function TaskTypeMenu({
             >
               <option.Icon className="h-3.5 w-3.5 text-zinc-500" />
               <span className="flex-1">{option.label}</span>
-              {value === option.label ? <Check className="h-4 w-4 text-[var(--os-brand-rail)]" /> : null}
+              {value === option.label ? <Check className="h-4 w-4 text-[var(--os-brand-ink)]" /> : null}
             </button>
           ))}
         </div>
@@ -2425,7 +2425,7 @@ function AssigneeMenu({
             className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-400"
             disabled
           >
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-rail)]">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-ink)]">
               <Plus className="h-3.5 w-3.5" />
             </span>
             Create Agent
@@ -2464,7 +2464,7 @@ function DateMenu({ onSelect, onClose }: { onSelect: (label: string, isoDate: st
             Start date
           </button>
           <button type="button" className="ml-1.5 flex h-7 items-center gap-2 rounded-md border border-[var(--os-brand-rail)] bg-white !px-2.5 text-[12px] text-zinc-700">
-            <CalendarDays className="h-3.5 w-3.5 text-[var(--os-brand-rail)]" />
+            <CalendarDays className="h-3.5 w-3.5 text-[var(--os-brand-ink)]" />
             Due date
           </button>
         </div>
@@ -2661,7 +2661,7 @@ function BoardMode({
       <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
-          className="inline-flex h-6 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] !px-2 text-[11px] font-medium text-[var(--os-brand-rail)]"
+          className="inline-flex h-6 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] !px-2 text-[11px] font-medium text-[var(--os-brand-ink)]"
         >
           <Columns3 className="h-3.5 w-3.5" />
           Status
@@ -4790,7 +4790,7 @@ function FilterMenu({
         )}
 
         <div className="mt-2 flex items-center justify-between">
-          <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--os-brand-rail)] hover:opacity-80" onClick={addFilter}>
+          <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--os-brand-ink)] hover:opacity-80" onClick={addFilter}>
             <Plus className="h-3.5 w-3.5" /> Add filter
           </button>
           {filters.length > 0 ? (
@@ -5280,7 +5280,7 @@ function renderTaskValue(task: TaskItem, column: ColumnDef) {
     case "linkedDocs":
     case "notes":
       return (
-        <button type="button" className="text-zinc-400 hover:text-[var(--os-brand-rail)]">
+        <button type="button" className="text-zinc-400 hover:text-[var(--os-brand-ink)]">
           Add note
         </button>
       );

@@ -94,7 +94,7 @@ export function ViewTab({
       <span className="truncate">{label}</span>
       {trailing}
       {active ? (
-        <span className="pointer-events-none absolute -bottom-px left-2 right-2 h-[2px] rounded-full bg-zinc-900" />
+        <span className="pointer-events-none absolute -bottom-px left-2 right-2 h-[2px] rounded-full bg-zinc-900 dark:bg-zinc-100" />
       ) : null}
     </>
   );

@@ -115,7 +115,7 @@ const QUICK_CHIPS: { key: string; label: string }[] = [
 
 // Shared micro-styles.
 const LABEL = "text-[10.5px] font-medium uppercase tracking-wide text-zinc-400";
-const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700 outline-none focus:border-[var(--os-brand)] transition-colors";
+const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700 outline-none dark:bg-[#1B1F26] dark:border-[#2A2F38] dark:text-zinc-200 focus:border-[var(--os-brand)] transition-colors";
 
 export function DatePlanner({
   item, canEdit, onPatch, statuses = [], compact = false, done = false,
@@ -262,7 +262,7 @@ export function DatePlanner({
             <div
               ref={panelRef}
               style={{ position: "fixed", top: pos.top, left: pos.left, width: PANEL_WIDTH, maxHeight: "78vh" }}
-              className="z-[120] rounded-xl bg-white border border-zinc-200 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col"
+              className="z-[120] rounded-xl bg-white dark:bg-[#14171D] border border-zinc-200 dark:border-[#2A2F38] dark:text-zinc-200 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col"
               // Keep popover interactions from bubbling (React tree) to the row /
               // card that hosts this planner — otherwise a click here can trigger
               // the ancestor's open/select handlers.

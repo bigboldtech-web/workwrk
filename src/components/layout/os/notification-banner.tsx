@@ -57,6 +57,8 @@ export function NotificationBanner() {
       className="flex-shrink-0 h-10 flex items-center px-4 gap-3 text-[13px]"
       style={{
         background: "color-mix(in srgb, var(--os-brand-rail) 14%, white)",
+        // Banner bg hardcodes a white-mixed base, so rail (dark) text stays
+        // readable in BOTH themes — do not swap to --os-brand-ink here.
         color: "var(--os-brand-rail)",
         borderBottom: "1px solid color-mix(in srgb, var(--os-brand-rail) 20%, transparent)",
       }}
@@ -79,7 +81,7 @@ export function NotificationBanner() {
         type="button"
         onClick={remind}
         className="px-3 py-1 rounded-md text-[12px] font-medium hover:bg-black/5 transition-colors"
-        style={{ color: "var(--os-brand-rail)" }}
+        style={{ color: "var(--os-brand-ink)" }}
       >
         Remind me
       </button>

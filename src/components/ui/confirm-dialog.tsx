@@ -40,7 +40,7 @@ export function ConfirmDialog({
           <div className="flex items-center gap-3">
             {destructive && (
               <div className="h-10 w-10 rounded-xl bg-[rgba(255,61,138,0.1)] border border-[rgba(255,61,138,0.3)] flex items-center justify-center shrink-0">
-                <AlertTriangle size={18} className="text-[#ff3d8a]" />
+                <AlertTriangle size={18} className="text-[#E2445C]" />
               </div>
             )}
             <div>

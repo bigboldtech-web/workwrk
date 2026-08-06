@@ -224,7 +224,7 @@ export default function InboxPage() {
               aria-haspopup="menu"
               className={`inline-flex items-center gap-1.5 h-6 !px-2 rounded-md text-[12px] border hover:bg-zinc-50 transition-colors ${
                 filterOpen || filterType
-                  ? "bg-zinc-100 border-[var(--os-brand-rail)] text-[var(--os-brand-rail)] font-medium"
+                  ? "bg-zinc-100 border-[var(--os-brand-rail)] text-[var(--os-brand-ink)] dark:border-zinc-500 font-medium"
                   : "bg-white border-zinc-200 text-zinc-600"
               }`}
             >
@@ -367,10 +367,10 @@ function InboxFilterMenu({
               onClose();
             }}
             className={`flex w-full items-center gap-3 !px-4 py-2 text-left text-[13px] hover:bg-zinc-50 ${
-              label === filterType ? "text-[var(--os-brand-rail)] font-medium bg-zinc-50" : "text-zinc-800"
+              label === filterType ? "text-[var(--os-brand-ink)] font-medium bg-zinc-50" : "text-zinc-800"
             }`}
           >
-            <Icon className={`h-4 w-4 ${label === filterType ? "text-[var(--os-brand-rail)]" : "text-zinc-500"}`} />
+            <Icon className={`h-4 w-4 ${label === filterType ? "text-[var(--os-brand-ink)]" : "text-zinc-500"}`} />
             <span className="flex-1">{label}</span>
             <span className="text-[11px] text-zinc-400">⇧{shortcut}</span>
           </button>
@@ -514,11 +514,11 @@ function DisplayModeCard({
       <span
         className={`relative flex h-[112px] items-center justify-center rounded-lg border ${
           active
-            ? "border-[var(--os-brand-rail)] bg-[color-mix(in_srgb,var(--os-brand-rail)_6%,white)]"
+            ? "border-[var(--os-brand-rail)] bg-[color-mix(in_srgb,var(--os-brand-rail)_6%,white)] dark:border-zinc-500 dark:bg-white/5"
             : "border-zinc-200 bg-white hover:border-zinc-300"
         }`}
       >
-        <Icon className={`h-12 w-12 ${active ? "text-[var(--os-brand-rail)]" : "text-zinc-300"}`} />
+        <Icon className={`h-12 w-12 ${active ? "text-[var(--os-brand-ink)]" : "text-zinc-300"}`} />
         <span
           className={`absolute right-3 top-3 flex h-4 w-4 items-center justify-center rounded-full border ${
             active
@@ -701,7 +701,7 @@ function NotifEntry({
       <span className="text-[13px] font-medium text-zinc-800 truncate shrink-0 max-w-[38%]">{n.title}</span>
       <v.Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       {n.message ? (
-        <p className={`flex-1 min-w-0 truncate text-[13px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-rail)] dark:text-blue-400" : "text-zinc-500"}`}>
+        <p className={`flex-1 min-w-0 truncate text-[13px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-ink)]" : "text-zinc-500"}`}>
           {n.message}
         </p>
       ) : (

@@ -819,7 +819,7 @@ export function OsCommandPalette() {
                 onClick={() => toggleType(f.key)}
 	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border transition-colors ${
                   on
-                    ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
+                    ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)] dark:border-transparent dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] dark:text-zinc-100"
                     : "border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                 }`}
                 aria-pressed={on}

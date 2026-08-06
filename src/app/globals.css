@@ -37,13 +37,13 @@
   --color-border: #DADAD7;
   --color-muted: #707070;
   --color-muted-2: #9A9A9A;
-  --color-accent: #7c3aed;           /* violet-600 — primary fill */
-  --color-accent-light: #8b5cf6;     /* violet-500 — hover */
-  --accent: #7c3aed;
-  --accent-strong: #6d28d9;
-  --accent-soft: rgba(124, 58, 237, 0.10);
+  --color-accent: #0073EA;           /* brand blue — primary fill */
+  --color-accent-light: #3B8EEF;     /* hover */
+  --accent: #0073EA;
+  --accent-strong: #0060B9;
+  --accent-soft: rgba(0, 115, 234, 0.10);
   --accent-contrast: #ffffff;
-  --accent-glow: 0 4px 14px -4px rgba(124, 58, 237, 0.35);
+  --accent-glow: 0 4px 14px -4px rgba(0, 115, 234, 0.35);
 
   /* New: explicit surface + elevated. surface-2 stays as legacy alias. */
   --surface: #F7F7F6;
@@ -504,25 +504,31 @@ body {
  * white canvas a white-on-white border vanishes. Remap the alpha
  * variants to subtle black so the structure shows through. */
 
-:root:not(.dark) [class*="border-white/5"] { border-color: rgba(0, 0, 0, 0.06) !important; }
-:root:not(.dark) [class*="border-white/10"] { border-color: rgba(0, 0, 0, 0.08) !important; }
-:root:not(.dark) [class*="border-white/15"] { border-color: rgba(0, 0, 0, 0.1) !important; }
-:root:not(.dark) [class*="border-white/20"] { border-color: rgba(0, 0, 0, 0.12) !important; }
+/* Exact-class selectors, NOT [class*=] substrings: the substring form
+ * also matched `dark:bg-white/10`, `dark:hover:bg-white/5`, `bg-white/50`
+ * etc., painting permanent black-alpha fills on clean light-mode UI
+ * (dead rail hovers, tinted rows, corrupted Today buttons). A CSS class
+ * selector matches whole class tokens only, so variant-prefixed
+ * compounds no longer collide. */
+:root:not(.dark) .border-white\/5 { border-color: rgba(0, 0, 0, 0.06) !important; }
+:root:not(.dark) .border-white\/10 { border-color: rgba(0, 0, 0, 0.08) !important; }
+:root:not(.dark) .border-white\/15 { border-color: rgba(0, 0, 0, 0.1) !important; }
+:root:not(.dark) .border-white\/20 { border-color: rgba(0, 0, 0, 0.12) !important; }
 
-:root:not(.dark) [class*="divide-white/5"] > * + * { border-color: rgba(0, 0, 0, 0.06) !important; }
-:root:not(.dark) [class*="divide-white/10"] > * + * { border-color: rgba(0, 0, 0, 0.08) !important; }
+:root:not(.dark) .divide-white\/5 > * + * { border-color: rgba(0, 0, 0, 0.06) !important; }
+:root:not(.dark) .divide-white\/10 > * + * { border-color: rgba(0, 0, 0, 0.08) !important; }
 
-:root:not(.dark) [class*="bg-white/[0.02]"] { background-color: rgba(0, 0, 0, 0.02) !important; }
-:root:not(.dark) [class*="bg-white/[0.03]"] { background-color: rgba(0, 0, 0, 0.025) !important; }
-:root:not(.dark) [class*="bg-white/[0.04]"] { background-color: rgba(0, 0, 0, 0.03) !important; }
-:root:not(.dark) [class*="bg-white/[0.05]"] { background-color: rgba(0, 0, 0, 0.04) !important; }
-:root:not(.dark) [class*="bg-white/5"] { background-color: rgba(0, 0, 0, 0.04) !important; }
-:root:not(.dark) [class*="bg-white/10"] { background-color: rgba(0, 0, 0, 0.06) !important; }
+:root:not(.dark) .bg-white\/\[0\.02\] { background-color: rgba(0, 0, 0, 0.02) !important; }
+:root:not(.dark) .bg-white\/\[0\.03\] { background-color: rgba(0, 0, 0, 0.025) !important; }
+:root:not(.dark) .bg-white\/\[0\.04\] { background-color: rgba(0, 0, 0, 0.03) !important; }
+:root:not(.dark) .bg-white\/\[0\.05\] { background-color: rgba(0, 0, 0, 0.04) !important; }
+:root:not(.dark) .bg-white\/5 { background-color: rgba(0, 0, 0, 0.04) !important; }
+:root:not(.dark) .bg-white\/10 { background-color: rgba(0, 0, 0, 0.06) !important; }
 
-:root:not(.dark) [class*="hover:bg-white/[0.02]"]:hover { background-color: rgba(0, 0, 0, 0.025) !important; }
-:root:not(.dark) [class*="hover:bg-white/[0.04]"]:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
-:root:not(.dark) [class*="hover:bg-white/5"]:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
-:root:not(.dark) [class*="hover:bg-white/10"]:hover { background-color: rgba(0, 0, 0, 0.06) !important; }
+:root:not(.dark) .hover\:bg-white\/\[0\.02\]:hover { background-color: rgba(0, 0, 0, 0.025) !important; }
+:root:not(.dark) .hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
+:root:not(.dark) .hover\:bg-white\/5:hover { background-color: rgba(0, 0, 0, 0.04) !important; }
+:root:not(.dark) .hover\:bg-white\/10:hover { background-color: rgba(0, 0, 0, 0.06) !important; }
 
 /* ================================================================
  * Mobile table responsiveness.

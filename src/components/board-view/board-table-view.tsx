@@ -1267,7 +1267,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             onClick={() => setMineOnly((v) => !v)}
             title={mineOnly ? "Showing your tasks" : "Show only my tasks"}
             aria-pressed={mineOnly}
-            className={`inline-flex items-center justify-center w-7 h-7 rounded-md ${mineOnly ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)]" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"}`}
+            className={`inline-flex items-center justify-center w-7 h-7 rounded-md ${mineOnly ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] dark:text-zinc-100 dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)]" : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"}`}
           >
             <UserCheck className="w-4 h-4" />
           </button>
@@ -2831,7 +2831,7 @@ function RowHoverActions({ canEdit, tags, isSubtask, onAddSubtask, onTagsChange,
   onRename: () => void;
 }) {
   if (!canEdit) return null;
-  const box = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-200 bg-white shadow-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors";
+  const box = "inline-flex items-center justify-center w-7 h-7 rounded-md border border-zinc-200 bg-white shadow-sm text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 transition-colors dark:bg-[#262B33] dark:border-[#2A2F38] dark:text-zinc-300 dark:hover:text-zinc-100 dark:hover:bg-[#2A2F38]";
   return (
     <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 shrink-0 ml-2">
       {!isSubtask ? (

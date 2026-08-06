@@ -74,7 +74,7 @@ export function PromptDialog({
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-[rgba(212,255,46,0.10)] border border-[rgba(212,255,46,0.30)] flex items-center justify-center shrink-0">
-              <Pencil size={16} className="text-[#d4ff2e]" />
+              <Pencil size={16} className="text-[#0073EA]" />
             </div>
             <div>
               <DialogTitle>{title}</DialogTitle>

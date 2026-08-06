@@ -109,7 +109,7 @@ const ContextMenuRadioItem = React.forwardRef<
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <ContextMenuPrimitive.ItemIndicator>
-        <Check className="h-3.5 w-3.5 text-[#d4ff2e]" />
+        <Check className="h-3.5 w-3.5 text-[#0073EA]" />
       </ContextMenuPrimitive.ItemIndicator>
     </span>
     {children}

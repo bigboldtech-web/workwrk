@@ -139,11 +139,11 @@ export default function AgreementsPage() {
             <Link href="/agreements" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${view === "live" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><FileSignature className="h-3.5 w-3.5" /> Contracts</Link>
             <Link href="/agreements?view=templates" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${view === "templates" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><Folder className="h-3.5 w-3.5" /> Templates</Link>
             {view === "templates" ? (
-              <button type="button" onClick={newTemplate} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+              <button type="button" onClick={newTemplate} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-50">
                 {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} New template
               </button>
             ) : (
-              <button type="button" onClick={openNew} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500"><Plus className="h-3.5 w-3.5" /> New contract</button>
+              <button type="button" onClick={openNew} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)]"><Plus className="h-3.5 w-3.5" /> New contract</button>
             )}
           </div>
         }
@@ -158,7 +158,7 @@ export default function AgreementsPage() {
             <FileSignature className="mx-auto h-8 w-8 text-zinc-300" />
             <div className="mt-3 text-sm font-medium text-zinc-700">{view === "templates" ? "No templates yet" : "No contracts yet"}</div>
             <div className="mt-1 text-[13px] text-zinc-500">{view === "templates" ? "Create a template, or open a contract and choose “Save as template”." : "Write or upload a document, add signers, place fields, and send it."}</div>
-            <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50"><Plus className="h-4 w-4" /> {view === "templates" ? "New template" : "New contract"}</button>
+            <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-4 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-50"><Plus className="h-4 w-4" /> {view === "templates" ? "New template" : "New contract"}</button>
           </div>
         ) : (
           <div className="space-y-7">
@@ -233,7 +233,7 @@ export default function AgreementsPage() {
               <button type="button" onClick={() => setEdit(null)} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
               <button id="agreement-edit-save" type="button"
                 onClick={() => { const e = edit; setEdit(null); if (e.mode === "rename") void patchRow(e.row.id, { title: e.value.trim() || e.row.title }, "Renamed"); else void patchRow(e.row.id, { category: e.value.trim() || null }, "Moved"); }}
-                className="inline-flex h-8 items-center rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">Save</button>
+                className="inline-flex h-8 items-center rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)]">Save</button>
             </div>
           </div>
         </div>
@@ -253,7 +253,7 @@ export default function AgreementsPage() {
             <div className="mt-4 flex justify-end gap-2">
               <button type="button" onClick={() => setFolderEdit(null)} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
               <button type="button" onClick={() => { const f = folderEdit; setFolderEdit(null); void renameFolder(f.items, f.value.trim() || null); }}
-                className="inline-flex h-8 items-center rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">Save</button>
+                className="inline-flex h-8 items-center rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)]">Save</button>
             </div>
           </div>
         </div>

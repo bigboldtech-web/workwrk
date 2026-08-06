@@ -613,7 +613,7 @@ function OkrsGoalsCard({ okrs }: { okrs: ApiMyOkr[] | null }) {
   return (
     <DashCard
       title="OKRs / Goals"
-      titleIcon={<Target className="w-3.5 h-3.5 text-[var(--os-brand-rail)]" />}
+      titleIcon={<Target className="w-3.5 h-3.5 text-[var(--os-brand-ink)]" />}
       actions={
         <>
           <Link href="/okrs" className="p-1 rounded hover:bg-zinc-100 text-zinc-500" title="View all OKRs">
@@ -662,7 +662,7 @@ function KrasKpisCard({ kras }: { kras: ApiMyKra[] | null }) {
   return (
     <DashCard
       title="KRAs & KPIs"
-      titleIcon={<Activity className="w-3.5 h-3.5 text-[var(--os-brand-rail)]" />}
+      titleIcon={<Activity className="w-3.5 h-3.5 text-[var(--os-brand-ink)]" />}
       actions={
         <>
           <Link href="/team/alignment" className="p-1 rounded hover:bg-zinc-100 text-zinc-500" title="View Alignment">

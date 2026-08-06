@@ -478,7 +478,7 @@ export function BoardView<T>(props: Props<T>) {
                   if (e.key === "Enter") renameTab(t.id, (e.target as HTMLInputElement).value);
                   if (e.key === "Escape") setRenamingTabId(null);
                 }}
-                className="px-2.5 py-1.5 text-xs font-medium border border-violet-300 bg-white rounded-t-md outline-none"
+                className="px-2.5 py-1.5 text-xs font-medium border border-[var(--os-brand)]/40 bg-white rounded-t-md outline-none"
               />
             );
           }
@@ -491,7 +491,7 @@ export function BoardView<T>(props: Props<T>) {
               className={
                 "group inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-t-md transition-colors border-b-2 -mb-px " +
                 (active
-                  ? "border-violet-500 text-violet-700 dark:text-violet-300 bg-zinc-50"
+                  ? "border-[var(--os-brand)] text-[var(--os-brand-deep)] dark:text-zinc-100 bg-zinc-50"
                   : "border-transparent text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50")
               }
               title={isMain ? "Main table — always present" : "Double-click to rename"}
@@ -512,7 +512,7 @@ export function BoardView<T>(props: Props<T>) {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); saveTabFromCurrent(t.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-wider text-zinc-500-2 hover:text-violet-600"
+                  className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-wider text-zinc-500-2 hover:text-[var(--os-brand)]"
                   tabIndex={-1}
                   title="Save current view to this tab"
                 >
@@ -525,7 +525,7 @@ export function BoardView<T>(props: Props<T>) {
         <button
           type="button"
           onClick={addTab}
-          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-zinc-500 hover:text-violet-600 -mb-px"
+          className="inline-flex items-center gap-1 px-2 py-1.5 text-xs text-zinc-500 hover:text-[var(--os-brand)] -mb-px"
           title="Save current view as a new tab"
         >
           <Plus size={11} /> Tab
@@ -548,7 +548,7 @@ export function BoardView<T>(props: Props<T>) {
                   className={
                     "inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-colors " +
                     (view === id
-                      ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300"
+                      ? "bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] text-[var(--os-brand-deep)] dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] dark:text-zinc-100"
                       : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed")
                   }
                 >
@@ -566,7 +566,7 @@ export function BoardView<T>(props: Props<T>) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={props.searchPlaceholder ?? `Search ${props.items.length} row${props.items.length === 1 ? "" : "s"}…`}
-                className="pl-7 pr-7 py-1.5 rounded-md border border-zinc-200 bg-white text-xs w-56 focus:outline-none focus:ring-1 focus:ring-violet-500"
+                className="pl-7 pr-7 py-1.5 rounded-md border border-zinc-200 bg-white text-xs w-56 focus:outline-none focus:ring-1 focus:ring-[var(--os-brand)]"
               />
               {query && (
                 <button
@@ -588,13 +588,13 @@ export function BoardView<T>(props: Props<T>) {
               className={
                 "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium border transition-colors " +
                 (activeFilterCount > 0 || showFilters
-                  ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700 dark:text-violet-300"
+                  ? "bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] border-[var(--os-brand)]/40 text-[var(--os-brand-deep)] dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] dark:text-zinc-100"
                   : "border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50")
               }
             >
               <Filter size={11} /> Filter
               {activeFilterCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-violet-200 dark:bg-violet-800 text-[10px] font-bold">{activeFilterCount}</span>
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-[var(--os-brand)]/20 dark:bg-white/20 text-[10px] font-bold">{activeFilterCount}</span>
               )}
             </button>
           )}
@@ -633,8 +633,8 @@ export function BoardView<T>(props: Props<T>) {
                         className={
                           "text-[11px] px-2 py-0.5 rounded-md border transition-colors " +
                           (isOn
-                            ? "bg-violet-600 border-violet-600 text-white"
-                            : "bg-white border-zinc-200 text-zinc-500 hover:border-violet-300")
+                            ? "bg-[var(--os-brand)] border-[var(--os-brand)] text-white"
+                            : "bg-white border-zinc-200 text-zinc-500 hover:border-[var(--os-brand)]/40")
                         }
                       >
                         {c.label ?? c.value}
@@ -657,8 +657,8 @@ export function BoardView<T>(props: Props<T>) {
 
       {/* Bulk action bar — appears when ≥1 row selected */}
       {props.selectable && selectedIds.size > 0 && (
-        <div className="mb-3 rounded-lg border border-violet-300 bg-violet-50 dark:bg-violet-950/40 px-3 py-2 flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+        <div className="mb-3 rounded-lg border border-[var(--os-brand)]/40 bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] px-3 py-2 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-[var(--os-brand-deep)] dark:text-zinc-100">
             {selectedIds.size} selected
           </span>
           {bulkError && (
@@ -671,7 +671,7 @@ export function BoardView<T>(props: Props<T>) {
                   type="button"
                   onClick={() => setShowBulkUpdate((v) => v ? null : selectFields[0]?.key ?? null)}
                   disabled={bulking}
-                  className="text-xs px-3 py-1.5 rounded-md border border-violet-300 bg-white text-violet-700 hover:bg-violet-100 dark:hover:bg-violet-950/60 disabled:opacity-50"
+                  className="text-xs px-3 py-1.5 rounded-md border border-[var(--os-brand)]/40 bg-white text-[var(--os-brand-deep)] hover:bg-[var(--os-brand)]/10 dark:hover:bg-white/10 disabled:opacity-50"
                 >
                   Update {selectFields.find((f) => f.key === showBulkUpdate)?.label ?? selectFields[0]?.label} ▾
                 </button>
@@ -927,7 +927,7 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
                         onClick={() => onSortClick!(f.key)}
                         className={
                           "inline-flex items-center gap-1 -ml-1 px-1 py-0.5 rounded transition-colors " +
-                          (isSorted ? "text-violet-700 dark:text-violet-300" : "hover:bg-white")
+                          (isSorted ? "text-[var(--os-brand-deep)] dark:text-zinc-100" : "hover:bg-white")
                         }
                         title={isSorted ? `Sorted ${sortDir} · click to ${sortDir === "asc" ? "reverse" : "clear"}` : "Click to sort"}
                       >
@@ -955,7 +955,7 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
                   key={id}
                   className={
                     "border-t border-zinc-200 group " +
-                    (isSelected ? "bg-violet-50 dark:bg-violet-950/30" : "hover:bg-zinc-50")
+                    (isSelected ? "bg-[color-mix(in_srgb,var(--os-brand)_8%,transparent)] dark:bg-white/5" : "hover:bg-zinc-50")
                   }
                 >
                   {selectable && (
@@ -1027,7 +1027,7 @@ function InlineEditor({
 }) {
   const [local, setLocal] = useState<unknown>(value);
 
-  const baseInputClass = "w-full px-2 py-1 rounded border border-violet-400 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-violet-500";
+  const baseInputClass = "w-full px-2 py-1 rounded border border-[var(--os-brand)]/50 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-[var(--os-brand)]";
 
   // Stop click bubbling so clicks inside the editor don't trigger the
   // td onClick (which would re-enter edit mode).
@@ -1127,7 +1127,7 @@ function InlineEditor({
                 key={c.value}
                 type="button"
                 onClick={() => toggle(c.value)}
-                className={"text-[10px] px-1.5 py-0.5 rounded border " + (on ? "bg-violet-600 text-white border-violet-600" : "bg-white border-zinc-200 text-zinc-500")}
+                className={"text-[10px] px-1.5 py-0.5 rounded border " + (on ? "bg-[var(--os-brand)] text-white border-[var(--os-brand)]" : "bg-white border-zinc-200 text-zinc-500")}
               >
                 {c.label ?? c.value}
               </button>
@@ -1373,7 +1373,7 @@ function KanbanCard<T>({
     <div className="rounded-lg bg-white border border-zinc-200 p-3 relative">
       <div className="flex items-start justify-between mb-1.5">
         <div
-          className={"font-medium text-sm leading-tight pr-6 " + (onClick ? "cursor-pointer hover:text-violet-600" : "")}
+          className={"font-medium text-sm leading-tight pr-6 " + (onClick ? "cursor-pointer hover:text-[var(--os-brand)]" : "")}
           onClick={onClick}
         >
           {getTitle(item)}
@@ -1474,7 +1474,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
               <div
                 key={getId(item)}
                 onClick={() => onRowClick?.(item)}
-                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-[var(--os-brand)]/40" : "")}
               >
                 <div className="font-medium">{getTitle(item)}</div>
                 <div className="text-[11px] text-zinc-500-2 mt-0.5">
@@ -1496,7 +1496,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
               <div
                 key={getId(item)}
                 onClick={() => onRowClick?.(item)}
-                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+                className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-[var(--os-brand)]/40" : "")}
               >
                 <div className="font-medium">{getTitle(item)}</div>
               </div>
@@ -1533,7 +1533,7 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
           <article
             key={getId(item)}
             onClick={() => onRowClick?.(item)}
-            className={"rounded-xl border border-zinc-200 bg-white p-4 transition-colors " + (onRowClick ? "cursor-pointer hover:border-violet-300" : "")}
+            className={"rounded-xl border border-zinc-200 bg-white p-4 transition-colors " + (onRowClick ? "cursor-pointer hover:border-[var(--os-brand)]/40" : "")}
           >
             <div className="font-semibold text-sm mb-2 line-clamp-2">{getTitle(item)}</div>
             <div className="space-y-1 text-xs">
@@ -1573,7 +1573,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       return (
         <div className="inline-flex flex-wrap gap-1">
           {arr.slice(0, compact ? 2 : 6).map((v) => (
-            <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-950/40 text-violet-700">{v}</span>
+            <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] dark:bg-white/10 text-[var(--os-brand-deep)]">{v}</span>
           ))}
           {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>
@@ -1584,9 +1584,9 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       return <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
     }
     case "URL":
-      return <a href={String(value)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline truncate inline-block max-w-[160px]">{String(value)}</a>;
+      return <a href={String(value)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-[var(--os-brand)] hover:underline truncate inline-block max-w-[160px]">{String(value)}</a>;
     case "EMAIL":
-      return <a href={`mailto:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
+      return <a href={`mailto:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-[var(--os-brand)] hover:underline">{String(value)}</a>;
     case "TEXTAREA":
       return <span className="line-clamp-2 text-xs text-zinc-500">{String(value)}</span>;
     case "USER":
@@ -1594,8 +1594,8 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       // The full resolve-to-name lookup wires up when we add a shared
       // people-by-id hook the table can call.
       return (
-        <span className="inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300">
-          <span className="inline-flex w-4 h-4 rounded-full bg-violet-500 text-white items-center justify-center text-[9px] font-semibold">
+        <span className="inline-flex items-center gap-1.5 text-[11px] px-1.5 py-0.5 rounded-full bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] dark:bg-white/10 text-[var(--os-brand-deep)] dark:text-zinc-100">
+          <span className="inline-flex w-4 h-4 rounded-full bg-[var(--os-brand)] text-white items-center justify-center text-[9px] font-semibold">
             {String(value).charAt(0).toUpperCase()}
           </span>
           <span className="truncate max-w-[120px] font-mono">{String(value).slice(0, 12)}</span>
@@ -1635,8 +1635,8 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
       return (
         <div className="inline-flex items-center gap-2 text-[11px]">
-          <div className="relative w-24 h-1.5 rounded-full bg-violet-200 dark:bg-violet-900/40">
-            <div className="absolute inset-0 rounded-full bg-violet-500" />
+          <div className="relative w-24 h-1.5 rounded-full bg-[var(--os-brand)]/20 dark:bg-white/15">
+            <div className="absolute inset-0 rounded-full bg-[var(--os-brand)]" />
           </div>
           <span className="text-zinc-500 tabular-nums">{days}d</span>
         </div>
@@ -1673,7 +1673,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       );
     }
     case "PHONE":
-      return <a href={`tel:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
+      return <a href={`tel:${String(value)}`} onClick={(e) => e.stopPropagation()} className="text-xs text-[var(--os-brand)] hover:underline">{String(value)}</a>;
     case "LOCATION": {
       const label = typeof value === "object" && value !== null && "label" in (value as Record<string, unknown>)
         ? String((value as Record<string, unknown>).label ?? "")
@@ -1698,7 +1698,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       return (
         <div className="inline-flex flex-wrap gap-1">
           {arr.slice(0, compact ? 2 : 6).map((t) => (
-            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800">#{t}</span>
+            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--os-brand)_8%,transparent)] dark:bg-white/5 text-[var(--os-brand-deep)] dark:text-zinc-100 border border-[var(--os-brand)]/30 dark:border-white/20">#{t}</span>
           ))}
           {arr.length > (compact ? 2 : 6) && <span className="text-[10px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>

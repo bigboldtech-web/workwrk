@@ -156,8 +156,8 @@ export default function AppearancePage() {
                     type="button"
                     disabled={saving}
                     onClick={() => pickAppearance(opt.value)}
-                    className={`flex flex-col items-start gap-2 rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 disabled:opacity-60 ${
-                      active ? "ring-2 ring-zinc-900" : ""
+                    className={`flex flex-col items-start gap-2 rounded-xl border border-zinc-200 bg-white p-3 text-left transition-all hover:border-zinc-300 disabled:opacity-60 dark:bg-[#1B1F26] dark:border-[#2A2F38] ${
+                      active ? "ring-2 ring-zinc-900 dark:ring-zinc-100" : ""
                     }`}
                   >
                     <opt.Icon className="h-4 w-4 text-zinc-600" />
@@ -184,7 +184,7 @@ export default function AppearancePage() {
                     aria-label={a.label}
                     aria-pressed={active}
                     className={`flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-60 ${
-                      active ? "ring-2 ring-zinc-900 ring-offset-2" : "hover:scale-105"
+                      active ? "ring-2 ring-zinc-900 ring-offset-2 ring-offset-white dark:ring-zinc-100 dark:ring-offset-[#14171D]" : "hover:scale-105"
                     }`}
                     style={{ background: a.swatch }}
                   >

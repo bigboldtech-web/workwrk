@@ -11,12 +11,12 @@ import { cn } from "@/lib/utils";
 // keeps a rounded-full silhouette for hero CTAs.
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 active:translate-y-px",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 active:translate-y-px",
   {
     variants: {
       variant: {
         default:
-          "text-white bg-gradient-to-r from-violet-600 to-violet-700 hover:from-violet-500 hover:to-violet-600 shadow-[0_4px_12px_-4px_rgba(124,58,237,0.4)] hover:shadow-[0_6px_16px_-4px_rgba(124,58,237,0.55)] hover:-translate-y-[1px]",
+          "text-white bg-[#0073EA] hover:bg-[#0060B9] shadow-[0_4px_12px_-4px_rgba(0,115,234,0.4)]",
         destructive:
           "text-white bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 shadow-[0_4px_12px_-4px_rgba(244,63,94,0.4)] hover:-translate-y-[1px]",
         outline:
@@ -26,7 +26,7 @@ const buttonVariants = cva(
         ghost:
           "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-muted dark:hover:bg-surface-2 dark:hover:text-foreground",
         link:
-          "text-violet-700 hover:text-violet-800 underline-offset-4 hover:underline px-0",
+          "text-[#0073EA] hover:text-[#005BB8] underline-offset-4 hover:underline px-0",
       },
       size: {
         default: "h-9 px-4 py-2 text-[13px]",
