@@ -1,0 +1,552 @@
+# WorkwrK Screen-Coverage Matrix (vs ClickUp + Monday on Mobbin)
+
+Generated 2026-08-06 by an 8-agent Mobbin inventory sweep (603k tokens).
+Statuses: PARITY = matches ClickUp; PARTIAL = surface exists, listed gaps remain;
+MISSING = no equivalent surface; PRODUCT-DECISION = ClickUp ships it, we chose not to (yet).
+KPI/KRA/OKR/SOP/Reviews are OUR differentiators and stay regardless of this matrix.
+
+## task-views-deep
+_1) Saved views: ClickUp uses an explicit dirty-state 'Save view' pill; we autosave view config to the View record (board-canvas persists hiddenFields/extraColumns) and tables/[id] has a saved-views picker + named views. Treat the model difference as intentional, but saved FILTERS (named, reusable) are a real gap folded into the Filters row. 2) Sprint Points picker also implies a per-List 'Sprint Point Settings' scale editor if we build points. 3) The Teams-area tabs seen in captures (Overview/Analytics/Priorities/Feed/StandUp/Workload/Timesheet, e.g. https://mobbin.com/screens/7db81793-687b-44e3-9eb0-102ec1a53443 Timesheet with My Capacity weekly-hours setting) belong to the team/timesheets areas, not board views; flagging because per-person weekly capacity hours is the data prerequisite for the Workload capacity grid above. 4) Chat/Channels appear in every screenshot's sidebar: existing product-decision, not counted here. 5) AI-fill assignee column ('AI' sparkle on the Assignee header) and Ask AI toolbar entries are AI-area scope. 6) ClickUp view-type roster from the required-views modal: List, Board, Calendar, Map, Activity, Team, Gantt, Mind Map, Table, Timeline, Workload; we ship renderers for all except Mind Map and a true standalone Team view (ours is a Workload variant), and we additionally ship Chart/Form/Doc/Whiteboard/Hierarchy/Pivot/Cards/Dashboard/FileGallery beyond ClickUp's roster._
+
+- **[MISSING/high] Everything / All Tasks view (workspace-wide)** — [ref](https://mobbin.com/screens/132dc714-53b4-4600-8815-7ffa36c1c1d2)
+  - Shows: Sidebar carries a permanent 'All Tasks · <workspace>' node above Spaces opening one list/table of every task across all Spaces with the same view toolbar (visible in sidebar of every captured screen)
+  - Gap: No cross-Space aggregate view; closest are per-Space tabs and dashboards. Cheap to build by pointing the existing List/Table renderer at an all-boards query; heavily used by SMB owners/managers as the 'whole company' pane
+- **[MISSING/low] Mind Map view** — [ref](https://mobbin.com/screens/ce937929-79a6-40be-bcea-c09e15b4b1b5)
+  - Shows: Radial tree: list node at center branching to task nodes (status-dot + title + open icon), add-node +, re-layout control, mini-map bottom-left, standard view toolbar (Filter/Customize/Add Task)
+  - Ours: `boards/[slug] Hierarchy view is the nearest (tree, not mind map)`
+  - Gap: No MIND_MAP renderer. Could be a canvas layout mode of the existing Hierarchy view; niche for SMB end-clients, Whiteboards cover freeform mapping
+- **[MISSING/low] Default settings for views (required views + default templates)** — [ref](https://mobbin.com/screens/477b1534-83f1-45b8-89f4-52c5eb8aa10e)
+  - Shows: Admin modal, two tabs: 'Required views' (toggle which view types auto-create on every Space/Folder/List; List always required) and 'Default View Templates' (pick a saved view template per view type, apply to new or all required views: https://mobbin.com/screens/262cc2b1-3c69-409e-a5ed-0ff61b268e0c)
+  - Gap: Views are created manually per board; no workspace-level required-views policy or per-type default view template. Admin nicety, low urgency for SMB
+- **[PARTIAL/high] Workload view (capacity grid)** — [ref](https://mobbin.com/screens/41e2b803-107e-44ad-95bf-63c11f49a411)
+  - Shows: Per-person swimlanes on a date axis; per-day capacity cells (e.g. 0h/40h) color-coded vs capacity; capacity unit selector (Time Estimates), date-range (14 days) and Daily Scheduled mode; per-person Unscheduled/Overdue rollups; Unassigned lane; Save view
+  - Ours: `boards/[slug] Workload view (board-workload-view.tsx, 'workload' variant)`
+  - Gap: Ours is counts + one stacked status bar per person: no date axis, no per-day hours-vs-capacity cells, no capacity settings (weekly hours), no unassigned lane, no backlog drag. High leverage: ties directly into our People/KRA differentiators
+- **[PARTIAL/high] Filters panel (condition builder + saved filters)** — [ref](https://mobbin.com/screens/c134479c-3686-4018-a5e9-d6d54bafdd6e)
+  - Shows: Filter popover: Where <field> <Is> <value> rows, AND/OR connector, 'Add nested filter', + Add filter, Clear all, and a 'Saved filters' dropdown; toolbar shows active '1 Filter' chip, Sort, Closed toggle, Save view
+  - Ours: `boards/[slug] filter bar (board-filter-bar.tsx)`
+  - Gap: We have quick single-value filters (status/priority/assignee); missing multi-condition builder with field/operator/value rows, AND/OR + nesting, saved filters, and the active-filter-count chip. Core daily-use surface
+- **[PARTIAL/medium] Table view (spreadsheet grid)** — [ref](https://mobbin.com/screens/a9f3cd9a-cac2-4290-b934-6ccc15614c75)
+  - Shows: Numbered rows, Group:None, columns Name/Assignee(+AI fill)/Status pill/Due date/Priority, + add-column, toolbar with Filter/Closed/Assignee/Customize
+  - Ours: `boards/[slug] Table view (src/components/board-view/board-table-view.tsx) + tables/[id]`
+  - Gap: No row-number gutter; group-by picker not surfaced on Table toolbar; AI-fill column cell is an AI-area feature. Core grid (inline edit, column toggles, sort, CSV) already ships.
+- **[PARTIAL/medium] Timeline view** — [ref](https://mobbin.com/screens/9fe6fe05-2823-4250-896c-982b2ac61724)
+  - Shows: Horizontal task bars on a day-scale axis with zoom (Days dropdown), group-by control, and a right side panel of Unscheduled/Overdue tasks with sort + Backlog button for drag-to-schedule
+  - Ours: `boards/[slug] Timeline view (board-timeline-view.tsx)`
+  - Gap: Ours is a read-only fixed 12-week strip grouped by status only: no zoom/time-scale control, no drag to schedule/resize, no Unscheduled+Overdue side panel or Backlog drawer, no group-by assignee
+- **[PARTIAL/medium] Team view (per-person cards)** — [ref](https://mobbin.com/screens/4ed5d2cd-edde-4144-915a-ba0b7f5ddf6e)
+  - Shows: One card per member with done-% donut, not-done/done counts, collapsible status-group task lists inside the card, plus a Workload mini-bars card at left; expanded-card variant at https://mobbin.com/screens/caed8962-b58e-4c18-9391-13df63797c66
+  - Ours: `boards/[slug] Workload view 'team' variant (per-assignee kanban)`
+  - Gap: We render plain per-assignee columns; missing the summary header (done % donut, counts), collapsible status groups inside each person card, and the adjacent workload mini-bar column
+- **[PARTIAL/medium] View toolbar: Group by / Subtasks / Columns / Customize** — [ref](https://mobbin.com/screens/8b2419a3-f16a-4a36-8269-871829c24f8c)
+  - Shows: Left toolbar chips on every view: 'Group: Status' picker, 'Subtasks' expand toggle, 'Columns' picker; right side Filter/Closed/Assignee/search/Customize/Add Task; 'Save view' pill appears when the view has unsaved layout changes
+  - Ours: `boards/[slug] view canvas (board-canvas.tsx column toggles + FieldShelf)`
+  - Gap: Columns toggle and per-view config persistence exist (autosave model, arguably better than ClickUp's explicit Save-view). Missing: group-by-any-field picker exposed as a toolbar chip on all views, subtasks show/expand toggle, Closed-tasks toggle chip
+- **[PARTIAL/medium] Bulk action bar + task context menu (incl. Sprint Points)** — [ref](https://mobbin.com/screens/4652acbf-48cd-4d01-a776-85cb30e0dba6)
+  - Shows: Bottom bulk bar (Status/Assignees/Dates/Custom Fields/Tags/Move-Add/Copy/delete/More) and right-click menu: set Custom Fields, Task Type, Status, Assignees, Dates, Sprint Points (1/2/3/5/8 picker at https://mobbin.com/screens/48776cc6-9631-49ca-a614-2e58ce73cc52), Tags, Priority, Watchers, Dependencies; actions Move/Add, Duplicate, Convert to Subtask, Merge Tasks, Relationships, Copy to clipboard, Remove from List, Archive
+  - Ours: `boards/[slug] (bulk-action-bar.tsx, item-row-more-menu.tsx)`
+  - Gap: Bulk bar and row menu exist; menu lacks Sprint Points, Merge Tasks, Convert-to-Subtask from menu, Archive, and set-Watchers entries
+- **[PARTIAL/medium] Sprints (sprint lists, points, burndown/velocity)** — [ref](https://mobbin.com/screens/48776cc6-9631-49ca-a614-2e58ce73cc52)
+  - Shows: Sprint Points as a first-class task field (fibonacci picker + 'Sprint Point Settings'), 'Agile Sprint Planning' sprint list living in the Space tree (visible in sidebar of https://mobbin.com/screens/132dc714-53b4-4600-8815-7ffa36c1c1d2); burndown/burnup ship as dashboard cards
+  - Ours: `tasks/sprint (hours-based burndown room)`
+  - Gap: We have a burndown page computed from time estimates, but no Sprint entity in the Space tree (dated sprint lists with rollover), no sprintPoints field in schema (confirmed absent), no points-based burndown/velocity cards in the Dashboards Add Card gallery
+- **[PARTIAL/low] Activity view (board-scoped feed)** — [ref](https://mobbin.com/screens/3a6160ae-bbc4-4ade-8914-228e7e89f839)
+  - Shows: Feed grouped by day, then by task (card per task with its events: status changes, followers, links, subtasks, automation/ClickBot rows, '6 more updates' collapse), Filter + subtasks toggle in toolbar
+  - Ours: `boards/[slug] Activity view (board-activity-view.tsx)`
+  - Gap: Ours is a flat chronological list with task chips: no day headers, no per-task grouping cards with collapse ('N more updates'), no activity-type filter
+
+## docs-hub
+_1) Mobbin has no direct capture of ClickUp's Docs Hub screen; the Dashboards hub screens show the identical hub chrome (sidebar nav + template row + sortable table + column toggles) and were used as the pattern reference. Our /docs hub is already very close to it. 2) The two gaps that decide whether Docs reads as a real docs product: subpages/page-tree (multi-page wikis) and the share/permissions modal. Everything else is polish on an editor that is already strong (cover, icon, fonts, outline, comments, versions, AI ask). 3) ClickUp's doc 'Improve' inline-AI rewrite maps to our existing AI endpoints; it is a toolbar wiring job, not a new backend. 4) Wiki verification is a strategic fit: flagging SOP-backed docs as verified wikis feeds our SOP/KRA differentiator and future AI answers. 5) Monday's workdoc identity is live board embeds inside docs; that aligns with the Lego strategy (Boards embedded in Docs) and would differentiate us from ClickUp's static-ish doc embeds. 6) No chat/channels implications in this area. ClickUp Clips appeared in searches but belongs to another area's inventory._
+
+- **[MISSING/high] Doc sharing & permissions modal** — [ref](https://mobbin.com/screens/47f34a8e-b6d7-42c5-b462-11fe74383c93)
+  - Shows: Share modal: invite by name/email, 'Share link with anyone' toggle + Copy public link, advanced settings (expire link, index by search engines, embed code, which properties to share), private link, default permission level (view/comment/edit/full), share-with list rows, 'Make Private' (captured on a task; ClickUp docs use the same share component)
+  - Ours: `/docs/[id] Share button (copies link only); server-side doc-access.ts`
+  - Gap: No share UI at all beyond copy-link. Need the modal: per-person invites with permission levels, workspace vs private visibility, public link toggle, and view-only guest rendering. For SMB end-clients sharing an SOP/policy/brief externally, this is table stakes.
+- **[PARTIAL/high] Subpages / multi-page doc tree ('Add page' + Subpages section)** — [ref](https://mobbin.com/screens/1b6cb75c-06e8-4e58-ab6c-86449ba8e40f)
+  - Shows: 'Add page' button in doc header, subpages rendered as a section/table inside the doc, and a collapsible page tree so one doc holds nested pages (the wiki backbone)
+  - Ours: `/docs/[id] (Doc.parentId exists in API/schema; sidebar Recent Pages)`
+  - Gap: Data model has parentId and a legacy 'subpage' embed block, but no in-doc page tree panel, no 'Add page' button, no Subpages section rendering child pages. Multi-page docs are the core of a knowledge base; this is the biggest structural gap in the area.
+- **[PARTIAL/medium] Doc editor page chrome (breadcrumb, cover, icon, byline, toolbar)** — [ref](https://mobbin.com/screens/ad4f1f36-d066-4709-9c73-8672f5c91fba)
+  - Shows: Doc page with Docs breadcrumb, cover image, page icon, title, author + last-updated byline, 'Link Task or Doc' chip, Improve/Edit/Comment mode toolbar, Ask AI and Share buttons, right icon rail, 'Add page' affordance top-left
+  - Ours: `/docs/[id] (block-doc-editor.tsx)`
+  - Gap: We have breadcrumb, cover gradient/image, icon picker, outline toggle, Ask, comments, versions. Missing: 'Link Task or Doc' chip under the icon, owners/contributors byline row, and the Improve (inline AI rewrite) mode in the toolbar (we have Ask/summarize APIs but no inline Improve).
+- **[PARTIAL/medium] Page Styles right panel** — [ref](https://mobbin.com/screens/672206a5-e54e-4b98-b841-f8b0f69f9133)
+  - Shows: Right panel: Font style (System/Serif/Mono), Font size (S/Default/L), Page width (Default/Full), 'Apply typography to all pages', Header toggles (cover image, page icon & title, owners, contributors, subtitle, last modified), Sections (Subpages: Table, Relationships: Dialog, Page outline), Focus mode (Block/Page), Stats (word count, characters, reading time, show stats on page)
+  - Ours: `/docs/[id] (meta: font default/serif/mono, fullWidth, cover)`
+  - Gap: Have font family, full-width, cover, outline toggle. Missing: font size control, header element toggles (owners/contributors/subtitle/last-modified), Subpages/Relationships section toggles, focus mode, and the stats block (word count/characters/reading time).
+- **[PARTIAL/medium] Save as doc template modal** — [ref](https://mobbin.com/screens/526a890f-25f5-4cbc-88a0-f2c992416881)
+  - Shows: 'Save as new doc Template' modal: template name, description, tags, Share-with radios (All members/Only me/Select people/Everyone incl. guests/Admins only), Public sharing toggle, 'Update an existing Template' link
+  - Ours: `Template Center save-as (global); not wired from the doc editor`
+  - Gap: Template save-as exists platform-wide, but the doc editor's own menu has no 'Save as template' entry, and our template save-as lacks the audience scoping (who can use it) and tags/description fields.
+- **[PARTIAL/medium] Wikis (wiki flag + verified source of truth)**
+  - Shows: ClickUp lets a doc be created/converted as a Wiki: flagged badge, prioritized in search and AI answers as verified knowledge; wikis get their own hub grouping (not directly captured on Mobbin; our sidebar already has a 'Popular Wikis' section and a Wiki starter card)
+  - Ours: `/docs (Wiki starter template card + 'Popular Wikis' sidebar section)`
+  - Gap: Wiki exists only as a template/sidebar label; no isWiki flag on the Doc model, no convert-to-wiki action, no badge, no priority weighting in search/AI answers. Pairs naturally with our SOP differentiator (SOPs as verified wikis).
+- **[PARTIAL/medium] Doc relationships panel (linked tasks/docs dialog)** — [ref](https://mobbin.com/screens/5d02dafb-f077-4059-9380-95eeeb91293a)
+  - Shows: Relationships section in the doc's Page Styles/sections area opening a dialog listing tasks and docs linked to this doc; plus the 'Link Task or Doc' affordance in the header
+  - Ours: `lib/doc-link-extract.ts + EntityLink graph (backend)`
+  - Gap: Link extraction and the EntityLink graph exist server-side, but there is no in-doc Relationships panel/dialog showing linked tasks and docs, and no manual 'Link Task or Doc' action in the doc header.
+- **[PARTIAL/medium] Doc import / export**
+  - Shows: ClickUp doc export (PDF/HTML/Markdown) from the doc ... menu and workspace import of docs from Notion/Confluence/Word (settings-level flow; not captured in Mobbin searches)
+  - Ours: `/api/docs/[id]/export (md only) + /imports (sources all COMING_SOON)`
+  - Gap: Export supports Markdown only; PDF/HTML are stubs (PDF export is what SMB clients actually ask for: policies, agreements). Imports page lists ClickUp/Asana/Trello/Excel/Sheets as coming soon and has no doc sources (Notion/Confluence/Word).
+- **[PARTIAL/medium] Monday workdoc: Doc style panel + live board embeds** (monday) — [ref](https://mobbin.com/screens/7bc2b89c-2f82-419d-867c-2dd3fc0929b0)
+  - Shows: Monday workdoc comparison: Doc style panel (layout Narrow/Wide/Frame, serif/mono, font size, page background colors and paper patterns, cover/title/TOC toggles), inline toolbar with text+highlight color palettes, @mention people/teams, and '/board' to embed a live board widget inside the doc
+  - Ours: `/docs/[id] (BlockNote canvas with legacy task_card/sop_card/entity_link embeds)`
+  - Gap: Two ideas worth stealing: (1) live board/table embed block inside docs, which is exactly our Boards+Docs Lego thesis and we only have card-style embeds; (2) page background color/pattern styling as a light-lift delighter. Monday's Frame layout and TOC toggle map to our existing width/outline controls.
+- **[PARTIAL/low] Docs facet in unified search** — [ref](https://mobbin.com/screens/78d00f39-8c51-416a-999b-70af5d99febc)
+  - Shows: Global search popover with type tabs (Tasks/Docs/Channels/Messages), app-source chips, Ask AI row, and results grouped with location context
+  - Ours: `topbar search / command palette (⌘K)`
+  - Gap: Command palette searches entities but has no Docs type-tab faceting or Ask-AI row inside search results (unverified in depth; light spot-check only).
+- **[PARITY/low] Docs Hub listing (All/My/Shared/Private + templates row + table)** — [ref](https://mobbin.com/screens/d00dc77f-7b5d-4acb-b8e9-fa82f35779b1)
+  - Shows: ClickUp hub chrome: left mini-nav (All/My/Shared with me/Private), starter-template card row, sortable table with Name/Location/Date viewed/Date updated/Owner/Sharing plus a column show-hide toggle and per-column sort menu (Mobbin only captured the Dashboards hub; the Docs hub uses identical chrome)
+  - Ours: `/docs (src/app/(dashboard)/docs/page.tsx + docs-sidebar.tsx)`
+  - Gap: Minor: no column show/hide toggle; sort limited to title/location/updated (no Owner or Date created columns). Views All/My/Shared/Private/Meeting/Archived, template cards, search, sort, location filter all present.
+- **[PARITY/low] Page outline rail** — [ref](https://mobbin.com/screens/1b6cb75c-06e8-4e58-ab6c-86449ba8e40f)
+  - Shows: Hover outline popover / right-rail listing the doc's headings for jump navigation
+  - Ours: `/docs/[id] (OutlineRail minimap in block-doc-editor.tsx)`
+- **[PARITY/low] Doc templates gallery (Template Center, Doc type filter)** — [ref](https://mobbin.com/screens/04818cc9-7502-402a-a6f8-ec356682723b)
+  - Shows: Template Center modal with type checkboxes (Space/Folder/List/Task/Doc/View/Whiteboard), complexity filter, search, categorized template cards with previews
+  - Ours: `Template Center (/api/template-center, DOC kind supported)`
+  - Gap: DOC kind wired end-to-end; only thin seed library (5 seeds) vs ClickUp's hundreds. Content gap, not a screen gap.
+- **[PARITY/low] Doc version history**
+  - Shows: Page history with restore (ClickUp doc ... menu; not captured in Mobbin searches)
+  - Ours: `/api/docs/[id]/versions + restore`
+
+## dashboards-goals
+_Big picture: dashboards are chrome-complete but data-empty; Goals/OKRs are data-complete but missing the task roll-up mechanic. (1) The single biggest gap in this area is the widget data layer for /dashboards/[id]: Dashboard.widgets persists but nothing renders, while the Add Card gallery already advertises 10 categories, so the surface currently promises more than it delivers. Suggest shipping in order: Task List card, Number/Pie/Bar/Battery, then Calculation + leaderboard. (2) ClickUp's Discussion widget (a comment thread as a dashboard card) is chat-adjacent; given Chat/Channels is a product decision for us, treat that one widget as product-decision too rather than a gap. (3) The AI Project Update card and the Productivity Points leaderboard both map directly onto our declared differentiators (AI Ask/Brain + AI Performance Manager monthly ranking); building them as widgets turns parity work into differentiation. (4) 'Schedule report' (emailed dashboard snapshots) is a small but visible header affordance in every captured ClickUp dashboard. (5) Goals: our OKR cascade (Company/Team/Individual) is structurally richer than ClickUp's goal folders; the only parity-critical missing mechanic is targets auto-rolling-up from linked task completion (okr-linked-work is deliberately link-only today). (6) Space Overview grid is at full parity; no work needed there._
+
+- **[MISSING/high] Task List card widget (full-width, own toolbar)** — [ref](https://mobbin.com/screens/27113b60-6baf-4b1e-bd2c-3deebad34c58)
+  - Shows: An embedded list view as a dashboard card: grouped by status, its own group/subtasks/columns/filter/search toolbar, inline Add Task per group
+  - Ours: `/dashboards/[id]`
+  - Gap: No embedded task-list widget at all. This is ClickUp's flagship dashboard card; needs a scoped (list/board/space source) reuse of our existing List renderer inside a WidgetCard with its own toolbar state.
+- **[MISSING/medium] Calculation widget + automation activity feed + productivity leaderboard** — [ref](https://mobbin.com/screens/0e77d5cb-d187-4f1d-9473-5d695873ff31)
+  - Shows: Single-value 'Calculate' widget, a feed card of form-submission/ClickBot automation events, and 'Productivity Points Over Last 30 Days' people table (comments added, resolved, tasks completed, worked on, total points, Sum footers)
+  - Ours: `/dashboards/[id]`
+  - Gap: None of the three exist. The people-leaderboard table dovetails directly with our AI Performance Manager monthly ranking differentiator, so it should become a first-class widget; Calculate (aggregate a field) is cheap once widget config exists; the automation feed is blocked on the deferred Automation Hub (low).
+- **[MISSING/low] Sprint widget set (burndown / burnup / velocity / CFD)**
+  - Shows: ClickUp's Add Card gallery ships a Sprints category of agile charts (not captured in Mobbin's ClickUp 4.0 set)
+  - Ours: `/dashboards/[id] Add Card gallery ('Sprints' category exists)`
+  - Gap: add-card-panel.tsx lists a Sprints category but no sprint widgets exist (we also have no sprint object). For SMB→mid-market end-clients this is low urgency; consider hiding the category until real, so the gallery never advertises dead ends.
+- **[PARTIAL/high] Dashboard canvas with live widgets (task list, pie, notes, search, discussion)** — [ref](https://mobbin.com/screens/6058497a-d55c-40ae-a31b-ae4143bffef9)
+  - Shows: Edit-mode dashboard grid: Task List card, Workload-by-Status pie, Discussion (comment thread) widget, Search results widget, rich-text Notes widget; Add card, Filters, auto-refresh chrome
+  - Ours: `/dashboards/[id]`
+  - Gap: Chrome + Add Card gallery are at parity, but the canvas only renders an empty state: Dashboard.widgets is typed unknown[] and never rendered (src/app/(dashboard)/dashboards/[id]/page.tsx says widget data 'lands with the Dashboard view phase'). Need widget CRUD + persistence, drag/resize grid layout, and the core widget renderers (task list, pie/bar chart, text/notes) wired to real board data via the existing WidgetCard shell.
+- **[PARTIAL/high] Reporting dashboard: stat cards + battery bar + breakdown charts + AI project update + Schedule report** — [ref](https://mobbin.com/screens/2802e4dc-5a33-4b61-b556-7008bffeeb2f)
+  - Shows: Number stat cards (Open/Overdue/Total), 'Overall Progress' battery bar, Workload-by-Status pie, Priority Breakdown bar chart, Open-Tasks-by-Assignee pie, Tasks-Due-This-Week list card, AI-written project summary card, 'Schedule report' header button
+  - Ours: `boards/[slug] Dashboard view + /dashboards/[id]`
+  - Gap: Board-level Dashboard view has a FIXED stat/status/priority/owner set (board-dashboard-view.tsx, no per-widget config); standalone dashboards have none of these as placeable widgets. Missing: configurable Number/Battery/Pie/Bar widget instances with source+filter config, the AI project-update card (we already have AI infra to power it), and Schedule report (emailed dashboard on a cadence).
+- **[PARTIAL/high] Goal detail: progress hero + targets + roll-up + timeline** — [ref](https://mobbin.com/screens/a9e061e2-07f3-4a80-a367-d4502cb0ea51)
+  - Shows: Goal page: large circular %, description, Sharing & Permissions button, Targets list where each target shows linked tasks ('1 task', '2 tasks') and a progress bar rolling up from them, Timeline activity log, confetti celebration on progress
+  - Ours: `/okrs/[id]`
+  - Gap: We have the progress ring, KRs with current/target/unit bars, check-in timeline, and linked Spaces/Boards/KRAs. Concrete gaps: (1) targets never auto-roll-up from linked work — okr-linked-work.tsx is explicitly link-only, progress is manual check-ins; ClickUp task-type targets compute % from linked task completion; (2) no per-goal Sharing & Permissions; (3) no completion celebration moment. Roll-up is the core mechanic and Goals is a rail item + our differentiator.
+- **[PARTIAL/medium] Monday dashboard widget UX (comparative reference)** (monday) — [ref](https://mobbin.com/screens/0a366d26-d10c-41d9-86a8-257e72ce9700)
+  - Shows: Monday dashboards: View/Edit mode toggle, 'N connected boards' scope picker in the header, Add widget CTA, per-widget filter icon on every card header, widget kinds Numbers / Battery / Chart / Gantt-with-baseline (also https://mobbin.com/screens/fcb49357-560f-4513-946b-5a85332bd447 and https://mobbin.com/screens/ca70669c-0e24-4868-b1e4-455fed1e9b0e)
+  - Ours: `/dashboards/[id]`
+  - Gap: Adopt for our widget build: explicit connected-board scoping in the dashboard header, a per-widget filter affordance on the card chrome, and the Battery (segmented progress) widget which matches our Monday-clean visual preference. These are UX patterns to fold into the high-priority widget work above, not separate surfaces.
+- **[PARTIAL/low] Dashboard live refresh + per-widget loading skeletons** — [ref](https://mobbin.com/screens/e37f9235-7899-474c-a6de-02f68f982ecf)
+  - Shows: Each widget shows its own 'Loading...' spinner/skeleton while data refreshes; 'Refreshed just now' + Auto refresh: On in the toolbar
+  - Ours: `/dashboards/[id]`
+  - Gap: Our 'Refreshed just now / Auto refresh' toolbar labels are static chrome with no data pipeline behind them. Lands naturally with the widget data layer: per-widget fetch states + interval refresh.
+- **[PARTIAL/low] Team view: per-person workload cards** — [ref](https://mobbin.com/screens/4ed5d2cd-edde-4144-915a-ba0b7f5ddf6e)
+  - Shows: Board 'Team' view: vertical workload spectrum with avatars, then a card per person showing not-done/done counts, a completion ring %, and collapsible status-group rows
+  - Ours: `boards/[slug] Workload view / spaces/[slug] Team tab`
+  - Gap: We have Workload and Team surfaces but not this presentation: per-person cards with completion ring + per-status rollup rows and the avatar spectrum column.
+- **[PARTIAL/low] Time Tracking widget set (hours per person/task cards)** — [ref](https://mobbin.com/screens/812c613b-1ae0-4e0b-a9da-73870c1d0d8c)
+  - Shows: Nearest capture: All-timesheets people-by-day hours grid with totals; ClickUp also offers time-tracked report cards inside dashboards
+  - Ours: `/timesheets (reporting itself) + Add Card gallery 'Time Tracking' category`
+  - Gap: Timesheets route covers time reporting as a page, but no time-tracked dashboard widgets (hours per person, time by list) exist despite the gallery category. Low-medium value for non-agency end-clients.
+- **[PARITY/low] Space Overview card grid (Recent / Docs / Bookmarks / Folders / Lists / Resources / Workload)** — [ref](https://mobbin.com/screens/321f31b4-9053-4f91-836f-582821407e26)
+  - Shows: Space Overview tab as a mini-dashboard: Recent items, Docs, Bookmarks, Folders, Lists table with per-list progress bars, Resources (files), Workload-by-Status pie, plus Customize + Add card
+  - Ours: `spaces/[slug] Overview tab`
+  - Gap: space-overview-grid.tsx ships the same seven cards (recent/docs/bookmarks/folders/lists/resources/workload pie) plus Add cards + customize. Only nit: no per-card 'Refreshed just now' badge.
+- **[PARITY/low] Goal target update modal** — [ref](https://mobbin.com/screens/662c87bf-64aa-4e1f-9a9c-d1f96eaddf26)
+  - Shows: Modal to update a target: start/current/target values, add-unit, Decrease/Increase toggle, numeric input, optional note, Save update
+  - Ours: `/okrs/[id] (OkrCheckInForm inline island)`
+  - Gap: Functionally equivalent (value + unit + note + refresh of bars/feed); ours is inline per-KR rather than a modal, and lacks the explicit Decrease/Increase affordance. Cosmetic only.
+- **[PARITY/low] Goals index (All Goals list)**
+  - Shows: ClickUp's goal home groups goals in folders with progress % per goal (only the breadcrumb was captured on Mobbin; no dedicated index screen in the set)
+  - Ours: `/okrs`
+  - Gap: Our index has a stats hero + Company→Team→Individual cascade with health bars and expandable KRs, which exceeds ClickUp's flat folder list. Folder-grouping vs level-cascade is a deliberate structural difference, not a gap.
+
+## home-planner-topbar
+_Strongest area finding: the topbar surfaces are further along than expected. Real gaps concentrate in three places. (1) Search overlay depth: our ⌘K palette hits live /api/search but lacks per-result hover actions (Ask AI on a row, copy link, open in new tab), a sort control, and a command mode with typed aliases; the Gmail/Drive/SharePoint source chips are placeholders, fine under the demand-driven integrations strategy but they should either gate behind 'Connect' CTAs or hide until connectors exist, otherwise the overlay promises sources it cannot search. (2) Keyboard shortcuts: profile menu ships a dead link to /settings?tab=shortcuts; no overlay exists anywhere. (3) Notification preferences: we have inbox bucket prefs but no per-channel (email/browser push/mobile) settings page. Cleanup: src/components/layout/os/notifications-popover.tsx is orphaned (imported nowhere) since the topbar follows ClickUp's inbox-first pattern; delete or repurpose. Product decisions reaffirmed: chat rows in Create menu/sidebar More/Create Channel, and the Planner AI Notetaker (meeting-bot needs provider integrations). Our Home ships extra differentiator cards (OKRs, KRAs, Reminders) beyond ClickUp's set, which is aligned with the KPI/KRA strategy; ClickUp's Priorities card covers the old LineUp, and only classic-Home 'Trending' has no equivalent (not worth building). ClickUp 4.0 has no bell popover at all, so our RemindersBell is an extra surface, not a parity debt._
+
+- **[MISSING/medium] Keyboard-shortcuts overlay / hotkeys reference**
+  - Shows: ClickUp ships a hotkeys cheat-sheet + settings toggle list (no Mobbin web capture found). Search overlay footer references '/', Tab, arrow-key shortcuts
+  - Ours: `none; profile menu links to /settings?tab=shortcuts (route absent), no ? overlay`
+  - Gap: Build a shortcuts overlay (? or ⌘/) listing ⌘K, ⌘J, ⌘T, view hotkeys, and fix the dead profile-menu link. Currently a visible dead end in a shipped menu
+- **[MISSING/low] Custom command creation (Link / Clipboard / Cloud)** — [ref](https://mobbin.com/screens/b78f8479-52dd-48f1-9d9b-c0a8ecd29337)
+  - Shows: Create Command flow: pick type Link (URL shortcut), Clipboard (text snippet), Cloud (JSON endpoint), shareable per workspace
+  - Gap: No user-defined commands at all; power-user feature, low pull for SMB
+- **[MISSING/low] Search settings modal (General / Sources / Commands)** — [ref](https://mobbin.com/screens/8b931845-d40f-4e53-9811-474cb6386be7)
+  - Shows: Modal managing search behavior, connected sources, and custom command CRUD, opened from the search overlay footer
+  - Gap: Palette footer has no settings entry; fine to defer until connectors exist (integrations are demand-driven)
+- **[PARTIAL/high] Global search / Command Center overlay (results state)** — [ref](https://mobbin.com/screens/78d00f39-8c51-416a-999b-70af5d99febc)
+  - Shows: Centered overlay: query input with Ask AI chip, connected-app icon row (Gmail, GitHub, Drive...), entity chips Tasks/Docs/Channels/Messages, Sort by Relevance, result rows with location breadcrumb + age and hover actions (Ask AI, copy link, open in new tab), footer hints (arrow keys, /, Tab) + Settings
+  - Ours: `OsCommandPalette (src/components/layout/os/command-palette.tsx, ⌘K) with live /api/search, source chips, Tasks/Docs/People/Spaces/Agents filters, Ask AI header chip, footer hints`
+  - Gap: No per-row hover actions (Ask AI on a result, copy link, open in new tab); no sort control on results; connected-app source chips (Gmail/Drive/SharePoint) are placeholders with no backing connectors
+- **[PARTIAL/medium] Command Center: commands list + slash aliases** — [ref](https://mobbin.com/screens/e09c2958-609d-4b67-a466-a08fbab6e290)
+  - Shows: Typing / lists commands with keyboard aliases (Set ClickUp Status 'ss', Open My Priorities 'pri', Show Calendar Schedule, Connect Apps, Explore, Show Favorites) plus user-defined custom commands
+  - Ours: `OsCommandPalette quick-actions section (static curated actions, no aliases)`
+  - Gap: No command mode with typed aliases; no in-palette actions like set status / open priorities / toggle favorites
+- **[PARTIAL/medium] Notification preferences (per-channel: Inbox / Email / Browser / Mobile)** — [ref](https://mobbin.com/screens/f62c18eb-e175-4a8e-b78e-5857d58b5aca)
+  - Shows: Settings page with Default/Focused/Custom presets per channel, Slack integration, 'don't send mobile when active on desktop' and auto-follow toggles
+  - Ours: `/inbox settings popover only (bucket prefs); /settings has no notifications section`
+  - Gap: No per-channel notification preference page (email digests, browser push, presets). Table-stakes for a notifications system at SMB scale
+- **[PARTIAL/medium] Planner week grid with left work panel** — [ref](https://mobbin.com/screens/98725157-dec0-46de-a5d8-3e929a80e05e)
+  - Shows: Time-grid calendar with now-line; left panel: numbered Priorities, 'Meet with' people search, collapsible Assigned to me / Today & overdue / Backlog (list picker + search); bottom floating 'Search events, teammates, commands' bar; Day/Week dropdown, AI Notes button, mini-calendar and refresh icons
+  - Ours: `/planner (planner-week.tsx + planner-side-panel.tsx + planner-command-bar.tsx + connect gate)`
+  - Gap: Week-only: no Day/Week view dropdown; side-panel task rows not yet draggable onto the grid (click-to-open only)
+- **[PARTIAL/low] Inbox Zero empty state** — [ref](https://mobbin.com/screens/f784aba7-c329-4e4f-90b2-6f21a0a2a70d)
+  - Shows: Cleared inbox celebration illustration + motivational quote card
+  - Ours: `/inbox empty state`
+  - Gap: Verify our empty state has comparable warmth (illustration + copy); cheap polish win
+- **[PARTIAL/low] Home sidebar 'More' menu (Chat Activity, Drafts & Sent, Posts, All Channels, All Spaces, All Tasks)** — [ref](https://mobbin.com/screens/a1d39a24-0fab-4233-9408-d541a20d64bf)
+  - Shows: 'More' under Home expands pinnable rows: Chat Activity, Drafts & Sent, Posts, All Channels, All Spaces, All Tasks, Customize
+  - Ours: `middle sidebar More section (Inbox/Assigned Comments/My Wrk/More)`
+  - Gap: Chat rows (Chat Activity/Posts/All Channels/Drafts) are chat = product decision; non-chat gap: an 'All Tasks' / 'All Spaces' everything-view row with pin control
+- **[PRODUCT-DECISION/low] Planner AI Notetaker panel** — [ref](https://mobbin.com/screens/7d4c9da7-fee9-41f2-8542-d2e96dab5e5e)
+  - Shows: AI Notes side panel: auto-join meetings per connected account, paste-call-link to record, Zoom provider connect, produces summaries/action items
+  - Gap: Meeting-bot recording depends on external meeting providers; integrations are demand-driven. We have AI + /meetings; revisit when calendar connect ships
+- **[PRODUCT-DECISION/low] Create Channel modal** — [ref](https://mobbin.com/screens/90c40832-868e-4102-9fc2-e804a327f468)
+  - Shows: Chat channel creation: name, private toggle, attach a List, import
+  - Gap: Chat/Channels deliberately not shipped (ClickUp 4.0 chat = product decision row)
+- **[PARITY/low] Home 'My Tasks' card grid (greeting, Recents, Agenda, My Work, Assigned to me)** — [ref](https://mobbin.com/screens/81eba05f-ec09-46ca-9e8a-976fff37b768)
+  - Shows: Time-of-day greeting; Recents list with per-type glyphs; Agenda day card; My Work card with To Do/Done/Delegated tabs and Today/Overdue/Next/Unscheduled groups; Assigned to me embedded grid; Assigned comments card; Manage cards button + settings gear
+  - Ours: `/tasks (src/app/(dashboard)/tasks/page.tsx, react-grid-layout, 11 cards)`
+- **[PARITY/low] Home cards: Priorities (LineUp), Personal List, AI StandUp** — [ref](https://mobbin.com/screens/132dc714-53b4-4600-8815-7ffa36c1c1d2)
+  - Shows: Numbered Priorities card (flag, age, due date; 4.0's LineUp successor), Personal List mini board, AI StandUp card summarizing last 7 days of the user's work
+  - Ours: `/tasks cards: priorities, personal-list, ai-standup (plus our extra okrs/kras/reminders cards)`
+  - Gap: ClickUp classic Home also had a 'Trending' card we don't ship; verify AiStandUpCard generates from real activity, not canned copy
+- **[PARITY/low] Inbox notification center (Primary / Other / Later / Cleared)** — [ref](https://mobbin.com/screens/f1374e47-4168-46b0-baab-445916244ac6)
+  - Shows: Full-page notification center: 4 tabs with unread counts, Filter, settings gear, Clear all, rows with actor + action text, per-row hover actions (clear, snooze), date groups (Today/Yesterday/Last 7 days)
+  - Ours: `/inbox (Primary/Other/Later/Cleared tabs, snooze-to-tomorrow, clear, prefs popover)`
+  - Gap: Spot-check per-row hover action set and date-group headers against the screenshots
+- **[PARITY/low] Reminder notification row in Inbox** — [ref](https://mobbin.com/screens/bc1ba74d-c344-40c0-b43b-c2815a956764)
+  - Shows: Fired reminder appears as an Inbox row deep-linking to its task, with unsnoozed-date meta
+  - Ours: `/inbox rows fed by ReminderTicker/cron; RemindersBell popover (Overdue/Today/Upcoming, snooze +1h, done) is our extra surface ClickUp lacks`
+- **[PARITY/low] Topbar notification bell popover** (monday) — [ref](https://mobbin.com/screens/25049aa4-66cb-495d-9ddf-389049cb008f)
+  - Shows: Monday.com pattern: bell opens an Inbox popover with update feed, like/reply, view filters. ClickUp 4.0 has NO bell popover; notifications route to the Inbox page
+  - Ours: `Topbar has RemindersBell + Inbox link (ClickUp pattern). notifications-popover.tsx exists but is orphaned, imported nowhere`
+  - Gap: We already follow the ClickUp inbox-first pattern; delete or wire the orphaned src/components/layout/os/notifications-popover.tsx so dead code doesn't drift
+- **[PARITY/low] Topbar '+ Create' quick-create menu** — [ref](https://mobbin.com/screens/0a9d8456-f4dc-4ccb-9335-1c0fa5cc7c4c)
+  - Shows: Dropdown: Task (⌥T), Message (⌘G), List, Channel, Space, Doc, Form, Dashboard, Whiteboard, Section (personalize sidebar), Templates footer
+  - Ours: `create-menu.tsx: Task/List/Space + AI section + Doc/Form/Dashboard/Whiteboard/Database + Templates/Import/Customize sidebar`
+  - Gap: Message/Channel entries are chat (product decision); we ship Database extra; consider showing keyboard shortcut hints on rows like ClickUp does
+- **[PARITY/low] Quick-create Task modal** — [ref](https://mobbin.com/screens/2aa8678d-90f9-491b-ae22-adc9bf186f12)
+  - Shows: Compact modal: location breadcrumb chip, task-type chip, title, rich description, status/assignee/date/priority/tags pickers, Templates button, attachment + reminder icons, Create Task split button
+  - Ours: `create-task-modal.tsx (⌘T quick task, shipped in parity waves)`
+  - Gap: Verify split-button (create + create-and-open) and Templates entry inside the modal
+- **[PARITY/low] Profile / avatar menu with status + presence**
+  - Shows: Avatar menu: Set status, mute notifications, Settings, Notifications, Themes, Keyboard shortcuts, Help, pinnable personal tools, Trash, Log out, online dot (no good Mobbin capture surfaced; audited from our parity screenshots)
+  - Ours: `profile-menu.tsx + set-status-modal.tsx + presence dot on avatar`
+  - Gap: 'Keyboard shortcuts' row dead-links to /settings?tab=shortcuts which does not exist (see shortcut overlay row)
+- **[PARITY/low] Workspace switcher menu (top-left)**
+  - Shows: Workspace avatar dropdown: workspace list with switch, create workspace, Upgrade, Settings, Apps, Templates (no clean Mobbin capture in results; visible collapsed in every Home screenshot)
+  - Ours: `workspace-menu.tsx (switch, create, delete-with-fallback, Upgrade gate, Settings, Templates)`
+  - Gap: 'Apps' row is a coming-soon toast, consistent with demand-driven integrations strategy
+- **[PARITY/low] Planner drag-create popover (Event / Task / Focus time / OOO)** — [ref](https://mobbin.com/screens/b26915c0-01e1-444d-a4fd-9ba7a4bb523a)
+  - Shows: Sweep a range on the grid, popover with 4 type tabs, title with @people @@tasks mentions, add video call, participants, linked ClickUp tasks/docs, busy/default visibility, notification toggle
+  - Ours: `planner-week.tsx drag-to-sweep create popover with Event/Task/Focus/OOO`
+  - Gap: Verify @people/@@task inline mentions and add-video-call affordance inside the popover
+- **[PARITY/low] Topbar calendar peek (planner popup)** — [ref](https://mobbin.com/screens/98725157-dec0-46de-a5d8-3e929a80e05e)
+  - Shows: Calendar icon in topbar giving a quick glance at the week without leaving context (ClickUp: mini agenda + planner shortcut)
+  - Ours: `calendar-peek.tsx opening PlannerModal (full week grid overlay)`
+- **[PARITY/low] Topbar right cluster: timer, clips, quick tools** — [ref](https://mobbin.com/screens/137326d0-2a37-48a8-8d27-cf85dee3d85e)
+  - Shows: ClickUp topbar right: running timer readout, screen-record/Clips icon, video, notification dot, avatar
+  - Ours: `click-topbar.tsx: ActiveTimerPill + pinnable quick tools (task/My Work/Notepad/Reminder/Doc/Voice) + RemindersBell + Inbox + avatar`
+  - Gap: Screen-record Clips is rail-level for us (Clips rail item); voice capture covers quick recording
+
+## automations-forms-templates
+_1) Automation Hub is fully designed (docs/plans/automation-hub.md + schema SQL) but zero UI exists; every automation row below lands on that plan. Recommend updating the plan's frontend section before build: ClickUp uses a modal opened in-context from a Space/List (tabs Browse/Manage/Usage/Activity/Webhooks/Recurring), not standalone pages, and Monday's recipe-template-first gallery is the friendlier SMB entry point; ship recipes first, raw builder second. 2) The Browse gallery's Integrations column (Slack/GitHub/Calendly/HubSpot/Twilio) conflicts with our demand-driven integrations strategy; seed only Email + generic webhook actions. 3) ClickUp's automation templates carry AI badges (Run AI on a schedule, process new tasks with AI) and an AI-agent action with tool config; this maps cleanly onto our existing agents/autopilot routes and AI-OS vision, so agents-as-automation-actions should be a first-class design goal, not an afterthought. 4) ClickUp's form builder IS the board Form view (Build/Settings/Preview sub-tabs inline); ours is a separate /forms/[id] page with the board Form view just iframing the responder; converging these is the single highest-leverage forms change. 5) Template Center's biggest perceived gap is visual: ClickUp cards have colorful preview thumbnails and counts (588/809 templates); ours are text tiles with 5 seeds. Thumbnail generation + a 30-50 template seed library would change how complete the product reads. 6) Dashboard Add Card gallery appeared in results and is already at parity per the recent dashboards wave; excluded as duplicate. 7) ClickApps/App Center feature-toggle panel treated as product-decision (App Center packaging = integrations marketplace we deferred), but a simple workspace-level automations kill switch in /settings is worth adopting when the engine ships._
+
+- **[MISSING/high] Automations modal — Manage tab (list of automations)** — [ref](https://mobbin.com/screens/92b59974-0c99-47af-a55f-2739690a67ec)
+  - Shows: Location scope picker, Active/Inactive tabs with counts, filter dropdowns (Trigger/Condition/Action/Updated by), Add Automation button, per-rule row as When/and/then sentence chips + enable toggle + inline description; header tabs Browse/Manage/Usage/Activity/Webhooks/Recurring
+  - Gap: No automations surface at all; plan exists at docs/plans/automation-hub.md with (dashboard)/automation/* pages, needs re-spec as in-context modal
+- **[MISSING/high] Automations modal — Browse (templates gallery)** — [ref](https://mobbin.com/screens/0941ca3e-0998-43ed-a686-27ac8edd3248)
+  - Shows: Left nav: Featured/Popular, Solutions (PM/Marketing/Dev/Prof Services), Categories (Move/Statuses/Task Types/Creation/Dates/Assignees), Integrations; card grid of one-click automation recipes with trigger-to-action icon pairs and Popular/AI badges
+  - Gap: No recipe gallery; seed 15-20 recipes across Statuses/Dates/Assignees/Creation categories, Email+webhook only for integrations
+- **[MISSING/high] Automation builder — trigger/action canvas** — [ref](https://mobbin.com/screens/45f020cf-80c6-4d5e-9f4e-2974f661c0dd)
+  - Shows: Two-card canvas (Trigger card with type dropdown e.g. Task or subtask created + Source(s) multiselect; arrow; Action card e.g. Change status with status picker and inline warning callout), plus-buttons to chain, live sentence summary bar at bottom (When X then Y), name + description fields, Cancel/Create
+  - Gap: Entire builder UI; engine + schema designed in automation-hub plan but no frontend
+- **[MISSING/high] Automation builder — condition rows** — [ref](https://mobbin.com/screens/a33570e2-4678-4ec4-ba92-431683678c53)
+  - Shows: "And if this condition is true" card inserted between trigger and action: field picker (Priority), operator (Is equal to), value picker, delete-condition control; sentence bar grows to When / and Condition is true / then
+  - Gap: Condition model exists in planned schema; UI for field/operator/value rows unbuilt
+- **[MISSING/high] Monday Automation Center (comparative reference)** (monday) — [ref](https://mobbin.com/screens/20939958-e52c-4ae9-9289-864fcbfd8c72)
+  - Shows: Tabs Automations Center/Board Automations/Account Usage; category sidebar (Basic/Notifications/Status Change/Recurring/Due Dates/Item Creation/Move/Subitems/Dependencies/Custom); recipe cards with bolded fill-in-the-blank sentences + Use template; hero custom-automation entry
+  - Gap: Comparative pattern: recipe-first gallery with plain-language sentences is the SMB-friendly default entry; our hub should lead with this over the raw builder
+- **[MISSING/medium] Automation builder — schedule trigger + email report action** — [ref](https://mobbin.com/screens/88da3ba0-5a75-455d-b287-a3d066ec8e87)
+  - Shows: "On a schedule" trigger: Repeat presets/custom, every-N-weeks, weekday chips, time, start date, Advanced, human-readable summary with next run; action Send Email Report with To/Cc/Bcc
+  - Gap: Time-based triggers and email actions; we have Reminder/recurrence primitives (Item.metadata roll-forward) to reuse for the cron side
+- **[MISSING/medium] Automations — Usage / Activity / Webhooks / Recurring tabs** — [ref](https://mobbin.com/screens/92b59974-0c99-47af-a55f-2739690a67ec)
+  - Shows: Header tabs beyond Browse/Manage: usage metering, run-history audit log, webhook management, recurring-tasks manager
+  - Gap: Activity (run log) is the trust-critical one and is in the plan's guarantees section; usage metering and webhooks can trail; recurring manager could surface our existing Item recurrence
+- **[MISSING/medium] Monday custom automation sentence builder (comparative reference)** (monday) — [ref](https://mobbin.com/screens/20183635-2391-4d40-96e8-4b8101a71ac6)
+  - Shows: Full-screen fill-in-the-blank sentence: When Status changes to [something] then [do this], underlined clickable tokens, + to chain extra conditions/actions (and then notify someone), Create Automation
+  - Gap: Alternative builder UX to ClickUp's card canvas; pick one paradigm (recommend ClickUp cards + Monday-style live sentence summary, which ClickUp's bottom bar already hybridizes)
+- **[MISSING/low] Dashboard creation template picker** — [ref](https://mobbin.com/screens/6b31e22a-bb00-43df-95a1-8a0d9f06f106)
+  - Shows: "Choose a Dashboard template" empty-state: Simple Dashboard, AI Team Center, Time Tracking, Project Management, AI Personal Center, Start from scratch
+  - Ours: `app/(dashboard)/dashboards`
+  - Gap: Dashboards shell + Add Card gallery shipped at parity, but new-dashboard flow lacks a template picker step; 4-5 presets composed from existing cards would close it
+- **[PARTIAL/high] Form builder — Build tab with field-type menu (board Form view)** — [ref](https://mobbin.com/screens/410ec85f-3c9b-4124-954b-39663dcb12ac)
+  - Shows: Form as a board view tab with Build/Settings/Preview sub-tabs, Published toggle + Copy link, responses count, Start/End page outline, Add question, field menu: Task property, Short/Long text, Dates, Single-select (Dropdown/Checkbox/Progress/Rating/Voting), Multi-select (Labels/Tags), Contact info, People, Uploads, Number, Signature, Information Block; each type offers Create-new-field vs Map-to-existing-field-in-location
+  - Ours: `app/(dashboard)/forms/[id]`
+  - Gap: We have 9 basic types + board/table column mapping; missing People/Uploads/Rating/Voting/Progress/Signature/Contact-info/Info-block types, map-to-task-property UX (status/priority/tags/description), Start/End pages, Preview tab, and builder is not inline in the board Form view (board-form-view.tsx just iframes the responder)
+- **[PARTIAL/medium] Automation action — Launch AI Agent (scheduled standup)** — [ref](https://mobbin.com/screens/11a8c326-4192-453c-8f4f-9ef603d25429)
+  - Shows: Schedule trigger wired to Launch AI Agent action: workspace data-source checkboxes (Spaces/tasks/Docs), Add tool button, tool cards (Assign a comment, Write StandUp with people + time period), Create & save
+  - Ours: `app/(dashboard)/agents + autopilot`
+  - Gap: Agents/autopilot exist as routes but are not invocable as automation actions with schedule triggers, data-source scoping, or tool config
+- **[PARTIAL/medium] Form builder — create field modal (rating config)** — [ref](https://mobbin.com/screens/f4a2d5b9-dae7-4fc4-8f6d-f72d877b472f)
+  - Shows: Create-field popover inside form builder: field name, optional description shown on hover in tasks/views, emoji type picker and number-scale slider for Rating fields
+  - Ours: `app/(dashboard)/forms/[id]`
+  - Gap: Our add-field is label+required+options only; no description, no rating/emoji/scale config, created fields do not become reusable workspace custom fields
+- **[PARTIAL/medium] Form sharing settings dropdown (publish/embed)** — [ref](https://mobbin.com/screens/f311a25f-5f8b-4b0c-a05b-416d822ed017)
+  - Shows: Published toggle with Copy link split-dropdown: Expire link (Never expire), Share link with search engines toggle, Autosize embed height, Embed code + Copy code
+  - Ours: `app/(dashboard)/forms/[id] + app/embed/forms/[id]`
+  - Gap: Have isPublic + copy link + embed responder route; missing link expiry, search-engine indexing toggle, embed-code snippet UI, autosize option
+- **[PARTIAL/medium] Public form responder page (comparative reference)** — [ref](https://mobbin.com/screens/3759cafd-b11e-4214-8f4d-a5422aa84733)
+  - Shows: Clean centered public intake form: title, helper description, required markers, grouped sections, submit button, vendor branding footer (Wrike shown; ClickUp equivalent is the Preview/published form)
+  - Ours: `app/(dashboard)/forms/[id]/respond + app/embed/forms/[id]`
+  - Gap: Responder exists; missing branding (logo/avatar/accent color), custom success message/redirect, and multi-page (Start/End page) rendering
+- **[PARTIAL/medium] Template Center — browse with filters and thumbnails** — [ref](https://mobbin.com/screens/04818cc9-7502-402a-a6f8-ec356682723b)
+  - Shows: Left nav Featured/Workspace Templates/ClickUp Templates with counts (588+), Template Type filters (Space/Folder/List/Task/Doc/View/Whiteboard), Complexity (Beginner/Intermediate/Advanced), search, Use Cases/Tags/Created-by filter buttons, category sections with See-more, cards with colorful live-preview thumbnails, promo banner, Activity Log link
+  - Ours: `src/components/templates/template-center.tsx (+ app/(dashboard)/templates)`
+  - Gap: Scopes/kind/complexity/search/apply all exist; missing card preview thumbnails, Use Cases/Tags/Created-by filters, count badges, Activity Log, and library depth (5 seeds vs hundreds); WHITEBOARD/DOC kinds exist in enum but seed coverage is thin
+- **[PRODUCT-DECISION/low] App Center / ClickApps automation toggle** — [ref](https://mobbin.com/screens/2017e33e-b3cd-4fae-abc0-7eec2b59f031)
+  - Shows: Workspace App Center with ClickApps feature toggles (AI, AI Notetaker, Automation, Connected Search) and a destructive-confirm warning when disabling Automations workspace-wide
+  - Ours: `app/(dashboard)/settings`
+  - Gap: App Center marketplace packaging conflicts with deferred-integrations strategy; adopt only a workspace automations on/off switch in Settings when engine ships
+- **[PARITY/low] Form responses to tasks pipeline (submissions inbox)** — [ref](https://mobbin.com/screens/0cac19da-9b3a-457c-ab62-56ec3f9b1a09)
+  - Shows: Responses counter in form header; in ClickUp each submission becomes a task in the target list with mapped fields
+  - Ours: `app/(dashboard)/forms/[id] (Submissions tab)`
+  - Gap: Submissions inbox + item creation on target board with field mappings already work; minor: deep-link from a submission to its created item
+
+## chat-clips-collab
+_Chat/Channels/DMs/SyncUp calls are one coherent product-decision block: ClickUp 4.0 makes chat a per-location surface with threads, a Replies inbox, and native calls whose recordings feed Clips. We deliberately do not ship chat, but two spillover effects matter: (1) ClickUp's comment thread inherits chat affordances (reactions, replies, resolve, assign, mentions), so matching their TASK collaboration does not require chat, just a first-class comment system, currently our weakest surface (item-thread.tsx is plain text + delete). (2) The Clips rail item we already ship points at /notetaker (AI transcript extractor), which is a different feature than ClickUp's Clips recordings library; either build record-screen -> gallery -> viewer (viewer with timestamped comments is the valuable async-review part) or rename the rail entry to Notetaker to stop over-promising. Suggested build order: 1) comment primitives (reactions, replies, resolve, assigneeId on ItemUpdate, shared @mention picker reused from Docs), which simultaneously fills the always-empty /assigned-comments page and gives Inbox real comment payloads; 2) fullscreen attachment lightbox; 3) Clips record+gallery+viewer; 4) proofing pins last, reusing comment primitives. Our voice quick-tool in the topbar could seed voice clips into the same Clips model._
+
+- **[MISSING/high] Clips Hub gallery** — [ref](https://mobbin.com/screens/305171ca-3ad1-4991-8446-c550be1e1127)
+  - Shows: Clips app: left nav All/Video/Voice/SyncUps/AI-Notetaker + Recents, thumbnail card grid, New Clip button, sort/search, grid-list toggle
+  - Ours: `notetaker (Clips rail item routes here)`
+  - Gap: Our Clips rail item opens the AI transcript Notetaker, not a recordings library. No record-screen flow, no clip storage, no gallery. Rail promise is currently unfulfilled/misleading, either build the gallery or relabel the rail item
+- **[MISSING/medium] Clip created confirmation popover** — [ref](https://mobbin.com/screens/018f86ba-9a40-4d0a-8a7a-81ee57b3941d)
+  - Shows: Post-recording toast with inline player preview, Create-a-task, open-in-new-tab, Copy-link actions
+  - Gap: No recording flow exists; this is the share/handoff moment that makes Clips useful for async work
+- **[MISSING/medium] Clip viewer with timestamped comments + transcript** — [ref](https://mobbin.com/screens/bd3d21a9-6275-4865-957b-47af724b5c82)
+  - Shows: Video player, Copy-link, right rail with Comments/Transcript tabs, comments pinned to a timestamp (00:15), per-comment Resolve + Assign-to
+  - Gap: No clip playback page at all; timestamped comments and transcript tab are the differentiating parts
+- **[MISSING/medium] Attachment fullscreen viewer with proofing annotations** — [ref](https://mobbin.com/screens/5536c1fe-7e56-4a77-8e56-fbfba05bb096)
+  - Shows: Fullscreen image viewer: zoom controls, download/share/delete, numbered comment pins dropped on the image, right-rail comment thread with Resolve + Assign
+  - Ours: `files`
+  - Gap: No fullscreen attachment preview anywhere in src/components. Even without pin annotations, click-to-open lightbox with download is baseline; pins/proofing can follow for design-review use-cases
+- **[MISSING/low] Proofing comment composer on image (emoji + assign)** — [ref](https://mobbin.com/screens/17088e94-0a62-4fa6-a8ec-3bcdc6218ae4)
+  - Shows: Dropping a numbered pin opens an inline composer on the image with emoji picker, attach, voice, and assign-proofing-request affordances
+  - Gap: Depends on the fullscreen viewer above; only worth building after comment primitives (assign/resolve/reactions) exist so pins reuse them
+- **[PARTIAL/high] Task detail comment thread (activity rail)** — [ref](https://mobbin.com/screens/9eed163f-1230-484d-ac79-6c1a89f1e2a3)
+  - Shows: Comment cards with Resolve checkbox, 'Assigned to X by Y' banner, like + emoji reactions, reply counts, interleaved activity events, Comment/Email composer tabs, composer buttons for attach/emoji/@mention/clip/voice
+  - Ours: `item/[id] (ItemThread in board-item-detail)`
+  - Gap: src/components/board-view/item-thread.tsx renders flat plain-text comments with delete only. Missing: emoji reactions, threaded replies, resolve, assign-comment-to-person, @mentions, attachments/rich text in composer. Monday's baseline (like/reply/seen) confirms this is table stakes, our biggest collab gap
+- **[PARTIAL/high] @mention people picker in composer** — [ref](https://mobbin.com/screens/021ad17f-d555-4614-a6fd-e7eb834b91a5)
+  - Shows: Typeahead dropdown while typing a name: online status, recency, create/invite fallbacks
+  - Ours: `docs (blocknote mention-inline only)`
+  - Gap: Mention inline node exists in the Docs editor but comment composers (ItemThread, drawer) have no @ typeahead, so mention notifications can never fire from comments. Ship one shared mention-picker used by comments + docs
+- **[PARTIAL/medium] Assigned Comments view** — [ref](https://mobbin.com/screens/ee60ac43-6456-4368-816b-9d6463ef4cd7)
+  - Shows: Sidebar destination listing comments assigned to me / delegated by me, with resolve workflow (visible as 'Assigned comments 0/1' block on task detail)
+  - Ours: `assigned-comments`
+  - Gap: Page chrome (tabs, Resolved toggle, date filter, search, empty state) is ClickUp-parity but permanently empty: ItemUpdate has no assigneeId, so no comment can ever be assigned. Wire schema + resolve flow together with the comment-thread upgrade
+- **[PARTIAL/medium] Monday.com All Updates inbox (comparative reference)** (monday) — [ref](https://mobbin.com/screens/206e4106-03fe-4221-9952-a49f7ab32db1)
+  - Shows: Cross-board updates feed with Inbox-view filters (I was mentioned / bookmarked), Like + Reply on every update, seen counts
+  - Ours: `inbox`
+  - Gap: Our Inbox shows notifications but comments carry no like/reply/seen affordances to surface. Closing the comment-thread gap automatically closes this one
+- **[PARTIAL/medium] Monday.com item Updates tab with inline file/video preview (comparative reference)** (monday) — [ref](https://mobbin.com/screens/fe795c1d-767f-492b-969f-93cfc74a0319)
+  - Shows: Update cards with embedded doc/video previews, Like/Reply, @mention highlighting in replies, seen-by counts, per-update Files and Activity Log tabs
+  - Ours: `item/[id]`
+  - Gap: Confirms competitor baseline: rich-media comments with reactions and replies. Our composer is a bare textarea; inline attachment rendering in comments is part of the same upgrade
+- **[PRODUCT-DECISION/low] Chat DM conversation** — [ref](https://mobbin.com/screens/1106411c-b009-479c-ae48-700f09ed971a)
+  - Shows: 1:1 DM with Chat/Calendar/Assigned-Tasks tabs, View Profile + Start SyncUp cards, message list, rich composer with AI and slash commands
+  - Gap: Full chat is deliberately not shipped; Inbox + task comments are our messaging surface
+- **[PRODUCT-DECISION/low] Channel view (posts + messages in a Space)** — [ref](https://mobbin.com/screens/5ffa6c9f-a646-4350-9fce-f97308a27434)
+  - Shows: Channel tab living beside Board/Team/Timeline views: message stream, typed Posts (Update/Discussion), SyncUp join cards, right rail with Followers/Search/Replies/Assigned/Settings
+  - Gap: ClickUp 4.0 embeds a channel per location; we assemble collab from Boards+Docs+comments instead
+- **[PRODUCT-DECISION/low] Replies inbox (threads across channels)** — [ref](https://mobbin.com/screens/0b3a8bac-a1fd-43fe-a542-81621a337245)
+  - Shows: Unread/Read tabs listing every thread the user follows, per-thread Resolve state, Mark-unread, inline reply composer
+  - Ours: `inbox`
+  - Gap: Depends on chat threads; our Inbox covers notifications instead
+- **[PRODUCT-DECISION/low] Message thread side panel** — [ref](https://mobbin.com/screens/c7157419-7e9c-4900-8ee4-8ac1f5c50b5e)
+  - Shows: Right-hand thread panel on a message: Resolve, Assign-to person, Create Task from message, threaded replies with reactions
+  - Gap: Chat threads not shipped; note the message-to-task conversion pattern is worth reusing on comments someday
+- **[PRODUCT-DECISION/low] New message / To: picker (people + channels)** — [ref](https://mobbin.com/screens/1ef8a48e-f617-4c7d-a71d-3c811ed191c9)
+  - Shows: Compose target picker with Recents/People/Channels tabs, create-channel and invite-by-email escape hatches
+  - Gap: Chat-only surface
+- **[PRODUCT-DECISION/low] Add people to channel modal** — [ref](https://mobbin.com/screens/f97d74be-f883-4672-8f84-b89a581ee635)
+  - Shows: Member picker with search, checkmarked members who auto-follow notifications, invite via email
+  - Gap: Chat-only surface; our equivalent people-picker pattern already exists for Space/Board sharing
+- **[PRODUCT-DECISION/low] SyncUp voice/video call** — [ref](https://mobbin.com/screens/c89bc823-e583-401e-88f1-38ca4342c54c)
+  - Shows: In-app call with participant tiles, mic/cam/screenshare/record/react controls, persistent Call Thread panel, recording lands in Clips Hub
+  - Ours: `meetings`
+  - Gap: Native calls are chat-adjacent infrastructure; our Meetings + Notetaker cover the meeting artifact instead of the live call
+
+## settings-admin-onboarding
+_Settings shell observation: ClickUp splits its settings sidebar into a Workspace group (People, App Center, Settings, Work Schedule, Spaces, Security & Permissions, Audit Logs, Teams, Task Types, Imports/Exports, API, Email Integration, Billing, AI Usage, Trash) and a personal group (My Settings, Workspaces, Notifications, Chat, AI Notetaker, Apps, Calendar, Referrals, Log out), with Trash living INSIDE settings. Our /settings layout already covers a comparable workspace group (members, permissions, hierarchy, identity, billing, audit, api, import-export, integrations, task-types, modules, calendar, locale, tags, scoring) and we have parity or better on Audit Logs and Task Types; the personal group is the thinner side (no Notifications page, no per-user security). Sidebar items seen but not captured as dedicated rows: Work Schedule (we cover via time-off/timesheets), Email Integration (send/receive email in tasks: product-decision, CRM-ish), AI Usage metering (low; add once AI billing matters), Referrals program and Suggest-an-App (growth mechanics, product-decision), multi-Workspace switcher (we are single-org today: product decision with architectural implications, flag before mid-market). Biggest coherent gap cluster for SMB to mid-market: identity/security (workspace 2FA/SSO/session enforcement + per-user 2FA + password change), the invite loop (invite modal, pending invites, seat awareness in Manage People), and notification preferences. Second cluster is data in/out: competitor importers (ClickUp/Asana/Trello/Monday) with staging grid and job history, and workspace CSV export; these are importers, not connectors, so the demand-driven integrations rule does not defer them. Billing/upgrade/checkout is a monetization-readiness cluster that can lean on Stripe-hosted checkout instead of bespoke card forms._
+
+- **[MISSING/high] Security settings (2FA / SSO / session management)** — [ref](https://mobbin.com/screens/343462a6-422c-4252-9b71-cca8291e4a52)
+  - Shows: Workspace-enforced 2FA radio options, SSO providers (Google/Microsoft/Okta/SAML), session duration + idle timeout, data retention, public-views authentication
+  - Ours: `/settings/identity (org identity only, no security section)`
+  - Gap: No workspace security page at all: no 2FA enforcement, no SSO config, no session/idle timeout, no retention controls. Identity page covers name/logo/timezone/currency only.
+- **[MISSING/high] Notification Settings** — [ref](https://mobbin.com/screens/ec4be7ab-3f21-4fdd-8af2-adcc2aefcd76)
+  - Shows: Per-channel presets (Inbox/Email/Browser/Mobile each with Focused/Default dropdown + example previews), Slack channel sync, auto-follow rules, suppress-mobile-when-active toggle
+  - Ours: `none (Reminders bell exists, no notification prefs page)`
+  - Gap: No notification-preferences surface anywhere. Table stakes for any work OS; needed before email/browser notifications ship or users will churn on noise.
+- **[MISSING/medium] Workspace data export (CSV)** — [ref](https://mobbin.com/screens/f2aea1e2-bdab-4d5b-a860-ad3812cb699b)
+  - Shows: Export page: pick a location (Space/Folder/List) from a dropdown, Start export, get CSV of workspace task data
+  - Ours: `/settings/import-export (exports audit log only)`
+  - Gap: No task/board/workspace CSV export. Data-egress is a trust requirement for mid-market buyers (and pairs with our data-integrity mandate).
+- **[MISSING/medium] Upgrade full-page plan comparison** — [ref](https://mobbin.com/screens/6e73bf82-be8d-4e6a-8024-f25467a224bc)
+  - Shows: Upgrade to unleash everything page: 4 plan columns with per-plan Upgrade CTAs, monthly/yearly toggle, money-back badge, upgraded-confirmation toast
+  - Ours: `none`
+  - Gap: No self-serve upgrade surface or upgrade CTAs in the shell. This is the monetization funnel for a self-serve SMB SaaS.
+- **[MISSING/low] Checkout: order summary + payment details** — [ref](https://mobbin.com/screens/d499104d-8f6f-4acf-8ed3-aa9040e18ce9)
+  - Shows: Order-summary modal with billed-yearly/monthly cards, add-on bundles, trust badges; invoice-details + card form with promo code and billed-today summary
+  - Ours: `none`
+  - Gap: No checkout flow. Can be satisfied by Stripe-hosted checkout rather than a bespoke in-app form; decide before building custom card forms.
+- **[MISSING/low] Spaces admin page (settings > Spaces)** — [ref](https://mobbin.com/screens/fea6d6c7-7bfc-45a5-913c-2a44eaad492c)
+  - Shows: All-spaces admin table: owner, shared-with, status set chips, enabled ClickApps icons, required views; Archived and Inaccessible Spaces tabs; New Space
+  - Ours: `none (spaces managed only via sidebar tree + per-space menus)`
+  - Gap: No central admin inventory of all Spaces incl. archived/inaccessible ones. Matters for admins in 50+ person orgs; low urgency below that.
+- **[PARTIAL/high] Manage People admin table** — [ref](https://mobbin.com/screens/f991a6aa-4b1e-4cfe-a45c-287cb41eae75)
+  - Shows: Member table with role chips (Owner/Guest/Pending), email, last active, invited by/on, per-row ... menu, seats-to-fill banner, search-or-invite-by-email bar, Invite People button, Export
+  - Ours: `/settings/members`
+  - Gap: Ours assigns access level + reporting manager (our differentiator) but has no invite entry point, no pending-invite rows, no last-active column, no seats banner, no member export, no per-row action menu (resend/revoke/remove).
+- **[PARTIAL/high] Invite People modal with role picker** — [ref](https://mobbin.com/screens/58394d8a-db89-4a3d-bd39-7d413ea1b057)
+  - Shows: Email input, free-seats-remaining note, Invite-as dropdown (Member / Limited Member / Guest / Admin / add custom role) with per-role descriptions, Send invite
+  - Ours: `people page + /setup invite; /api/invitations + accept-invite exist; space-level invite dialogs exist`
+  - Gap: Backend invitation plumbing exists but there is no single polished workspace-level Invite modal with role selection reachable from topbar/settings/members; invite UX is scattered across setup and space share dialogs.
+- **[PARTIAL/high] Import source picker (competitor importers)** — [ref](https://mobbin.com/screens/dbe9f797-d667-4cf4-b7ef-600c29c38e79)
+  - Shows: Select source of import: Spreadsheet, Document, plus app importers for Asana, Basecamp, Confluence, Jira, Monday, Notion, Slack, Todoist, Trello, Wrike
+  - Ours: `/imports (Database CSV + People CSV; ClickUp/Asana/Trello/Excel/Sheets listed as coming soon)`
+  - Gap: Only CSV paths are real. At minimum a ClickUp importer and an Asana/Trello/Monday importer are the switching-cost lever for winning SMB accounts off incumbents; these are importers, not integrations, so the demand-driven connector rule does not defer them.
+- **[PARTIAL/medium] Advanced permissions toggles** — [ref](https://mobbin.com/screens/818fed59-5cfa-4a69-8180-8fa864dc8b44)
+  - Shows: Workspace-content policy toggles: request-access, new-Spaces-private default, admins manage private Spaces/Custom Fields, private attachment links, authenticated forms, block public sharing
+  - Ours: `/settings/permissions (role-x-module matrix)`
+  - Gap: We have the granular roles-x-modules permission grid (arguably stronger), but none of the content-policy toggles: private-by-default, request access, public-sharing kill switch, admin override of private items.
+- **[PARTIAL/medium] Imports/Exports hub with import history** — [ref](https://mobbin.com/screens/700d6600-c4c1-4888-8192-d26b40e6dc4c)
+  - Shows: Import items / Export items buttons plus a History list showing running imports with progress bar, started-at, tasks-imported count, and Cancel
+  - Ours: `/imports + /settings/import-export (static nav cards)`
+  - Gap: Our two pages are static hubs; no import job history, no progress, no cancel. Fine for CSV v1 but breaks down the moment a big import runs.
+- **[PARTIAL/medium] Spreadsheet importer mapping grid** — [ref](https://mobbin.com/screens/5f818b9c-e766-44e2-8646-528e2b81c7fa)
+  - Shows: Full-page CSV staging grid: drag-drop upload, manual data entry, column mapping to Task Name/Assignee/Status/Due Date, All/Valid/Invalid row tabs, then Import into ClickUp
+  - Ours: `/imports -> Database CSV import, People bulk-import`
+  - Gap: Our CSV imports exist but lack the staging/validation grid (valid-invalid row triage, inline fixes, column mapping preview) that makes imports trustworthy.
+- **[PARTIAL/medium] Trash / recycle bin** — [ref](https://mobbin.com/screens/da62204a-3851-402e-b6e8-a27a153dbe4f)
+  - Shows: Trash table with search + filter, Name/Type/Location/Deleted-on/Deleted-by columns covering tasks, subtasks, lists, Spaces, docs, forms, whiteboards, custom fields, time entries; Clear all Trash with confirm modal; 30-day auto-purge banner
+  - Ours: `/trash`
+  - Gap: Ours restores documents-class entities (SOPs, tables, files, notes, policies) with 60-day retention, but no search/filter, no Location column, no Clear-all, and unclear coverage of tasks/lists/spaces/views in the same bin.
+- **[PARTIAL/medium] Billing page (Plans / Add-ons / Billing / Invoices tabs)** — [ref](https://mobbin.com/screens/6f2d4f5a-54cb-4ce5-bf7a-fe266baa89fa)
+  - Shows: Current-plan card, plan comparison columns with feature checklists, AI add-on upsell banner, tabbed Billing/Invoices sections
+  - Ours: `/settings/billing`
+  - Gap: Ours is a read-only plan + usage-vs-limits snapshot. No plan comparison, no payment method, no invoices tab, no add-ons. Needed once we monetize; until then the snapshot is acceptable.
+- **[PARTIAL/medium] Onboarding wizard (intent -> manage -> features -> tools -> name)** — [ref](https://mobbin.com/screens/85fba539-a6c2-4125-86b9-26dbbf7a4e25)
+  - Shows: Multi-step modal wizard: Work/Personal/School intent, what-to-manage chips (Startup, HR & Recruiting, PMO...), features-to-try chips, which-tools-do-you-use chips (feeds importer suggestions), workspace naming step with progress bar
+  - Ours: `/onboard (Welcome -> Use case -> Pick apps -> Ready) + /setup`
+  - Gap: Our 4-step wizard covers intent + app picking. Missing: which-tools-do-you-use step wired to importers, and features-to-try personalization. Naming lives in /setup, acceptable split.
+- **[PARTIAL/medium] Teams admin (settings > Teams)** — [ref](https://mobbin.com/screens/1222b9a4-a5a2-41a0-93a6-12cde6ab0dea)
+  - Shows: Teams table: name, @alias for mentions, source (Manual), member avatars, Create Team; note that view-only users added to teams become paid
+  - Ours: `/team, /people, /settings/hierarchy`
+  - Gap: We model hierarchy/departments (stronger for our PPMS angle) but have no user-created ad-hoc Teams with @alias group mentions.
+- **[PARTIAL/medium] Teams directory with tabs (Overview/Analytics/StandUp/Workload/Timesheet)** — [ref](https://mobbin.com/screens/6f429054-91b4-4fc4-bb7c-c013dd7f26e5)
+  - Shows: Team page with member table (manager, teams, email, role, user status), card-grid alt view, filters (Status/Account type/Manager/Sort), and per-team tabs incl. StandUp and Workload
+  - Ours: `/team + /people + /timesheets + /workforce-planning`
+  - Gap: Our people surfaces exist but are separate pages; no per-team hub stitching members + workload + timesheet + standup into one tabbed entity. Candidate to fold into our KRA/KPI differentiator instead of copying.
+- **[PARTIAL/medium] ClickApps gallery (per-workspace feature toggles)** — [ref](https://mobbin.com/screens/54d9a73c-98b6-4336-b8e8-111bd0bf5b52)
+  - Shows: Toggleable platform features (AI, AI Notetaker, Automation, Connected Search...) as illustrated cards with search + filter-by-Space
+  - Ours: `/settings/modules`
+  - Gap: We have org-level module toggles; missing per-Space scoping of feature toggles and the illustrated gallery treatment.
+- **[PARTIAL/medium] My Settings: personal profile + account security** — [ref](https://mobbin.com/screens/e8fc2d76-c530-475a-9fc9-ab35062897a5)
+  - Shows: Avatar, name, email, change password, per-user 2FA (SMS/TOTP toggles), theme color swatches, Light/Dark/Auto appearance
+  - Ours: `/account + Customize panel (themes/accents/density)`
+  - Gap: Theme/appearance parity exists via Customize panel; account page lacks change-password and per-user 2FA enrollment (pairs with the missing workspace Security page).
+- **[PARTIAL/low] Space creation: Define your workflow template step** — [ref](https://mobbin.com/screens/eefd3afd-0980-4f55-9e2e-cabc1eed4732)
+  - Shows: Pre-configured solution picker (Starter/Marketing/PM/Product+Engineering) with editable defaults summary: default views, task statuses pipeline, ClickApps
+  - Ours: `create Space modal + Template Center (SPACE templates)`
+  - Gap: We have Space templates via Template Center; the create-space modal lacks the inline defaults summary (views/statuses/ClickApps preview) before confirming.
+- **[PARTIAL/low] My Settings: preferences (language, timezone, date/time format)** — [ref](https://mobbin.com/screens/0210a154-c805-4498-9eef-1e33cfd8ad67)
+  - Shows: Language + timezone pickers, week-start, 12/24h, date format radios, high-contrast toggle, in-app toast preferences
+  - Ours: `/settings/locale`
+  - Gap: We have org-level locale; missing per-user overrides (timezone/format per person) and accessibility (high contrast) toggle.
+- **[PRODUCT-DECISION/low] App Center (integrations gallery + categories)** — [ref](https://mobbin.com/screens/c4fc9695-bafa-4017-b9c5-62ed59704344)
+  - Shows: Featured integrations grid (Dropbox, Figma, GitHub, GCal, Drive, Jira, Teams, Salesforce, Slack, Zoom) with category sidebar, connected badge, Suggest-an-app modal
+  - Ours: `/integrations (marketplace UI with categories + connect/disconnect, demo data)`
+  - Gap: UI shell is at parity; real OAuth connectors are deliberately demand-driven per the 2026-05-16 integrations strategy. Not an automatic gap.
+- **[PRODUCT-DECISION/low] Chat Settings** — [ref](https://mobbin.com/screens/cffcc110-ada8-4b61-8a4c-fe97249b6088)
+  - Shows: Chat notification matrix (browser/mobile per event type), sidebar label options for Channels
+  - Ours: `none`
+  - Gap: ClickUp 4.0 ships full Chat; whether WorkwrK ships chat/channels is an open product decision, so its settings page is too.
+- **[PARITY/low] Workspace API token page** — [ref](https://mobbin.com/screens/efc09b1b-7f02-4415-b802-9ba584ed71a2)
+  - Shows: Personal API token with copy/regenerate, plus authorized custom-apps list
+  - Ours: `/settings/api`
+
+## monday-strengths
+_Monday-beats-ClickUp patterns we ALREADY embody (keep): colored group rails, full-cell status chips, per-group summary footers with stacked bars/sums (board-table-view monday mode), Monday-clean whitespace/flat/single-accent visual language. Highest-leverage adoptions in order: (1) date-bucketed My Work list (Past/Today/This week/Next week/Later/No date + hide-done + customize) as a tab or replacement inside My Wrk, (2) advanced filter builder with live count + save-filter-as-named-view, (3) real dashboard widgets (Numbers/Battery/Chart) with per-widget filter, overflow menu, and drill-down-to-items. Monday's signature interaction grammar worth standardizing across WorkwrK: fill-in-the-blanks sentence recipes (bold editable tokens in plain English) used for automations AND integrations; adopt it whenever Automation Hub lands. Integrations Center and Automations Center are product decisions per strategy memos (demand-driven connectors; automation deferred until event emission), not screen gaps. Item-card Updates feed: seen-by counts and inline file previews are the two pieces that materially improve SMB async communication; email-in updates is optional plumbing. All statuses verified against code: src/components/board-view/board-table-view.tsx (GroupSummaryRow), board-filter-bar.tsx (no rule builder), src/components/dashboard/widget-card.tsx (no widget menu), app/(dashboard)/forms/[id]/page.tsx (public toggle + share + embed present), app/(dashboard)/tasks/page.tsx (card grid, not date buckets)._
+
+- **[MISSING/medium] Widget '...' menu — Full Screen / Duplicate / Dock / Export** (monday) — [ref](https://mobbin.com/screens/66dcb4f7-4326-4fba-8065-67f2d46b7034)
+  - Shows: Every widget's overflow menu: Full Screen, Settings, Rename, Duplicate, Dock this widget, Export (submenu), Delete
+  - Ours: `src/components/dashboard/widget-card.tsx`
+  - Gap: WidgetCard chrome exists but has no per-widget action menu (fullscreen, duplicate, export PNG/CSV, settings). Needed once widgets render data.
+- **[MISSING/medium] Chart drill-down — full screen with underlying items** (monday) — [ref](https://mobbin.com/screens/15b73e4c-2b8a-4595-8aa1-f3f93de61e8f)
+  - Shows: Clicking a chart segment opens full-screen drill-down: the filtered bar plus the actual item rows beneath ('Exit drill down'), and a Settings rail with a visual chart-type gallery (pie/donut/line/bar/column/area)
+  - Gap: No chart drill-down-to-items anywhere; no visual chart-type switcher gallery. Drill-down is the pattern that makes Monday dashboards feel trustworthy (numbers always explain themselves).
+- **[PARTIAL/high] My Work — date-bucketed cross-board list** (monday) — [ref](https://mobbin.com/screens/5b79b58f-de4a-4483-a5df-d47118fccf8a)
+  - Shows: Single flat list of the viewer's items across ALL boards, grouped Past dates / Today / This week / Next week / Later / Without a date, with Board+Group+People columns, search, 'Hide done items' checkbox, and a Customize panel
+  - Ours: `app/(dashboard)/tasks/page.tsx (My Wrk card grid) + /planner + /me`
+  - Gap: Our My Wrk is a ClickUp-Home card grid (Agenda/Personal List/Assigned to me). No single date-bucketed cross-board work list with overdue bucket, hide-done toggle, and customize (which boards/columns/date-buckets). This is Monday's most-loved daily driver and beats ClickUp Home for at-a-glance 'what do I do today'.
+- **[PARTIAL/high] Table toolbar — advanced filter builder + save as new view** (monday) — [ref](https://mobbin.com/screens/e136c410-647d-47c1-9b9e-b9c5b0a489ee)
+  - Shows: Filter popover with rule rows (Where column / condition / value), '+ Add new filter', live 'Showing all of 3 tasks' count, 'Clear all', and 'Save as new view'; plus a one-click Person quick-filter chip beside it
+  - Ours: `src/components/board-view/board-filter-bar.tsx`
+  - Gap: Our filter bar is single-shot; no multi-rule Where/condition/value builder, no live match count, no persist-filter-as-named-view, no dedicated Person quick filter. Filter-state-to-saved-view is a core Monday table strength.
+- **[PARTIAL/high] Board Dashboard tab — widget canvas (Numbers/Battery/Chart/Gantt)** (monday) — [ref](https://mobbin.com/screens/45024d13-339c-430c-b9be-7bc815f57275)
+  - Shows: Dashboard as a board view tab: '+ Add widget' toolbar, Numbers KPI tile, Battery (stacked % done bar with legend), Pie/Bar charts, Gantt widget, each with its own filter icon
+  - Ours: `app/(dashboard)/dashboards/[id] + boards Dashboard view; src/components/dashboard/widget-card.tsx`
+  - Gap: Dashboards shell + Add Card gallery exist but canvas is still empty-state; no live Numbers/Battery/Chart widgets bound to board data, no per-widget filter. Battery widget (percent-done stacked bar) is a distinctly Monday pattern worth adopting.
+- **[PARTIAL/medium] Table toolbar — hide-columns picker + column pinning** (monday) — [ref](https://mobbin.com/screens/18299218-0660-465e-9cbb-3fd8024ccea4)
+  - Shows: 'Hide' toolbar button opens a searchable 'Choose columns to display' checklist with All Columns toggle; a sibling '...' menu offers 'Choose columns to pin' (freeze Name+Person left) — see also https://mobbin.com/screens/3f8a5b4f-8c95-4933-a29b-2550a10aba70
+  - Ours: `src/components/board-view/board-table-view.tsx (FieldShelf + per-column Hide)`
+  - Gap: We have FieldShelf toggles and per-column-header Hide, but no searchable one-popover column checklist in the toolbar and no user-facing column pinning/freeze for board tables (DataTable has frozen header only).
+- **[PARTIAL/medium] Kanban — Customize View side panel** (monday) — [ref](https://mobbin.com/screens/a0bf0660-1ae9-4c71-81b3-6f81227e6237)
+  - Shows: Right panel to pick the Kanban column (which status field drives lanes), cover image column, checklist of card columns to show on cards, subitem card columns, and 'Divide by groups'
+  - Ours: `boards/[slug] Board (kanban) view`
+  - Gap: Our Kanban is ClickUp-parity; no per-view 'customize card fields' panel (choose which fields render on cards, cover images, group-by second dimension, lane count badges in colored lane headers).
+- **[PARTIAL/medium] Item card — Updates feed (social-style)** (monday) — [ref](https://mobbin.com/screens/32817243-aeb6-4381-950b-4d01ff2d0426)
+  - Shows: Item panel Updates tab as a feed of rich-text posts (headings, lists, tables in composer), Like + Reply per post, 'Seen' count, 'Write updates via email' address, inline file/PDF previews with viewer controls, Draft Saved indicator — composer detail at https://mobbin.com/screens/08cf8c2a-e9cd-4fe2-b17c-2feb4b183425
+  - Ours: `shared BoardItemDetail (drawer + /item/[id])`
+  - Gap: We have ClickUp-style comments. Missing Monday's feed affordances: like/seen-by counts, reply threading per post, rich-text composer with tables/checklists, draft autosave indicator, inline document previewer, email-in updates. Seen-by + inline previews are the highest-value pieces.
+- **[PARTIAL/low] Board header — inline title edit + description + view tabs** (monday) — [ref](https://mobbin.com/screens/cc104506-cf09-4ddf-9554-eaa2d30db813)
+  - Shows: Click-to-edit board title with emoji picker, one-line description with 'See More', star/favorite, Activity avatars, Invite button, and view tabs (Main Table/Timeline/Dashboard/Kanban) with '+' to add a view
+  - Ours: `app/(dashboard)/boards/[slug] header + ViewTabs`
+  - Gap: We have view tabs + add-view. Missing: inline-editable board description line with See More, and header Activity-avatars/Invite affordance. Small chrome, big 'alive product' feel.
+- **[PARTIAL/low] Item card — filterable Activity Log tab** (monday) — [ref](https://mobbin.com/screens/c8a2cc05-0f97-49c0-8031-0103e89bacbc)
+  - Shows: Per-item Activity Log tab with 'Filter Log' dropdown and Person filter, each entry showing time, actor, field, old → new value; links to Integrations/Automations activity
+  - Ours: `src/components/board-view/item-activity-drawer.tsx`
+  - Gap: Activity drawer exists but no filter-by-type/person controls and no consistent old→new value rendering per entry.
+- **[PARTIAL/low] WorkForms — shared public form with branding** (monday) — [ref](https://mobbin.com/screens/291244a5-987a-49c8-ba4f-767688b7629d)
+  - Shows: Board form view rendered as branded standalone page (colored backdrop, cover, 'Powered by WorkForms'), with Edit form and Share form buttons in the board tab
+  - Ours: `app/(dashboard)/forms/[id] (builder with isPublic toggle, share link, embed snippet, responder view)`
+  - Gap: Builder + public share + embed exist. Missing form theming (backdrop color, cover image, logo) so shared forms look branded rather than utilitarian. Cosmetic but customer-facing.
+- **[PRODUCT-DECISION/medium] Automations Center — recipe template gallery** (monday) — [ref](https://mobbin.com/screens/b2e3d0f2-8ba0-4e14-9d3c-77b143dfb352)
+  - Shows: Automation templates by category (Notifications/Status change/Recurring/Due dates/Item creation/Move item/Subitems/Dependencies/Custom), each a bold-blank sentence card with 'Use template'
+  - Gap: Automation Hub is designed but deferred until modules emit events (docs/plans/automation-hub.md). When built, Monday's sentence-template gallery is the UX to copy: categories + natural-language recipes, not a node editor first.
+- **[PRODUCT-DECISION/low] Integrations Center — app grid + recipe cards** (monday) — [ref](https://mobbin.com/screens/c138c892-3d9f-415d-ba34-75b6555c0b06)
+  - Shows: Modal with category rail (Communication/Marketing/CRM...), Explore-by-app logo grid (Slack/Gmail/Jira/Zoom...), sentence-style recipe cards 'When X changes to Y, notify in channel Z' with 'Add to board', plus Board Integrations and Account Usage tabs
+  - Gap: Deliberate: third-party connectors are demand-driven; in-house product completes first (2026-05-16 pivot). If/when built, adopt Monday's fill-in-the-blanks sentence recipes over ClickUp's config forms.
+- **[PARITY/low] Board table — colored group rails + per-group summary footers** (monday) — [ref](https://mobbin.com/screens/593ecb2d-ba6f-4c3a-afa7-af6e6aedd0be)
+  - Shows: Groups with colored left rails and titles, full-cell colored Status/Date chips, and a summary footer per group aggregating every column (stacked status bar, sums like '4.5 sum')
+  - Ours: `src/components/board-view/board-table-view.tsx (GroupSummaryRow, monday mode)`
+- **[PARITY/low] Files Gallery widget** (monday) — [ref](https://mobbin.com/screens/c6cd41af-5ad4-49ed-afb1-1cf4c38e7979)
+  - Shows: Dashboard widget listing all files across the board: search, grid/list toggle, bulk download, per-file source column reference
+  - Ours: `boards/[slug] FileGallery view + /files`
+  - Gap: We cover this as a board view and a global Files page; as a dashboard widget it can ride the Add Card gallery later, not a distinct gap.
+
+## Totals
+- have-parity: 23
+- have-partial: 66
+- missing: 32
+- product-decision: 14
