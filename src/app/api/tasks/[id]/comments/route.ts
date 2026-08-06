@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { shouldNotify } from "@/lib/notify-prefs";
 
 /**
  * Notes thread on a task. Any user who can see the task can read its
@@ -59,16 +60,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   // Notify the assignee when someone else leaves a comment. Fire-and-forget
   // to keep the request snappy; the email queue cron is the safety net.
+  // Honors the "Comments on my tasks" toggle in /settings/notifications.
   if (task.assigneeId !== authorId) {
-    prisma.notification.create({
-      data: {
-        userId: task.assigneeId,
-        type: "task_comment",
-        title: "New comment on your task",
-        message: `${task.title}: ${text.slice(0, 120)}${text.length > 120 ? "…" : ""}`,
-        link: `/tasks?id=${id}`,
-      },
-    }).catch(() => {});
+    shouldNotify(task.assigneeId, "comments")
+      .then((wanted) => {
+        if (!wanted) return;
+        return prisma.notification.create({
+          data: {
+            userId: task.assigneeId,
+            type: "task_comment",
+            title: "New comment on your task",
+            message: `${task.title}: ${text.slice(0, 120)}${text.length > 120 ? "…" : ""}`,
+            link: `/tasks?id=${id}`,
+          },
+        });
+      })
+      .catch(() => {});
   }
 
   return jsonSuccess(comment, 201);

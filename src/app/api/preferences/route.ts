@@ -75,6 +75,12 @@ const patchSchema = z.object({
       h: z.number(),
     }))).optional(),
     overviewCardsHidden: z.array(z.string()).optional(),
+    // Notification settings (/settings/notifications) — stored inside the
+    // home JSON column (no schema migration). "email" includes the "master" key.
+    notifications: z.object({
+      inbox: z.record(z.string(), z.boolean()).optional(),
+      email: z.record(z.string(), z.boolean()).optional(),
+    }).optional(),
   }).optional(),
   theme: z.object({
     appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),

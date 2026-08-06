@@ -6,6 +6,7 @@ import { triggerRecalculation } from "@/services/performanceScoreService";
 import { sendEmail } from "@/lib/email";
 import { kudosTemplate } from "@/lib/email-templates";
 import { notifyKudosPosted } from "@/services/slackNotifier";
+import { shouldNotify, shouldEmail } from "@/lib/notify-prefs";
 
 // GET: Kudos feed (company-wide, paginated) or per-user
 export async function GET(req: NextRequest) {
@@ -126,8 +127,8 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Notify the receiver
-  await prisma.notification.create({
+  // Notify the receiver (honors the "Kudos & recognition" inbox toggle)
+  if (await shouldNotify(receiverId, "kudos")) await prisma.notification.create({
     data: {
       title: "You received kudos!",
       message: `${kudos.giver.firstName} ${kudos.giver.lastName} recognized you: "${message.trim().slice(0, 80)}"`,
@@ -145,7 +146,9 @@ export async function POST(req: NextRequest) {
     dashboardLink: `${baseUrl}/dashboard`,
   });
 
-  if (receiver.email) {
+  // Gated by both the /settings/notifications email toggle and the legacy
+  // EmailPreference kudos category (checked inside sendEmail).
+  if (receiver.email && await shouldEmail(receiverId, "kudos")) {
     try {
       await sendEmail({
         to: receiver.email,

@@ -9,6 +9,7 @@ import { getTeamUserIds } from "@/lib/team";
 import { pushTaskToGoogle, deleteTaskFromGoogle } from "@/services/googleCalendarPush";
 import { GOOGLE_CAL_SOURCE } from "@/services/googleCalendar";
 import { tagFilterIds } from "@/lib/tag-filter";
+import { shouldNotify, shouldEmail } from "@/lib/notify-prefs";
 
 type TaskStatusValue = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
 type TaskPriorityValue = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -231,7 +232,7 @@ export async function POST(req: NextRequest) {
   // Notify assignee if task was delegated to someone else
   if (task.assigneeId !== currentUserId) try {
     const dateStr = task.date ? new Date(task.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "no due date";
-    await prisma.notification.create({
+    if (await shouldNotify(task.assigneeId, "task_assigned")) await prisma.notification.create({
       data: {
         userId: task.assigneeId,
         type: "task_assigned",
@@ -241,13 +242,13 @@ export async function POST(req: NextRequest) {
       },
     }).catch((err) => console.error("[Task] Notification failed:", err));
 
-    // Email the assignee
+    // Email the assignee (honors /settings/notifications email prefs)
     try {
       const [assignee, actor] = await Promise.all([
         prisma.user.findUnique({ where: { id: task.assigneeId }, select: { email: true, firstName: true } }),
         prisma.user.findUnique({ where: { id: currentUserId }, select: { firstName: true, lastName: true } }),
       ]);
-      if (assignee?.email) {
+      if (assignee?.email && await shouldEmail(task.assigneeId, "task_assigned")) {
         const baseUrl = process.env.NEXTAUTH_URL || "https://workwrk.com";
         const { subject, html } = genericNotificationTemplate({
           heading: "Task Assigned",
@@ -396,7 +397,8 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Notify on reassignment
-  if (updates.assigneeId && updates.assigneeId !== task.assigneeId && updates.assigneeId !== getUserId(session)) {
+  if (updates.assigneeId && updates.assigneeId !== task.assigneeId && updates.assigneeId !== getUserId(session)
+      && await shouldNotify(updates.assigneeId, "task_assigned")) {
     const dateStr = updated.date ? new Date(updated.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "no due date";
     await prisma.notification.create({
       data: {

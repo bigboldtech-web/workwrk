@@ -71,7 +71,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: "Security", icon: Shield, href: "/account/security" },
       { label: "Profile", icon: User, href: "/account/profile" },
-      { label: "Notifications", icon: Bell, href: "/account/notifications" },
+      { label: "Notifications", icon: Bell, href: "/settings/notifications" },
       { label: "Appearance", icon: Palette, href: "/account/appearance" },
     ],
   },

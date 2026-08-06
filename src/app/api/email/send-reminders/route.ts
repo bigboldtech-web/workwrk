@@ -6,6 +6,7 @@ import {
   evaluationReminderTemplate,
   overdueManagerTemplate,
 } from "@/lib/email-templates";
+import { filterNotifyUsers } from "@/lib/notify-prefs";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
@@ -166,9 +167,12 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, title: true, assigneeId: true },
     });
-    if (dueToday.length > 0) {
+    // Honor the "Due-date reminders" inbox toggle (batched, one query).
+    const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.assigneeId), "due_reminders");
+    const toNotify = dueToday.filter((t) => wantsDue.has(t.assigneeId));
+    if (toNotify.length > 0) {
       await prisma.notification.createMany({
-        data: dueToday.map((t) => ({
+        data: toNotify.map((t) => ({
           userId: t.assigneeId,
           type: "task_due_today",
           title: "Task Due Today",
@@ -177,7 +181,7 @@ export async function POST(req: NextRequest) {
         })),
       });
     }
-    results.push(`Tasks due today notifications: ${dueToday.length}`);
+    results.push(`Tasks due today notifications: ${toNotify.length} (of ${dueToday.length} due)`);
   }
 
   // ──────────────────────────────────────
