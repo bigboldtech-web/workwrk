@@ -14,9 +14,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard, Loader2, Plus } from "lucide-react";
+import { BarChart3, LayoutDashboard, Loader2, Plus, Timer as TimerIcon, Users as UsersIcon } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsToast } from "@/components/layout/os/toast";
 import { TAUPE, taupeButton } from "@/components/ui/accent";
 
@@ -99,9 +98,9 @@ export default function DashboardsPage() {
           <button
             type="button"
             onClick={() => setCreating(true)}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] text-white ${taupeButton}`}
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-3.5 w-3.5" />
             New Dashboard
           </button>
         }
@@ -150,24 +149,46 @@ export default function DashboardsPage() {
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : dashboards.length === 0 && !creating ? (
-          <OsEmptyView
-            Icon={LayoutDashboard}
-            iconGradient="linear-gradient(135deg, #a78bfa, #7c3aed)"
-            title="No dashboards yet"
-            subtitle="Build a dashboard of widgets over your boards, people and goals."
-            cta="New Dashboard"
-            onCta={() => setCreating(true)}
-          />
+          // ClickUp's "Choose a Dashboard template" chooser (chrome only —
+          // every card opens the same create flow for now).
+          <div className="flex flex-col items-center pt-16">
+            <h2 className="text-[20px] font-semibold text-zinc-900">Choose a Dashboard template</h2>
+            <p className="mt-1 max-w-md text-center text-[13px] text-zinc-500">
+              Get started with a Dashboard template or create a custom Dashboard to fit your exact needs.
+            </p>
+            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {[
+                { name: "Simple Dashboard", desc: "Manage and prioritize tasks", Icon: LayoutDashboard },
+                { name: "Team Center", desc: "View team activity", Icon: UsersIcon },
+                { name: "Time Tracking", desc: "View and report on time tracking metrics", Icon: TimerIcon },
+                { name: "Project Management", desc: "Analyze project progress and metrics", Icon: BarChart3 },
+                { name: "Start from scratch", desc: "A blank canvas for your widgets", Icon: Plus },
+              ].map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  onClick={() => setCreating(true)}
+                  className="w-56 rounded-lg border border-zinc-200 bg-white p-4 text-left hover:border-zinc-300 hover:shadow-sm"
+                >
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-zinc-50">
+                    <t.Icon className="h-4 w-4 text-zinc-600" />
+                  </span>
+                  <div className="mt-3 text-[13px] font-semibold text-zinc-900">{t.name}</div>
+                  <p className="mt-0.5 text-[12px] text-zinc-500">{t.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {dashboards.map((d) => (
               <Link
                 key={d.id}
                 href={`/dashboards/${d.id}`}
-                className="rounded-xl border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:bg-zinc-50"
+                className="rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-300 hover:shadow-sm"
               >
                 <div className="mb-2 flex items-center gap-2">
-                  <LayoutDashboard className="h-4 w-4 text-purple-500" />
+                  <LayoutDashboard className="h-4 w-4 text-zinc-500" />
                   <span className="truncate text-[13.5px] font-semibold text-zinc-900">{d.name}</span>
                 </div>
                 {d.description ? (
