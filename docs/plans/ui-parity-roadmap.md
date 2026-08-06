@@ -121,6 +121,19 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-06: **Wave 3 sweep shipped** (6 workflow audits → 7 commits):
+  sidebar tree rows c8fb029 (active pill, no guide lines, zinc icons),
+  create-modals 862603e (shared shell, dark pills, ui/dialog flat scrim +
+  blue focus ring), settings 4db86b6 (All-settings nav, 16px headers, blue
+  cards), whiteboards 2da1583 (canvas bar + flat library), docs 3f87557
+  (breadcrumb header, Ask/Share, 32px title, de-purpled), dashboards
+  b885e8e (breadcrumb+toolbar shell, Add Card gallery, template chooser,
+  WidgetCard shell). Docs leftovers (low-pri): bottom word-count pill,
+  empty-doc hint chips, font-card labels, Add page button, cover-icon
+  card look. Settings leftovers: Log out nav footer, personal-section
+  username label. Shared-Switch violet track + bdoc iact is-on tint are
+  global-token questions, not per-surface.
+  NEXT: dark-mode verification pass across everything shipped 08-05/06.
 - 2026-08-05 (evening): **Wave 2/3 sweep via workflow audits.** 5 parallel
   agents pulled fresh Mobbin ClickUp references and produced file-anchored
   diffs; all implemented + browser-verified: task-detail trio (d68e676),
