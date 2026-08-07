@@ -2,25 +2,41 @@
 
 // BoardWorkloadView — WORKLOAD renderer, two variants driven by
 // View.config.variant:
-//   "workload" (default) — per-person capacity rows: open/done counts,
-//     overdue badge, and a status-colored stacked bar (mirrors the
-//     Space-level Workload card from Phases 52–55, board-scoped).
+//   "workload" (default) — ClickUp-parity capacity grid: people rows ×
+//     day columns via the shared WorkloadGrid (workload-grid.tsx).
+//     Capacity settings persist in View.config as flat wl* keys through
+//     the same PATCH the canvas uses (Object.assign into the SHARED
+//     viewConfig blob first so filters/hiddenFields/groupBy never get
+//     clobbered — see board-canvas.tsx persistViewConfig).
 //   "team" — per-person kanban: one column per assignee, cards open
 //     the task drawer (the Space Team tab pattern, board-scoped).
 
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Users } from "lucide-react";
 import {
   isDoneStatus,
   type BoardItemRow,
   type StatusOption,
 } from "@/lib/board-items-shared";
+import { useOsToast } from "@/components/layout/os/toast";
 import { PersonAvatar } from "./assignee-picker";
 import { PriorityFlag } from "./priority-picker";
+import {
+  WorkloadGrid,
+  sanitizeWorkloadSettings,
+  type WorkloadPerson,
+  type WorkloadSettings,
+} from "./workload-grid";
 
 interface BoardWorkloadViewProps {
+  boardId: string;
+  /** Active view + its config — used to persist the capacity settings.
+   *  Null viewId (no view row yet) → settings are session-local only. */
+  viewId: string | null;
+  viewConfig?: Record<string, unknown>;
   initialItems: BoardItemRow[];
   statuses: StatusOption[];
+  canEdit: boolean;
   variant?: "workload" | "team";
   onOpenItem?: (itemId: string) => void;
 }
@@ -31,7 +47,22 @@ interface PersonBucket {
   rows: BoardItemRow[];
 }
 
-export function BoardWorkloadView({ initialItems, statuses, variant = "workload", onOpenItem }: BoardWorkloadViewProps) {
+/** View.config flat keys → WorkloadSettings (garbage-tolerant). */
+function parseSettings(cfg: Record<string, unknown> | undefined): WorkloadSettings {
+  return sanitizeWorkloadSettings({
+    mode: cfg?.wlMode,
+    windowDays: cfg?.wlWindow,
+    dailyHours: cfg?.wlDailyHours,
+    dailyTasks: cfg?.wlDailyTasks,
+    perPersonHours: cfg?.wlPerPerson,
+    countWeekends: cfg?.wlWeekends,
+    showAllPeople: cfg?.wlShowAll,
+  });
+}
+
+export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, statuses, canEdit, variant = "workload", onOpenItem }: BoardWorkloadViewProps) {
+  const { toast } = useOsToast();
+
   const buckets = useMemo<PersonBucket[]>(() => {
     const map = new Map<string, PersonBucket>();
     for (const it of initialItems) {
@@ -50,6 +81,109 @@ export function BoardWorkloadView({ initialItems, statuses, variant = "workload"
     });
     return list;
   }, [initialItems]);
+
+  // ── Capacity settings (View.config wl* keys) ──────────────────────
+  const [settings, setSettings] = useState<WorkloadSettings>(() => parseSettings(viewConfig));
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist the whole shared blob (the PATCH replaces config wholesale);
+  // debounce 750ms + one retry + failure toast, flush on unmount — the
+  // dashboards-page persistence discipline.
+  const push = useCallback(async (attempt = 0) => {
+    if (!viewId) return;
+    try {
+      const res = await fetch(`/api/boards/${boardId}/views/${viewId}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ config: { ...(viewConfig ?? {}) } }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch {
+      if (attempt === 0) {
+        toast("Couldn't save workload settings, retrying…");
+        setTimeout(() => { void push(1); }, 1500);
+      } else {
+        toast("Couldn't save workload settings. Check your connection.");
+      }
+    }
+  }, [boardId, viewId, viewConfig, toast]);
+
+  const handleSettingsChange = useMemo(() => {
+    if (!viewId || !canEdit) return undefined;
+    return (patch: Partial<WorkloadSettings>) => {
+      setSettings((prev) => {
+        const next = { ...prev, ...patch };
+        if (viewConfig) {
+          // Mutate the SHARED viewConfig object BEFORE the debounced PATCH
+          // spreads it, so concurrent filter/column saves keep our keys and
+          // we keep theirs (board-canvas.tsx clobber discipline). Idempotent
+          // on StrictMode double-invoke.
+          Object.assign(viewConfig, {
+            wlMode: next.mode,
+            wlWindow: next.windowDays,
+            wlDailyHours: next.dailyHours,
+            wlDailyTasks: next.dailyTasks,
+            wlPerPerson: next.perPersonHours,
+            wlWeekends: next.countWeekends,
+            wlShowAll: next.showAllPeople,
+          });
+        }
+        return next;
+      });
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => { void push(); }, 750);
+    };
+  }, [viewId, canEdit, viewConfig, push]);
+
+  // Flush a pending debounce on unmount so the last change isn't lost.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        void push();
+      }
+    };
+  }, [push]);
+
+  // ── Board members (so zero-task people can render) ────────────────
+  const [members, setMembers] = useState<WorkloadPerson[]>([]);
+  useEffect(() => {
+    if (variant === "team") return;
+    let alive = true;
+    fetch(`/api/boards/${boardId}/members`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : { members: [] }))
+      .then((data) => {
+        if (!alive) return;
+        const list = Array.isArray(data?.members) ? data.members : [];
+        const users: WorkloadPerson[] = [];
+        for (const m of list as Array<{ user?: WorkloadPerson | null }>) {
+          const u = m?.user;
+          if (u && typeof u.id === "string") {
+            users.push({ id: u.id, firstName: u.firstName ?? null, lastName: u.lastName ?? null, avatar: u.avatar ?? null });
+          }
+        }
+        setMembers(users);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [boardId, variant]);
+
+  // Members ∪ owners on live items, so ex-members with open tasks render.
+  const people = useMemo(() => {
+    const map = new Map<string, WorkloadPerson>();
+    for (const m of members) map.set(m.id, m);
+    for (const it of initialItems) {
+      if (it.owner && !map.has(it.owner.id)) {
+        map.set(it.owner.id, {
+          id: it.owner.id,
+          firstName: it.owner.firstName,
+          lastName: it.owner.lastName,
+          avatar: it.owner.avatar,
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [members, initialItems]);
 
   if (initialItems.length === 0) {
     return (
@@ -105,48 +239,15 @@ export function BoardWorkloadView({ initialItems, statuses, variant = "workload"
   }
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white divide-y divide-zinc-100">
-      {buckets.map((b) => {
-        const open = b.rows.filter((r) => !isDoneStatus(statuses, r.status)).length;
-        const done = b.rows.length - open;
-        const overdue = b.rows.filter(
-          (r) => r.dueAt && new Date(r.dueAt) < new Date() && !isDoneStatus(statuses, r.status),
-        ).length;
-        return (
-          <div key={b.key} className="px-4 py-3 flex items-center gap-3">
-            <PersonLabel bucket={b} />
-            <div className="flex-1 min-w-0">
-              <StatusBar rows={b.rows} statuses={statuses} />
-            </div>
-            <span className="text-[12px] tabular-nums text-zinc-700 w-16 text-right">{open} open</span>
-            <span className="text-[12px] tabular-nums text-emerald-600 w-16 text-right">{done} done</span>
-            <span className={`inline-flex items-center gap-1 text-[12px] tabular-nums w-20 justify-end ${overdue ? "text-red-600" : "text-zinc-300"}`}>
-              <AlertTriangle className="w-3 h-3" />
-              {overdue} late
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function PersonLabel({ bucket }: { bucket: PersonBucket }) {
-  if (!bucket.owner) {
-    return (
-      <span className="inline-flex items-center gap-2 w-44 shrink-0 text-[12.5px] text-zinc-500">
-        <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-zinc-100 text-zinc-400">
-          <Users className="w-3 h-3" />
-        </span>
-        Unassigned
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-2 w-44 shrink-0 text-[12.5px] font-medium text-zinc-800 min-w-0">
-      <PersonAvatar person={{ ...bucket.owner, email: null }} size={24} />
-      <span className="truncate">{`${bucket.owner.firstName ?? ""} ${bucket.owner.lastName ?? ""}`.trim()}</span>
-    </span>
+    <WorkloadGrid
+      items={initialItems}
+      people={people}
+      statuses={statuses}
+      settings={settings}
+      canEdit={canEdit}
+      onSettingsChange={handleSettingsChange}
+      onOpenItem={onOpenItem}
+    />
   );
 }
 

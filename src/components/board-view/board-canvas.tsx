@@ -373,8 +373,12 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardFileGalleryView boardId={boardId} onOpenItem={(id) => setOpenItemId(id)} />
       ) : viewType === "WORKLOAD" ? (
         <BoardWorkloadView
+          boardId={boardId}
+          viewId={viewId}
+          viewConfig={viewConfig}
           initialItems={filteredItems}
           statuses={statuses}
+          canEdit={canEdit}
           variant={viewConfig?.variant === "team" ? "team" : "workload"}
           onOpenItem={(id) => setOpenItemId(id)}
         />

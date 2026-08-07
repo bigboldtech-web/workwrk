@@ -20,7 +20,7 @@ import {
   ShoppingBag, Workflow, ScrollText,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
-  LayoutDashboard, Target,
+  LayoutDashboard, Target, GaugeCircle,
   type LucideIcon,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
@@ -894,6 +894,7 @@ function TeamsSidebar() {
         <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
         <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
         <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
+        <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={pathname === "/team/workload"} />
       </ul>
     </>
   );
