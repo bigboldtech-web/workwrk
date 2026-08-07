@@ -127,6 +127,23 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-07 (later): **Wave D verified + shipped (docs layer).** The three
+  builds (sharing 63c635e, subpages 6913359, hub 2bb29bd — detailed below)
+  passed main-loop verification. **Sharing got a real two-session security
+  matrix**: viewer's forced PUT → 403 read-only; restricted doc for an
+  unlisted member → 404 on the doc AND the /versions side door; public link
+  200 unauthenticated → toggle off → 404 (timing-safe token). No-entry docs
+  behave exactly as before (nobody locked out). The agent's "lost content"
+  scare was a misattribution — its test text lived in the trashed test
+  subpage with 4 clean save versions; autosave untouched. **Systemic dark
+  fix** bfb834d: MorePortal's wrapper now carries .workwrk-os (portals mount
+  on document.body OUTSIDE the shell, so dark utility repaints never reached
+  panel chrome — the Share modal was a white island); plus :root.dark
+  .bdoc__head pinned to the doctabs tone (token-painted chrome doesn't flip
+  in dark). Deployed via the Actions pipeline (raw SSH deploys retired after
+  the 08-07 outage; see a3b28fa). Remaining for later: pages drag-reorder,
+  guest email invites, doc-comment WRITE gate on restricted docs (reads are
+  gated), /api/docs 200-row cap on hub tabs.
 - 2026-08-07: **Doc subpages Pages panel + editor leftovers.** Left Pages
   tree on /docs/[id] (new doc-pages-panel.tsx off the EXISTING Doc.parentId
   self-relation, no migration; flat GET /api/docs assembled client-side,
