@@ -180,6 +180,11 @@ model Organization {
   roleBoundaries        RoleBoundary[]
   thresholds            Threshold[]
   roleInstanceOverrides RoleInstanceOverride[]
+  // 🆕 Automation Hub — event-driven workflow engine (Wave E)
+  automationWorkflows    AutomationWorkflow[]
+  automationRuns         AutomationRun[]
+  automationUsage        AutomationUsage[]
+  integrationConnections IntegrationConnection[]
 
   @@index([slug])
 }
@@ -6748,4 +6753,216 @@ enum EntityLinkRelation {
   EMBEDDED
   REQUIRED_READING
   REFERENCES
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Automation Hub — event-driven workflow engine (Wave E).
+// Deliberately separate from the legacy Workflow/WorkflowRun models
+// (those stay dedicated to approval chains). Models mirror
+// docs/plans/automation-hub-schema.sql verbatim; the migration is
+// hand-authored additive-only SQL (never regenerate via diff — that
+// pulls in unrelated DB drift).
+// ─────────────────────────────────────────────────────────────────
+
+enum AutomationWorkflowStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ERROR
+  ARCHIVED
+}
+
+enum AutomationSeverity {
+  CRITICAL
+  MAJOR
+  MINOR
+}
+
+enum AutomationRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+  SKIPPED
+}
+
+enum AutomationStepStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+enum AutomationStepType {
+  TRIGGER
+  CONDITION
+  ACTION
+}
+
+enum IntegrationProvider {
+  WHATSAPP
+  GMAIL
+  GOOGLE_CALENDAR
+  SLACK
+  WEBHOOK
+  ZAPIER
+  CRM
+}
+
+// NB: plain `IntegrationStatus` already exists — this one is distinct.
+enum IntegrationConnectionStatus {
+  CONNECTED
+  DISCONNECTED
+  EXPIRED
+  ERROR
+}
+
+model AutomationWorkflow {
+  id                 String                     @id @default(cuid())
+  organizationId     String
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name               String
+  description        String?
+  status             AutomationWorkflowStatus   @default(DRAFT)
+  severity           AutomationSeverity         @default(MINOR)
+  triggerEvent       String?
+  definition         Json                       @default("{}")
+  publishedVersionId String?
+  createdById        String?
+  updatedById        String?
+  lastRunAt          DateTime?
+  publishedAt        DateTime?
+  archivedAt         DateTime?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  versions           AutomationWorkflowVersion[]
+  runs               AutomationRun[]
+
+  @@index([organizationId, status])
+  // Hot matcher index — runAutomationsForEvent lookups.
+  @@index([organizationId, triggerEvent, status])
+}
+
+model AutomationWorkflowVersion {
+  id             String             @id @default(cuid())
+  organizationId String
+  workflowId     String
+  workflow       AutomationWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  versionNumber  Int
+  definitionJson Json               @default("{}")
+  isPublished    Boolean            @default(false)
+  createdById    String?
+  createdAt      DateTime           @default(now())
+  runs           AutomationRun[]
+
+  @@unique([workflowId, versionNumber])
+  @@index([organizationId])
+}
+
+model AutomationRun {
+  id                String                     @id @default(cuid())
+  organizationId    String
+  organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflowId        String
+  workflow          AutomationWorkflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflowVersionId String?
+  workflowVersion   AutomationWorkflowVersion? @relation(fields: [workflowVersionId], references: [id], onDelete: SetNull)
+  triggerEventKey   String
+  triggerPayload    Json                       @default("{}")
+  status            AutomationRunStatus        @default(RUNNING)
+  severity          AutomationSeverity         @default(MINOR)
+  idempotencyKey    String
+  recordType        String?
+  recordId          String?
+  userId            String?
+  errorMessage      String?
+  startedAt         DateTime                   @default(now())
+  completedAt       DateTime?
+  durationMs        Int?
+  createdAt         DateTime                   @default(now())
+  steps             AutomationRunStep[]
+
+  @@unique([workflowId, idempotencyKey])
+  @@index([organizationId, status])
+  @@index([organizationId, workflowId])
+  @@index([organizationId, severity, status])
+  @@index([organizationId, createdAt])
+  @@index([recordType, recordId])
+}
+
+model AutomationRunStep {
+  id             String               @id @default(cuid())
+  organizationId String
+  runId          String
+  run            AutomationRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  order          Int
+  stepType       AutomationStepType
+  stepKey        String
+  stepName       String
+  status         AutomationStepStatus @default(RUNNING)
+  inputJson      Json                 @default("{}")
+  outputJson     Json                 @default("{}")
+  errorMessage   String?
+  startedAt      DateTime             @default(now())
+  completedAt    DateTime?
+  durationMs     Int?
+  createdAt      DateTime             @default(now())
+
+  @@index([runId, order])
+  @@index([organizationId])
+}
+
+model AutomationUsage {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflowId     String?
+  runId          String?
+  userId         String?
+  boardId        String?
+  moduleName     String?
+  actionKey      String
+  usageCount     Int          @default(1)
+  usageDate      DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, usageDate])
+  @@index([organizationId, workflowId])
+  @@index([organizationId, actionKey])
+  @@index([organizationId, userId])
+}
+
+model IntegrationConnection {
+  id                    String                      @id @default(cuid())
+  organizationId        String
+  organization          Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider              IntegrationProvider
+  connectedByUserId     String?
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  status                IntegrationConnectionStatus @default(DISCONNECTED)
+  scopesJson            Json                        @default("[]")
+  metadataJson          Json                        @default("{}")
+  lastSyncAt            DateTime?
+  errorMessage          String?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+
+  @@unique([organizationId, provider])
+  @@index([organizationId, status])
+}
+
+model AutomationTemplate {
+  id           String             @id @default(cuid())
+  name         String
+  description  String?
+  category     String?
+  severity     AutomationSeverity @default(MINOR)
+  templateJson Json               @default("{}")
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([isActive, category])
 }
