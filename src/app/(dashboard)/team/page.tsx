@@ -12,6 +12,7 @@ import {
   Star, ArrowRight, CheckCircle2, type LucideIcon,
 } from "lucide-react";
 import { TeamStatTile, TeamCard } from "@/components/team/ui";
+import { TeamPulse } from "@/components/team/team-pulse";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ export default async function TeamOverviewPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-5xl">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-6xl">
         {/* Headline stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="People" value={people} sub="active in org" accent="#0073EA" href="/people" />
@@ -84,6 +85,11 @@ export default async function TeamOverviewPage() {
               ))}
             </ul>
           )}
+        </TeamCard>
+
+        {/* Team pulse — people cards with current work */}
+        <TeamCard title="Team pulse" subtitle="Who's working on what right now">
+          <TeamPulse />
         </TeamCard>
 
         {/* Section shortcuts */}
