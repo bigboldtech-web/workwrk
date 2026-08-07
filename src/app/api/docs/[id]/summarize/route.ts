@@ -8,6 +8,8 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 const MAX_INPUT_CHARS = 200_000;
 
@@ -19,9 +21,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const doc = await prisma.doc.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, title: true, content: true },
+    select: { id: true, title: true, content: true, entityType: true, entityId: true, createdById: true },
   });
   if (!doc) return jsonError("not found", 404);
+  const su = (session as { user: { id: string; accessLevel?: string | null } }).user;
+  if (!(await docAccessible(doc, su.id, su.accessLevel))) return jsonError("not found", 404);
+  // Viewers may summarize; restricted + unlisted → 404.
+  const role = await requireDocRole({ orgId, userId: su.id, accessLevel: su.accessLevel }, { id, createdById: doc.createdById });
+  if (!role) return jsonError("not found", 404);
 
   const text = extractDocText(doc.content);
   const trimmed = text.length > MAX_INPUT_CHARS ? text.slice(0, MAX_INPUT_CHARS) : text;

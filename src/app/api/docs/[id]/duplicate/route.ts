@@ -9,6 +9,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
@@ -19,13 +20,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     where: { id, organizationId: ctx.orgId },
     select: {
       title: true, content: true, excerpt: true,
-      entityType: true, entityId: true, archivedAt: true,
+      entityType: true, entityId: true, archivedAt: true, createdById: true,
     },
   });
   if (!original) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!(await docAccessible(original, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // Viewers may duplicate (the clone is a fresh doc they own; the source
+  // is never mutated). Restricted + unlisted → 404.
+  const role = await requireDocRole(ctx, { id, createdById: original.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (original.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
 
   // Re-key every block so the clone's comment-storage namespace (which

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 const MAX_DOC_CHARS = 200_000;
 
@@ -31,12 +32,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const doc = await prisma.doc.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, title: true, content: true, entityType: true, entityId: true },
+    select: { id: true, title: true, content: true, entityType: true, entityId: true, createdById: true },
   });
   if (!doc) return jsonError("not found", 404);
   if (!(await docAccessible(doc, userId, accessLevel))) {
     return jsonError("not found", 404);
   }
+  // Viewers may ask; restricted + unlisted → 404.
+  const role = await requireDocRole({ orgId, userId, accessLevel }, { id, createdById: doc.createdById });
+  if (!role) return jsonError("not found", 404);
 
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);

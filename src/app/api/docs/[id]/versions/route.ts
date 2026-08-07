@@ -7,6 +7,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
@@ -15,9 +17,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const doc = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true },
+    select: { id: true, entityType: true, entityId: true, createdById: true },
   });
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const versions = await prisma.docVersion.findMany({
     where: { docId: id },

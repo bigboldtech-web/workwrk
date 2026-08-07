@@ -18,6 +18,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 const ENTITY_TYPE = "DOC_BLOCK";
 
@@ -30,12 +31,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // exposed by tagging the entityId.
   const doc = await prisma.doc.findFirst({
     where: { id: docId, organizationId: ctx.orgId },
-    select: { id: true, entityType: true, entityId: true },
+    select: { id: true, entityType: true, entityId: true, createdById: true },
   });
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // Viewers keep comments (ClickUp parity); restricted + unlisted → 404.
+  const role = await requireDocRole(ctx, { id: docId, createdById: doc.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // entityId pattern `docId:blockId` — query by startsWith so a single
   // index scan covers every block in this doc.

@@ -33,6 +33,7 @@ import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
+import { DocShareModal } from "./doc-share-modal";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker — keeps the doc page light + fast.
@@ -65,6 +66,7 @@ type DocPayload = {
   summarizedAt?: string | null;
   updatedAt: string;
   createdAt: string;
+  createdById?: string | null;
 };
 
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
@@ -163,6 +165,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [readingMode, setReadingMode] = useState(false);
   const [comments, setComments] = useState<CommentsByBlock>({});
   const [me, setMe] = useState<MeUser | null>(null);
+  // Per-doc role from GET /api/docs/[id] (settings.docSharing). Missing
+  // myRole (older cached responses) defaults to "edit" — zero behavior
+  // change for existing docs.
+  const [myRole, setMyRole] = useState<"edit" | "view">("edit");
+  const [shareOpen, setShareOpen] = useState(false);
+  const shareBtnRef = useRef<HTMLButtonElement | null>(null);
 
   // Load current user for the comment author identity.
   useEffect(() => {
@@ -321,6 +329,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         const d: DocPayload = data.doc ?? data;
         setDoc(d);
         setTitle(d.title ?? "");
+        setMyRole(data.myRole === "view" ? "view" : "edit");
         lastUpdatedAtRef.current = d.updatedAt ?? null;
         const c = d.content;
         setMeta((c?.meta as DocMeta) ?? {});
@@ -390,11 +399,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const bnDocRef = useRef(bnDoc);
   const blocksRef = useRef(blocks);
   const metaRef = useRef(meta);
+  const myRoleRef = useRef(myRole);
   useEffect(() => {
     titleRef.current = title;
     bnDocRef.current = bnDoc;
     blocksRef.current = blocks;
     metaRef.current = meta;
+    myRoleRef.current = myRole;
   });
 
   // Persist accepts the full editor state: BlockNote doc (source of truth),
@@ -406,6 +417,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     nextExcerpt?: string,
     attempt = 0,
   ) => {
+    // View-only members never fire PUTs — the server would 403 every
+    // attempt and the retry loop would burn 4 tries + a scary save toast.
+    // Ref read (not a closure) so the guard is never stale.
+    if (myRoleRef.current === "view") return;
     if (saveInFlightRef.current) {
       pendingPersistRef.current = { bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta, excerpt: nextExcerpt };
       return;
@@ -700,12 +715,25 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           </button>
           <button
             type="button"
-            onClick={copyLink}
-            title="Share (copies link)"
+            ref={shareBtnRef}
+            onClick={() => setShareOpen((s) => !s)}
+            title="Share"
+            aria-haspopup="dialog"
+            aria-expanded={shareOpen}
             className="inline-flex h-7 items-center rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
           >
             Share
           </button>
+          <DocShareModal
+            docId={docId}
+            docTitle={title || "Untitled note"}
+            createdById={doc.createdById ?? null}
+            meId={me?.id ?? null}
+            open={shareOpen}
+            onClose={() => setShareOpen(false)}
+            anchorRef={shareBtnRef}
+            viewerRole={myRole}
+          />
           <button
             type="button"
             className={`bdoc__iact ${panel?.kind === "history" ? "is-on" : ""}`}
@@ -911,7 +939,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
           placeholder="Untitled note"
-          readOnly={readingMode || !!meta.locked}
+          readOnly={readingMode || !!meta.locked || myRole === "view"}
         />
 
         {blocks && <DocMetaStrip blocks={blocks} doc={doc} />}
@@ -943,10 +971,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           // force-remounts on doc switch, reading-mode toggle, or version
           // restore — never holds a stale in-memory document.
           <BlockNoteCanvas
-            key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${restoreNonce}`}
+            key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
             initialBnDoc={bnDoc}
             legacyBlocks={blocks}
-            readonly={readingMode || !!meta.locked}
+            readonly={readingMode || !!meta.locked || myRole === "view"}
             onChange={handleEditorChange}
             docId={docId}
             onComment={(blockId) => setPanel({ kind: "comments", blockId })}

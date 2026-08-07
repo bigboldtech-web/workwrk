@@ -15,6 +15,8 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
 import { logActivity } from "@/lib/activity";
+import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 const COL_TYPES = ["short_text", "long_text", "number", "select", "date", "checkbox", "url", "email"] as const;
 const MAX_INPUT_CHARS = 100_000;
@@ -31,9 +33,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const doc = await prisma.doc.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, title: true, content: true },
+    select: { id: true, title: true, content: true, entityType: true, entityId: true, createdById: true },
   });
   if (!doc) return jsonError("not found", 404);
+  const su = (session as { user: { id: string; accessLevel?: string | null } }).user;
+  if (!(await docAccessible(doc, su.id, su.accessLevel))) return jsonError("not found", 404);
+  // Extract-table writes derived org content (a new DataTable) — edit-gated.
+  const role = await requireDocRole({ orgId, userId: su.id, accessLevel: su.accessLevel }, { id, createdById: doc.createdById });
+  if (!role) return jsonError("not found", 404);
+  if (role === "view") return jsonError("read-only", 403);
 
   const text = extractDocText(doc.content);
   if (!text.trim()) return jsonError("doc is empty", 422);

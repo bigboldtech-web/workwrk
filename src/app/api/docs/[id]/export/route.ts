@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const ctx = await resolveSuiteContext();
@@ -23,12 +24,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   const doc = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, title: true, content: true, entityType: true, entityId: true, updatedAt: true },
+    select: { id: true, title: true, content: true, entityType: true, entityId: true, updatedAt: true, createdById: true },
   });
   if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // Viewers may export; restricted + unlisted → 404.
+  const role = await requireDocRole(ctx, { id, createdById: doc.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const md = blocksToMarkdown(doc.title, doc.content);
 

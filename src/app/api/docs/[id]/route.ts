@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { docAccessible } from "@/lib/doc-access";
+import { requireDocRole } from "@/lib/doc-sharing";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 
@@ -54,13 +55,18 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!(await docAccessible(doc, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // Per-doc role (settings.docSharing). null = restricted + unlisted →
+  // same 404 as an invisible anchor. "view" | "edit" rides back to the
+  // editor so it can lock the canvas client-side.
+  const role = await requireDocRole(ctx, { id: doc.id, createdById: doc.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   // Refresh presigned URLs for image / file blocks backed by S3. The
   // stored URL is a 1-hour signature; re-signing per read keeps doc
   // viewing fast and the URL always usable, mirroring the SOP
   // screenshot enrichment pattern.
   const enriched = { ...doc, content: await presignBlocksImagesAndFiles(doc.content) };
-  return NextResponse.json({ doc: enriched });
+  return NextResponse.json({ doc: enriched, myRole: role });
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -74,13 +80,21 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 
   const existing = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, title: true, content: true, archivedAt: true, entityType: true, entityId: true, updatedAt: true },
+    select: { id: true, title: true, content: true, archivedAt: true, entityType: true, entityId: true, updatedAt: true, createdById: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (existing.archivedAt) return NextResponse.json({ error: "archived" }, { status: 410 });
+
+  // Write gate — BEFORE the tree-only fast path, so a view-only member
+  // can't move/re-anchor the doc either. 404 for unlisted-on-restricted,
+  // 403 read-only for viewers; the client guards persist() so this is
+  // only the backstop.
+  const role = await requireDocRole(ctx, { id, createdById: existing.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
 
   // Fast-path: a pure tree update (move / reorder / mark-folder) carries no
   // title/content/excerpt — apply it directly without snapshotting a version
@@ -192,12 +206,15 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const existing = await prisma.doc.findFirst({
     where: { id, organizationId: ctx.orgId },
-    select: { id: true, archivedAt: true, entityType: true, entityId: true },
+    select: { id: true, archivedAt: true, entityType: true, entityId: true, createdById: true },
   });
   if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!(await docAccessible(existing, ctx.userId, ctx.accessLevel))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  const role = await requireDocRole(ctx, { id, createdById: existing.createdById });
+  if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
   if (existing.archivedAt) return NextResponse.json({ ok: true, alreadyArchived: true });
 
   // Soft-archive only — the row stays, versions stay.
