@@ -67,6 +67,7 @@ type DocPayload = {
   content: { bnDoc?: PartialBlock[]; blocks?: Block[]; html?: string; meta?: DocMeta; comments?: CommentsByBlock; version?: number } | null;
   summary?: string | null;
   summarizedAt?: string | null;
+  archivedAt?: string | null;
   updatedAt: string;
   createdAt: string;
   createdById?: string | null;
@@ -136,6 +137,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [peekQuery, setPeekQuery] = useState("");
   const [peekDocs, setPeekDocs] = useState<{ id: string; title: string; updatedAt: string }[] | null>(null);
   const [doc, setDoc] = useState<DocPayload | null>(null);
+  const [restoring, setRestoring] = useState(false);
   const [title, setTitle] = useState("");
   // bnDoc is BlockNote's native JSON — the source of truth for editing.
   // `blocks` is a derived mirror (LegacyBlock[]) the surrounding chrome
@@ -657,6 +659,48 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return (
       <div className="bdoc__loading">
         <Loader2 className="bdoc__spin" /> Loading…
+      </div>
+    );
+  }
+
+  // Trashed docs never render their content — stale sub-page links used to
+  // open deleted pages as if nothing happened. Offer restore or a way out.
+  if (doc.archivedAt) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24 px-6 text-center">
+        <Trash2 className="w-8 h-8 text-zinc-300" />
+        <p className="text-[15px] font-semibold text-zinc-900">This page is in Trash</p>
+        <p className="max-w-sm text-[12.5px] leading-snug text-zinc-500">
+          &ldquo;{doc.title || "Untitled"}&rdquo; was deleted. Restore it to keep editing, or head back to your docs.
+        </p>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={restoring}
+            onClick={async () => {
+              setRestoring(true);
+              try {
+                const res = await fetch(`/api/docs/${docId}/restore`, { method: "POST" });
+                if (!res.ok) throw new Error();
+                window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+                window.location.reload();
+              } catch {
+                toast("Couldn't restore the page");
+                setRestoring(false);
+              }
+            }}
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+          >
+            {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            Restore page
+          </button>
+          <Link
+            href="/docs"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Back to Docs
+          </Link>
+        </div>
       </div>
     );
   }

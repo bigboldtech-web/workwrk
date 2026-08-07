@@ -16,6 +16,7 @@ import {
   MoreHorizontal, ChevronRight, Plus, type LucideIcon,
 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
+import { onSidebarRefresh } from "./sidebar-refresh";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { createChildPage } from "@/components/docs/doc-pages-panel";
 import { renderNoteIcon } from "@/components/docs/note-icon";
@@ -68,9 +69,14 @@ export function DocsSidebar() {
     const onChange = () => { void load(); };
     window.addEventListener("workwrk:docs-changed", onChange);
     window.addEventListener("workwrk:favs-changed", onChange);
+    // Title renames from the doc editor fire the generic sidebar-refresh
+    // event (sidebar-refresh.ts) — without this the Pages tree kept the old
+    // title until a manual reload.
+    const offRefresh = onSidebarRefresh(onChange);
     return () => {
       window.removeEventListener("workwrk:docs-changed", onChange);
       window.removeEventListener("workwrk:favs-changed", onChange);
+      offRefresh();
     };
   }, [load]);
 
