@@ -127,6 +127,28 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-07 (latest): **Wave E shipped — Automation Hub is LIVE.** Executed
+  docs/plans/automation-hub.md end to end: schema foundation 51ff7ef (7
+  models + 7 enums re-derived verbatim from the preserved DDL, hand-authored
+  additive migration folder, applied to local via psql; prod applies via
+  deploy-migrations.mjs on this deploy), engine 2c61229 (src/lib/automation/:
+  matcher on the hot index, sha256 idempotency + P2002 dedupe, anti-loop
+  __automationDepth max 3 + 20 runs/record/hr, 13-operator AND/OR condition
+  eval, per-step run logging, usage meter vs settings.automationLimit ??
+  1000, retry cron /api/cron/automation-retry, AES-256-GCM crypto;
+  dispatchEvent hook fire-and-forget + NEW task.status_changed /
+  task.assignee_changed pipes; send_email is REAL via queueEmail), APIs
+  fd67e73 (14 org-scoped gated routes incl. publish→version snapshot),
+  hub pages 08f2562 + 3b02f91 (Automation app manager+ in Build & Extend:
+  Workflows list, Health severity cards + donut, Usage meter + daily chart,
+  Monday-style sentence builder w/ registry-driven params + Mobbin refs,
+  Logs + step drawer + retry, Connections (webhook real, rest honest 501),
+  Templates gallery seeding 5 recipes that clone to DRAFT).
+  E2E-PROVEN twice: agent smoke on a disposable org, then live on the demo
+  org — template → publish → real task flipped DONE → SUCCESS run in 17ms
+  with TRIGGER/CONDITION/ACTION steps + notification + usage 1/1000.
+  Dark verified. OPS TODO: add the automation-retry cron row (POST w/
+  x-cron-secret) to the server scheduler next to email-queue/webhook-retry.
 - 2026-08-07 (later): **Wave D verified + shipped (docs layer).** The three
   builds (sharing 63c635e, subpages 6913359, hub 2bb29bd — detailed below)
   passed main-loop verification. **Sharing got a real two-session security
