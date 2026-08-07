@@ -11,18 +11,30 @@
 //
 // Editing: bars are pointer-draggable — dragging the body shifts start+due by
 // whole days; the left/right edges resize independently (one-day minimum). A
-// live preview tracks the cursor; release PATCHes the dates and syncs via
-// onItemChanged. Undated markers open a date picker (or drag) to set dueAt.
+// live preview tracks the cursor with a prospective-dates tooltip; release
+// PATCHes the dates and syncs via onItemChanged. Undated markers open a date
+// picker (or drag) to set dueAt. Bars fully off-window leave a lane chevron
+// that jumps the window to them.
+//
+// Backlog: the toolbar "Backlog" toggle docks the ClickUp-style "Tasks" panel
+// (Unscheduled | Overdue) on the right; rows drag onto the lanes to schedule
+// at the drop day (HTML5 DnD, calendar contract) or one-click "Today".
+// Zoom (ganttWeeks) + backlog visibility persist in View.config.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarPlus, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
-import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { isDoneStatus, makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { StatusGlyph } from "./status-glyph";
+import { GanttBacklogPanel } from "./gantt-backlog-panel";
 
 // Zoom steps for the visible window (fewer weeks = zoomed in). ClickUp
-// exposes this as the floating +/− stack on the canvas.
-const WEEK_STEPS = [8, 12, 16, 24] as const;
+// exposes this as the floating +/− stack on the canvas. 4 weeks is the
+// day-granularity step: the header switches to per-day weekday+number cells.
+// Deliberate omissions vs ClickUp (honest-UI, out of scope): dependency
+// arrows between bars, progress % fill on bars, a Day/Week/Month dropdown
+// (this weekCount stack is the equivalent), and a show-weekends toggle.
+const WEEK_STEPS = [4, 8, 12, 16, 24] as const;
 const MS_PER_DAY = 86_400_000;
 const ROW_H = 34;      // per-task lane height (matches the left name rows)
 const HEAD_H = 44;     // two-tier timeline header (month band + day row)
@@ -72,6 +84,15 @@ function shiftToIso(d: Date, deltaDays: number): string {
   return `${y}-${m}-${day}T00:00:00.000Z`;
 }
 
+function addDays(d: Date, deltaDays: number): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + deltaDays);
+}
+
+// Short date label for the live drag tooltip + drop chip ("Aug 7").
+function fmtDay(d: Date): string {
+  return d.toLocaleDateString("default", { month: "short", day: "numeric" });
+}
+
 export function BoardGanttView({
   boardId,
   viewId,
@@ -96,10 +117,24 @@ export function BoardGanttView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [anchor, setAnchor] = useState<Date>(defaultAnchor);
-  const [weekCount, setWeekCount] = useState<number>(12);
+  // Zoom + backlog visibility persist as view chrome in View.config
+  // (ganttWeeks / backlogOpen) — same fire-and-forget contract as
+  // dateFieldKey below. Initialized once from the server-provided config;
+  // after mount the local state is the source of truth (the prop goes
+  // stale after PATCHes since there is no refetch).
+  const cfgWeeks =
+    typeof viewConfig?.ganttWeeks === "number" && (WEEK_STEPS as readonly number[]).includes(viewConfig.ganttWeeks)
+      ? (viewConfig.ganttWeeks as number)
+      : 12;
+  const [weekCount, setWeekCount] = useState<number>(cfgWeeks);
+  const [backlogOpen, setBacklogOpen] = useState<boolean>(viewConfig?.backlogOpen === true);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  // Backlog drag-out (HTML5 DnD, same contract as the calendar view):
+  // which panel row is in flight + which day column the cursor hovers.
+  const [panelDragId, setPanelDragId] = useState<string | null>(null);
+  const [dropDay, setDropDay] = useState<number | null>(null);
 
   // DATE/DATETIME fields — the fallback source for undated tasks. Auto (default)
   // uses the first; the picker lets you choose a specific one (or Due-only).
@@ -111,16 +146,36 @@ export function BoardGanttView({
   const rawSel = typeof viewConfig?.dateFieldKey === "string" ? (viewConfig.dateFieldKey as string) : "__auto";
   const dateSource = rawSel === "__auto" || rawSel === "__due" || dateFields.some((f) => f.key === rawSel) ? rawSel : "__auto";
   const [dateSourceLocal, setDateSourceLocal] = useState(dateSource);
-  const persistDateSource = useCallback((next: string) => {
-    setDateSourceLocal(next);
+  // Persist view chrome (dateFieldKey / ganttWeeks / backlogOpen) into
+  // View.config via the existing views PATCH. The ref accumulates every key
+  // written this session so a later write never drops an earlier one (the
+  // viewConfig prop is a mount-time snapshot and goes stale after PATCHes).
+  // Fire-and-forget on purpose: config is non-critical view chrome, not user
+  // content — matches the original persistDateSource contract.
+  const cfgPatchRef = useRef<Record<string, unknown>>({});
+  const persistViewConfig = useCallback((patch: Record<string, unknown>) => {
+    cfgPatchRef.current = { ...cfgPatchRef.current, ...patch };
     if (viewId) {
       void fetch(`/api/boards/${boardId}/views/${viewId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ config: { ...(viewConfig ?? {}), dateFieldKey: next } }),
+        body: JSON.stringify({ config: { ...(viewConfig ?? {}), ...cfgPatchRef.current } }),
       }).catch(() => {});
     }
   }, [boardId, viewId, viewConfig]);
+  const persistDateSource = useCallback((next: string) => {
+    setDateSourceLocal(next);
+    persistViewConfig({ dateFieldKey: next });
+  }, [persistViewConfig]);
+  const setZoom = useCallback((next: number) => {
+    setWeekCount(next);
+    persistViewConfig({ ganttWeeks: next });
+  }, [persistViewConfig]);
+  const toggleBacklog = useCallback(() => {
+    const next = !backlogOpen;
+    setBacklogOpen(next);
+    persistViewConfig({ backlogOpen: next });
+  }, [backlogOpen, persistViewConfig]);
   // Which field feeds undated tasks: none for Due-only, else the chosen/first field.
   const fallbackFieldKey = dateSourceLocal === "__due" ? null : dateSourceLocal === "__auto" ? firstDateFieldKey : dateSourceLocal;
 
@@ -152,7 +207,14 @@ export function BoardGanttView({
     return out;
   }, [initialItems, fallbackFieldKey]);
 
-  const undatedCount = useMemo(() => rows.filter((r) => !r.start && !r.end).length, [rows]);
+  // Backlog panel feeds: undated tasks + past-due-still-open tasks. Derived
+  // from the same rows memo the lanes use, so counts follow the active
+  // filters exactly like the chart does.
+  const startOfTodayD = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const unscheduled = rows.filter((r) => !r.start && !r.end).map((r) => r.item);
+  const overdueRows = rows
+    .filter((r) => r.end && r.end.getTime() < startOfTodayD.getTime() && !isDoneStatus(statuses, r.item.status))
+    .map((r) => ({ item: r.item, end: r.end! }));
 
   // Lookup updated every render so the (mount-stable) pointer-up handler can
   // resolve the dragging item's real dates without stale closures. Undated
@@ -380,11 +442,24 @@ export function BoardGanttView({
             </select>
           </label>
         ) : null}
-        {undatedCount > 0 ? (
-          <span className="inline-flex items-center h-5 rounded-full bg-zinc-100 px-2 text-[10.5px] font-medium text-zinc-500">
-            {undatedCount} unscheduled
-          </span>
-        ) : null}
+        {/* Backlog toggle — opens the ClickUp-style "Tasks" side panel.
+            Neutral pressed state (Monday-clean, no accent fill). */}
+        <button
+          type="button"
+          onClick={toggleBacklog}
+          className={`h-7 rounded-md border px-3 text-[11.5px] font-medium inline-flex items-center gap-1.5 transition-colors ${
+            backlogOpen
+              ? "border-zinc-300 bg-zinc-100 text-zinc-900 dark:border-zinc-600 dark:bg-white/10 dark:text-zinc-100"
+              : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5"
+          }`}
+        >
+          Backlog
+          {unscheduled.length + overdueRows.length > 0 ? (
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-100 px-1 text-[10px] font-semibold tabular-nums text-zinc-500">
+              {unscheduled.length + overdueRows.length}
+            </span>
+          ) : null}
+        </button>
       </div>
 
       {rows.length === 0 ? (
@@ -393,14 +468,17 @@ export function BoardGanttView({
           <p className="text-xs text-zinc-500">Add a task below and it shows up here, ready to schedule.</p>
         </div>
       ) : (
-        <div className="relative rounded-xl border border-zinc-200 bg-white overflow-x-auto">
+        <div className="flex items-stretch overflow-hidden rounded-xl border border-zinc-200 bg-white">
+          {/* Chart scroll container — sticky Name column + zoom stack pin to
+              THIS box, so the open backlog panel sits outside the scroll. */}
+          <div className="relative min-w-0 flex-1 overflow-x-auto">
           {/* ClickUp's floating zoom stack (fewer weeks = zoom in). */}
           <div className="absolute right-2 z-30 flex flex-col rounded-md border border-zinc-200 bg-white shadow-sm overflow-hidden dark:border-zinc-700 dark:bg-zinc-900" style={{ top: HEAD_H + 8 }}>
             <button
               type="button"
               aria-label="Zoom in"
               disabled={weekCount === WEEK_STEPS[0]}
-              onClick={() => setWeekCount((c) => WEEK_STEPS[Math.max(0, WEEK_STEPS.indexOf(c as typeof WEEK_STEPS[number]) - 1)])}
+              onClick={() => setZoom(WEEK_STEPS[Math.max(0, WEEK_STEPS.indexOf(weekCount as typeof WEEK_STEPS[number]) - 1)])}
               className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300"
             >
               <Plus className="w-3 h-3" />
@@ -409,7 +487,7 @@ export function BoardGanttView({
               type="button"
               aria-label="Zoom out"
               disabled={weekCount === WEEK_STEPS[WEEK_STEPS.length - 1]}
-              onClick={() => setWeekCount((c) => WEEK_STEPS[Math.min(WEEK_STEPS.length - 1, WEEK_STEPS.indexOf(c as typeof WEEK_STEPS[number]) + 1)])}
+              onClick={() => setZoom(WEEK_STEPS[Math.min(WEEK_STEPS.length - 1, WEEK_STEPS.indexOf(weekCount as typeof WEEK_STEPS[number]) + 1)])}
               className="h-6 w-6 inline-flex items-center justify-center text-zinc-500 hover:bg-zinc-50 disabled:text-zinc-300 border-t border-zinc-100"
             >
               <Minus className="w-3 h-3" />
@@ -467,28 +545,98 @@ export function BoardGanttView({
                     </div>
                   ))}
                 </div>
-                <div
-                  className="grid h-[26px]"
-                  style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(60px, 1fr))` }}
-                >
-                  {weeks.map((w, i) => {
-                    const isThisWeek = startOfWeek(today).getTime() === w.getTime();
-                    return (
-                      <div key={i} className="border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px]">
-                        {isThisWeek ? (
-                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-rose-500 text-white text-[10px] font-semibold">
-                            {w.getDate()}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-400">{w.getDate()}</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                {weekCount === 4 ? (
+                  // Day-granularity zoom step: per-day weekday letter + number
+                  // cells (ClickUp's "S 26  M 27" row at tighter zoom).
+                  <div
+                    className="grid h-[26px]"
+                    style={{ gridTemplateColumns: `repeat(${totalDays}, minmax(24px, 1fr))` }}
+                  >
+                    {Array.from({ length: totalDays }, (_, i) => {
+                      const d = addDays(anchor, i);
+                      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+                      return (
+                        <div
+                          key={i}
+                          className={`border-l first:border-l-0 border-zinc-100 flex items-center justify-center gap-0.5 text-[10px] ${
+                            isWeekend ? "bg-zinc-50 dark:bg-white/[0.03]" : ""
+                          }`}
+                        >
+                          <span className="text-zinc-400">{"SMTWTFS"[d.getDay()]}</span>
+                          {i === todayCol ? (
+                            <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rose-500 text-white text-[9.5px] font-semibold">
+                              {d.getDate()}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-500 tabular-nums">{d.getDate()}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div
+                    className="grid h-[26px]"
+                    style={{ gridTemplateColumns: `repeat(${weekCount}, minmax(60px, 1fr))` }}
+                  >
+                    {weeks.map((w, i) => {
+                      const isThisWeek = startOfWeek(today).getTime() === w.getTime();
+                      return (
+                        <div key={i} className="border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px]">
+                          {isThisWeek ? (
+                            <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-rose-500 text-white text-[10px] font-semibold">
+                              {w.getDate()}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-400">{w.getDate()}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-              {/* Lanes */}
-              <div ref={lanesRef} className="relative" style={{ height: chartHeight }}>
+              {/* Lanes — also the drop target for backlog drag-out (HTML5
+                  DnD, same reschedule contract as the calendar grid). */}
+              <div
+                ref={lanesRef}
+                className="relative"
+                style={{ height: chartHeight }}
+                onDragOver={(e) => {
+                  if (!panelDragId || !canEdit) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const rect = lanesRef.current?.getBoundingClientRect();
+                  if (!rect || rect.width <= 0) return;
+                  const day = Math.min(totalDays - 1, Math.max(0, Math.floor(((e.clientX - rect.left) / rect.width) * totalDays)));
+                  setDropDay(day);
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget === e.target) setDropDay(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (panelDragId && dropDay !== null) void scheduleDate(panelDragId, shiftToIso(anchor, dropDay).slice(0, 10));
+                  setPanelDragId(null);
+                  setDropDay(null);
+                }}
+              >
+                {/* Drop indicator: brand day line + prospective-date chip. */}
+                {panelDragId && dropDay !== null ? (
+                  <>
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-[var(--os-brand)]"
+                      style={{ left: `${((dropDay + 0.5) / totalDays) * 100}%` }}
+                    />
+                    <span
+                      className="pointer-events-none absolute top-1 z-20 -translate-x-1/2 rounded-[5px] bg-[var(--os-brand)] px-1.5 py-0.5 text-[10px] font-medium text-white"
+                      style={{ left: `${((dropDay + 0.5) / totalDays) * 100}%` }}
+                    >
+                      {fmtDay(addDays(anchor, dropDay))}
+                    </span>
+                  </>
+                ) : null}
                 {/* Weekend shading (behind gridlines/bars) */}
                 {Array.from({ length: weekCount }, (_, i) => (
                   <span key={`wknd-${i}`} aria-hidden>
@@ -552,14 +700,43 @@ export function BoardGanttView({
                           height: 14,
                           backgroundColor: `${color}33`,
                         }}
-                      />
+                      >
+                        {/* Live target-day tooltip while dragging to schedule. */}
+                        {d ? (
+                          <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none dark:bg-zinc-100 dark:text-zinc-900">
+                            {fmtDay(addDays(startOfTodayD, d.dayDelta))}
+                          </span>
+                        ) : null}
+                      </button>
                     );
                   }
 
-                  // Dated → a duration bar, clipped to the window.
+                  // Dated → a duration bar, clipped to the window. Bars fully
+                  // outside the window leave an edge chevron in the lane that
+                  // jumps the window to the bar (ClickUp's off-screen affordance).
                   const s = start!;
                   const e = end!;
-                  if (e.getTime() < anchor.getTime() || s.getTime() >= windowEnd.getTime()) return null;
+                  if (e.getTime() < anchor.getTime() || s.getTime() >= windowEnd.getTime()) {
+                    const isLeft = e.getTime() < anchor.getTime();
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        title={`${item.title} — jump to bar`}
+                        onClick={() => {
+                          const w = startOfWeek(s);
+                          w.setDate(w.getDate() - 7);
+                          setAnchor(w);
+                        }}
+                        className={`absolute z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-white/10 ${
+                          isLeft ? "left-1" : "right-1"
+                        }`}
+                        style={{ top: rowIndex * ROW_H + (ROW_H - 20) / 2 }}
+                      >
+                        {isLeft ? <ChevronLeft className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                      </button>
+                    );
+                  }
                   const startDay = Math.max(0, Math.floor((s.getTime() - anchor.getTime()) / MS_PER_DAY));
                   const endDay = Math.min(totalDays - 1, Math.floor((e.getTime() - anchor.getTime()) / MS_PER_DAY));
                   const startCol = startDay;
@@ -581,12 +758,33 @@ export function BoardGanttView({
                   const widthPct = (dispSpan / totalDays) * 100;
                   // ClickUp spills short bars' names to the right of the bar.
                   const spillLabel = dispSpan <= 2;
+                  // Live prospective dates while dragging — same clamp math as
+                  // commitDrag so the tooltip always matches what release writes.
+                  let tipStart: Date | null = null;
+                  let tipEnd: Date | null = null;
+                  if (d) {
+                    const spanDays = Math.round(
+                      (new Date(e.getFullYear(), e.getMonth(), e.getDate()).getTime() -
+                        new Date(s.getFullYear(), s.getMonth(), s.getDate()).getTime()) / MS_PER_DAY,
+                    );
+                    let delta = d.dayDelta;
+                    if (d.mode === "resize-start" && delta > spanDays) delta = spanDays;
+                    if (d.mode === "resize-end" && delta < -spanDays) delta = -spanDays;
+                    tipStart = d.mode === "resize-end" ? addDays(s, 0) : addDays(s, delta);
+                    tipEnd = d.mode === "resize-start" ? addDays(e, 0) : addDays(e, delta);
+                  }
                   return (
                     <div
                       key={item.id}
                       className={`group absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded-[6px]" : ""}`}
                       style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, top, height: 24 }}
                     >
+                      {tipStart && tipEnd ? (
+                        <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none dark:bg-zinc-100 dark:text-zinc-900">
+                          {fmtDay(tipStart)}
+                          {tipEnd.getTime() !== tipStart.getTime() ? ` → ${fmtDay(tipEnd)}` : ""}
+                        </span>
+                      ) : null}
                       {canEdit ? (
                         <div
                           onPointerDown={(e) => beginDrag(e, item.id, "resize-start")}
@@ -644,6 +842,20 @@ export function BoardGanttView({
                 className="flex-1 min-w-0 bg-transparent text-[12.5px] text-zinc-800 placeholder:text-zinc-400 focus:outline-none"
               />
             </div>
+          ) : null}
+          </div>
+          {backlogOpen ? (
+            <GanttBacklogPanel
+              unscheduled={unscheduled}
+              overdue={overdueRows}
+              statuses={statuses}
+              canEdit={canEdit}
+              onOpenItem={onOpenItem}
+              onScheduleToday={(id) => void scheduleDate(id, shiftToIso(startOfTodayD, 0).slice(0, 10))}
+              onDragStart={setPanelDragId}
+              onDragEnd={() => { setPanelDragId(null); setDropDay(null); }}
+              onClose={toggleBacklog}
+            />
           ) : null}
         </div>
       )}
