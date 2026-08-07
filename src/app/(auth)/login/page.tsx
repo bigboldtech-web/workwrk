@@ -59,7 +59,7 @@ export default function LoginPage() {
             placeholder="you@company.com"
             autoComplete="email"
             required
-            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
           />
         </div>
 
@@ -68,7 +68,7 @@ export default function LoginPage() {
             <label htmlFor="password" className="text-xs font-medium text-slate-700">
               Password
             </label>
-            <Link href="/forgot-password" className="text-xs text-violet-700 hover:text-violet-800">
+            <Link href="/forgot-password" className="text-xs text-[#0073EA] hover:text-[#0056B0]">
               Forgot password?
             </Link>
           </div>
@@ -80,7 +80,7 @@ export default function LoginPage() {
             placeholder="••••••••"
             autoComplete="current-password"
             required
-            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
           />
         </div>
 
@@ -103,7 +103,7 @@ export default function LoginPage() {
 
       <p className="text-sm text-slate-600 text-center">
         New to WorkwrK?{" "}
-        <Link href="/register" className="text-violet-700 hover:text-violet-800 font-medium">
+        <Link href="/register" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Start your free trial
         </Link>
       </p>

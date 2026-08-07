@@ -19,7 +19,7 @@ export default function AuthLayout({
       {/* ── Form pane ── */}
       <div className="flex flex-col px-6 sm:px-10 lg:px-16 py-10">
         <Link href="/" className="inline-flex items-center gap-2 group w-fit">
-          <span className="w-8 h-8 rounded-lg bg-gradient-to-br from-slate-900 to-slate-700 flex items-center justify-center group-hover:from-violet-600 group-hover:to-violet-500 transition-colors">
+          <span className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center">
             <span className="text-white text-sm font-bold tracking-tight">W</span>
           </span>
           <span className="font-bold text-base tracking-tight">workwrk</span>
@@ -40,18 +40,14 @@ export default function AuthLayout({
       </div>
 
       {/* ── Proof pane ── (hidden on small screens) */}
-      <div className="hidden lg:flex flex-col justify-center px-12 xl:px-20 py-12 bg-gradient-to-br from-violet-50 via-white to-emerald-50/40 border-l border-slate-100 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-[28rem] h-[28rem] bg-violet-300/30 rounded-full blur-3xl -translate-y-1/3 translate-x-1/3" aria-hidden />
-        <div className="absolute bottom-0 left-0 w-[32rem] h-[32rem] bg-emerald-300/25 rounded-full blur-3xl translate-y-1/3 -translate-x-1/4" aria-hidden />
-        <div className="absolute top-1/2 left-1/2 w-72 h-72 bg-pink-200/20 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" aria-hidden />
-
+      <div className="hidden lg:flex flex-col justify-center px-12 xl:px-20 py-12 bg-zinc-50/60 border-l border-zinc-100 relative overflow-hidden">
         <div className="relative max-w-md">
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-violet-700 bg-white/80 backdrop-blur border border-violet-200/60 px-3 py-1.5 rounded-full shadow-sm">
-            <Sparkles size={12} className="text-violet-600" /> Built like Lego. Runs your whole business.
+          <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0073EA] bg-white border border-blue-200/70 px-3 py-1.5 rounded-full shadow-sm">
+            <Sparkles size={12} className="text-[#0073EA]" /> Built like Lego. Runs your whole business.
           </div>
 
           <h2 className="text-3xl xl:text-[2.5rem] font-bold tracking-tight text-slate-900 mt-6 leading-[1.1]">
-            Compose your work OS — <span className="bg-gradient-to-r from-violet-600 to-pink-500 bg-clip-text text-transparent">one primitive at a time.</span>
+            Compose your work OS, <span className="text-[#0073EA]">one primitive at a time.</span>
           </h2>
 
           <p className="text-slate-600 mt-5 leading-relaxed text-[15px]">
@@ -62,12 +58,12 @@ export default function AuthLayout({
           {/* Primitives showcase — directly tied to what the app actually does */}
           <div className="grid grid-cols-2 gap-2.5 mt-7">
             {[
-              { icon: FormInput,  label: "Forms",  hint: "any data, any source",          color: "text-violet-600 bg-violet-100/60 border-violet-200/60" },
-              { icon: TableIcon,  label: "Tables", hint: "grid · kanban · calendar",      color: "text-teal-600 bg-teal-100/60 border-teal-200/60" },
-              { icon: FileText,   label: "Docs",   hint: "block editor + AI summary",     color: "text-blue-600 bg-blue-100/60 border-blue-200/60" },
-              { icon: Bot,        label: "Agents", hint: "tools, memory, workflows",      color: "text-pink-600 bg-pink-100/60 border-pink-200/60" },
+              { icon: FormInput,  label: "Forms",  hint: "any data, any source",          color: "text-[#0073EA] bg-blue-50 border-blue-100" },
+              { icon: TableIcon,  label: "Tables", hint: "grid · kanban · calendar",      color: "text-emerald-600 bg-emerald-50 border-emerald-100" },
+              { icon: FileText,   label: "Docs",   hint: "block editor + AI summary",     color: "text-amber-600 bg-amber-50 border-amber-100" },
+              { icon: Bot,        label: "Agents", hint: "tools, memory, workflows",      color: "text-rose-600 bg-rose-50 border-rose-100" },
             ].map((p) => (
-              <div key={p.label} className={`flex items-start gap-2.5 text-sm text-slate-700 bg-white/85 backdrop-blur border rounded-xl px-3 py-2.5 transition hover:shadow-md hover:-translate-y-0.5 ${p.color.split(" ")[2]}`}>
+              <div key={p.label} className={`flex items-start gap-2.5 text-sm text-slate-700 bg-white border rounded-xl px-3 py-2.5 transition hover:shadow-sm hover:-translate-y-0.5 ${p.color.split(" ")[2]}`}>
                 <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${p.color.split(" ").slice(0, 2).join(" ")}`}>
                   <p.icon size={14} />
                 </span>
@@ -93,7 +89,7 @@ export default function AuthLayout({
               &ldquo;We replaced <span className="font-semibold text-slate-900">14 SaaS tools</span> with WorkwrK in one quarter. Our managers actually open the app now — that didn&apos;t happen with Workday.&rdquo;
             </blockquote>
             <figcaption className="flex items-center gap-2.5 mt-4">
-              <span className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-400 to-pink-500 text-white text-xs font-bold flex items-center justify-center">MS</span>
+              <span className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs font-bold flex items-center justify-center">MS</span>
               <span className="text-xs">
                 <span className="block font-semibold text-slate-900">Mohsin S.</span>
                 <span className="block text-slate-500">COO · 280-person services firm</span>

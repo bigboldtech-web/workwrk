@@ -62,7 +62,7 @@ function ResetPasswordForm() {
         </Link>
         <p className="text-sm text-slate-600 text-center">
           Back to{" "}
-          <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+          <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
             sign in
           </Link>
         </p>
@@ -108,7 +108,7 @@ function ResetPasswordForm() {
               autoComplete="new-password"
               minLength={8}
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
 
@@ -125,7 +125,7 @@ function ResetPasswordForm() {
               autoComplete="new-password"
               minLength={8}
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
 

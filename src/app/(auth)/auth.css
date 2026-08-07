@@ -37,7 +37,7 @@
   width: 28px;
   height: 28px;
   border-radius: 8px;
-  background: linear-gradient(135deg, #0f172a, #475569);
+  background: #18181b;
   display: inline-block;
   position: relative;
 }
@@ -61,7 +61,7 @@
   margin: 0 0 8px;
   color: #0f172a;
 }
-.auth-title .hi { color: #6d28d9; }
+.auth-title .hi { color: #0073EA; }
 
 .auth-sub {
   font-size: 14px;
@@ -82,10 +82,10 @@
 }
 .auth-forgot {
   font-size: 12px;
-  color: #6d28d9;
+  color: #0073EA;
   text-decoration: none;
 }
-.auth-forgot:hover { color: #5b21b6; }
+.auth-forgot:hover { color: #0056B0; }
 
 .auth-input {
   width: 100%;
@@ -102,8 +102,8 @@
 .auth-input::placeholder { color: #94a3b8; }
 .auth-input:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18);
+  border-color: #0073EA;
+  box-shadow: 0 0 0 3px rgba(0, 115, 234, 0.15);
 }
 
 .auth-error {
@@ -205,8 +205,8 @@
   font-size: 14px;
   color: #475569;
 }
-.auth-foot a { color: #6d28d9; text-decoration: none; font-weight: 500; }
-.auth-foot a:hover { color: #5b21b6; }
+.auth-foot a { color: #0073EA; text-decoration: none; font-weight: 500; }
+.auth-foot a:hover { color: #0056B0; }
 
 .auth-legal {
   margin-top: 14px;
@@ -232,7 +232,7 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: #6d28d9;
+  color: #0073EA;
   text-transform: uppercase;
   display: inline-flex; align-items: center; gap: 6px;
 }
@@ -247,7 +247,7 @@
 .ob-progress-fill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #8b5cf6, #6d28d9);
+  background: #0073EA;
   border-radius: 100px;
   transition: width 0.3s cubic-bezier(0.2, 0.9, 0.3, 1);
 }

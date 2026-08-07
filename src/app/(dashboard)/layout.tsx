@@ -50,7 +50,7 @@ export default function DashboardLayout({
   }, []);
 
   if (status === "loading" || (status === "authenticated" && !setupChecked)) {
-    return <DotsLoaderScreen label="Loading workspace" background="#FBFAF7" />;
+    return <DotsLoaderScreen label="Loading workspace" background="transparent" />;
   }
 
   if (status === "unauthenticated") return null;

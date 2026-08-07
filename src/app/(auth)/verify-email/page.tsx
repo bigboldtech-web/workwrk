@@ -8,15 +8,17 @@ import { Loader2, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
 function VerifyEmailInner() {
   const params = useSearchParams();
   const token = params.get("token");
-  const [state, setState] = useState<"loading" | "ok" | "already" | "error">("loading");
-  const [msg, setMsg] = useState("");
+  // No token means we can settle the state at first render — no
+  // synchronous setState inside the effect.
+  const [state, setState] = useState<"loading" | "ok" | "already" | "error">(
+    token ? "loading" : "error"
+  );
+  const [msg, setMsg] = useState(
+    token ? "" : "This link is missing its token. Request a new verification email."
+  );
 
   useEffect(() => {
-    if (!token) {
-      setState("error");
-      setMsg("This link is missing its token. Request a new verification email.");
-      return;
-    }
+    if (!token) return;
     fetch("/api/auth/verify-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -73,7 +75,7 @@ function VerifyEmailInner() {
         </Link>
         <p className="text-sm text-slate-600 text-center">
           Not signed in?{" "}
-          <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+          <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
             Log in
           </Link>
         </p>
@@ -117,7 +119,7 @@ function VerifyEmailInner() {
       </Link>
       <p className="text-sm text-slate-600 text-center">
         Need a new link?{" "}
-        <Link href="/forgot-password" className="text-violet-700 hover:text-violet-800 font-medium">
+        <Link href="/forgot-password" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Request one
         </Link>
       </p>

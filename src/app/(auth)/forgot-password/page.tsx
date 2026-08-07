@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
               placeholder="you@company.com"
               autoComplete="email"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
           <button
@@ -94,7 +94,7 @@ export default function ForgotPasswordPage() {
 
       <p className="text-sm text-slate-600 text-center">
         Remember it?{" "}
-        <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+        <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Back to sign in
         </Link>
       </p>

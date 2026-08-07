@@ -27,7 +27,7 @@ export default function DashboardError({
         <div className="w-12 h-12 mx-auto rounded-xl bg-red-50 flex items-center justify-center mb-4">
           <AlertTriangle className="w-6 h-6 text-red-500" />
         </div>
-        <h1 className="text-[20px] font-semibold text-zinc-900">
+        <h1 className="text-[17px] font-semibold text-zinc-900">
           This page couldn&apos;t load
         </h1>
         <p className="text-[13px] text-zinc-500 mt-2 leading-relaxed">
@@ -46,21 +46,21 @@ export default function DashboardError({
           <button
             type="button"
             onClick={() => reset()}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)]"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full bg-zinc-900 text-white text-[13px] font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
             <RotateCw className="w-3.5 h-3.5" />
             Try again
           </button>
           <Link
             href="/spaces"
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-200 text-zinc-800 text-[13px] hover:bg-zinc-50"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-[13px] hover:bg-zinc-50"
           >
             <LayoutGrid className="w-3.5 h-3.5" />
             All spaces
           </Link>
           <Link
             href="/today"
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-zinc-200 text-zinc-800 text-[13px] hover:bg-zinc-50"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-[13px] hover:bg-zinc-50"
           >
             <Home className="w-3.5 h-3.5" />
             Home

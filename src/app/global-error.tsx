@@ -22,20 +22,20 @@ export default function GlobalError({
           justifyContent: "center",
           fontFamily:
             "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
-          background: "#0a0a0a",
-          color: "#fafafa",
+          background: "#ffffff",
+          color: "#18181b",
           padding: "24px",
         }}
       >
         <div style={{ maxWidth: 420, textAlign: "center" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 8px" }}>
+          <h1 style={{ fontSize: 17, fontWeight: 600, margin: "0 0 8px" }}>
             Something went wrong
           </h1>
-          <p style={{ fontSize: 14, color: "#a0a0a0", lineHeight: 1.5, margin: "0 0 20px" }}>
+          <p style={{ fontSize: 13, color: "#71717a", lineHeight: 1.5, margin: "0 0 20px" }}>
             The app hit an unexpected error. Try reloading, or head back home.
           </p>
           {error?.digest ? (
-            <p style={{ fontSize: 11, color: "#707070", margin: "0 0 20px" }}>
+            <p style={{ fontSize: 11, color: "#a1a1aa", margin: "0 0 20px" }}>
               Reference: {error.digest}
             </p>
           ) : null}
@@ -46,12 +46,12 @@ export default function GlobalError({
               style={{
                 cursor: "pointer",
                 border: "none",
-                borderRadius: 8,
-                padding: "10px 14px",
+                borderRadius: 999,
+                padding: "8px 16px",
                 fontSize: 13,
                 fontWeight: 600,
-                background: "#d4ff2e",
-                color: "#0a0a0a",
+                background: "#18181b",
+                color: "#fff",
               }}
             >
               Try again
@@ -59,12 +59,12 @@ export default function GlobalError({
             <a
               href="/today"
               style={{
-                borderRadius: 8,
-                padding: "10px 14px",
+                borderRadius: 999,
+                padding: "8px 16px",
                 fontSize: 13,
                 textDecoration: "none",
-                border: "1px solid rgba(255,255,255,0.16)",
-                color: "#fafafa",
+                border: "1px solid #e4e4e7",
+                color: "#3f3f46",
               }}
             >
               Go home

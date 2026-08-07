@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
@@ -44,16 +44,14 @@ export default function OnboardingPage() {
   const { data: session } = useSession();
   const [step, setStep] = useState(0);
   const [focus, setFocus] = useState<Focus | null>(null);
-  const [firstName, setFirstName] = useState("");
   const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const name = (session?.user as { firstName?: string; name?: string } | undefined)?.firstName
-      ?? session?.user?.name?.split(" ")[0]
-      ?? "";
-    setFirstName(name);
-  }, [session]);
+  // Derived directly from the session — no state/effect needed.
+  const firstName =
+    (session?.user as { firstName?: string; name?: string } | undefined)?.firstName
+    ?? session?.user?.name?.split(" ")[0]
+    ?? "";
 
   const totalSteps = 3;
   const progress = Math.round(((step + 1) / totalSteps) * 100);
@@ -81,13 +79,16 @@ export default function OnboardingPage() {
         workwrk
       </Link>
 
-      <div className="ob-step-head">
-        <span className="ob-step-label">
+      <div className="flex items-center justify-between gap-3 mb-6">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
           <Sparkles size={12} />
           Getting started · step {step + 1} of {totalSteps}
         </span>
-        <span className="ob-progress-bar">
-          <span className="ob-progress-fill" style={{ width: `${progress}%` }} />
+        <span className="flex-1 max-w-[160px] h-1 rounded-full bg-zinc-100 overflow-hidden">
+          <span
+            className="block h-full rounded-full bg-[#0073EA] transition-[width] duration-300"
+            style={{ width: `${progress}%` }}
+          />
         </span>
       </div>
 
@@ -102,40 +103,43 @@ export default function OnboardingPage() {
             about 90 seconds tailoring it to you.
           </p>
 
-          <div className="ob-preview">
-            <div className="ob-preview-tile ob-tile-lime">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-6">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <Users size={16} />
               <span>People</span>
             </div>
-            <div className="ob-preview-tile ob-tile-pink">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <Target size={16} />
               <span>KRAs</span>
             </div>
-            <div className="ob-preview-tile ob-tile-blue">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <BookOpen size={16} />
               <span>SOPs</span>
             </div>
-            <div className="ob-preview-tile ob-tile-amber">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <Star size={16} />
               <span>Reviews</span>
             </div>
-            <div className="ob-preview-tile ob-tile-mint">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <Heart size={16} />
               <span>Kudos</span>
             </div>
-            <div className="ob-preview-tile ob-tile-lime">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
               <Sparkles size={16} />
               <span>AI Engine</span>
             </div>
           </div>
 
-          <div className="ob-nav">
-            <Link href="/dashboard" className="ob-skip">
+          <div className="mt-7 flex items-center justify-between gap-3">
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
+            >
               Skip
             </Link>
             <button
               type="button"
-              className="bento-btn bento-btn-lime auth-submit ob-next"
+              className="auth-submit ob-next"
               onClick={() => setStep(1)}
             >
               Let&apos;s go <ArrowRight size={14} />
@@ -154,26 +158,37 @@ export default function OnboardingPage() {
             actually use first — you can change this later.
           </p>
 
-          <div className="ob-focus-list">
+          <div className="flex flex-col gap-2 my-6">
             {focusOptions.map((o) => (
               <button
                 key={o.key}
                 type="button"
                 onClick={() => setFocus(o.key)}
-                className={`ob-focus ${focus === o.key ? "is-active" : ""}`}
+                className={`text-left p-4 rounded-xl border bg-white transition flex flex-col gap-2 ${
+                  focus === o.key
+                    ? "border-[#0073EA] ring-2 ring-[#0073EA]/15"
+                    : "border-zinc-200 hover:border-zinc-300"
+                }`}
               >
-                <div className="ob-focus-head">
-                  <span className="ob-focus-title">{o.label}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[14px] font-semibold text-zinc-900">{o.label}</span>
                   {focus === o.key && (
-                    <span className="ob-focus-check">
+                    <span className="w-5 h-5 rounded-full bg-[#0073EA] text-white inline-flex items-center justify-center">
                       <Check size={12} />
                     </span>
                   )}
                 </div>
-                <p className="ob-focus-body">{o.body}</p>
-                <div className="ob-focus-mods">
+                <p className="text-[13px] text-zinc-500 leading-relaxed m-0">{o.body}</p>
+                <div className="flex flex-wrap gap-1.5">
                   {o.modules.map((m) => (
-                    <span key={m} className="ob-focus-mod">
+                    <span
+                      key={m}
+                      className={`h-5 inline-flex items-center px-2 rounded-[5px] text-[10.5px] font-medium ${
+                        focus === o.key
+                          ? "bg-blue-50 text-[#0073EA]"
+                          : "bg-zinc-100 text-zinc-600"
+                      }`}
+                    >
                       {m}
                     </span>
                   ))}
@@ -182,17 +197,17 @@ export default function OnboardingPage() {
             ))}
           </div>
 
-          <div className="ob-nav">
+          <div className="mt-7 flex items-center justify-between gap-3">
             <button
               type="button"
-              className="ob-back"
+              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
               onClick={() => setStep(0)}
             >
               <ArrowLeft size={14} /> Back
             </button>
             <button
               type="button"
-              className="bento-btn bento-btn-lime auth-submit ob-next"
+              className="auth-submit ob-next"
               onClick={() => setStep(2)}
               disabled={!focus}
             >
@@ -227,24 +242,24 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          <div className="ob-summary">
-            <span className="ob-summary-label">Focus</span>
-            <span className="ob-summary-val">
+          <div className="mt-4 px-4 py-3 rounded-lg border border-zinc-200 bg-zinc-50 flex items-center justify-between">
+            <span className="text-[11px] uppercase tracking-wide text-zinc-400">Focus</span>
+            <span className="text-[13px] font-medium text-zinc-900">
               {focus ? focusOptions.find((f) => f.key === focus)?.label : "Not set"}
             </span>
           </div>
 
-          <div className="ob-nav">
+          <div className="mt-7 flex items-center justify-between gap-3">
             <button
               type="button"
-              className="ob-back"
+              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
               onClick={() => setStep(1)}
             >
               <ArrowLeft size={14} /> Back
             </button>
             <button
               type="button"
-              className="bento-btn bento-btn-lime auth-submit ob-next"
+              className="auth-submit ob-next"
               onClick={handleFinish}
               disabled={saving}
             >
@@ -263,212 +278,6 @@ export default function OnboardingPage() {
         </>
       )}
 
-      <style>{`
-        .ob-card { max-width: 520px !important; }
-
-        .ob-step-head {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          margin-bottom: 28px;
-        }
-        .ob-step-label {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.16em;
-          text-transform: uppercase;
-          color: #d4ff2e;
-        }
-        .ob-progress-bar {
-          height: 3px;
-          background: rgba(255, 255, 255, 0.06);
-          border-radius: 100px;
-          overflow: hidden;
-        }
-        .ob-progress-fill {
-          display: block;
-          height: 100%;
-          background: linear-gradient(90deg, #d4ff2e, #5eead4);
-          box-shadow: 0 0 10px rgba(212, 255, 46, 0.5);
-          transition: width 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
-        }
-
-        .ob-preview {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 8px;
-          margin: 4px 0 28px;
-        }
-        .ob-preview-tile {
-          display: inline-flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 6px;
-          padding: 12px 14px;
-          border-radius: 12px;
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.1em;
-          text-transform: uppercase;
-          border: 1px solid transparent;
-        }
-        .ob-tile-lime { background: rgba(212, 255, 46, 0.08); border-color: rgba(212, 255, 46, 0.25); color: #d4ff2e; }
-        .ob-tile-pink { background: rgba(255, 61, 138, 0.08); border-color: rgba(255, 61, 138, 0.25); color: #ff3d8a; }
-        .ob-tile-blue { background: rgba(74, 158, 255, 0.08); border-color: rgba(74, 158, 255, 0.25); color: #4a9eff; }
-        .ob-tile-amber { background: rgba(255, 153, 51, 0.08); border-color: rgba(255, 153, 51, 0.25); color: #ff9933; }
-        .ob-tile-mint { background: rgba(94, 234, 212, 0.08); border-color: rgba(94, 234, 212, 0.25); color: #5eead4; }
-
-        .ob-focus-list {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          margin: 6px 0 28px;
-        }
-        .ob-focus {
-          text-align: left;
-          padding: 16px 18px;
-          background: #1a1a1a;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 14px;
-          color: #ededed;
-          font-family: inherit;
-          cursor: pointer;
-          transition: all 0.2s cubic-bezier(0.2, 0.9, 0.3, 1);
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .ob-focus:hover {
-          border-color: rgba(255, 255, 255, 0.14);
-          transform: translateY(-1px);
-        }
-        .ob-focus.is-active {
-          background: rgba(212, 255, 46, 0.04);
-          border-color: #d4ff2e;
-          box-shadow: 0 0 0 3px rgba(212, 255, 46, 0.12);
-        }
-        .ob-focus-head {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .ob-focus-title {
-          font-size: 14.5px;
-          font-weight: 600;
-          color: #fafafa;
-          letter-spacing: -0.01em;
-        }
-        .ob-focus-check {
-          width: 20px;
-          height: 20px;
-          border-radius: 50%;
-          background: #d4ff2e;
-          color: #0a0a0a;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .ob-focus-body {
-          font-size: 13px;
-          color: #a0a0a0;
-          line-height: 1.5;
-          margin: 0;
-        }
-        .ob-focus-mods {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 5px;
-          padding-top: 2px;
-        }
-        .ob-focus-mod {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 9.5px;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          color: #707070;
-          padding: 3px 8px;
-          background: #141414;
-          border: 1px solid rgba(255, 255, 255, 0.06);
-          border-radius: 100px;
-        }
-        .ob-focus.is-active .ob-focus-mod {
-          color: #d4ff2e;
-          border-color: rgba(212, 255, 46, 0.25);
-          background: rgba(212, 255, 46, 0.05);
-        }
-
-        .ob-summary {
-          margin-top: 18px;
-          padding: 14px 16px;
-          background: rgba(212, 255, 46, 0.05);
-          border: 1px solid rgba(212, 255, 46, 0.2);
-          border-radius: 12px;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .ob-summary-label {
-          font-family: var(--font-geist-mono), monospace;
-          font-size: 10.5px;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: #707070;
-        }
-        .ob-summary-val {
-          font-size: 13px;
-          font-weight: 500;
-          color: #d4ff2e;
-        }
-
-        .ob-nav {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          margin-top: 28px;
-        }
-        .ob-next {
-          justify-content: center;
-          flex: 1;
-          max-width: 260px;
-        }
-        .ob-next:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-          transform: none !important;
-        }
-        .ob-back,
-        .ob-skip {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 11px 16px;
-          background: transparent;
-          border: 1px solid rgba(255, 255, 255, 0.08);
-          color: #a0a0a0;
-          font-family: inherit;
-          font-size: 13px;
-          font-weight: 500;
-          border-radius: 100px;
-          cursor: pointer;
-          text-decoration: none;
-          transition: all 0.2s;
-        }
-        .ob-back:hover,
-        .ob-skip:hover {
-          color: #fafafa;
-          border-color: rgba(255, 255, 255, 0.14);
-          background: #1a1a1a;
-        }
-
-        @media (max-width: 480px) {
-          .ob-preview { grid-template-columns: 1fr 1fr; }
-        }
-      `}</style>
     </div>
   );
 }

@@ -110,7 +110,7 @@ function RegisterForm() {
         )}
 
         {invited && invitation && (
-          <div className="rounded-lg border border-violet-200 bg-violet-50 text-violet-800 text-sm px-3 py-2 flex items-center gap-2">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm px-3 py-2 flex items-center gap-2">
             <CheckCircle2 size={14} />
             <span>Joining as <strong>{invitation.email}</strong></span>
           </div>
@@ -128,7 +128,7 @@ function RegisterForm() {
               onChange={(e) => update("organizationName", e.target.value)}
               placeholder="ScaleOps"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         )}
@@ -146,7 +146,7 @@ function RegisterForm() {
               placeholder="Priya"
               autoComplete="given-name"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
           <div className="space-y-1.5">
@@ -161,7 +161,7 @@ function RegisterForm() {
               placeholder="Sharma"
               autoComplete="family-name"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         </div>
@@ -179,7 +179,7 @@ function RegisterForm() {
               placeholder="priya@company.com"
               autoComplete="email"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         )}
@@ -197,7 +197,7 @@ function RegisterForm() {
             autoComplete="new-password"
             minLength={8}
             required
-            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-500 transition"
+            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
           />
         </div>
 
@@ -221,7 +221,7 @@ function RegisterForm() {
 
       <p className="text-sm text-slate-600 text-center">
         Already have an account?{" "}
-        <Link href="/login" className="text-violet-700 hover:text-violet-800 font-medium">
+        <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Sign in
         </Link>
       </p>
