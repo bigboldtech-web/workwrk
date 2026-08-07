@@ -16177,6 +16177,12 @@ table.os-tbl {
   border: 1px solid var(--os-line);
   transition: background 120ms ease, border-color 120ms ease;
 }
+/* Browsers restore focus to the last-clicked sub-page link on back-
+   navigation and draw the default thick blue focus ring around it.
+   Suppress the outline; keyboard users get a quiet brand tint instead. */
+.bn-subpage:focus,
+.bn-subpage:focus-visible { outline: none; }
+.bn-subpage:focus-visible { background: color-mix(in srgb, var(--os-brand) 8%, transparent); }
 /* Configured sub-page = Notion-style inline underlined link (not a card). */
 .bn-subpage--configured {
   cursor: pointer;
