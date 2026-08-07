@@ -127,6 +127,19 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-07: **Doc subpages Pages panel + editor leftovers.** Left Pages
+  tree on /docs/[id] (new doc-pages-panel.tsx off the EXISTING Doc.parentId
+  self-relation, no migration; flat GET /api/docs assembled client-side,
+  cycle-guarded), breadcrumb ancestor chain (root / … / parent), Add page
+  (panel row, head ghost when collapsed, per-row hover "+"), row "…" =
+  shared NoteActionMenu; panel hidden in ?peek= splits, open state in
+  localStorage. Plus the five Wave 3 leftovers: bottom word-count pill
+  (words/chars/read-time popover, dark bg fixed), empty-doc hint chips
+  (backed: Ask panel + Add subpage), font cards System/Serif/Mono with
+  Aa/Ss/00 glyphs + visible rest border + brand #0073EA active (was
+  #2563eb fallback), Add icon/cover/comment hover flipped to quiet gray
+  ghost. Browser-verified light+dark, split view, cover overlap. Deferred:
+  drag-reorder of pages (tree-only PUT fast path exists, no UI yet).
 - 2026-08-07: **Wave C shipped (planning depth)** — 4 Mobbin audits → 4 builds:
   **Workload** acce916: shared WorkloadGrid (people × day capacity cells,
   tasks/hours modes off Item.metadata.timeEstimate, overload red + amber

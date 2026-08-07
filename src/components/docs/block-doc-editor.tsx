@@ -13,7 +13,7 @@
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -22,6 +22,7 @@ import {
   ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
   MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
   ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight, Paperclip,
+  PanelLeft, FilePlus, ChevronUp,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
@@ -34,6 +35,8 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
 import { DocShareModal } from "./doc-share-modal";
+import { DocPagesPanel, useDocTree, createChildPage } from "./doc-pages-panel";
+import { MenuList } from "@/components/ui/menu";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker — keeps the doc page light + fast.
@@ -171,6 +174,28 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [myRole, setMyRole] = useState<"edit" | "view">("edit");
   const [shareOpen, setShareOpen] = useState(false);
   const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Left Pages panel (ClickUp parity) — subpage tree fed by the flat
+  // GET /api/docs response. Pure chrome: it never touches the persist()
+  // save path, and peek panes (null) skip the fetch entirely.
+  const tree = useDocTree(pane === "primary" ? docId : null);
+  const [pagesOpen, setPagesOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("workwrk:doc-pages-open") !== "0"; } catch { return true; }
+  });
+  const togglePages = useCallback(() => {
+    setPagesOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem("workwrk:doc-pages-open", next ? "1" : "0"); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+  // Ref on the content column (right of the Pages panel) so the bottom
+  // word-count pill can pin itself to the column's left edge.
+  const contentColRef = useRef<HTMLDivElement | null>(null);
+  // In a ?peek= split the primary column is already half-width — the fixed
+  // 240px Pages panel would crush the editor, so it (and its toggle) hide
+  // until the split closes. The ghost Add page button stays available.
+  const inSplit = !!searchParams.get("peek");
+  const showPagesPanel = pane === "primary" && pagesOpen && !inSplit;
 
   // Load current user for the comment author identity.
   useEffect(() => {
@@ -554,6 +579,15 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     navigator.clipboard.writeText(url).then(() => toast("Link copied"));
   }
 
+  // Create a child page under this doc and jump into it. Chrome-only: the
+  // canvas flushes any pending debounced save on unmount and persist() uses
+  // keepalive, so navigating away mid-edit is already safe.
+  async function addSubpage() {
+    const id = await createChildPage(docId);
+    if (id) router.push(`/docs/${id}`);
+    else toast("Couldn't create page");
+  }
+
   // Copy the whole page as Markdown — reuses the export endpoint so the
   // clipboard content matches an exported file exactly.
   async function copyContents() {
@@ -658,10 +692,52 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             panes keep it minimal — DocSplitView provides Close + Swap. */}
         {pane !== "peek" && (
           <div className="flex min-w-0 items-center gap-1.5">
+            {!inSplit && (
+              <button
+                type="button"
+                className={`bdoc__iact ${pagesOpen ? "is-on" : ""}`}
+                onClick={togglePages}
+                title={pagesOpen ? "Hide pages" : "Show pages"}
+                aria-pressed={pagesOpen}
+                aria-label="Pages"
+              >
+                <PanelLeft />
+              </button>
+            )}
+            {!showPagesPanel && (
+              <button
+                type="button"
+                onClick={() => void addSubpage()}
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
+              >
+                <FilePlus className="h-3.5 w-3.5" /> Add page
+              </button>
+            )}
             <Link href="/docs" className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
               Docs
             </Link>
             <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
+            {/* Ancestor chain — root … direct parent. Long chains collapse to
+                "first / … / parent" so the breadcrumb never overflows. */}
+            {(tree.ancestors.length > 2
+              ? [tree.ancestors[0], null, tree.ancestors[tree.ancestors.length - 1]]
+              : tree.ancestors
+            ).map((a, i) => a === null ? (
+              <Fragment key={`bc-gap-${i}`}>
+                <span className="text-[12.5px] text-[var(--os-ink-3)]" aria-hidden>…</span>
+                <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
+              </Fragment>
+            ) : (
+              <Fragment key={a.id}>
+                <Link
+                  href={`/docs/${a.id}`}
+                  className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] truncate max-w-[140px]"
+                >
+                  {a.title || "Untitled"}
+                </Link>
+                <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
+              </Fragment>
+            ))}
             <span className="inline-flex h-[15px] w-[15px] shrink-0 items-center justify-center [&_svg]:h-[15px] [&_svg]:w-[15px]">
               {meta.icon ? renderNoteIcon(meta.icon) : <FileText className="text-[var(--os-ink-3)]" />}
             </span>
@@ -858,6 +934,26 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         </div>
       </header>
 
+      {/* Pages panel + content column. Additive layout only — everything
+          inside the right column (cover / conflict banner / page) is
+          untouched, as is the save machinery it renders. */}
+      <div className="flex items-start">
+      {showPagesPanel && tree.rootId && (
+        <DocPagesPanel
+          docId={docId}
+          rootId={tree.rootId}
+          rowsById={tree.rowsById}
+          childrenOf={tree.childrenOf}
+          ancestors={tree.ancestors}
+          refresh={() => void tree.refresh()}
+          currentTitle={title}
+          currentEmoji={meta.icon ?? null}
+          onNavigate={(id) => router.push(`/docs/${id}`)}
+          onCollapse={togglePages}
+        />
+      )}
+      <div className="flex-1 min-w-0" ref={contentColRef}>
+
       {/* Cover */}
       {hasCover && (
         <div className="bdoc__cover" style={coverStyle}>
@@ -982,8 +1078,40 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           />
         )}
 
+        {/* Empty-doc hint row (ClickUp parity) — shown until the first real
+            edit; both chips are backed (Ask panel / child-page create). It
+            disappears automatically because `blocks` mirrors the canvas. */}
+        {pane === "primary" && !readingMode && !meta.locked && myRole !== "view" && legacy === null && blocks !== null &&
+          (blocks.length === 0 ||
+            (blocks.length === 1 && blocks[0].kind === "paragraph" && !(blocks[0] as { text: string }).text.trim())) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-zinc-400">
+            <span>{"Write, or type '/' for commands"}</span>
+            <button
+              type="button"
+              onClick={() => setPanel({ kind: "ask" })}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Help me write
+            </button>
+            <button
+              type="button"
+              onClick={() => void addSubpage()}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
+            >
+              <FilePlus className="h-3.5 w-3.5" /> Add subpage
+            </button>
+          </div>
+        )}
+
         <BacklinksPanel kind="doc" id={docId} />
       </div>
+      </div>
+      </div>
+
+      {/* Bottom word-count pill — fixed at the content column's left edge. */}
+      {pane === "primary" && blocks && blocks.length > 0 && (
+        <WordCountPill blocks={blocks} containerRef={contentColRef} recomputeKey={showPagesPanel} />
+      )}
 
       {/* Outline rail only when no slide-over panel is open and not in
           reading mode — keeps the right edge calm. */}
@@ -1249,6 +1377,92 @@ function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
   );
 }
 
+// ───────── Bottom word-count pill (ClickUp parity) ─────────
+//
+// A fixed rounded pill at the bottom-left of the content column showing the
+// live word count; clicking it opens a small stats popover (words /
+// characters / read time). Pure chrome — reads the `blocks` mirror only.
+function WordCountPill({ blocks, containerRef, recomputeKey }: {
+  blocks: Block[];
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  recomputeKey: boolean;
+}) {
+  const [left, setLeft] = useState<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const stats = useMemo(() => {
+    let words = 0;
+    let chars = 0;
+    for (const b of blocks) {
+      if (!("text" in b)) continue;
+      const plain = (b as { text: string }).text.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ");
+      words += plain.split(/\s+/).filter(Boolean).length;
+      chars += plain.replace(/\s+/g, " ").trim().length;
+    }
+    const minutes = Math.max(1, Math.round(words / 220));
+    return { words, chars, minutes };
+  }, [blocks]);
+
+  // Pin to the content column's left edge; recompute on resize and whenever
+  // the Pages panel toggles (the column shifts sideways).
+  useLayoutEffect(() => {
+    const compute = () => {
+      const el = containerRef.current;
+      if (el) setLeft(el.getBoundingClientRect().left + 24);
+    };
+    compute();
+    window.addEventListener("resize", compute);
+    return () => window.removeEventListener("resize", compute);
+  }, [containerRef, recomputeKey]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: MouseEvent) {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (left === null) return null;
+
+  return (
+    <div ref={wrapRef} className="fixed bottom-4 z-30" style={{ left }}>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1.5">
+          <MenuList className="w-[200px]">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+              <span>Words</span><span>{stats.words.toLocaleString()}</span>
+            </div>
+            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+              <span>Characters</span><span>{stats.chars.toLocaleString()}</span>
+            </div>
+            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+              <span>Read time</span><span>{stats.minutes} min</span>
+            </div>
+          </MenuList>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="true"
+        className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white dark:bg-[#1B1F26] px-2.5 text-[11.5px] font-medium text-zinc-500 shadow-sm hover:text-zinc-700"
+      >
+        {stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}
+        <ChevronUp className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+    </div>
+  );
+}
+
 // A plain action row in the page menu: icon · label · optional shortcut hint.
 function PamRow({ icon, label, kbd, onClick, danger, disabled }: {
   icon: ReactNode; label: string; kbd?: string; onClick: () => void; danger?: boolean; disabled?: boolean;
@@ -1334,10 +1548,12 @@ function PageActionsMenu({
   });
 
   const font: DocFont = meta.font ?? "default";
-  const FONTS: { key: DocFont; label: string; cls: string }[] = [
-    { key: "default", label: "Default", cls: "is-default" },
-    { key: "serif", label: "Serif", cls: "is-serif" },
-    { key: "mono", label: "Mono", cls: "is-mono" },
+  // Keys stay "default"/"serif"/"mono" — persisted meta compat. Labels +
+  // per-card glyphs match ClickUp (System Aa / Serif Ss / Mono 00).
+  const FONTS: { key: DocFont; label: string; glyph: string; cls: string }[] = [
+    { key: "default", label: "System", glyph: "Aa", cls: "is-default" },
+    { key: "serif", label: "Serif", glyph: "Ss", cls: "is-serif" },
+    { key: "mono", label: "Mono", glyph: "00", cls: "is-mono" },
   ];
 
   // Wrap an action so selecting it also dismisses the menu (Notion behaviour
@@ -1369,7 +1585,7 @@ function PageActionsMenu({
                 className={`bdoc-pam__font ${f.cls} ${font === f.key ? "is-active" : ""}`}
                 onClick={() => onSetMeta({ font: f.key })}
               >
-                <span className="bdoc-pam__font-ag">Ag</span>
+                <span className="bdoc-pam__font-ag">{f.glyph}</span>
                 <span className="bdoc-pam__font-lbl">{f.label}</span>
               </button>
             ))}

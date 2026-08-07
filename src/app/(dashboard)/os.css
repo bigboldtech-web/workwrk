@@ -32620,7 +32620,8 @@ table.os-tbl {
 .bdoc__page:hover .bdoc__add-emoji,
 .bdoc__page:hover .bdoc__add-cover,
 .bdoc__page:hover .bdoc__add-comment { opacity: 1; pointer-events: auto; }
-.bdoc__add-emoji:hover, .bdoc__add-cover:hover, .bdoc__add-comment:hover { color: var(--os-brand); border-color: var(--os-brand); background: var(--os-brand-soft); }
+/* Quiet gray ghost hover (ClickUp look) — not the loud brand-blue dashed. */
+.bdoc__add-emoji:hover, .bdoc__add-cover:hover, .bdoc__add-comment:hover { color: var(--os-ink-2); background: var(--os-surface-1); border-color: transparent; }
 .bdoc__add-emoji svg, .bdoc__add-cover svg, .bdoc__add-comment svg { width: 13px; height: 13px; }
 
 /* Emoji picker popover */
@@ -33332,15 +33333,15 @@ table.os-tbl {
 .bdoc-pam__font {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 8px 4px; border-radius: 8px; cursor: pointer;
-  background: transparent; border: 1px solid transparent; color: var(--os-ink-2);
+  background: transparent; border: 1px solid var(--os-line); color: var(--os-ink-2);
 }
 .bdoc-pam__font:hover { background: var(--os-surface-1); }
-.bdoc-pam__font.is-active { border-color: var(--os-accent, #2563eb); color: var(--os-ink); }
+.bdoc-pam__font.is-active { border-color: var(--os-brand); background: var(--os-brand-soft); color: var(--os-ink); }
 .bdoc-pam__font-ag { font-size: 22px; line-height: 1; }
 .bdoc-pam__font.is-default .bdoc-pam__font-ag { font-family: var(--os-font, inherit); }
 .bdoc-pam__font.is-serif .bdoc-pam__font-ag { font-family: Georgia, "Times New Roman", serif; }
 .bdoc-pam__font.is-mono .bdoc-pam__font-ag { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-.bdoc-pam__font.is-active .bdoc-pam__font-ag { color: var(--os-accent, #2563eb); }
+.bdoc-pam__font.is-active .bdoc-pam__font-ag { color: var(--os-brand); }
 .bdoc-pam__font-lbl { font-size: 11px; font-weight: 600; }
 /* Footer */
 .bdoc-pam__foot {
