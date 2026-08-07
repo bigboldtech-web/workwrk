@@ -127,6 +127,28 @@ status boxes as surfaces land.
 ---
 
 ## Status log
+- 2026-08-07: **Wave C shipped (planning depth)** — 4 Mobbin audits → 4 builds:
+  **Workload** acce916: shared WorkloadGrid (people × day capacity cells,
+  tasks/hours modes off Item.metadata.timeEstimate, overload red + amber
+  unestimated dots, per-person expand, capacity gear, weekend zero-cap) wired
+  into the board WORKLOAD view (View.config wl* keys) + manager-scoped
+  /team/workload (Teams app > Performance). **Timeline** 481bc73: Gantt
+  backlog panel (Unscheduled|Overdue tabs, drag-out scheduling via the
+  calendar PATCH contract, Today quick-action), 4-week day-level zoom step,
+  persisted ganttWeeks/backlogOpen, live drag date tooltip, off-window jump
+  chevrons. **Team** 9b09ad8: /api/team/members-work (read-gated, admin=org /
+  non-admin=report tree) + Team pulse member cards on /team (status bar via
+  shared StatusDistribution, Working-on rows, backed-only "..." actions).
+  **Sprints** cce7baa: migration-free — Sprint = Board with settings.sprint,
+  auto-seeded Sprint Points NUMBER field, auto-name "Sprint N (M/D - M/D)",
+  header strip (dates + countdown pill + Points done/total + bar), Create
+  Sprint modal from Space "+"/global "+", auto-renumber + honest Burndown
+  toast. Verified live both themes (sprint create → points math 5/8 live;
+  workload grid task/hours modes; backlog overdue chips). Also purged violet
+  chrome b97e419 (Roles tile/menu icon amber, IN_PROGRESS fallback blue,
+  Apps tint orange). Remaining: sprint velocity/burndown analytics, board
+  workload custom-status colors on board-scoped sources, Everything-cap
+  note for /team/workload.
 - 2026-08-06 (later): **Coverage matrix + Waves A & B shipped.**
   Coverage matrix 24fc2ff (docs/plans/coverage-matrix.md, 135 surfaces from an
   8-agent ClickUp/Monday inventory: 23 parity / 66 partial / 32 missing / 14
