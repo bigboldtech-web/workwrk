@@ -35,6 +35,7 @@ import Link from "next/link";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { StatusChip } from "@/components/ui/chip";
 import { TeamStatTile, TeamAvatar, pctColor } from "@/components/team/ui";
+import { TAUPE } from "@/components/ui/accent";
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-emerald-600";
@@ -891,7 +892,7 @@ export default function UserProfilePage() {
       {/* Performance summary — shared stat tiles */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <TeamStatTile icon={Target} label="Avg KPI Score" value={perf.avgKPI ?? "N/A"} accent={perf.avgKPI ? pctColor(perf.avgKPI) : "#71717A"} />
-        <TeamStatTile icon={Target} label="Active KRAs" value={perf.activeKRAs ?? 0} accent="#6366F1" />
+        <TeamStatTile icon={Target} label="Active KRAs" value={perf.activeKRAs ?? 0} accent={TAUPE.soft} />
         <TeamStatTile icon={Smile} label="Avg Mood" value={perf.avgMood ?? "N/A"} accent="#16a34a" />
         <TeamStatTile icon={Star} label="Review Score" value={perf.latestReviewScore ?? "N/A"} accent={perf.latestReviewScore ? pctColor(perf.latestReviewScore) : "#71717A"} />
       </div>
@@ -901,11 +902,11 @@ export default function UserProfilePage() {
       <Tabs value={tab} onValueChange={setTab}>
         <ViewTabStrip className="overflow-x-auto">
           {([
-            { k: "kras", label: "KRAs", Icon: Target, tile: "#a78b6c" },
+            { k: "kras", label: "KRAs", Icon: Target, tile: TAUPE.soft },
             { k: "monthly-kpis", label: "Monthly KPIs", Icon: TrendingUp, tile: "#16a34a" },
             { k: "calendar", label: "Work Calendar", Icon: CalendarClock, tile: "#f59e0b" },
             { k: "kpis", label: "KPI History", Icon: Clock, tile: "#0073EA" },
-            { k: "skills", label: "Skills", Icon: Zap, tile: "#6366F1" },
+            { k: "skills", label: "Skills", Icon: Zap, tile: "#14B8A6" },
             { k: "reviews", label: "Reviews", Icon: CheckSquare, tile: "#dc2626" },
             { k: "kudos", label: "Kudos", Icon: Heart, tile: "#e11d48" },
             { k: "checkins", label: "Check-ins", Icon: Smile, tile: "#16a34a" },
@@ -1059,7 +1060,7 @@ export default function UserProfilePage() {
                     <p className="text-sm mt-1 italic text-[#C0C0D0]">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[#0073EA]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#0073EA]/30 text-[#0073EA]">{k.companyValue}</Badge>
                       )}
                       <span className="text-[10px] text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>

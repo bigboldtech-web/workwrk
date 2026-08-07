@@ -11,10 +11,10 @@ import {
 } from "lucide-react";
 
 const VIEW_TABS: { key: string; label: string; Icon: LucideIcon; tile: string }[] = [
-  { key: "overview", label: "Overview", Icon: LayoutDashboard, tile: "#6366F1" },
+  { key: "overview", label: "Overview", Icon: LayoutDashboard, tile: "#0073EA" },
   { key: "list", label: "List", Icon: ListIcon, tile: "#6B7280" },
-  { key: "board", label: "Board", Icon: Kanban, tile: "#4F6BED" },
-  { key: "team", label: "Team", Icon: UsersIcon, tile: "#A855F7" },
+  { key: "board", label: "Board", Icon: Kanban, tile: "#0073EA" },
+  { key: "team", label: "Team", Icon: UsersIcon, tile: "#00C875" },
   { key: "calendar", label: "Calendar", Icon: CalendarIcon, tile: "#F59E0B" },
   { key: "gantt", label: "Gantt", Icon: GanttChart, tile: "#EF4444" },
 ];

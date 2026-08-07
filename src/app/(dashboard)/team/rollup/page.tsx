@@ -77,7 +77,7 @@ export default async function TeamRollupPage() {
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <TeamStatTile icon={GitBranchPlus} label="Sub-teams" value={data.totals.subTeamCount} accent="#6366F1" />
+              <TeamStatTile icon={GitBranchPlus} label="Sub-teams" value={data.totals.subTeamCount} accent="#F59E0B" />
               <TeamStatTile icon={UsersIcon} label="People in tree" value={data.totals.aggregateReportCount} accent="#0073EA"
                 sub={`${data.totals.directIcCount} direct · ${data.totals.aggregateReportCount - data.totals.directIcCount} via sub-teams`} />
               <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
@@ -133,7 +133,7 @@ function SubTeamCard({ t }: { t: SubTeam }) {
         </div>
         <OwnReviewBadge own={t.manager.ownReview} />
         {t.manager.via === "dotted" ? (
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">
+          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">
             <GitBranchPlus className="w-3 h-3" /> Dotted
           </span>
         ) : null}
@@ -178,7 +178,7 @@ function SubMetric({
 function OwnReviewBadge({ own }: { own: SubTeam["manager"]["ownReview"] }) {
   if (!own.status) return null;
   if (own.status === "DRAFT") {
-    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Own: Draft</span>;
+    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Own: Draft</span>;
   }
   if (own.status === "SUBMITTED") {
     return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700">Own: Submitted</span>;
@@ -205,7 +205,7 @@ function DirectIcRow({ ic }: { ic: DirectIcSummary }) {
         <div className="text-[11px] text-zinc-500 truncate">{ic.email}</div>
       </div>
       {ic.via === "dotted" ? (
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Dotted</span>
+        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Dotted</span>
       ) : null}
       <ReviewChip review={ic.weeklyReview} />
       <span className={`text-xs ${toneClass(tone(ic.kpiCompliancePct))}`}>KPI {ic.kpiCompliancePct}%</span>
@@ -222,7 +222,7 @@ function ReviewChip({ review }: { review: DirectIcSummary["weeklyReview"] }) {
     return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-700"><AlertCircle className="w-3 h-3" />No review</span>;
   }
   if (review.status === "DRAFT") {
-    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">Draft</span>;
+    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Draft</span>;
   }
   if (review.status === "SUBMITTED") {
     return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700"><Clock className="w-3 h-3" />Submitted</span>;

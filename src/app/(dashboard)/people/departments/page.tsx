@@ -37,7 +37,7 @@ type ApiDept = {
   subDepartments?: ApiDept[];
 };
 
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
+const AV_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
 function avColor(id: string) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) {
   const fa = (f ?? "")[0] ?? "";
@@ -199,7 +199,7 @@ export default function DepartmentsPage() {
         {/* KPIs */}
         <div className="dept__kpis">
           <KpiTile accent="var(--os-c-blue)"   Icon={Building2} label="Departments"  value={`${stats.total}`}        sub="org units" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Users}     label="Headcount"    value={`${stats.totalHeadcount}`} sub="across all depts" />
+          <KpiTile accent="var(--os-brand)" Icon={Users}     label="Headcount"    value={`${stats.totalHeadcount}`} sub="across all depts" />
           <KpiTile accent="var(--os-c-green)"  Icon={Network}   label="With head"    value={`${stats.withHead}`}     sub="leadership in place" />
           <KpiTile accent={stats.vacant > 0 ? "var(--os-c-orange)" : "var(--os-c-green)"}
                    Icon={UserX} label="Vacant head" value={`${stats.vacant}`} sub={stats.vacant > 0 ? "need a leader" : "all departments led"} />
@@ -240,7 +240,7 @@ export default function DepartmentsPage() {
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Building2}
-            iconGradient={GRAD.indigoBlue}
+            iconGradient="#0073EA"
             title="No departments yet"
             subtitle="Departments organize your people and route policies, payroll, and announcements. Create your first one to get started."
             cta="New department"
@@ -289,7 +289,7 @@ function TreeNode({
   const hasChildren = node.children.length > 0;
   const headcount = node._count?.members ?? 0;
   const totalCount = totalCounts.get(node.id) ?? headcount;
-  const color = node.color ?? C.indigo;
+  const color = node.color ?? C.blue;
 
   return (
     <div className="dept__node">
@@ -372,7 +372,7 @@ function TreeNode({
 
 function DeptCard({ dept }: { dept: ApiDept & { children: ApiDept[] } }) {
   const headcount = dept._count?.members ?? 0;
-  const color = dept.color ?? C.indigo;
+  const color = dept.color ?? C.blue;
   const subCount = dept.children.length;
   return (
     <article className="dept__card" style={{ ["--card-c" as unknown as string]: color }}>
@@ -421,7 +421,6 @@ function DeptCard({ dept }: { dept: ApiDept & { children: ApiDept[] } }) {
 function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Building2; label: string; value: string; sub: string }) {
   return (
     <div className="dept__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="dept__kpi-accent" aria-hidden="true" />
       <div className="dept__kpi-row">
         <div className="dept__kpi-icon"><Icon /></div>
         <div className="dept__kpi-label">{label}</div>

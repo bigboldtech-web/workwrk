@@ -19,13 +19,12 @@ export function TeamStatTile({ icon: Icon, label, value, sub, accent = "#0073EA"
   icon: LucideIcon; label: string; value: string | number; sub?: string; accent?: string; href?: string;
 }) {
   const inner = (
-    <div className="relative h-full rounded-xl border border-zinc-200 bg-white p-4 overflow-hidden hover:border-zinc-300 transition-colors">
-      <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: accent }} aria-hidden />
-      <div className="flex items-center gap-2 mb-3 mt-1">
+    <div className="h-full rounded-xl border border-zinc-200 bg-white p-4 hover:border-zinc-300 transition-colors">
+      <div className="flex items-center gap-2 mb-3">
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: `${accent}1a` }}>
           <Icon className="h-4 w-4" style={{ color: accent }} />
         </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{label}</span>
       </div>
       <div className="text-2xl font-semibold text-zinc-900 tabular-nums">{value}</div>
       {sub ? <div className="text-[12px] text-zinc-400 mt-0.5">{sub}</div> : null}

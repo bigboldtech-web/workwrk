@@ -5,23 +5,21 @@
  *  GET /api/users?limit=500
  *
  * Layout:
- *   OsTitleBar with org nav links in actions.
- *   4-tile KPI strip: Total · Departments · On leave · New (last 30d).
- *   Toolbar: search + status tabs (All / On leave / New) + sort dropdown.
+ *   Breadcrumb header (Teams / Directory) with icon tile + org nav links.
+ *   TeamStatTile strip: Headcount · Departments · On leave · New (90d).
+ *   Toolbar: search + status tabs (All / Active / On leave / New) + sort dropdown.
  *   Department chip row (auto-derived).
  *   Grouped sections by department with colored dot + count + line.
- *   Photo cards: gradient avatar tile + name/role + dept/office chips + manager line + tenure pill.
+ *   Person cards: TeamAvatar + name/role + dept/office chips + manager line + tenure.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Users, Search, Mail, Briefcase, MapPin, UserPlus, ChevronDown,
-  Building2, Sparkles, Hash, Network, GraduationCap, ArrowLeft,
+  Users, Search, Briefcase, MapPin,
+  Building2, Sparkles, Network, ArrowLeft,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { TeamStatTile, TeamAvatar } from "@/components/team/ui";
 
@@ -41,23 +39,11 @@ type ApiUser = {
   _count?: { directReports?: number };
 };
 
-const AV_GRADIENTS = [
-  GRAD.bluePurple, GRAD.greenTeal, GRAD.pinkPurple, GRAD.indigoBlue,
-  GRAD.orangePink, GRAD.purpleIndigo, GRAD.tealGreen, GRAD.yellowOrange,
-];
-function avGradient(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AV_GRADIENTS[h % AV_GRADIENTS.length];
-}
-function initials(f?: string | null, l?: string | null): string {
-  return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
-}
 function fullName(u: ApiUser): string {
   return [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "Unknown";
 }
 
-const CAT_COLORS = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+const CAT_COLORS = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
 function deptColor(seed: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
@@ -73,14 +59,6 @@ function tenure(join?: string | null): string {
   const y = Math.floor(days / 365); const m = Math.floor((days % 365) / 30);
   return m === 0 ? `${y}y` : `${y}y ${m}mo`;
 }
-function tenureTone(join?: string | null): "new" | "regular" | "veteran" {
-  if (!join) return "regular";
-  const days = (Date.now() - new Date(join).getTime()) / MS_DAY;
-  if (days < 90) return "new";
-  if (days > 365 * 3) return "veteran";
-  return "regular";
-}
-
 type Filter = "all" | "active" | "on-leave" | "new";
 type SortKey = "name" | "recent" | "tenure" | "reports";
 
@@ -192,7 +170,7 @@ export default function PeopleDirectoryPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="Headcount" value={stats.total} accent="#0073EA" sub="active teammates" />
-          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#6366F1" sub="org units" />
+          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#71717A" sub="org units" />
           <TeamStatTile icon={ArrowLeft} label="On leave" value={stats.onLeave} accent="#f59e0b" sub={stats.onLeave > 0 ? "back when noted" : "everyone here"} />
           <TeamStatTile icon={Sparkles} label="New (90d)" value={stats.newHires} accent="#16a34a" sub="recent joiners" />
         </div>

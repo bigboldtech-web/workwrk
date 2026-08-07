@@ -88,7 +88,7 @@ export function NewKraDialog({
         className="relative w-full max-w-md rounded-xl bg-white shadow-xl border border-zinc-200"
       >
         <header className="flex items-center gap-2.5 px-4 py-3 border-b border-zinc-100">
-          <span className="grid place-items-center w-7 h-7 rounded-lg bg-purple-50 text-purple-600">
+          <span className="grid place-items-center w-7 h-7 rounded-lg bg-blue-50 text-[#0073EA]">
             <Target className="w-4 h-4" />
           </span>
           <h2 className="text-[14px] font-semibold text-zinc-900 flex-1">New KRA</h2>

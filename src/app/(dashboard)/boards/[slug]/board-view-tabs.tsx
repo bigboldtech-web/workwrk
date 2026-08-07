@@ -42,19 +42,19 @@ const VIEW_ICONS: Record<ViewType, LucideIcon> = {
 // tab style). List (TABLE non-monday) is neutral gray; the Monday Table is green.
 const VIEW_HEX: Record<ViewType, string> = {
   TABLE: "#6B7280",
-  KANBAN: "#4F6BED",
+  KANBAN: "#0073EA",
   CALENDAR: "#F59E0B",
   GANTT: "#EF4444",
   TIMELINE: "#3B82F6",
   CHART: "#F43F5E",
   DOC: "#3B82F6",
-  FORM: "#8B5CF6",
+  FORM: "#7F5347",
   DASHBOARD: "#EC4899",
   MAP: "#EA580C",
   WORKLOAD: "#14B8A6",
   WHITEBOARD: "#EAB308",
   FILE_GALLERY: "#71717A",
-  CARDS: "#6366F1",
+  CARDS: "#0891B2",
   PIVOT: "#059669",
   HIERARCHY: "#0D9488",
   ACTIVITY: "#0EA5E9",
@@ -134,7 +134,7 @@ export function BoardViewTabs({
         const isMondayTable = v.type === "TABLE" && config?.grid === "monday";
         const isTeam = v.type === "WORKLOAD" && config?.variant === "team";
         const VIcon = isMondayTable ? Table2 : isTeam ? UsersIcon : (VIEW_ICONS[v.type] ?? ListIcon);
-        const tileColor = isMondayTable ? "#16A34A" : isTeam ? "#A855F7" : (VIEW_HEX[v.type] ?? "#6B7280");
+        const tileColor = isMondayTable ? "#16A34A" : isTeam ? "#00C875" : (VIEW_HEX[v.type] ?? "#6B7280");
         const active = v.id === activeViewId;
         const isDefault = v.id === defaultViewId;
         const base = basePath ?? `/boards/${boardSlug}`;

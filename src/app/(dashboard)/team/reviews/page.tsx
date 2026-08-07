@@ -50,7 +50,7 @@ export default async function TeamReviewsPage() {
           <span className="text-xs text-zinc-400 hidden sm:inline">weekly reviews from your reports — approve or request changes</span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1100px]">
+      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
         <TeamReviewsClient pending={pending} acted={acted} />
       </div>
     </div>

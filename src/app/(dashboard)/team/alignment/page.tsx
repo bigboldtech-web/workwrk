@@ -21,7 +21,8 @@ import {
   Target, ChartLine, BookOpenCheck, Users as UsersIcon, ClipboardCheck, BarChart3,
 } from "lucide-react";
 import { TeamAlignmentBoard } from "./team-alignment-board";
-import { TeamStatTile } from "@/components/team/ui";
+import { TeamStatTile, pctColor } from "@/components/team/ui";
+import { TAUPE } from "@/components/ui/accent";
 
 export const dynamic = "force-dynamic";
 
@@ -78,9 +79,9 @@ export default async function TeamAlignmentPage() {
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <TeamStatTile icon={UsersIcon} label="Reports" value={data.totals.reportCount} accent="#0073EA" sub="direct + dotted" />
-              <TeamStatTile icon={Target} label="Active KRAs" value={data.totals.activeKras} accent="#6366F1" sub="across your team" />
-              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={complianceAccent(data.totals.avgKpiCompliancePct)} />
-              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} accent={complianceAccent(data.totals.avgSopReadRatePct)} />
+              <TeamStatTile icon={Target} label="Active KRAs" value={data.totals.activeKras} accent={TAUPE.soft} sub="across your team" />
+              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
+              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
             </div>
 
             <TeamAlignmentBoard members={data.members} />
@@ -89,10 +90,4 @@ export default async function TeamAlignmentPage() {
       </div>
     </div>
   );
-}
-
-function complianceAccent(pct: number): string {
-  if (pct >= 80) return "#16a34a";
-  if (pct >= 50) return "#f59e0b";
-  return "#dc2626";
 }

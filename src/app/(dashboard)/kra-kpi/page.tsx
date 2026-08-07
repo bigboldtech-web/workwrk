@@ -49,7 +49,7 @@ type ApiKra = {
 type RollupBucket = { total: number; done: number };
 type RollupData = { kra: Record<string, RollupBucket>; kpi: Record<string, RollupBucket> };
 
-const CATEGORY_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+const CATEGORY_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
 function categoryColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
@@ -158,7 +158,7 @@ export default function KraKpiPage() {
 
       <div className="kra">
         <div className="kra__kpis">
-          <KpiTile accent="var(--os-c-purple)" Icon={Target}    label="KRAs"          value={`${stats.total}`}            sub="key result areas" />
+          <KpiTile accent="var(--os-brand)" Icon={Target}    label="KRAs"          value={`${stats.total}`}            sub="key result areas" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Activity}  label="KPIs"          value={`${stats.totalKpis}`}        sub="metric definitions" />
           <KpiTile accent="var(--os-c-green)"  Icon={Users}     label="Assignments"   value={`${stats.totalAssignments}`} sub="people on KRAs" />
           <KpiTile accent="var(--os-c-orange)" Icon={Briefcase} label="Role-mapped"   value={`${stats.withRole}`}         sub={`${stats.total - stats.withRole} role-agnostic`} />
@@ -193,7 +193,7 @@ export default function KraKpiPage() {
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Target}
-            iconGradient={GRAD.purpleIndigo}
+            iconGradient="#0073EA"
             title="No KRAs defined yet"
             subtitle="KRAs (Key Result Areas) define outcomes you measure with KPIs. Assign them to roles or individuals."
             chips={["Sales", "Engineering", "Operations", "Marketing"]}
@@ -299,7 +299,6 @@ function KraCard({ kra: k, rollup }: { kra: ApiKra; rollup: RollupData | null })
 function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Target; label: string; value: string; sub: string }) {
   return (
     <div className="kra__kpi-stat" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="kra__kpi-stat-accent" aria-hidden="true" />
       <div className="kra__kpi-stat-row">
         <div className="kra__kpi-stat-icon"><Icon /></div>
         <div className="kra__kpi-stat-label">{label}</div>

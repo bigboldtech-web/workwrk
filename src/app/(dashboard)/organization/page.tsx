@@ -1,6 +1,6 @@
 "use client";
 
-/* Organization — bespoke settings hub + compact org chart preview.
+/* Organization — org chart page.
  *
  *  GET /api/users?limit=500
  *  GET /api/departments
@@ -8,23 +8,18 @@
  *  GET /api/roles
  *
  * Layout:
- *   OsTitleBar with People link in actions.
- *   Hero: gradient cover + org identity card (name, plan tag, member count).
- *   4-tile KPI strip: People · Departments · Offices · Roles.
- *   8-card launchpad to org-config sub-areas.
- *   Compact org tree preview (top 3 levels).
+ *   Breadcrumb header (Teams / Org chart) with icon tile + Directory/Settings links.
+ *   TeamStatTile strip: People · Departments · Offices · Roles.
+ *   Collapsible reporting-hierarchy tree (top levels) in a TeamCard.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Building2, Users, MapPin, Briefcase, Palette, Globe, Shield, FileText,
-  Sparkles, Network, ChevronDown, ChevronRight, ArrowRight, CreditCard,
-  Settings as SettingsIcon, GraduationCap,
+  Building2, Users, MapPin, Briefcase,
+  ChevronDown, ChevronRight, ArrowRight,
+  Settings as SettingsIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { TeamStatTile, TeamCard, TeamAvatar } from "@/components/team/ui";
 
@@ -50,14 +45,6 @@ type ApiOrg = {
   industry?: string | null;
   size?: string | null;
 };
-
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(f?: string | null, l?: string | null) {
-  const fa = (f ?? "")[0] ?? "";
-  const la = (l ?? "")[0] ?? "";
-  return ((fa + la) || "?").toUpperCase();
-}
 
 type TreeNode = { user: ApiUser; reports: TreeNode[] };
 function buildTree(users: ApiUser[]): TreeNode[] {
@@ -149,10 +136,6 @@ export default function OrganizationPage() {
   }, [users, depts, offices, roles, tree]);
 
   const orgName = org?.name || "Your organization";
-  const heroGrad = org?.primaryColor
-    ? `linear-gradient(135deg, ${org.primaryColor}, color-mix(in srgb, ${org.primaryColor} 60%, var(--os-c-purple)))`
-    : GRAD.purpleIndigo;
-  const orgInitials = orgName.split(/\s+/).slice(0, 2).map((p) => p[0] ?? "").join("").toUpperCase() || "OR";
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -163,8 +146,8 @@ export default function OrganizationPage() {
           <span>Org chart</span>
         </div>
         <div className="flex items-center gap-3">
-          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#6366F1]/10 shrink-0">
-            <Building2 className="h-5 w-5 text-[#6366F1]" />
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
+            <Building2 className="h-5 w-5 text-[#0073EA]" />
           </span>
           <h1 className="text-base font-semibold text-zinc-900">Org chart</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">{orgName} — reporting hierarchy</span>
@@ -178,10 +161,10 @@ export default function OrganizationPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1100px]">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="People" value={stats.people} accent="#0073EA" sub={`${stats.withManager} reporting`} />
-          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#6366F1" sub="org units" />
+          <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#71717A" sub="org units" />
           <TeamStatTile icon={MapPin} label="Offices" value={stats.offices} accent="#f59e0b" sub={stats.hq ? `HQ: ${stats.hq}` : "no HQ set"} />
           <TeamStatTile icon={Briefcase} label="Roles" value={stats.roles} accent="#16a34a" sub="job titles" />
         </div>

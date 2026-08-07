@@ -6,8 +6,8 @@
  *  POST  /api/roles  { title, level }
  *
  * Layout:
- *   OsTitleBar with back + nav + New role.
- *   4-tile KPI strip: Roles · Headcount · Unfilled · Levels.
+ *   Breadcrumb header (Teams / Roles) with icon tile + nav links + New role.
+ *   TeamStatTile strip: Roles · Headcount · Unfilled · Levels.
  *   Toolbar: search + level filter chips (C-Suite, VP, Director, etc.).
  *   Grouped sections by level: each with header pill + count + role cards.
  *   Cards: title + level chip + dept + headcount badge (orange when 0).
@@ -17,15 +17,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  Briefcase, Plus, Users, Search, ArrowLeft, Building2, UserX,
+  Briefcase, Plus, Users, Search, Building2, UserX,
   Layers, GraduationCap,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
+import { TeamStatTile } from "@/components/team/ui";
 
 type Level = "EMPLOYEE" | "TEAM_LEAD" | "MANAGER" | "DIRECTOR" | "VP" | "C_LEVEL" | "HR" | "COMPANY_ADMIN" | "SUPER_ADMIN";
 
@@ -49,15 +49,15 @@ const LEVEL_SHORT: Record<Level, string> = {
   TEAM_LEAD: "Team lead", EMPLOYEE: "IC", HR: "HR", COMPANY_ADMIN: "Admin", SUPER_ADMIN: "Super",
 };
 const LEVEL_COLORS: Record<Level, string> = {
-  C_LEVEL: C.purple, VP: C.pink, DIRECTOR: C.indigo, MANAGER: C.blue,
-  TEAM_LEAD: C.teal, EMPLOYEE: C.sage, HR: C.orange, COMPANY_ADMIN: C.red, SUPER_ADMIN: C.red,
+  C_LEVEL: C.red, VP: C.pink, DIRECTOR: C.orange, MANAGER: C.blue,
+  TEAM_LEAD: C.teal, EMPLOYEE: C.sage, HR: C.yellow, COMPANY_ADMIN: C.gray, SUPER_ADMIN: C.gray,
 };
 const LEVEL_RANK: Record<Level, number> = {
   C_LEVEL: 7, VP: 6, DIRECTOR: 5, MANAGER: 4, TEAM_LEAD: 3,
   EMPLOYEE: 1, HR: 2, COMPANY_ADMIN: 0, SUPER_ADMIN: 0,
 };
 
-const DEPT_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.indigo, C.purple, C.red];
+const DEPT_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
 function deptColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
@@ -164,38 +164,46 @@ export default function RolesPage() {
   }, [roles]);
 
   return (
-    <>
-      <OsTitleBar
-        title="Roles"
-        Icon={Briefcase}
-        iconGradient={GRAD.purpleIndigo}
-        description={roles === null
-          ? "Loading roles…"
-          : `${stats.total} role${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={4}
-        actions={
-          <div className="rls__head-actions">
-            <button type="button" className="rls__back" onClick={() => history.back()}>
-              <ArrowLeft /> People
-            </button>
-            <Link href="/people/departments" className="rls__nav-link"><Building2 /> Departments</Link>
-            <Link href="/people/skills" className="rls__nav-link"><GraduationCap /> Skills</Link>
-            <button type="button" className="rls__btn-primary" onClick={quickAdd}>
-              <Plus /> New role
-            </button>
-          </div>
-        }
-      />
+    <div className="flex flex-col h-full bg-white">
+      <div className="px-6 pt-4 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <Link href="/team" className="hover:text-zinc-900">Teams</Link>
+          <span className="text-zinc-300">/</span>
+          <span>Roles</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
+            <Briefcase className="h-5 w-5 text-[#0073EA]" />
+          </span>
+          <h1 className="text-base font-semibold text-zinc-900">Roles</h1>
+          <span className="text-xs text-zinc-400 hidden sm:inline">
+            {roles === null
+              ? "loading…"
+              : `${stats.total} role${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
+          </span>
+          <div className="flex-1" />
+          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
+          </Link>
+          <Link href="/people/departments" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <Building2 className="w-3.5 h-3.5 text-zinc-400" /> Departments
+          </Link>
+          <Link href="/people/skills" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+            <GraduationCap className="w-3.5 h-3.5 text-zinc-400" /> Skills
+          </Link>
+          <button type="button" onClick={quickAdd} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]">
+            <Plus className="w-3.5 h-3.5" /> New role
+          </button>
+        </div>
+      </div>
 
-      <div className="rls">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
         {/* KPIs */}
-        <div className="rls__kpis">
-          <KpiTile accent="var(--os-c-purple)" Icon={Briefcase} label="Roles defined" value={`${stats.total}`}        sub="job titles" />
-          <KpiTile accent="var(--os-c-blue)"   Icon={Users}     label="Headcount"     value={`${stats.totalHeadcount}`} sub="filling roles" />
-          <KpiTile accent={stats.unfilled > 0 ? "var(--os-c-orange)" : "var(--os-c-green)"}
-                   Icon={UserX} label="Unfilled" value={`${stats.unfilled}`} sub={stats.unfilled > 0 ? "needs hiring" : "all positions filled"} />
-          <KpiTile accent="var(--os-c-teal)"   Icon={Layers}    label="Levels"        value={`${stats.levelCount}`}   sub="org tiers in use" />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <TeamStatTile icon={Briefcase} label="Roles defined" value={stats.total} accent="#0073EA" sub="job titles" />
+          <TeamStatTile icon={Users} label="Headcount" value={stats.totalHeadcount} accent="#14B8A6" sub="filling roles" />
+          <TeamStatTile icon={UserX} label="Unfilled" value={stats.unfilled} accent={stats.unfilled > 0 ? "#F59E0B" : "#00C875"} sub={stats.unfilled > 0 ? "needs hiring" : "all positions filled"} />
+          <TeamStatTile icon={Layers} label="Levels" value={stats.levelCount} accent="#71717A" sub="org tiers in use" />
         </div>
 
         {/* Toolbar */}
@@ -251,7 +259,7 @@ export default function RolesPage() {
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Briefcase}
-            iconGradient={GRAD.purpleIndigo}
+            iconGradient="#0073EA"
             title="No roles defined yet"
             subtitle="Roles are job titles your org uses — 'Senior Engineer', 'AE', 'Director of Ops'. Each role gets an access level that controls what its holders can see."
             cta="New role"
@@ -285,7 +293,7 @@ export default function RolesPage() {
           ))
         )}
       </div>
-    </>
+    </div>
   );
 }
 
@@ -320,19 +328,5 @@ function RoleCard({ role: r }: { role: ApiRole }) {
         <p className="rls__card-desc">{r.description.length > 140 ? r.description.slice(0, 140) + "…" : r.description}</p>
       )}
     </Link>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Briefcase; label: string; value: string; sub: string }) {
-  return (
-    <div className="rls__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="rls__kpi-accent" aria-hidden="true" />
-      <div className="rls__kpi-row">
-        <div className="rls__kpi-icon"><Icon /></div>
-        <div className="rls__kpi-label">{label}</div>
-      </div>
-      <div className="rls__kpi-value">{value}</div>
-      <div className="rls__kpi-sub">{sub}</div>
-    </div>
   );
 }

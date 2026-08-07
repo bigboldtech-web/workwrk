@@ -46,7 +46,7 @@ export default async function TeamKpiReviewsPage() {
           <span className="text-xs text-zinc-400 hidden sm:inline">sign off on reported KPI scores, or send back for changes</span>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1100px]">
+      <div className="flex-1 overflow-y-auto px-6 py-4 max-w-[1280px]">
         <KpiReviewsClient pending={pending} acted={acted} />
       </div>
     </div>

@@ -32,7 +32,7 @@ type ApiSkill = {
   topHolders: { id: string; firstName: string; lastName: string; rating: number; department?: string | null }[];
 };
 
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
+const AV_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) {
   const fa = (f ?? "")[0] ?? "";
@@ -328,7 +328,7 @@ function SkillDetail({ skill: s }: { skill: ApiSkill }) {
           <div className="skl__bar-track">
             <div
               className="skl__bar-fill"
-              style={{ width: `${mgrPct}%`, background: s.avgManager > 0 ? "var(--os-c-purple)" : "transparent" }}
+              style={{ width: `${mgrPct}%`, background: s.avgManager > 0 ? "var(--os-brand)" : "transparent" }}
             />
           </div>
           <span className="skl__bar-val">{s.avgManager > 0 ? `${s.avgManager.toFixed(1)}` : "—"} <small>/ 5</small></span>
@@ -386,7 +386,6 @@ function SkillDetail({ skill: s }: { skill: ApiSkill }) {
 function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Sparkles; label: string; value: string; sub: string }) {
   return (
     <div className="skl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="skl__kpi-accent" aria-hidden="true" />
       <div className="skl__kpi-row">
         <div className="skl__kpi-icon"><Icon /></div>
         <div className="skl__kpi-label">{label}</div>

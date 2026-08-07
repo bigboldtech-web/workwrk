@@ -40,7 +40,7 @@ const POPULAR: ViewTile[] = [
   { type: "CALENDAR",  label: "Calendar",  tag: undefined,    Icon: CalIcon,       swatch: "#F97316" },
   { type: "DOC",       label: "Doc",       tag: "Wiki",       Icon: FileText,      swatch: "#3B82F6" },
   { type: "KANBAN",    label: "Board",     tag: "Kanban",     Icon: LayoutGrid,    swatch: "#3B82F6" },
-  { type: "FORM",      label: "Form",      tag: "Survey",     Icon: ClipboardList, swatch: "#8B5CF6" },
+  { type: "FORM",      label: "Form",      tag: "Survey",     Icon: ClipboardList, swatch: "#7F5347" },
   { type: "DASHBOARD", label: "Dashboard", tag: "Report",     Icon: BarChart3,     swatch: "#EC4899" },
 ];
 
@@ -55,12 +55,12 @@ const SECONDARY: ViewTile[] = [
   { type: "WHITEBOARD",   label: "Whiteboard",    tag: undefined, Icon: Brush,        swatch: "#FACC15" },
   { type: "ACTIVITY",     label: "Activity",      tag: "Feed",    Icon: Activity,     swatch: "#0EA5E9" },
   { type: "WORKLOAD",     label: "Workload",      tag: "Capacity",Icon: GaugeCircle,  swatch: "#14B8A6" },
-  { type: "WORKLOAD",     label: "Team",          tag: undefined, Icon: UsersIcon,    swatch: "#A855F7", config: { variant: "team" } },
+  { type: "WORKLOAD",     label: "Team",          tag: undefined, Icon: UsersIcon,    swatch: "#00C875", config: { variant: "team" } },
   { type: "WHITEBOARD",   label: "Mind Map",      tag: undefined, Icon: Workflow,     swatch: "#EC4899" },
   { type: "MAP",          label: "Map",           tag: undefined, Icon: MapPin,       swatch: "#EA580C" },
   { type: "CHART",        label: "Chart",         tag: "Report",  Icon: BarChart3,    swatch: "#F43F5E" },
   { type: "TIMELINE",     label: "Timeline",      tag: undefined, Icon: AlignLeft,    swatch: "#F59E0B" },
-  { type: "CARDS",        label: "Cards",         tag: "Gallery", Icon: SquareStack,  swatch: "#6366F1" },
+  { type: "CARDS",        label: "Cards",         tag: "Gallery", Icon: SquareStack,  swatch: "#0891B2" },
   { type: "PIVOT",        label: "Pivot",         tag: undefined, Icon: Grid3X3,      swatch: "#059669" },
   { type: "HIERARCHY",    label: "Hierarchy",     tag: "Tree",    Icon: ListTree,     swatch: "#0D9488" },
   { type: "FILE_GALLERY", label: "File gallery",  tag: undefined, Icon: FileImage,    swatch: "#71717A" },
@@ -75,7 +75,7 @@ const EMBEDS: EmbedTile[] = [
   { key: "gcal",     label: "Google Calendar", Icon: CalIcon,         swatch: "#F97316" },
   { key: "gmaps",    label: "Google Maps",     Icon: MapPin,          swatch: "#EA580C" },
   { key: "youtube",  label: "YouTube",         Icon: FileImage,       swatch: "#EF4444" },
-  { key: "figma",    label: "Figma",           Icon: FileImage,       swatch: "#A855F7" },
+  { key: "figma",    label: "Figma",           Icon: FileImage,       swatch: "#71717A" },
 ];
 
 interface Props {

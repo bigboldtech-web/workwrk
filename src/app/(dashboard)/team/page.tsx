@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { TeamStatTile, TeamCard } from "@/components/team/ui";
 import { TeamPulse } from "@/components/team/team-pulse";
+import { TAUPE } from "@/components/ui/accent";
 
 export const dynamic = "force-dynamic";
 
@@ -53,12 +54,12 @@ export default async function TeamOverviewPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-6xl">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-[1280px]">
         {/* Headline stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="People" value={people} sub="active in org" accent="#0073EA" href="/people" />
           <TeamStatTile icon={Briefcase} label="Roles" value={roles} sub="definitions" accent="#F59E0B" href="/people/roles" />
-          <TeamStatTile icon={Star} label="KRAs" value={kras} sub="result areas" accent="#a78b6c" href="/kra-kpi" />
+          <TeamStatTile icon={Star} label="KRAs" value={kras} sub="result areas" accent={TAUPE.soft} href="/kra-kpi" />
           <TeamStatTile icon={Gauge} label="KPIs" value={kpis} sub="metrics" accent="#16a34a" href="/kra-kpi" />
         </div>
 

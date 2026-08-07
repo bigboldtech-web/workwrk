@@ -75,15 +75,15 @@ const POPULAR_TILES: ViewTile[] = [
   { key: "gantt",       label: "Gantt", sublabel: "Chart",        Icon: GanttChart,      viewType: "GANTT",      hue: "#ef4444" },
   { key: "calendar",    label: "Calendar",                        Icon: CalIcon,         viewType: "CALENDAR",   hue: "#f59e0b" },
   { key: "doc",         label: "Doc", sublabel: "Wiki",           Icon: FileText,        viewType: "DOC",        hue: "#3b82f6" },
-  { key: "board",       label: "Board", sublabel: "Kanban",       Icon: LayoutGrid,      viewType: "KANBAN",     hue: "#4f6bed" },
-  { key: "form",        label: "Form", sublabel: "Survey",        Icon: ClipboardList,   viewType: "FORM",       hue: "#8b5cf6" },
+  { key: "board",       label: "Board", sublabel: "Kanban",       Icon: LayoutGrid,      viewType: "KANBAN",     hue: "#0073EA" },
+  { key: "form",        label: "Form", sublabel: "Survey",        Icon: ClipboardList,   viewType: "FORM",       hue: "#7F5347" },
   { key: "ai",          label: "Create with AI",                  Icon: BloomMark,       viewType: null,         hue: "#ec4899" },
   { key: "dashboard",   label: "Dashboard", sublabel: "Report",   Icon: BarChart3,       viewType: "DASHBOARD",  hue: "#ec4899" },
   { key: "table",       label: "Table",                           Icon: Table2,          viewType: "TABLE",      hue: "#10b981" },
   { key: "whiteboard",  label: "Whiteboard",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#eab308" },
   { key: "activity",    label: "Activity", sublabel: "Feed",      Icon: ActivityIcon,    viewType: null,         hue: "#0ea5e9" },
   { key: "workload",    label: "Workload", sublabel: "Capacity",  Icon: GaugeCircle,     viewType: "WORKLOAD",   hue: "#14b8a6" },
-  { key: "team",        label: "Team",                            Icon: UsersIcon,       viewType: null,         hue: "#a855f7" },
+  { key: "team",        label: "Team",                            Icon: UsersIcon,       viewType: null,         hue: "#00C875" },
   { key: "mindmap",     label: "Mind Map",                        Icon: Network,         viewType: null,         hue: "#ec4899" },
   { key: "map",         label: "Map",                             Icon: MapPin,          viewType: "MAP",        hue: "#ea580c" },
   { key: "timeline",    label: "Timeline",                        Icon: AlignLeft,       viewType: "TIMELINE",   hue: "#f59e0b" },
@@ -96,7 +96,7 @@ const INTEGRATION_TILES: ViewTile[] = [
   { key: "embed-calendar",  label: "Google Calendar", Icon: CalendarRange, viewType: null, hue: "#f59e0b" },
   { key: "embed-maps",      label: "Google Maps",     Icon: MapPin,        viewType: null, hue: "#10b981" },
   { key: "embed-youtube",   label: "YouTube",         Icon: Play,          viewType: null, hue: "#ef4444" },
-  { key: "embed-figma",     label: "Figma",           Icon: Brush,         viewType: null, hue: "#a855f7" },
+  { key: "embed-figma",     label: "Figma",           Icon: Brush,         viewType: null, hue: "#71717A" },
 ];
 
 // ── Component ──────────────────────────────────────────────────────
