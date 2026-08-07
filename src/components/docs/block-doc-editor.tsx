@@ -397,6 +397,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           setBnDoc(null);
           setBlocks([]);
         }
+        // Record a recently-viewed marker (MRU list on UserPreference.home,
+        // read by the Docs hub Recent tab + "Date viewed" column). Fire-and-
+        // forget: entirely outside the autosave/persist path, never awaited.
+        void fetch("/api/me/recent-docs", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ docId }),
+        }).catch(() => {});
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "load failed");
       }

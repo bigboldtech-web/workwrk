@@ -58,6 +58,10 @@ export interface HomePref {
     inbox?: Record<string, boolean>;
     email?: Record<string, boolean>; // includes the "master" switch key
   };
+  // Recently-viewed Docs (Docs hub "Recent" tab + "Date viewed" column).
+  // MRU-ordered, ISO timestamps, capped at 20. Written by
+  // /api/me/recent-docs on every successful doc load.
+  recentDocViews?: { id: string; at: string }[];
 }
 
 export interface ThemePref {

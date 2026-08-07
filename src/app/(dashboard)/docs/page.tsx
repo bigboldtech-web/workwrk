@@ -2,12 +2,14 @@
 
 /* Docs — ClickUp-style "All Docs" home.
  *
- * Left panel (DocsSidebar, in apps-catalog) sets ?view=; this page reads it and
- * renders the matching set as a rich table (Name / Location / Tags / Date
- * updated / Date viewed / Sharing) above a row of starter Templates.
+ * In-page tabs (All / Recent / Favorites / Created by me) plus the left panel
+ * (DocsSidebar, in apps-catalog) both set ?view=; this page reads it and
+ * renders the matching set as a rich table (Name / Location / Date updated /
+ * Date viewed / Contributors) above a row of starter Templates.
  *
  *   GET  /api/docs                list  (?archived=1 for the Archived view)
  *   POST /api/docs                { title, content }
+ *   GET  /api/me/recent-docs      recently-viewed ids + timestamps
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -15,13 +17,15 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   FileText, Plus, ChevronDown, ChevronUp, Check, MoreHorizontal, Search, ListFilter, ArrowUpDown,
-  Import as ImportIcon, Link2, Star, Pencil, Users, Rocket, NotebookPen, BookOpen, Loader2,
+  Import as ImportIcon, Link2, Star, Pencil, Clock, User, Rocket, NotebookPen, BookOpen, Loader2,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile";
+import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 
 type ApiDoc = {
   id: string;
@@ -33,6 +37,7 @@ type ApiDoc = {
   location?: { type: string; name: string; icon: string | null; color: string | null; href: string | null } | null;
   createdById?: string | null;
   createdBy?: { name: string | null; avatar?: string | null } | null;
+  contributors?: PersonRef[];
   parentId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -45,15 +50,27 @@ const SORT_OPTIONS: Array<{ col: SortCol; label: string }> = [
   { col: "location", label: "Location" },
 ];
 
-type ViewKey = "all" | "my" | "shared" | "private" | "meeting" | "archived";
+type ViewKey = "all" | "recent" | "favorites" | "my" | "shared" | "private" | "meeting" | "archived";
 const VIEW_LABEL: Record<ViewKey, string> = {
   all: "All Docs",
+  recent: "Recent",
+  favorites: "Favorites",
   my: "My Docs",
   shared: "Shared with me",
   private: "Private",
   meeting: "Meeting Notes",
   archived: "Archived",
 };
+
+// The in-page tab strip (ClickUp hub). Sidebar-only views (shared/private/
+// meeting/archived) render the strip with no active tab — DocsSidebar still
+// highlights them.
+const HUB_TABS: Array<{ key: ViewKey; label: string; Icon: typeof FileText }> = [
+  { key: "all", label: "All", Icon: FileText },
+  { key: "recent", label: "Recent", Icon: Clock },
+  { key: "favorites", label: "Favorites", Icon: Star },
+  { key: "my", label: "Created by me", Icon: User },
+];
 
 // "Just now" / "Jun 29" / "Aug 24, 2024" — ClickUp's date column style.
 function smartDate(iso: string | null | undefined): string {
@@ -90,7 +107,8 @@ export default function DocsPage() {
   const [rows, setRows] = useState<ApiDoc[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [favIds, setFavIds] = useState<Set<string>>(new Set());
+  const [recentViews, setRecentViews] = useState<Map<string, string>>(new Map()); // docId → ISO viewed-at
   const [creating, setCreating] = useState(false);
   const [newMenu, setNewMenu] = useState(false);
   const [sort, setSort] = useState<{ col: SortCol; dir: "asc" | "desc" }>({ col: "updated", dir: "desc" });
@@ -103,11 +121,26 @@ export default function DocsPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/docs${view === "archived" ? "?archived=1" : ""}`, { cache: "no-store" });
+      const [res, prefRes, recentRes] = await Promise.all([
+        fetch(`/api/docs${view === "archived" ? "?archived=1" : ""}`, { cache: "no-store" }),
+        fetch("/api/preferences", { cache: "no-store" }).catch(() => null),
+        fetch("/api/me/recent-docs", { cache: "no-store" }).catch(() => null),
+      ]);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRows(data.docs ?? data.data ?? (Array.isArray(data) ? data : []));
       setLoadError(null);
+      // Star state — same read path as DocsSidebar (effective.home.favoriteDocIds).
+      if (prefRes?.ok) {
+        const p = await prefRes.json();
+        setFavIds(new Set<string>(p.effective?.home?.favoriteDocIds ?? []));
+      }
+      // Recently-viewed markers → Recent tab + "Date viewed" column.
+      if (recentRes?.ok) {
+        const r = await recentRes.json();
+        const views: Array<{ id: string; at: string }> = Array.isArray(r?.views) ? r.views : [];
+        setRecentViews(new Map(views.map((x) => [x.id, x.at])));
+      }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -118,7 +151,11 @@ export default function DocsPage() {
   useEffect(() => {
     const onChange = () => { void load(); };
     window.addEventListener("workwrk:docs-changed", onChange);
-    return () => window.removeEventListener("workwrk:docs-changed", onChange);
+    window.addEventListener("workwrk:favs-changed", onChange);
+    return () => {
+      window.removeEventListener("workwrk:docs-changed", onChange);
+      window.removeEventListener("workwrk:favs-changed", onChange);
+    };
   }, [load]);
 
   // Child-count per doc → the little "page count" badge next to a title.
@@ -133,13 +170,15 @@ export default function DocsPage() {
   const visible = useMemo(() => {
     let base = rows ?? [];
     if (view === "my") base = base.filter((d) => d.createdById && d.createdById === meId);
+    else if (view === "favorites") base = base.filter((d) => favIds.has(d.id));
+    else if (view === "recent") base = base.filter((d) => recentViews.has(d.id));
     else if (view === "meeting") base = base.filter((d) => /meeting|minutes|stand.?up|1:1/i.test(d.title));
     else if (view === "private") base = base.filter((d) => d.createdById === meId && !d.entityType);
     else if (view === "shared") base = base.filter((d) => !!d.entityType);
     const q = search.trim().toLowerCase();
     if (!q) return base;
     return base.filter((d) => d.title.toLowerCase().includes(q) || (d.excerpt ?? "").toLowerCase().includes(q));
-  }, [rows, view, meId, search]);
+  }, [rows, view, meId, search, favIds, recentViews]);
 
   // Distinct locations present in the current set → the Filters popover options.
   const NO_LOC = "__none__";
@@ -160,13 +199,18 @@ export default function DocsPage() {
   const displayed = useMemo(() => {
     let base = visible;
     if (locFilter.size > 0) base = base.filter((d) => locFilter.has(d.location?.name ?? NO_LOC));
+    // Recent keeps most-recently-VIEWED order under the default sort
+    // (ISO timestamps compare lexicographically).
+    if (view === "recent" && sort.col === "updated" && sort.dir === "desc") {
+      return [...base].sort((a, b) => (recentViews.get(b.id) ?? "").localeCompare(recentViews.get(a.id) ?? ""));
+    }
     const sgn = sort.dir === "asc" ? 1 : -1;
     return [...base].sort((a, b) => {
       if (sort.col === "title") return sgn * (a.title || "").localeCompare(b.title || "");
       if (sort.col === "location") return sgn * (a.location?.name ?? "").localeCompare(b.location?.name ?? "");
       return sgn * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
     });
-  }, [visible, locFilter, sort]);
+  }, [visible, locFilter, sort, view, recentViews]);
 
   async function createDoc(template?: (typeof TEMPLATES)[number]) {
     if (creating) return;
@@ -195,7 +239,8 @@ export default function DocsPage() {
     finally { setCreating(false); }
   }
 
-  const COLS = "grid grid-cols-[minmax(220px,1fr)_150px_120px_130px_130px_90px_44px] items-center";
+  // Name / Location / Date updated / Date viewed / Contributors / menu
+  const COLS = "grid grid-cols-[minmax(220px,1fr)_150px_130px_130px_110px_44px] items-center";
 
   return (
     <div className="flex flex-col h-full bg-white text-zinc-900">
@@ -250,8 +295,21 @@ export default function DocsPage() {
         </div>
       </div>
 
+      {/* Tabs — All / Recent / Favorites / Created by me */}
+      <ViewTabStrip className="px-5">
+        {HUB_TABS.map((t) => (
+          <ViewTab
+            key={t.key}
+            icon={t.Icon}
+            label={t.label}
+            active={view === t.key}
+            onClick={() => router.push(t.key === "all" ? "/docs" : `/docs?view=${t.key}`)}
+          />
+        ))}
+      </ViewTabStrip>
+
       {/* Templates */}
-      <div className="px-5 pb-3">
+      <div className="px-5 pt-3 pb-3">
         <div className="text-[12px] text-zinc-500 mb-1.5">Templates</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {TEMPLATES.map((t) => (
@@ -368,26 +426,16 @@ export default function DocsPage() {
             </>
           ) : null}
         </div>
-        <span className="w-px h-4 bg-zinc-200 mx-0.5" />
-        <span className="text-[12.5px] text-zinc-500 px-1">Tags:</span>
         <div className="flex-1" />
-        {searchOpen ? (
-          <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
-            <Search className="w-3.5 h-3.5 text-zinc-400" />
-            <input
-              autoFocus
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onBlur={() => { if (!search) setSearchOpen(false); }}
-              placeholder="Search docs…"
-              className="w-[160px] text-[12.5px] bg-transparent outline-none"
-            />
-          </div>
-        ) : (
-          <button type="button" onClick={() => setSearchOpen(true)} className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100">
-            <Search className="w-3.5 h-3.5" /> Search
-          </button>
-        )}
+        <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 focus-within:border-zinc-300">
+          <Search className="w-3.5 h-3.5 text-zinc-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search docs…"
+            className="w-[200px] text-[12.5px] bg-transparent outline-none placeholder:text-zinc-400"
+          />
+        </div>
       </div>
 
       {/* Table */}
@@ -396,15 +444,10 @@ export default function DocsPage() {
         <div className={`${COLS} sticky top-0 z-10 bg-white border-b border-zinc-100 px-5 h-9 text-[11.5px] font-medium text-zinc-400`}>
           <SortHeader label="Name" col="title" sort={sort} onSort={toggleSort} />
           <SortHeader label="Location" col="location" sort={sort} onSort={toggleSort} />
-          <div>Tags</div>
           <SortHeader label="Date updated" col="updated" sort={sort} onSort={toggleSort} />
           <div>Date viewed</div>
-          <div>Sharing</div>
-          <div className="flex justify-center">
-            <button type="button" className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:bg-zinc-100" title="Add column" aria-label="Add column">
-              <Plus className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          <div>Contributors</div>
+          <div />
         </div>
 
         {loadError ? (
@@ -414,8 +457,16 @@ export default function DocsPage() {
         ) : displayed.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <FileText className="w-8 h-8 mx-auto text-zinc-300" />
-            <p className="mt-2 text-[13px] text-zinc-500">{search.trim() || locFilter.size > 0 ? "Nothing matches these filters." : `No docs in ${VIEW_LABEL[view]} yet.`}</p>
-            {!search.trim() && view !== "archived" ? (
+            <p className="mt-2 text-[13px] text-zinc-500">
+              {search.trim() || locFilter.size > 0
+                ? "Nothing matches these filters."
+                : view === "recent" ? "No recently viewed docs. Docs you open show up here."
+                : view === "favorites" ? "No favorite docs yet. Star a doc to pin it here."
+                : view === "my" ? "You haven't created any docs yet."
+                : view === "archived" ? "Nothing in Archived."
+                : `No docs in ${VIEW_LABEL[view]} yet.`}
+            </p>
+            {!search.trim() && locFilter.size === 0 && (view === "all" || view === "my") ? (
               <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800">
                 <Plus className="w-3.5 h-3.5" /> New Doc
               </button>
@@ -425,12 +476,14 @@ export default function DocsPage() {
           displayed.map((d) => {
             const count = childCount.get(d.id) ?? 0;
             const loc = d.location;
+            const fav = favIds.has(d.id);
+            const viewedAt = recentViews.get(d.id) ?? null;
             return (
               <div
                 key={d.id}
-                className={`${COLS} group px-5 h-11 border-b border-zinc-50 hover:bg-zinc-50/70 cursor-pointer text-[13px]`}
+                className={`${COLS} group px-5 h-11 border-b border-zinc-100 hover:bg-zinc-50/70 cursor-pointer text-[13px]`}
                 onClick={() => router.push(`/docs/${d.id}`)}
-                onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
+                onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: fav })}
               >
                 {/* Name + hover actions */}
                 <div className="flex items-center gap-2 min-w-0 pr-2">
@@ -448,9 +501,17 @@ export default function DocsPage() {
                       onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/docs/${d.id}`); toast("Link copied"); } catch { /* ignore */ } }}>
                       <Link2 className="w-3.5 h-3.5" />
                     </button>
-                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Favorite"
-                      onClick={async () => { try { await fetch(`/api/me/favorites/docs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId: d.id, on: true }) }); window.dispatchEvent(new CustomEvent("workwrk:favs-changed")); toast("Added to favorites"); } catch { /* ignore */ } }}>
-                      <Star className="w-3.5 h-3.5" />
+                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title={fav ? "Remove from favorites" : "Add to favorites"}
+                      onClick={async () => {
+                        try {
+                          const res = await fetch(`/api/me/favorites/docs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId: d.id, on: !fav }) });
+                          if (!res.ok) { toast("Couldn't update favorite"); return; }
+                          setFavIds((prev) => { const n = new Set(prev); if (fav) n.delete(d.id); else n.add(d.id); return n; });
+                          window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+                          toast(fav ? "Removed from favorites" : "Added to favorites");
+                        } catch { toast("Couldn't update favorite"); }
+                      }}>
+                      <Star className={fav ? "w-3.5 h-3.5 text-amber-400 fill-current" : "w-3.5 h-3.5"} />
                     </button>
                     <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Open"
                       onClick={() => router.push(`/docs/${d.id}`)}>
@@ -480,24 +541,35 @@ export default function DocsPage() {
                   ) : <span className="text-zinc-300">–</span>}
                 </div>
 
-                {/* Tags */}
-                <div className="text-zinc-300">–</div>
-
                 {/* Date updated */}
                 <div className="text-zinc-600 text-[12.5px]">{smartDate(d.updatedAt)}</div>
 
-                {/* Date viewed (no per-viewer timestamp yet) */}
-                <div className="text-zinc-400 text-[12.5px]">–</div>
-
-                {/* Sharing */}
+                {/* Date viewed — this viewer's last open (recent-docs marker) */}
                 <div>
-                  {d.createdBy?.avatar ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={d.createdBy.avatar} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  {viewedAt ? (
+                    <span className="text-zinc-600 text-[12.5px]">{smartDate(viewedAt)}</span>
                   ) : (
-                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-zinc-100 text-zinc-400">
-                      <Users className="w-3 h-3" />
-                    </span>
+                    <span className="text-zinc-300">–</span>
+                  )}
+                </div>
+
+                {/* Contributors — everyone who saved a version (creator fallback) */}
+                <div>
+                  {d.contributors && d.contributors.length > 0 ? (
+                    <div className="flex -space-x-1.5">
+                      {d.contributors.slice(0, 4).map((p) => (
+                        <span key={p.id} className="rounded-full ring-2 ring-white dark:ring-zinc-900">
+                          <PersonAvatar person={p} size={20} />
+                        </span>
+                      ))}
+                      {d.contributors.length > 4 ? (
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full ring-2 ring-white dark:ring-zinc-900 bg-zinc-100 text-zinc-500 text-[10px] font-medium">
+                          +{d.contributors.length - 4}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="text-zinc-300">–</span>
                   )}
                 </div>
 
@@ -507,7 +579,7 @@ export default function DocsPage() {
                     type="button"
                     className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-700 hover:bg-zinc-100 transition-opacity"
                     aria-label="Doc actions"
-                    onClick={(e) => noteMenu.open(e, { id: d.id, title: d.title })}
+                    onClick={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: fav })}
                   >
                     <MoreHorizontal className="w-4 h-4" />
                   </button>

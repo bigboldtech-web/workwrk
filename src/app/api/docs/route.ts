@@ -79,17 +79,36 @@ export async function GET(req: Request) {
   for (const f of locFolders) locMap.set(`FOLDER:${f.id}`, { type: "FOLDER", name: f.name, icon: f.icon, color: f.color, href: null });
   for (const it of locItems) locMap.set(`BOARD_ITEM:${it.id}`, { type: "BOARD_ITEM", name: it.title, icon: null, color: null, href: `/item/${it.id}` });
 
-  // Attach creator display info for list views ("Created by" column).
+  // Contributors — every distinct DocVersion author per doc, derived at
+  // read time (no storage). Most-recent-save first, capped at 5 below.
+  const contribRows = gated.length
+    ? await prisma.docVersion.groupBy({
+        by: ["docId", "authorId"],
+        where: { docId: { in: gated.map((d) => d.id) }, authorId: { not: null } },
+        _max: { createdAt: true },
+      })
+    : [];
+  const contribByDoc = new Map<string, Array<{ authorId: string; at: number }>>();
+  for (const r of contribRows) {
+    if (!r.authorId) continue;
+    const list = contribByDoc.get(r.docId) ?? [];
+    list.push({ authorId: r.authorId, at: r._max.createdAt ? new Date(r._max.createdAt).getTime() : 0 });
+    contribByDoc.set(r.docId, list);
+  }
+
+  // Attach creator + contributor display info for list views.
   const creatorIds = [...new Set(gated.map((d) => d.createdById).filter((x): x is string => !!x))];
-  const creators = creatorIds.length
+  const contribAuthorIds = contribRows.map((r) => r.authorId).filter((x): x is string => !!x);
+  const userIds = [...new Set([...creatorIds, ...contribAuthorIds])];
+  const users = userIds.length
     ? await prisma.user.findMany({
-        where: { id: { in: creatorIds } },
+        where: { id: { in: userIds } },
         select: { id: true, firstName: true, lastName: true, avatar: true },
       })
     : [];
-  const creatorById = new Map(creators.map((u) => [u.id, u]));
+  const userById = new Map(users.map((u) => [u.id, u]));
   const enriched = gated.map((d) => {
-    const u = d.createdById ? creatorById.get(d.createdById) : undefined;
+    const u = d.createdById ? userById.get(d.createdById) : undefined;
     const name = u ? (`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || null) : null;
     // Derive the list-row icon from content.meta.icon, then drop the heavy
     // content blob so the response stays small.
@@ -97,7 +116,17 @@ export async function GET(req: Request) {
     const meta = (content as { meta?: { icon?: string | null } } | null)?.meta;
     const emoji = typeof meta?.icon === "string" && meta.icon ? meta.icon : null;
     const location = d.entityType && d.entityId ? locMap.get(`${d.entityType}:${d.entityId}`) ?? null : null;
-    return { ...rest, emoji, location, createdBy: u ? { name, avatar: u.avatar } : null };
+    const versionAuthors = (contribByDoc.get(d.id) ?? [])
+      .sort((a, b) => b.at - a.at)
+      .slice(0, 5)
+      .map((c) => userById.get(c.authorId))
+      .filter((x): x is NonNullable<typeof x> => !!x)
+      .map((x) => ({ id: x.id, firstName: x.firstName, lastName: x.lastName, avatar: x.avatar }));
+    // Docs with no authored versions still show their creator.
+    const contributors = versionAuthors.length
+      ? versionAuthors
+      : u ? [{ id: u.id, firstName: u.firstName, lastName: u.lastName, avatar: u.avatar }] : [];
+    return { ...rest, emoji, location, createdBy: u ? { name, avatar: u.avatar } : null, contributors };
   });
 
   return NextResponse.json({ docs: enriched });
