@@ -98,7 +98,11 @@ export function MorePortal({
     <div
       ref={ref}
       style={{ position: "fixed", left: coords.left, top: coords.top, width }}
-      className="z-[80] os-portal-panel"
+      // workwrk-os: portals mount on document.body, OUTSIDE the app shell, so
+      // without this class the os.css dark-mode utility repaints (scoped to
+      // .workwrk-os) never reach portal panels — bg-white panels stay white
+      // islands in dark mode (found on the doc Share modal).
+      className="z-[80] os-portal-panel workwrk-os"
     >
       {children}
     </div>,

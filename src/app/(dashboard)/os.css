@@ -33432,6 +33432,10 @@ table.os-tbl {
 .doctabs__new:hover { background: color-mix(in srgb, var(--os-ink) 8%, transparent); color: var(--os-ink); }
 .doctabs__new svg { width: 16px; height: 16px; }
 :root.dark .doctabs { background: #15171c; border-bottom-color: rgba(255,255,255,0.07); }
+/* bdoc__head paints with var(--os-surface), which does NOT flip in dark
+   (dark = utility repaints, not token flips) — pin it to the doctabs tone
+   so the tab strip + doc header read as one seamless dark stack. */
+:root.dark .bdoc__head { background: #15171c; border-bottom-color: rgba(255,255,255,0.07); }
 :root.dark .doctabs__tab.is-active { background: #1f2229; box-shadow: 0 -1px 0 rgba(255,255,255,0.08), -1px 0 0 rgba(255,255,255,0.08), 1px 0 0 rgba(255,255,255,0.08); }
 :root.dark .doctabs__tab.is-active::after { background: #1f2229; }
 
