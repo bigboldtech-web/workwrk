@@ -274,16 +274,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <CircleDot className="w-3.5 h-3.5" />
         Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
       </button>
-      {customFieldsOn ? (
-        <button
-          type="button"
-          onClick={() => setShelfOpen(true)}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
-        >
-          <Settings2 className="w-3.5 h-3.5" />
-          Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
-        </button>
-      ) : null}
+      <button
+        type="button"
+        onClick={() => setShelfOpen(true)}
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+      >
+        <Settings2 className="w-3.5 h-3.5" />
+        Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
+      </button>
       {addTaskSlot}
     </>
   );
@@ -318,7 +316,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onEditStatuses={() => setStatusEditorOpen(true)}
-          onOpenFields={customFieldsOn ? () => setShelfOpen(true) : undefined}
+          onOpenFields={() => setShelfOpen(true)}
           currentUserId={currentUserId}
           toolbarActions={toolbarActions}
           filterSlot={filterMenu}
@@ -471,19 +469,21 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         onClose={() => { setStatusEditorOpen(false); stripPanel(); }}
       />
 
-      {customFieldsOn ? (
-        <FieldShelf
-          boardId={boardId}
-          open={shelfOpen}
-          canEdit={canEdit}
-          fields={fields}
-          hiddenFields={hiddenFields}
-          extraColumns={extraColumns}
-          onToggleColumn={viewId ? toggleColumn : undefined}
-          onClose={() => { setShelfOpen(false); stripPanel(); }}
-          onFieldsChanged={setFields}
-        />
-      ) : null}
+      {/* The shelf is the COLUMN manager (built-ins + custom): always
+          available. The Custom Fields module gates only custom-field
+          creation inside it. */}
+      <FieldShelf
+        boardId={boardId}
+        open={shelfOpen}
+        canEdit={canEdit}
+        customFieldsEnabled={customFieldsOn}
+        fields={fields}
+        hiddenFields={hiddenFields}
+        extraColumns={extraColumns}
+        onToggleColumn={viewId ? toggleColumn : undefined}
+        onClose={() => { setShelfOpen(false); stripPanel(); }}
+        onFieldsChanged={setFields}
+      />
     </>
   );
 }

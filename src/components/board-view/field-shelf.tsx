@@ -84,6 +84,9 @@ interface FieldShelfProps {
   boardId: string;
   open: boolean;
   canEdit: boolean;
+  /** Space's Custom Fields module. False gates only custom-field CREATION —
+   *  the column show/hide manager stays fully usable. */
+  customFieldsEnabled?: boolean;
   fields: FieldDef[];
   /** Per-view hidden field keys (View.config.hiddenFields) — default-on cols + custom. */
   hiddenFields?: string[];
@@ -99,9 +102,9 @@ interface FieldShelfProps {
 
 type Tab = "create" | "existing";
 
-export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, extraColumns, onToggleColumn, onClose, onFieldsChanged }: FieldShelfProps) {
+export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true, fields, hiddenFields, extraColumns, onToggleColumn, onClose, onFieldsChanged }: FieldShelfProps) {
   const confirm = useConfirm();
-  const [tab, setTab] = useState<Tab>("create");
+  const [tab, setTab] = useState<Tab>(customFieldsEnabled ? "create" : "existing");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -307,8 +310,17 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, extra
 
             <div className="flex-1 overflow-y-auto px-3 pb-4">
               {tab === "create" ? (
+                !customFieldsEnabled ? (
+                  <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
+                    <p className="text-[12.5px] text-zinc-600 font-medium">Custom Fields are turned off for this Space</p>
+                    <p className="mt-1 text-[12px] text-zinc-400 leading-snug">
+                      Enable the Custom Fields module in the Space&apos;s settings (Space &ldquo;&hellip;&rdquo; &rarr; Modules) to create new field types. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
+                    </p>
+                  </div>
+                ) : (
                 /* Create new — the field-type catalog only (Popular + All). */
                 <CreateNewTab boardId={boardId} query={query} catalog={filtered} busy={busy} canEdit={canEdit} onPick={(t, l) => void addField(t, l)} />
+                )
               ) : (
                 /* Add existing — ClickUp's Shown / Properties / Custom-Fields model. */
                 <div className="space-y-6 pt-1">
