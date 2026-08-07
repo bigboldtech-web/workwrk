@@ -18,6 +18,7 @@ import {
   HardDrive, Boxes, Layers,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
+  Activity, LayoutTemplate, Plug,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
   LayoutDashboard, Target, GaugeCircle,
@@ -1149,6 +1150,16 @@ export const APPS: AppEntry[] = [
   { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store",
     matchPaths: ["/store"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },
+  { key: "automation", label: "Automation", Icon: Workflow, defaultHref: "/automation/workflows",
+    matchPaths: ["/automation"], category: "Build & Extend", requiredAccess: "manager",
+    Sidebar: linksSidebar([
+      { href: "/automation/workflows",   label: "Workflows",   Icon: Workflow },
+      { href: "/automation/templates",   label: "Templates",   Icon: LayoutTemplate },
+      { href: "/automation/health",      label: "Health",      Icon: Activity },
+      { href: "/automation/usage",       label: "Usage",       Icon: GaugeCircle },
+      { href: "/automation/logs",        label: "Logs",        Icon: ScrollText },
+      { href: "/automation/connections", label: "Connections", Icon: Plug },
+    ]) },
 
   // ── Workspace ───────────────────────────────────────────────
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
