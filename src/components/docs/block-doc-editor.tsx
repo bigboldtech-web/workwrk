@@ -29,7 +29,7 @@ import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block,
 import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "./legacy-embed-preserve";
 import dynamic from "next/dynamic";
 import { BlockNoteCanvas } from "./blocknote-canvas";
-import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
+import { refreshSidebar, notifyDocsChanged } from "@/components/layout/os/sidebar-refresh";
 import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -602,7 +602,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     try {
       const res = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
       if (!res.ok) { toast("Couldn't move to Trash"); return; }
-      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+      notifyDocsChanged();
       toast("Moved to Trash");
       router.push("/docs");
     } catch { toast("Couldn't move to Trash"); }
@@ -682,7 +682,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               try {
                 const res = await fetch(`/api/docs/${docId}/restore`, { method: "POST" });
                 if (!res.ok) throw new Error();
-                window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+                notifyDocsChanged();
                 window.location.reload();
               } catch {
                 toast("Couldn't restore the page");

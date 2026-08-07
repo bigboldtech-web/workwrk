@@ -16,6 +16,7 @@
  * including this panel. Drag-reorder is deliberately omitted (not stubbed).
  */
 
+import { notifyDocsChanged } from "@/components/layout/os/sidebar-refresh";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, MoreHorizontal, PanelLeftClose, Plus } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -46,7 +47,7 @@ export async function createChildPage(parentId: string | null): Promise<string |
     const d = await res.json().catch(() => null);
     const id: string | undefined = d?.doc?.id ?? d?.data?.id ?? d?.id;
     if (!id) return null;
-    window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+    notifyDocsChanged();
     return id;
   } catch {
     return null;

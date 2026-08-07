@@ -18,3 +18,15 @@ export function onSidebarRefresh(cb: () => void): () => void {
   window.addEventListener(EVT, cb);
   return () => window.removeEventListener(EVT, cb);
 }
+
+/**
+ * Doc mutations (create / rename / trash / restore) must reflect INSTANTLY in
+ * BOTH sidebars: the Docs app tree listens on "workwrk:docs-changed", the
+ * Spaces tree on "workwrk:sidebar-refresh". Firing only one leaves the other
+ * stale until a manual reload — always use this for doc changes.
+ */
+export function notifyDocsChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+  refreshSidebar();
+}

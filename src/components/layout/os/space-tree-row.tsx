@@ -288,9 +288,14 @@ export function SpaceTreeRow({
   // without a page reload. A ref keeps the listener subscribed once.
   const liveRef = useRef({ expanded, loadChildren });
   useEffect(() => { liveRef.current = { expanded, loadChildren }; });
-  useEffect(() => onSidebarRefresh(() => {
-    if (liveRef.current.expanded) liveRef.current.loadChildren();
-  }), []);
+  useEffect(() => {
+    const refetch = () => { if (liveRef.current.expanded) liveRef.current.loadChildren(); };
+    const off = onSidebarRefresh(refetch);
+    // Doc mutations fired from the Docs app side (docs-changed) must also
+    // refresh nested folder docs here — one stale channel = ghost rows.
+    window.addEventListener("workwrk:docs-changed", refetch);
+    return () => { off(); window.removeEventListener("workwrk:docs-changed", refetch); };
+  }, []);
 
   return (
     <li className="group/space relative">

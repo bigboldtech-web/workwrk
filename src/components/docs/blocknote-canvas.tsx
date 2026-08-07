@@ -22,6 +22,7 @@
  * the fly via `legacyBlocksToBN`. The next save persists in v2 shape.
  */
 
+import { notifyDocsChanged } from "@/components/layout/os/sidebar-refresh";
 import {
   useCreateBlockNote,
   SuggestionMenuController,
@@ -122,7 +123,7 @@ function workspaceSlashItems(
         if (res.ok) {
           const d = await res.json();
           childId = d.doc?.id ?? d.data?.id ?? d.id ?? "";
-          window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+          notifyDocsChanged();
         }
       } catch { /* fall back to picker */ }
     }
@@ -212,35 +213,26 @@ function workspaceSlashItems(
 // cursor. Both lists are capped so the menu stays snappy.
 type MentionRow = { id: string; label: string; href: string; mkind: "user" | "doc" };
 
+// "@" is for PEOPLE only — linking a page has its own docs-only flow (the
+// "/" Page block + its picker). Mixing both here made page-linking feel like
+// it was asking for a name/email.
 async function fetchMentionRows(query: string): Promise<MentionRow[]> {
   const q = query.trim();
-  const [users, docs] = await Promise.all([
-    fetch(`/api/users?scope=all&limit=8${q ? `&search=${encodeURIComponent(q)}` : ""}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null),
-    fetch(`/api/docs`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-  ]);
+  const users = await fetch(`/api/users?scope=all&limit=8${q ? `&search=${encodeURIComponent(q)}` : ""}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
 
   const out: MentionRow[] = [];
-
   const userList: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string }> =
     users?.data ?? users?.users ?? [];
   for (const u of userList.slice(0, 8)) {
     const name = `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown";
     out.push({ id: u.id, label: name, href: `/people/${u.id}`, mkind: "user" });
   }
-
-  const docList: Array<{ id: string; title?: string }> = docs?.docs ?? docs?.data ?? docs ?? [];
-  const ql = q.toLowerCase();
-  const matchedDocs = (ql ? docList.filter((d) => (d.title ?? "").toLowerCase().includes(ql)) : docList).slice(0, 6);
-  for (const d of matchedDocs) {
-    out.push({ id: d.id, label: d.title || "Untitled note", href: `/docs/${d.id}`, mkind: "doc" });
-  }
-
   return out;
 }
 
-function mentionMenuItems(editor: EditorType, rows: MentionRow[]): DefaultReactSuggestionItem[] {
+function mentionMenuItems(editor: EditorType, rows: MentionRow[], docId?: string): DefaultReactSuggestionItem[] {
   return rows.map((row) => ({
     title: row.label,
     subtext: row.mkind === "user" ? "Person" : "Page",
@@ -255,6 +247,15 @@ function mentionMenuItems(editor: EditorType, rows: MentionRow[]): DefaultReactS
         { type: "mention", props: { mkind: row.mkind, refId: row.id, label: row.label, href: row.href } },
         " ", // trailing space so the caret lands after the pill
       ]);
+      // Mentioning a person drops them an Inbox notification (server honors
+      // their "Mentions" toggle). Best-effort — the pill already inserted.
+      if (row.mkind === "user" && docId) {
+        void fetch(`/api/docs/${docId}/mention`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: row.id }),
+        }).catch(() => {});
+      }
     },
   }));
 }
@@ -513,11 +514,11 @@ export function BlockNoteCanvas({ initialBnDoc, legacyBlocks, readonly, onChange
             )
           }
         />
-        {/* @-mentions for people + pages. Items are already query-matched
-            server/client-side in fetchMentionRows, so no extra filtering. */}
+        {/* @-mentions — PEOPLE only; picking one also drops them an Inbox
+            notification via /api/docs/[id]/mention (pref-gated server-side). */}
         <SuggestionMenuController
           triggerCharacter="@"
-          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query))}
+          getItems={async (query) => mentionMenuItems(editor, await fetchMentionRows(query), docId)}
         />
         {/* Custom drag-handle: + add-block button and our Notion block menu.
             The provider feeds live docId/callbacks to the menu through
