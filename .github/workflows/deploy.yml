@@ -9,6 +9,11 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  # Manual trigger for when a CI run was lost to transient runner failures.
+  # ALWAYS prefer this over ad-hoc SSH deploys: the concurrency group below
+  # serializes it against auto-deploys (2026-08-07 outage: a raw SSH deploy
+  # raced the pipeline deploy in the same directory and took prod down).
+  workflow_dispatch:
 
 concurrency:
   group: deploy-production
@@ -18,8 +23,9 @@ jobs:
   deploy:
     name: Deploy to aaPanel
     runs-on: ubuntu-latest
-    # Only deploy when the triggering CI run actually succeeded.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only deploy when the triggering CI run actually succeeded (manual
+    # workflow_dispatch runs have no workflow_run payload and always deploy).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.2.0
