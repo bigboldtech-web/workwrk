@@ -36,6 +36,9 @@ async function ctx() {
 const BOARD_SELECT = {
   id: true, slug: true, name: true, icon: true, color: true,
   visibility: true,
+  // Board.settings carries sprint identity (settings.sprint) so the sidebar
+  // tree can render sprint Lists with their own glyph.
+  settings: true,
 } as const;
 
 const FOLDER_INNER_SELECT = {
@@ -135,7 +138,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     visibility: "PRIVATE" | "WORKSPACE" | "ORG";
     ownerId: string | null;
     _count: { boards: number; childFolders: number };
-    boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG" }>;
+    boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG"; settings: unknown }>;
     childFolders?: FolderShape[];
   };
 

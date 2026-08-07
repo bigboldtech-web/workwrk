@@ -58,6 +58,15 @@ const patchSchema = z.object({
     })
     .nullable()
     .optional(),
+  // Sprint date edit — only valid on boards already carrying settings.sprint
+  // (updateBoard rejects the rest with "Not a sprint List").
+  sprint: z
+    .object({
+      startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    })
+    .refine((s) => s.endDate >= s.startDate, { message: "endDate must be on/after startDate" })
+    .optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {

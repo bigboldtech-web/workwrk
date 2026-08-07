@@ -41,6 +41,8 @@ import {
 } from "./board-filter-bar";
 import { FieldShelf } from "./field-shelf";
 import { BoardStatusEditor } from "./board-status-editor";
+import { SprintHeaderStrip } from "./sprint-header-strip";
+import type { SprintMeta } from "@/lib/sprint";
 import { useOsToast } from "@/components/layout/os/toast";
 
 // View types that render the (filterable) item list — only these get the
@@ -74,9 +76,12 @@ interface BoardCanvasProps {
    *  capability across the board's surfaces (columns, kanban card, drawer,
    *  timer). Absent = ungated (legacy Space → all on). */
   moduleGating?: { priority: boolean; tags: boolean; timeTracking: boolean; customFields: boolean };
+  /** Sprint identity (settings.sprint) — non-null renders the sprint header
+   *  strip (dates + countdown + points) above every view. */
+  sprint?: SprintMeta | null;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating, sprint }: BoardCanvasProps) {
   const router = useRouter();
   const { toast } = useOsToast();
   const pathname = usePathname();
@@ -285,6 +290,15 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
 
   return (
     <>
+      {sprint ? (
+        <SprintHeaderStrip
+          boardId={boardId}
+          canEdit={canEdit}
+          sprint={sprint}
+          items={items}
+          statuses={statuses}
+        />
+      ) : null}
       {viewType !== "TABLE" ? (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <div className="flex-1" />

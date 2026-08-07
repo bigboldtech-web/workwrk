@@ -11,8 +11,9 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
   Lock, Share2, Sparkles, ChevronDown, ListChecks,
-  ListFilter, Glasses, Zap,
+  ListFilter, Glasses, Zap, IterationCw,
 } from "lucide-react";
+import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
@@ -81,6 +82,8 @@ export default async function BoardPage(props: {
   // Per-List statuses (backbone #1) — the board's own set, or the
   // canonical default trio when Board.statuses is null.
   const statuses = getBoardStatuses(board);
+  // Sprint identity (migration-free) — null for ordinary Lists.
+  const sprint = parseSprintMeta(board.settings);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -122,6 +125,8 @@ export default async function BoardPage(props: {
         <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900 min-w-0 group cursor-pointer hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors">
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-4 h-4 text-zinc-500" />
+          ) : sprint ? (
+            <IterationCw className="w-4 h-4 text-zinc-700" />
           ) : (
             <ListChecks className="w-4 h-4 text-zinc-700" />
           )}
@@ -194,6 +199,7 @@ export default async function BoardPage(props: {
           statuses={statuses}
           canEdit={canEdit}
           currentUserId={u.id}
+          sprint={sprint}
           addTaskSlot={
             // key: this server-created element lands inside BoardCanvas's
             // toolbar children array; RSC-deserialized elements skip jsx-time

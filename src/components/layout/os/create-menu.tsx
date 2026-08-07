@@ -27,6 +27,7 @@ import {
   Database,
   FileText,
   Import,
+  IterationCw,
   LayoutDashboard,
   ListChecks,
   Loader2,
@@ -149,7 +150,7 @@ interface CreateMenuProps {
 }
 
 export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMenuProps) {
-  const { openCreateTask, openCreateList, openCustomize, openTemplateCenter } = useOsShell();
+  const { openCreateTask, openCreateList, openCreateSprint, openCustomize, openTemplateCenter } = useOsShell();
   const { toast } = useOsToast();
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -320,6 +321,13 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   label="List"
                   description="Track tasks, projects, people & more"
                   onClick={() => run(openCreateList)}
+                />
+                <MenuItem
+                  variant="inset"
+                  icon={IterationCw}
+                  label="Sprint"
+                  description="Time-boxed List with Sprint Points"
+                  onClick={() => run(openCreateSprint)}
                 />
                 <MenuItem
                   variant="inset"

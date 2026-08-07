@@ -39,6 +39,7 @@ import { ReminderPopover } from "./reminder-popover";
 import { ReminderTicker } from "./reminder-ticker";
 import { VoiceCapturePopover } from "./voice-capture-popover";
 import { CreateListModal } from "./create-list-modal";
+import { CreateSprintModal } from "./create-sprint-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 
 function CustomizeMount() {
@@ -103,6 +104,7 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             <QuickCaptureHandler />
             <CreateTaskModal />
             <CreateListModal />
+            <CreateSprintModal />
             <MyWorkPanel />
             <NotepadPanel />
             <ReminderPopover />

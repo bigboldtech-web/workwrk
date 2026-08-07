@@ -124,7 +124,12 @@ export function FieldShelf({ boardId, open, canEdit, fields, hiddenFields, extra
   const availableBuiltins = BUILTIN_COLUMNS.filter((c) => !c.locked && !c.soon && matchQ(c.label) && !isBuiltinShown(c.key, hidden, extra));
   // "Soon" properties (no backing data yet) — listed for ClickUp parity but
   // disabled. Sorted alphabetically alongside the available ones below.
-  const soonBuiltins = BUILTIN_COLUMNS.filter((c) => c.soon && matchQ(c.label));
+  // Sprint Lists carry a LIVE "sprint_points" custom field — hide the greyed
+  // sprint placeholders there so the panel never shows both.
+  const hideSoon = new Set(
+    fields.some((f) => f.key === "sprint_points") ? ["__soon_sprint_points", "__soon_sprints"] : [],
+  );
+  const soonBuiltins = BUILTIN_COLUMNS.filter((c) => c.soon && !hideSoon.has(c.key) && matchQ(c.label));
   const properties = [...availableBuiltins, ...soonBuiltins].sort((a, b) => a.label.localeCompare(b.label));
 
   const filtered = useMemo(() => {

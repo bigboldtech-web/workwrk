@@ -18,6 +18,13 @@ import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import {
+  parseSprintMeta,
+  sprintBoardName,
+  SPRINT_POINTS_FIELD_KEY,
+  SPRINT_POINTS_LABEL,
+  type SprintMeta,
+} from "@/lib/sprint";
 
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
@@ -69,6 +76,10 @@ export interface CreateBoardInput {
   itemType?: string;             // default "studio-item"
   defaultViewType?: ViewType;    // default TABLE
   visibility?: Visibility;
+  /** Sprints (migration-free): when set, the board is created as a Sprint —
+   *  settings.sprint written, Sprint Points NUMBER field seeded, and (when
+   *  the name is empty) auto-named "Sprint N (M/D - M/D)". */
+  sprint?: { startDate: string; endDate: string };
 }
 
 // The ClickUp-style view set every task List ships with: a grouped List, a
@@ -189,7 +200,8 @@ export async function getOrCreatePersonalBoard(organizationId: string, userId: s
 
 export async function createBoard(input: CreateBoardInput): Promise<BoardSummary & { defaultViewType: ViewType }> {
   const trimmed = input.name.trim();
-  if (!trimmed) throw new Error("Board name is required");
+  // Sprints may omit the name — it's derived from the sprint number + dates.
+  if (!trimmed && !input.sprint) throw new Error("Board name is required");
 
   // Ensure the Space exists in the org; reject otherwise.
   const space = await prisma.space.findFirst({
@@ -214,9 +226,45 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
     if (!folder) throw new Error("Folder not found in this Space");
   }
 
-  const slug = await uniqueBoardSlug(input.organizationId, toSlug(trimmed));
+  // Sprint identity (migration-free): number the sprint 1 + max among this
+  // Space's existing sprint boards (parsed client-side from settings — no
+  // JSON-path query; fine at SMB scale). Empty name → the dates-in-name
+  // convention "Sprint N (M/D - M/D)".
+  let sprintMeta: SprintMeta | null = null;
+  let boardName = trimmed;
+  if (input.sprint) {
+    const siblings = await prisma.board.findMany({
+      where: { spaceId: input.spaceId, archivedAt: null },
+      select: { settings: true },
+    });
+    let maxNumber = 0;
+    for (const row of siblings) {
+      const meta = parseSprintMeta(row.settings);
+      if (meta && meta.sprintNumber > maxNumber) maxNumber = meta.sprintNumber;
+    }
+    const sprintNumber = maxNumber + 1;
+    sprintMeta = {
+      isSprint: true,
+      sprintNumber,
+      startDate: input.sprint.startDate,
+      endDate: input.sprint.endDate,
+    };
+    if (!boardName) boardName = sprintBoardName(sprintNumber, input.sprint.startDate, input.sprint.endDate);
+  }
+
+  const slug = await uniqueBoardSlug(input.organizationId, toSlug(boardName));
   const itemType = input.itemType ?? "studio-item";
   const viewType = input.defaultViewType ?? "TABLE";
+
+  // Sprint task Lists ship with the Sprint Points NUMBER field pre-seeded —
+  // exactly the FieldDef addBoardField would produce, so every existing
+  // renderer (table column, drawer, FieldShelf) picks it up unchanged.
+  const seededSchema: Prisma.InputJsonValue =
+    itemType === "studio-item"
+      ? sprintMeta
+        ? { fields: [{ key: SPRINT_POINTS_FIELD_KEY, label: SPRINT_POINTS_LABEL, type: "NUMBER", position: 0, options: { decimals: 0 } }] }
+        : { fields: [] }
+      : {};
 
   const created = await prisma.$transaction(async (tx) => {
     const board = await tx.board.create({
@@ -225,15 +273,15 @@ export async function createBoard(input: CreateBoardInput): Promise<BoardSummary
         spaceId: input.spaceId,
         folderId: input.folderId ?? null,
         slug,
-        name: trimmed,
+        name: boardName,
         description: input.description ?? null,
         icon: input.icon ?? null,
         color: input.color ?? null,
         itemType,
         ownerId: input.userId,
         visibility: input.visibility ?? "WORKSPACE",
-        schema: itemType === "studio-item" ? { fields: [] } : {},
-        settings: {},
+        schema: seededSchema,
+        settings: (sprintMeta ? { sprint: sprintMeta } : {}) as Prisma.InputJsonValue,
         ...(seededStatuses ? { statuses: seededStatuses as unknown as Prisma.InputJsonValue } : {}),
       },
     });
@@ -367,6 +415,9 @@ export interface UpdateBoardInput {
   folderId?: string | null;
   /** Per-List statuses (backbone #1). null = reset to the default trio. */
   statuses?: StatusOption[] | null;
+  /** Sprint date edit — only valid on boards that already carry
+   *  settings.sprint (read-merge-write; other settings keys untouched). */
+  sprint?: { startDate: string; endDate: string };
 }
 
 export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
@@ -384,6 +435,29 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
   // SQL NULL (DbNull) means "use the default set" — distinct from a
   // stored JSON null, which parseBoardStatuses would also reject.
   if (patch.statuses !== undefined) data.statuses = patch.statuses === null ? Prisma.DbNull : patch.statuses;
+  if (patch.sprint !== undefined) {
+    const existing = await prisma.board.findUnique({
+      where: { id: boardId },
+      select: { settings: true, name: true },
+    });
+    if (!existing) throw new Error("Board not found");
+    const meta = parseSprintMeta(existing.settings);
+    if (!meta) throw new Error("Not a sprint List");
+    // Read-merge-write: never clobber unrelated settings keys.
+    const base =
+      existing.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
+        ? (existing.settings as Record<string, unknown>)
+        : {};
+    data.settings = {
+      ...base,
+      sprint: { ...meta, startDate: patch.sprint.startDate, endDate: patch.sprint.endDate },
+    } as Prisma.InputJsonValue;
+    // Keep the dates-in-name convention true — but only while the name still
+    // matches "Sprint N (…"; a user-customized name is left alone.
+    if (data.name === undefined && /^Sprint \d+ \(/.test(existing.name)) {
+      data.name = sprintBoardName(meta.sprintNumber, patch.sprint.startDate, patch.sprint.endDate);
+    }
+  }
   return prisma.board.update({ where: { id: boardId }, data });
 }
 

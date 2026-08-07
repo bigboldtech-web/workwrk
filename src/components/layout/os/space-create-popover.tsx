@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus, ListChecks, FolderPlus, FileText, BarChart3, Brush, ClipboardCheck,
-  Download, LayoutTemplate, ChevronRight, Database,
+  Download, LayoutTemplate, ChevronRight, Database, IterationCw,
 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
@@ -110,7 +110,7 @@ function SpaceCreateMenu({
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const { openTemplateCenter, openCreateList } = useOsShell();
+  const { openTemplateCenter, openCreateList, openCreateSprint } = useOsShell();
   const [busyKind, setBusyKind] = useState<string | null>(null);
 
   const stub = (label: string) => () => toast(`${label} creation coming soon`);
@@ -202,6 +202,14 @@ function SpaceCreateMenu({
         label="Folder"
         description="Group Lists, Docs & more"
         onClick={onRequestFolder}
+      />
+      <MenuItem
+        variant="inset"
+        icon={IterationCw}
+        iconClassName="text-zinc-700 dark:text-zinc-200"
+        label="Sprint"
+        description="Time-boxed List with Sprint Points"
+        onClick={() => { onCreated?.(); openCreateSprint({ spaceId }); }}
       />
 
       <MenuSeparator />

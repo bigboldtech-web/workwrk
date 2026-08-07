@@ -16,8 +16,9 @@ import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
   ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
-  BarChart3, ClipboardCheck, Download, Files, MoreHorizontal,
+  BarChart3, ClipboardCheck, Download, Files, MoreHorizontal, IterationCw,
 } from "lucide-react";
+import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceMoreTrigger } from "./space-more-menu";
 import { SpaceCreateTrigger } from "./space-create-popover";
@@ -161,6 +162,8 @@ interface BoardChild {
   icon: string | null;
   color: string | null;
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
+  /** Board.settings — sprint Lists carry settings.sprint (parseSprintMeta). */
+  settings?: unknown;
 }
 
 interface FolderChild {
@@ -588,6 +591,9 @@ function BoardTreeRow({
   // ClickUp highlights the currently-open List with the same grey pill the
   // Space row uses; child icons stay monochrome unless user-colored.
   const isActive = pathname === `/boards/${board.slug}`;
+  // Sprint Lists swap the glyph (dates already live in the name convention);
+  // the icon stays zinc-500 like every sibling row — no hue-keying.
+  const sprint = parseSprintMeta(board.settings);
   return (
     <li className="group/boardrow relative">
       <div
@@ -601,7 +607,11 @@ function BoardTreeRow({
           onClick={() => router.push(`/boards/${board.slug}`)}
           className={`flex items-center gap-1.5 text-[12px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
-          <ListChecks className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
+          {sprint ? (
+            <IterationCw className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
+          ) : (
+            <ListChecks className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
+          )}
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />

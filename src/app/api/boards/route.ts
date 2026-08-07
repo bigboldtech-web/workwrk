@@ -71,17 +71,31 @@ export async function GET(req: Request) {
   return NextResponse.json({ error: "spaceId or folderId required" }, { status: 400 });
 }
 
-const createSchema = z.object({
-  spaceId: z.string().min(1),
-  folderId: z.string().min(1).nullable().optional(),
-  name: z.string().min(1).max(80),
-  description: z.string().max(280).optional(),
-  icon: z.string().max(40).optional(),
-  color: z.string().max(20).optional(),
-  itemType: z.string().max(40).optional(),
-  defaultViewType: z.enum(VIEW_TYPES).optional(),
-  visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
-});
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+const createSchema = z
+  .object({
+    spaceId: z.string().min(1),
+    folderId: z.string().min(1).nullable().optional(),
+    // Optional ONLY for sprint creates (server derives "Sprint N (M/D - M/D)");
+    // the refine below keeps name required for every non-sprint create.
+    name: z.string().max(80).optional(),
+    description: z.string().max(280).optional(),
+    icon: z.string().max(40).optional(),
+    color: z.string().max(20).optional(),
+    itemType: z.string().max(40).optional(),
+    defaultViewType: z.enum(VIEW_TYPES).optional(),
+    visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
+    // Sprints (migration-free): mark the new List a Sprint with these dates.
+    sprint: z
+      .object({ startDate: isoDate, endDate: isoDate })
+      .refine((s) => s.endDate >= s.startDate, { message: "endDate must be on/after startDate" })
+      .optional(),
+  })
+  .refine((v) => Boolean(v.sprint) || Boolean(v.name && v.name.trim()), {
+    message: "name is required",
+    path: ["name"],
+  });
 
 export async function POST(req: Request) {
   const c = await ctx();
@@ -104,13 +118,14 @@ export async function POST(req: Request) {
       userId: c.userId,
       spaceId: parsed.data.spaceId,
       folderId: parsed.data.folderId ?? null,
-      name: parsed.data.name,
+      name: parsed.data.name ?? "",
       description: parsed.data.description,
       icon: parsed.data.icon,
       color: parsed.data.color,
       itemType: parsed.data.itemType,
       defaultViewType: parsed.data.defaultViewType,
       visibility: parsed.data.visibility,
+      sprint: parsed.data.sprint,
     });
     return NextResponse.json({ board }, { status: 201 });
   } catch (err) {

@@ -117,6 +117,12 @@ type ShellState = {
   /** Space to preselect in the create-list modal; null = derive from route. */
   createListPreselect: { spaceId?: string; folderId?: string } | null;
 
+  createSprintOpen: boolean;
+  openCreateSprint: (preselect?: { spaceId?: string; folderId?: string } | null) => void;
+  closeCreateSprint: () => void;
+  /** Space to preselect in the create-sprint modal; null = derive from route. */
+  createSprintPreselect: { spaceId?: string; folderId?: string } | null;
+
   // 🆕 Template Center — the OS-wide template browser/apply modal.
   // Mounted once at OsShell level; opened from the "+" menu, the
   // create-list/space modals ("Use Templates"), and "…" context menus.
@@ -222,6 +228,8 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
   const [createListPreselect, setCreateListPreselect] = useState<{ spaceId?: string; folderId?: string } | null>(null);
+  const [createSprintOpen, setCreateSprintOpen] = useState(false);
+  const [createSprintPreselect, setCreateSprintPreselect] = useState<{ spaceId?: string; folderId?: string } | null>(null);
   const [templateCenterOpen, setTemplateCenterOpen] = useState(false);
   const [templateCenterOpts, setTemplateCenterOpts] = useState<TemplateCenterOpts | null>(null);
   const [lens, setLensState] = useState<Lens>("me");
@@ -458,6 +466,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     setCreateListOpen(true);
   }, []);
   const closeCreateList = useCallback(() => setCreateListOpen(false), []);
+  const openCreateSprint = useCallback((preselect?: { spaceId?: string; folderId?: string } | null) => {
+    setCreateSprintPreselect(preselect ?? null);
+    setCreateSprintOpen(true);
+  }, []);
+  const closeCreateSprint = useCallback(() => setCreateSprintOpen(false), []);
   const openTemplateCenter = useCallback((opts?: TemplateCenterOpts) => {
     setTemplateCenterOpts(opts ?? null);
     setTemplateCenterOpen(true);
@@ -549,6 +562,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect,
       createListOpen, openCreateList, closeCreateList, createListPreselect,
+      createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect,
       templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter,
       lens, setLens,
       openItem, openItemDrawer, closeItemDrawer,
@@ -564,7 +578,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
