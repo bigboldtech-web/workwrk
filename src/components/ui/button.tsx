@@ -3,12 +3,12 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-// ClickUp-style button system. Primary action is a violet gradient
-// pill that lifts slightly on hover. Outline + ghost stay neutral so
-// they don't compete with the primary CTA on a page. Destructive is
-// a rose gradient with white text so it reads as "dangerous" without
-// shouting. Sizes share a consistent 8px radius — only the lg pill
-// keeps a rounded-full silhouette for hero CTAs.
+// Monday-clean button system. Primary is flat brand blue #0073EA,
+// destructive is flat red #E2445C — no gradients, no glow shadows
+// (shadow-sm ceiling). Outline + ghost stay neutral so they don't
+// compete with the primary CTA on a page. Sizes share a consistent
+// 8px radius — only the lg pill keeps a rounded-full silhouette for
+// hero CTAs.
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 active:translate-y-px",
@@ -16,9 +16,9 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "text-white bg-[#0073EA] hover:bg-[#0060B9] shadow-[0_4px_12px_-4px_rgba(0,115,234,0.4)]",
+          "text-white bg-[#0073EA] hover:bg-[#0060B9] shadow-sm",
         destructive:
-          "text-white bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-400 hover:to-rose-500 shadow-[0_4px_12px_-4px_rgba(244,63,94,0.4)] hover:-translate-y-[1px]",
+          "text-white bg-[#E2445C] hover:bg-[#CF3D53] shadow-sm",
         outline:
           "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:border-slate-300 hover:text-slate-900 dark:bg-transparent dark:text-foreground dark:border-border dark:hover:bg-surface-2",
         secondary:

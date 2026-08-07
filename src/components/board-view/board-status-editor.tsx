@@ -137,7 +137,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/20" onClick={onClose} aria-hidden />
-      <aside className="fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-white border-l border-zinc-200 shadow-2xl flex flex-col">
+      <aside role="dialog" aria-modal="true" aria-label="Task statuses" className="fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-white border-l border-zinc-200 shadow-2xl flex flex-col">
         <div className="px-4 py-3 border-b border-zinc-200 flex items-center gap-2">
           <span className="text-sm font-semibold text-zinc-900">Task statuses</span>
           <span className="text-[11px] text-zinc-400">{draft.length} of 30</span>

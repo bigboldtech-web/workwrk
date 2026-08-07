@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle } from "lucide-react";
 
@@ -35,32 +29,34 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            {destructive && (
-              <div className="h-10 w-10 rounded-xl bg-[rgba(255,61,138,0.1)] border border-[rgba(255,61,138,0.3)] flex items-center justify-center shrink-0">
-                <AlertTriangle size={18} className="text-[#E2445C]" />
-              </div>
-            )}
-            <div>
-              <DialogTitle>{title}</DialogTitle>
-              <p className="text-[13px] text-muted mt-1 leading-relaxed">{description}</p>
-            </div>
-          </div>
-        </DialogHeader>
-        <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+      <DialogContent
+        className="max-w-[420px] gap-0 p-6"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        <div className="flex items-center gap-2.5">
+          {destructive && (
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-red-50 dark:bg-[#E2445C]/15">
+              <AlertTriangle size={15} className="text-[#E2445C]" />
+            </span>
+          )}
+          <DialogTitle className="text-[15px] leading-none">{title}</DialogTitle>
+        </div>
+        <p className="mt-2.5 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+          {description}
+        </p>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
           <Button
             variant={destructive ? "destructive" : "default"}
+            size="sm"
             onClick={onConfirm}
             disabled={loading}
           >
             {loading ? "Processing…" : confirmLabel}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

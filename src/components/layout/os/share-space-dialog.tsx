@@ -716,7 +716,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
           type="button"
           onClick={send}
           disabled={busy || !email.trim()}
-          className="h-9 px-3 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-[12.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
           Send invite
@@ -877,7 +877,7 @@ function GroupPickerList({
               type="button"
               onClick={() => onAdd(g)}
               disabled={busy || g.memberCount === 0}
-              className="h-7 px-2.5 rounded-md bg-zinc-900 text-white text-[11.5px] font-medium hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="h-7 px-2.5 rounded-md bg-[#0073EA] text-white text-[11.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
             >
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
               Add all

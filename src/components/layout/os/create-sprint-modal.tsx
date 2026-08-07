@@ -245,7 +245,7 @@ export function CreateSprintModal() {
 
         {/* Footer */}
         <div className="px-5 pt-3 pb-4 mt-1 border-t border-zinc-100 flex items-center justify-end bg-white">
-          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50">
+          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Create
           </button>
         </div>

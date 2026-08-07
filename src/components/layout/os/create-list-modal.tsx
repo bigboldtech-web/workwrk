@@ -197,7 +197,7 @@ export function CreateListModal() {
           <button type="button" onClick={browseTemplates} className="px-2.5 h-8 text-[12.5px] font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors">
             Use Templates
           </button>
-          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50">
+          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Create
           </button>
         </div>

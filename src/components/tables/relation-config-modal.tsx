@@ -65,7 +65,7 @@ export function RelationConfigModal({
   return (
     <div className="fixed inset-0 z-[95] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div className="relative w-full max-w-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden">
+      <div role="dialog" aria-modal="true" aria-label={title} className="relative w-full max-w-[420px] bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100">
           <h3 className="inline-flex items-center gap-2 text-[15px] font-semibold text-zinc-900"><Icon className="w-4 h-4 text-zinc-500" /> {title}</h3>
           <button type="button" onClick={onClose} className="w-7 h-7 rounded-full bg-zinc-100 hover:bg-zinc-200 inline-flex items-center justify-center text-zinc-500"><X className="w-4 h-4" /></button>

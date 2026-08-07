@@ -72,7 +72,7 @@ export function AddCardPanel({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/20" onClick={onClose} aria-hidden />
-      <div className="relative flex h-[560px] w-[880px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl">
+      <div role="dialog" aria-modal="true" aria-label="Add Card" className="relative flex h-[560px] w-[880px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl">
         {/* Left category rail */}
         <div className="flex w-56 shrink-0 flex-col border-r border-zinc-100 p-2">
           <div className="flex h-8 items-center gap-2 px-2">

@@ -229,7 +229,7 @@ export function NewFolderDialog({
             type="button"
             onClick={submit}
             disabled={submitting || !name.trim()}
-            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
+            className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50"
           >
             {submitting ? "Creating…" : "Create"}
           </button>

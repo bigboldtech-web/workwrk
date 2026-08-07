@@ -1,13 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Pencil } from "lucide-react";
@@ -47,20 +41,26 @@ export function PromptDialog({
   loading = false,
 }: PromptDialogProps) {
   const [value, setValue] = useState(defaultValue);
+  const [wasOpen, setWasOpen] = useState(open);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Re-seed the field every time the dialog opens so a previous value
-  // doesn't leak into a fresh prompt.
+  // doesn't leak into a fresh prompt (state adjustment during render,
+  // per react.dev "you might not need an effect").
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setValue(defaultValue);
+  }
+
+  // Focus + select once the dialog has actually mounted.
   useEffect(() => {
     if (open) {
-      setValue(defaultValue);
-      // Defer focus so the dialog has actually mounted.
       requestAnimationFrame(() => {
         inputRef.current?.focus();
         inputRef.current?.select();
       });
     }
-  }, [open, defaultValue]);
+  }, [open]);
 
   function submit() {
     const trimmed = value.trim();
@@ -70,20 +70,18 @@ export function PromptDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-[rgba(212,255,46,0.10)] border border-[rgba(212,255,46,0.30)] flex items-center justify-center shrink-0">
-              <Pencil size={16} className="text-[#0073EA]" />
-            </div>
-            <div>
-              <DialogTitle>{title}</DialogTitle>
-              {description && (
-                <p className="text-[13px] text-muted mt-1 leading-relaxed">{description}</p>
-              )}
-            </div>
-          </div>
-        </DialogHeader>
+      <DialogContent className="max-w-[420px] gap-0 p-6">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-[#0073EA]/15">
+            <Pencil size={14} className="text-[#0073EA]" />
+          </span>
+          <DialogTitle className="text-[15px] leading-none">{title}</DialogTitle>
+        </div>
+        {description && (
+          <p className="mt-2.5 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {description}
+          </p>
+        )}
 
         <div className="mt-3">
           <Input
@@ -104,14 +102,14 @@ export function PromptDialog({
           />
         </div>
 
-        <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={onClose} disabled={loading}>
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose} disabled={loading}>
             {cancelLabel}
           </Button>
-          <Button onClick={submit} disabled={loading || (required && !value.trim())}>
+          <Button size="sm" onClick={submit} disabled={loading || (required && !value.trim())}>
             {loading ? "Saving…" : submitLabel}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

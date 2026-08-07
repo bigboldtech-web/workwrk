@@ -356,7 +356,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             type="button"
             onClick={() => void handleSend()}
             disabled={!canSend}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-4 text-[12.5px] font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[12.5px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
           >
             {sending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

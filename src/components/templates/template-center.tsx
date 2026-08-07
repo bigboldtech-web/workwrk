@@ -169,7 +169,7 @@ export function TemplateCenter({ open, onClose, kind, applyContext, onApplied }:
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div className="relative w-full max-w-[1040px] h-[82vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-zinc-200/60">
+      <div role="dialog" aria-modal="true" aria-label="Template Center" className="relative w-full max-w-[1040px] h-[82vh] bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-zinc-200/60">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b border-zinc-100">
           {selected ? (

@@ -86,16 +86,21 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 backdrop-blur-sm pt-[16vh] px-4"
+      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 pt-[16vh] px-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-[540px] bg-zinc-900 text-white rounded-2xl shadow-2xl border border-zinc-800 overflow-hidden">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Set status"
+        className="w-full max-w-[480px] bg-white dark:bg-[#14171D] text-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-[#2A2F38] overflow-hidden"
+      >
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
-          <h2 className="text-[18px] font-semibold">Set status</h2>
+          <h2 className="text-[15px] font-semibold text-zinc-900">Set status</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded-md text-zinc-400 hover:text-white hover:bg-zinc-800"
+            className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -104,7 +109,7 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
         <div className="px-5 pb-4 flex items-center gap-2">
           <button
             type="button"
-            className="w-9 h-9 rounded-lg border border-zinc-700 bg-zinc-800 flex items-center justify-center hover:border-zinc-600"
+            className="w-9 h-9 rounded-lg border border-zinc-200 bg-white flex items-center justify-center hover:bg-zinc-50"
             title="Pick emoji"
             onClick={() => setEmoji((e) => (e ? null : "😀"))}
           >
@@ -117,31 +122,31 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="What's on your mind?"
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-[14px] placeholder:text-zinc-500 focus:border-zinc-500 focus:outline-none"
+            className="flex-1 bg-white border border-zinc-200 rounded-md px-3 py-2 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#0073EA]"
           />
         </div>
         <div className="px-5 pb-5">
-          <div className="text-[12px] text-zinc-400 mb-2">For Cashkr Team</div>
+          <div className="text-[11px] uppercase tracking-wide text-zinc-400 mb-2">For Cashkr Team</div>
           <div className="space-y-1">
             {PRESETS.map((p) => (
               <button
                 key={p.label}
                 type="button"
                 onClick={() => applyPreset(p)}
-                className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-800 text-left"
+                className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-50 text-left"
               >
                 <span className="text-[18px]">{p.emoji}</span>
-                <span className="text-[14px] font-medium text-white">{p.label}</span>
-                <span className="text-[13px] text-zinc-400">— {p.expiry}</span>
+                <span className="text-[13px] font-medium text-zinc-900">{p.label}</span>
+                <span className="text-[12px] text-zinc-500">— {p.expiry}</span>
               </button>
             ))}
           </div>
         </div>
-        <div className="border-t border-zinc-800 px-5 py-3 flex justify-end">
+        <div className="border-t border-zinc-100 px-5 py-3 flex justify-end">
           <button
             type="button"
             onClick={save}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-800 hover:bg-zinc-700 text-[13px] font-medium border border-zinc-700"
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-[#0073EA] hover:bg-[#0060B9] text-white text-[12.5px] font-medium"
           >
             Save
             <CornerDownLeft className="w-3 h-3" />
