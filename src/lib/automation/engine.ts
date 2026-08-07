@@ -31,13 +31,13 @@ import { getUsageState, notifyLimitExceeded, recordUsage } from "./usage";
 export const MAX_CHAIN_DEPTH = 3;
 export const MAX_RUNS_PER_RECORD_PER_HOUR = 20;
 
-interface NormalizedAction {
+export interface NormalizedAction {
   key: string;
   name: string;
   params: Record<string, unknown>;
 }
 
-interface ParsedDefinition {
+export interface ParsedDefinition {
   conditions: unknown;
   actions: NormalizedAction[];
 }
@@ -60,7 +60,7 @@ function isP2002(err: unknown): boolean {
 }
 
 /** Accepts both builder shapes: {key|action|type, name, params|config}. */
-function parseDefinition(definition: unknown): ParsedDefinition {
+export function parseDefinition(definition: unknown): ParsedDefinition {
   const def = asRecord(definition);
   const rawActions = Array.isArray(def.actions) ? def.actions : [];
   const actions: NormalizedAction[] = [];
