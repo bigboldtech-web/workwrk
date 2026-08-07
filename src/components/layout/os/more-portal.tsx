@@ -48,7 +48,7 @@ export function MorePortal({
   placement = "right",
   point = null,
 }: Props) {
-  const [coords, setCoords] = useState<{ left: number; top: number } | null>(null);
+  const [coords, setCoords] = useState<{ left: number; top: number; maxHeight?: number } | null>(null);
   const localRef = useRef<HTMLDivElement>(null);
   const ref = panelRef ?? localRef;
 
@@ -74,30 +74,64 @@ export function MorePortal({
       }
       if (left < margin) left = margin;
 
-      // Push up if it would overflow the bottom. Assume max 480px panel
-      // height — generous; most More menus are well under this.
-      const PANEL_MAX_H = 480;
-      if (top + PANEL_MAX_H + margin > window.innerHeight) {
-        top = Math.max(margin, window.innerHeight - PANEL_MAX_H - margin);
+      // Vertical fit — every action (Delete included) must stay on-screen.
+      // First paint has no measurement yet, so assume a generous height;
+      // the post-paint pass below re-runs with the panel's REAL height.
+      const vh = window.innerHeight;
+      const panelH = ref.current?.offsetHeight || 480;
+      let maxHeight: number | undefined;
+      if (top + panelH + margin > vh) {
+        // Doesn't fit below/at the anchor — flip to open upward when the
+        // panel fits above it (bottom-aligned for "right", above for "below").
+        const flippedTop = placement === "below"
+          ? rect.top - gap - panelH
+          : rect.bottom - panelH;
+        if (flippedTop >= margin) {
+          top = flippedTop;
+        } else {
+          // Taller than either side allows: pin inside the viewport and let
+          // the panel scroll internally so the last items stay reachable.
+          top = Math.max(margin, vh - panelH - margin);
+          if (panelH > vh - margin * 2) maxHeight = vh - margin * 2;
+        }
       }
 
-      setCoords({ left, top });
+      setCoords({ left, top, maxHeight });
     };
     compute();
+    // Re-run after paint with the real panel height, and again whenever the
+    // panel's content grows (submenus, async rows).
+    const raf = requestAnimationFrame(compute);
+    let ro: ResizeObserver | null = null;
+    const attach = requestAnimationFrame(() => {
+      if (ref.current && typeof ResizeObserver !== "undefined") {
+        ro = new ResizeObserver(() => compute());
+        ro.observe(ref.current);
+      }
+    });
     window.addEventListener("resize", compute);
     window.addEventListener("scroll", compute, true);
     return () => {
+      cancelAnimationFrame(raf);
+      cancelAnimationFrame(attach);
+      ro?.disconnect();
       window.removeEventListener("resize", compute);
       window.removeEventListener("scroll", compute, true);
     };
-  }, [open, anchorRef, width, placement, point]);
+  }, [open, anchorRef, width, placement, point, ref]);
 
   if (!open || !coords || typeof document === "undefined") return null;
 
   return createPortal(
     <div
       ref={ref}
-      style={{ position: "fixed", left: coords.left, top: coords.top, width }}
+      style={{
+        position: "fixed",
+        left: coords.left,
+        top: coords.top,
+        width,
+        ...(coords.maxHeight ? { maxHeight: coords.maxHeight, overflowY: "auto" as const } : {}),
+      }}
       // workwrk-os: portals mount on document.body, OUTSIDE the app shell, so
       // without this class the os.css dark-mode utility repaints (scoped to
       // .workwrk-os) never reach portal panels — bg-white panels stay white

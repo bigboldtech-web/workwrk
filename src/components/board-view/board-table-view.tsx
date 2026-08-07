@@ -1078,7 +1078,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           icon={c.icon}
         />
       ))}
-      <th className="px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
+      {/* Pinned to the visible right edge: with many columns the table
+          scrolls horizontally and a non-sticky "+" (add field) drifts
+          off-screen — users read it as the button being gone. */}
+      <th className="sticky right-0 z-[5] bg-white px-1 py-2 text-right align-middle" style={{ width: actionsW }}>
         {canEdit && onOpenFields ? (
           <button
             type="button"
@@ -1727,7 +1730,7 @@ function Row({
       {showSops ? (
         <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
       ) : null}
-      <td className="px-2 py-1.5 text-right">
+      <td className="sticky right-0 bg-white group-hover:bg-zinc-50 px-2 py-1.5 text-right">
         {canEdit ? (
           <ItemRowMoreMenu
             ref={moreRef}

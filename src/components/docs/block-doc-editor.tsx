@@ -22,7 +22,7 @@ import {
   ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
   MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
   ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight, Paperclip,
-  PanelLeft, FilePlus, ChevronUp,
+  FilePlus, ChevronUp,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
@@ -35,7 +35,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
 import { DocShareModal } from "./doc-share-modal";
-import { DocPagesPanel, useDocTree, createChildPage } from "./doc-pages-panel";
+import { useDocTree, createChildPage } from "./doc-pages-panel";
 import { MenuList } from "@/components/ui/menu";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
@@ -174,28 +174,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   const [myRole, setMyRole] = useState<"edit" | "view">("edit");
   const [shareOpen, setShareOpen] = useState(false);
   const shareBtnRef = useRef<HTMLButtonElement | null>(null);
-  // Left Pages panel (ClickUp parity) — subpage tree fed by the flat
-  // GET /api/docs response. Pure chrome: it never touches the persist()
-  // save path, and peek panes (null) skip the fetch entirely.
+  // Subpage tree data — used ONLY for the breadcrumb ancestor chain here.
+  // The page tree itself lives in the DOCS SIDEBAR (Notion-style nesting),
+  // not in a second in-editor panel. Peek panes (null) skip the fetch.
   const tree = useDocTree(pane === "primary" ? docId : null);
-  const [pagesOpen, setPagesOpen] = useState<boolean>(() => {
-    try { return localStorage.getItem("workwrk:doc-pages-open") !== "0"; } catch { return true; }
-  });
-  const togglePages = useCallback(() => {
-    setPagesOpen((v) => {
-      const next = !v;
-      try { localStorage.setItem("workwrk:doc-pages-open", next ? "1" : "0"); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
-  // Ref on the content column (right of the Pages panel) so the bottom
-  // word-count pill can pin itself to the column's left edge.
+  // Ref on the content column so the bottom word-count pill can pin
+  // itself to the column's left edge.
   const contentColRef = useRef<HTMLDivElement | null>(null);
-  // In a ?peek= split the primary column is already half-width — the fixed
-  // 240px Pages panel would crush the editor, so it (and its toggle) hide
-  // until the split closes. The ghost Add page button stays available.
   const inSplit = !!searchParams.get("peek");
-  const showPagesPanel = pane === "primary" && pagesOpen && !inSplit;
 
   // Load current user for the comment author identity.
   useEffect(() => {
@@ -700,27 +686,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             panes keep it minimal — DocSplitView provides Close + Swap. */}
         {pane !== "peek" && (
           <div className="flex min-w-0 items-center gap-1.5">
-            {!inSplit && (
-              <button
-                type="button"
-                className={`bdoc__iact ${pagesOpen ? "is-on" : ""}`}
-                onClick={togglePages}
-                title={pagesOpen ? "Hide pages" : "Show pages"}
-                aria-pressed={pagesOpen}
-                aria-label="Pages"
-              >
-                <PanelLeft />
-              </button>
-            )}
-            {!showPagesPanel && (
-              <button
-                type="button"
-                onClick={() => void addSubpage()}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
-              >
-                <FilePlus className="h-3.5 w-3.5" /> Add page
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => void addSubpage()}
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
+            >
+              <FilePlus className="h-3.5 w-3.5" /> Add subpage
+            </button>
             <Link href="/docs" className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
               Docs
             </Link>
@@ -942,24 +914,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         </div>
       </header>
 
-      {/* Pages panel + content column. Additive layout only — everything
-          inside the right column (cover / conflict banner / page) is
-          untouched, as is the save machinery it renders. */}
+      {/* Content column. The page tree lives in the docs sidebar now
+          (Notion-style); the editor keeps only breadcrumbs + Add subpage. */}
       <div className="flex items-start">
-      {showPagesPanel && tree.rootId && (
-        <DocPagesPanel
-          docId={docId}
-          rootId={tree.rootId}
-          rowsById={tree.rowsById}
-          childrenOf={tree.childrenOf}
-          ancestors={tree.ancestors}
-          refresh={() => void tree.refresh()}
-          currentTitle={title}
-          currentEmoji={meta.icon ?? null}
-          onNavigate={(id) => router.push(`/docs/${id}`)}
-          onCollapse={togglePages}
-        />
-      )}
       <div className="flex-1 min-w-0" ref={contentColRef}>
 
       {/* Cover */}
@@ -1118,7 +1075,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
       {/* Bottom word-count pill — fixed at the content column's left edge. */}
       {pane === "primary" && blocks && blocks.length > 0 && (
-        <WordCountPill blocks={blocks} containerRef={contentColRef} recomputeKey={showPagesPanel} />
+        <WordCountPill blocks={blocks} containerRef={contentColRef} recomputeKey={inSplit} />
       )}
 
       {/* Outline rail only when no slide-over panel is open and not in

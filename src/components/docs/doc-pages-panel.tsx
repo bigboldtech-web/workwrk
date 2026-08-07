@@ -35,7 +35,7 @@ export type DocTreeRow = {
  * POST a new child page under `parentId` and broadcast the change.
  * Returns the new doc id, or null on failure (caller shows the toast).
  */
-export async function createChildPage(parentId: string): Promise<string | null> {
+export async function createChildPage(parentId: string | null): Promise<string | null> {
   try {
     const res = await fetch("/api/docs", {
       method: "POST",

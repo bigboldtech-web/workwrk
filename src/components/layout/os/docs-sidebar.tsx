@@ -13,10 +13,11 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   FileText, User, Users, Lock, Archive, NotebookPen, Star, BookOpen,
-  MoreHorizontal, type LucideIcon,
+  MoreHorizontal, ChevronRight, Plus, type LucideIcon,
 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
+import { createChildPage } from "@/components/docs/doc-pages-panel";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 
 type DocRow = {
@@ -85,12 +86,6 @@ export function DocsSidebar() {
   }, [docs, meId]);
 
   const q = query.trim().toLowerCase();
-  const recent = useMemo(() => {
-    const list = [...(docs ?? [])]
-      .filter((d) => !q || d.title.toLowerCase().includes(q))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return list.slice(0, 6);
-  }, [docs, q]);
   const favorites = useMemo(
     () => (docs ?? []).filter((d) => favIds.has(d.id) && (!q || d.title.toLowerCase().includes(q))),
     [docs, favIds, q],
@@ -142,24 +137,20 @@ export function DocsSidebar() {
         </ul>
       )}
 
-      {/* Recent Pages */}
-      <SectionLabel>Recent Pages</SectionLabel>
+      {/* Pages — the Notion-style nested tree. Sub-pages live under their
+          parent with chevrons; hover a row for "+" (add sub-page) and "…". */}
+      <SectionLabel>Pages</SectionLabel>
       {docs === null ? (
         <div className="px-2 py-1.5 text-[11.5px] text-zinc-400">Loading…</div>
-      ) : recent.length === 0 ? (
-        <EmptyCard Icon={FileText} text="Recently opened docs appear here" />
       ) : (
-        <ul className="flex flex-col gap-0.5">
-          {recent.map((d) => (
-            <DocLink key={`rec-${d.id}`} doc={d} onMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) })} onOpen={() => router.push(`/docs/${d.id}`)} active={pathname === `/docs/${d.id}`} />
-          ))}
-          <li>
-            <Link href="/docs" className="flex items-center gap-2 h-7 px-2 rounded-md text-[12.5px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600">
-              <MoreHorizontal className="w-4 h-4 shrink-0" />
-              <span>More</span>
-            </Link>
-          </li>
-        </ul>
+        <PagesTree
+          docs={docs}
+          query={q}
+          activePath={pathname}
+          onOpen={(id) => router.push(`/docs/${id}`)}
+          onMenu={(e, d) => noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) })}
+          onChanged={() => void load()}
+        />
       )}
 
       {/* Popular Wikis */}
@@ -189,6 +180,191 @@ function EmptyCard({ Icon, text }: { Icon: LucideIcon; text: string }) {
       <Icon className="w-4 h-4 mx-auto text-zinc-300" />
       <p className="mt-1.5 text-[11.5px] text-zinc-400 leading-snug">{text}</p>
     </div>
+  );
+}
+
+const EXPANDED_LS = "workwrk:docs:pages-open";
+
+/**
+ * PagesTree — Notion-style nested page list for the docs sidebar.
+ * Rows are h-7, children indent under their parent behind a chevron, and
+ * hovering a row reveals "+" (add a sub-page) and "…" (actions). While the
+ * sidebar search has a query, matches render as a flat list instead.
+ */
+function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
+  docs: DocRow[];
+  query: string;
+  activePath: string;
+  onOpen: (id: string) => void;
+  onMenu: (e: React.MouseEvent, doc: DocRow) => void;
+  onChanged: () => void;
+}) {
+  // Explicit user toggles (persisted); anything not overridden falls back to
+  // "auto-open" — the active doc's ancestor chain stays expanded so the
+  // current page is always visible without setState-in-effect.
+  const [overrides, setOverrides] = useState<Map<string, boolean>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(EXPANDED_LS) || "{}") as Record<string, boolean>;
+      return new Map(Object.entries(raw));
+    } catch { return new Map(); }
+  });
+
+  const { roots, childrenOf, byId } = useMemo(() => {
+    const map = new Map<string, DocRow>();
+    for (const d of docs) map.set(d.id, d);
+    const kids = new Map<string, DocRow[]>();
+    const rootRows: DocRow[] = [];
+    for (const d of docs) {
+      if (d.parentId && map.has(d.parentId)) {
+        const arr = kids.get(d.parentId) ?? [];
+        arr.push(d);
+        kids.set(d.parentId, arr);
+      } else {
+        rootRows.push(d);
+      }
+    }
+    const byTitle = (a: DocRow, b: DocRow) => (a.title || "Untitled").localeCompare(b.title || "Untitled");
+    rootRows.sort(byTitle);
+    for (const arr of kids.values()) arr.sort(byTitle);
+    return { roots: rootRows, childrenOf: kids, byId: map };
+  }, [docs]);
+
+  // Derived: the active doc's ancestor chain (auto-open unless the user
+  // explicitly collapsed a node).
+  const activeId = activePath.startsWith("/docs/") ? activePath.slice("/docs/".length) : null;
+  const autoOpen = useMemo(() => {
+    const set = new Set<string>();
+    let cur = activeId ? byId.get(activeId)?.parentId ?? null : null;
+    while (cur && !set.has(cur)) {
+      set.add(cur);
+      cur = byId.get(cur)?.parentId ?? null;
+    }
+    return set;
+  }, [activeId, byId]);
+
+  const isOpen = useCallback(
+    (id: string) => overrides.get(id) ?? autoOpen.has(id),
+    [overrides, autoOpen],
+  );
+  const toggle = useCallback((id: string) => {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(id, !(prev.get(id) ?? autoOpen.has(id)));
+      try { localStorage.setItem(EXPANDED_LS, JSON.stringify(Object.fromEntries(next))); } catch { /* ignore */ }
+      return next;
+    });
+  }, [autoOpen]);
+
+  const addPage = useCallback(async (parentId: string | null) => {
+    const id = await createChildPage(parentId);
+    if (id) onOpen(id);
+    onChanged();
+  }, [onOpen, onChanged]);
+
+  // Search mode: flat matches, no nesting.
+  if (query) {
+    const matches = docs.filter((d) => (d.title || "Untitled").toLowerCase().includes(query));
+    return matches.length === 0 ? (
+      <EmptyCard Icon={FileText} text="No pages match" />
+    ) : (
+      <ul className="flex flex-col gap-0.5">
+        {matches.map((d) => (
+          <PageRow key={d.id} doc={d} depth={0} hasChildren={false} open={false}
+            active={activePath === `/docs/${d.id}`} onToggle={() => {}} onOpen={() => onOpen(d.id)}
+            onAdd={() => void addPage(d.id)} onMenu={(e) => onMenu(e, d)} />
+        ))}
+      </ul>
+    );
+  }
+
+  const renderRows = (rows: DocRow[], depth: number, seen: Set<string>): React.ReactNode[] =>
+    rows.flatMap((d) => {
+      if (seen.has(d.id)) return [];
+      const nextSeen = new Set(seen).add(d.id);
+      const kids = childrenOf.get(d.id) ?? [];
+      const open = isOpen(d.id);
+      const row = (
+        <PageRow key={d.id} doc={d} depth={depth} hasChildren={kids.length > 0} open={open}
+          active={activePath === `/docs/${d.id}`} onToggle={() => toggle(d.id)} onOpen={() => onOpen(d.id)}
+          onAdd={() => void addPage(d.id)} onMenu={(e) => onMenu(e, d)} />
+      );
+      return open && kids.length > 0 ? [row, ...renderRows(kids, depth + 1, nextSeen)] : [row];
+    });
+
+  return (
+    <>
+      {roots.length === 0 ? (
+        <EmptyCard Icon={FileText} text="Create your first page" />
+      ) : (
+        <ul className="flex flex-col gap-0.5">{renderRows(roots, 0, new Set())}</ul>
+      )}
+      <button
+        type="button"
+        onClick={() => void addPage(null)}
+        className="mt-0.5 flex w-full items-center gap-2 h-7 px-2 rounded-md text-[12.5px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+      >
+        <Plus className="w-3.5 h-3.5 shrink-0" />
+        <span>New page</span>
+      </button>
+    </>
+  );
+}
+
+function PageRow({ doc, depth, hasChildren, open, active, onToggle, onOpen, onAdd, onMenu }: {
+  doc: DocRow;
+  depth: number;
+  hasChildren: boolean;
+  open: boolean;
+  active: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+  onAdd: () => void;
+  onMenu: (e: React.MouseEvent) => void;
+}) {
+  return (
+    <li
+      className={`group/page flex items-center gap-1 h-7 pr-1 rounded-md text-[13px] cursor-pointer ${
+        active ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
+      }`}
+      style={{ paddingLeft: 4 + depth * 14 }}
+      onClick={onOpen}
+      onContextMenu={onMenu}
+    >
+      <button
+        type="button"
+        aria-label={hasChildren ? (open ? "Collapse" : "Expand") : undefined}
+        tabIndex={hasChildren ? 0 : -1}
+        className={`w-4 h-4 grid place-items-center rounded shrink-0 text-zinc-400 ${
+          hasChildren ? "hover:bg-zinc-200 hover:text-zinc-700" : "pointer-events-none opacity-0"
+        }`}
+        onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      >
+        <ChevronRight className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      <span className="w-4 shrink-0 grid place-items-center text-[13px] [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
+        {doc.emoji ? renderNoteIcon(doc.emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
+      </span>
+      <span className="truncate flex-1">{doc.title || "Untitled"}</span>
+      <span className="hidden group-hover/page:flex items-center gap-0.5 shrink-0">
+        <button
+          type="button"
+          className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+          aria-label="Add page inside"
+          title="Add page inside"
+          onClick={(e) => { e.stopPropagation(); onAdd(); }}
+        >
+          <Plus className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+          aria-label="Page actions"
+          onClick={(e) => { e.stopPropagation(); onMenu(e); }}
+        >
+          <MoreHorizontal className="w-3.5 h-3.5" />
+        </button>
+      </span>
+    </li>
   );
 }
 
