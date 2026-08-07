@@ -67,7 +67,7 @@ export default function PolicyLedgerPage() {
         actions={
           <div className="flex items-center gap-2">
             {data ? (
-              <a href={`/api/policies/${id}/ledger/export`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">
+              <a href={`/api/policies/${id}/ledger/export`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]">
                 <Download className="h-3.5 w-3.5" /> Export CSV
               </a>
             ) : null}

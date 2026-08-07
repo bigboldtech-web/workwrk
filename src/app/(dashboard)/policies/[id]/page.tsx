@@ -277,7 +277,7 @@ export default function PolicyDetailPage() {
       <div className={`px-6 py-8 ${editing ? "w-full max-w-none" : "mx-auto max-w-3xl"}`}>
         {loadErr ? (
           <div className="text-sm text-zinc-500">
-            Couldn&apos;t load this policy. <Link href="/policies" className="text-violet-600 underline">Back to Policies</Link>
+            Couldn&apos;t load this policy. <Link href="/policies" className="text-[#0073EA] underline">Back to Policies</Link>
           </div>
         ) : !policy ? (
           <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
@@ -323,7 +323,7 @@ export default function PolicyDetailPage() {
               </datalist>
               {editStatus === "PUBLISHED" ? (
                 <label className="flex items-center gap-1.5 text-[13px] text-zinc-600" title="Material change — resets everyone to pending and requires them to re-acknowledge the new version. Leave off for typo/format fixes.">
-                  <input type="checkbox" checked={editRequireReack} onChange={(e) => setEditRequireReack(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                  <input type="checkbox" checked={editRequireReack} onChange={(e) => setEditRequireReack(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                   Require re-acknowledgement
                 </label>
               ) : null}
@@ -331,7 +331,7 @@ export default function PolicyDetailPage() {
               <button type="button" onClick={() => setEditing(false)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
                 <X className="h-3.5 w-3.5" /> Cancel
               </button>
-              <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+              <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
               </button>
             </div>
@@ -390,10 +390,10 @@ export default function PolicyDetailPage() {
                   ) : (
                     <div className="flex flex-col items-end gap-2">
                       <label className="flex max-w-sm cursor-pointer items-start gap-2 text-[13px] text-zinc-700">
-                        <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                        <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 h-4 w-4" style={{ accentColor: "#0073EA" }} />
                         <span>{policy.ackStatement?.trim() || DEFAULT_ATTESTATION}</span>
                       </label>
-                      <button type="button" onClick={acknowledge} disabled={acking || !attested} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                      <button type="button" onClick={acknowledge} disabled={acking || !attested} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                         {acking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Acknowledge
                       </button>
                     </div>
@@ -480,7 +480,7 @@ export default function PolicyDetailPage() {
             </div>
             <div className="border-b border-zinc-100 px-4 py-2.5">
               <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-700">
-                <input type="checkbox" checked={assignAll} onChange={(e) => setAssignAll(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                <input type="checkbox" checked={assignAll} onChange={(e) => setAssignAll(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                 Everyone in the org
               </label>
             </div>
@@ -504,7 +504,7 @@ export default function PolicyDetailPage() {
                           return (
                             <li key={u.id}>
                               <label className="flex cursor-pointer items-center gap-2.5 px-4 py-2 hover:bg-zinc-50">
-                                <input type="checkbox" checked={on} onChange={() => setSelectedIds((prev) => { const n = new Set(prev); if (on) n.delete(u.id); else n.add(u.id); return n; })} className="h-4 w-4" style={{ accentColor: "#7c3aed" }} />
+                                <input type="checkbox" checked={on} onChange={() => setSelectedIds((prev) => { const n = new Set(prev); if (on) n.delete(u.id); else n.add(u.id); return n; })} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                                 <div className="min-w-0">
                                   <div className="truncate text-[13px] text-zinc-800">{u.firstName} {u.lastName}</div>
                                   <div className="truncate text-[11px] text-zinc-400">{u.email}</div>
@@ -526,7 +526,7 @@ export default function PolicyDetailPage() {
             </div>
             <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3">
               <div className="text-[12px] text-zinc-400">{assignAll ? "All active employees" : `${selectedIds.size} selected`}</div>
-              <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+              <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                 {assignBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Assign
               </button>
             </div>

@@ -200,8 +200,8 @@ function AutosaveIndicator({
 
   const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border";
   if (status === "saving") {
-    return <span className={`${common} border-[rgba(212,255,46,0.3)] bg-[rgba(212,255,46,0.08)] text-[color:var(--accent-strong)]`}>
-      <span className="inline-block w-1.5 h-1.5 rounded-full bg-violet-600 animate-pulse" />
+    return <span className={`${common} border-blue-200 bg-blue-50 text-blue-700`}>
+      <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0073EA] animate-pulse" />
       Saving…
     </span>;
   }
@@ -294,14 +294,14 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="text-[11px] px-2 py-1 rounded border border-dashed border-zinc-200 text-zinc-500 hover:text-[#e2ff6b] hover:border-violet-500"
+        className="text-[11px] px-2 py-1 rounded border border-dashed border-zinc-200 text-zinc-500 hover:text-[#0073EA] hover:border-blue-300"
       >
         + Upload image
       </button>
       <button
         type="button"
         onClick={handleUrl}
-        className="text-[11px] px-2 py-1 rounded text-zinc-500 hover:text-[#e2ff6b]"
+        className="text-[11px] px-2 py-1 rounded text-zinc-500 hover:text-[#0073EA]"
       >
         or paste URL
       </button>
@@ -1641,7 +1641,7 @@ export default function SOPDetailPage() {
                               <input
                                 type="text"
                                 defaultValue={step.description || `Step ${index + 1}`}
-                                className="w-full text-sm font-medium bg-transparent border-b border-zinc-200 pb-1 focus:border-violet-500 focus:outline-none"
+                                className="w-full text-sm font-medium bg-transparent border-b border-zinc-200 pb-1 focus:border-[#0073EA] focus:outline-none"
                                 onBlur={(e) => {
                                   const newSteps = [...(sop.content.steps as RecordedStep[])];
                                   newSteps[index] = { ...newSteps[index], description: e.target.value };
@@ -1674,7 +1674,7 @@ export default function SOPDetailPage() {
                     })}
                     {/* Add Step button for recorded SOPs */}
                     {editing && (
-                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-zinc-200 text-zinc-500 hover:text-[#e2ff6b] gap-1.5 mt-2" onClick={() => {
+                      <Button variant="ghost" size="sm" className="w-full border border-dashed border-zinc-200 text-zinc-500 hover:text-[#0073EA] gap-1.5 mt-2" onClick={() => {
                         const newSteps = [...(sop.content.steps as RecordedStep[]), {
                           order: (sop.content.steps as RecordedStep[]).length + 1,
                           action: "manual",
@@ -1750,7 +1750,7 @@ export default function SOPDetailPage() {
                         className={`flex items-start gap-3 p-3 rounded-lg border bg-zinc-100 group transition-all ${
                           isDragging ? "opacity-40" : ""
                         } ${
-                          isDropTarget ? "border-violet-500 ring-1 ring-[rgba(212,255,46,0.35)]" : "border-zinc-200"
+                          isDropTarget ? "border-[#0073EA] ring-1 ring-[#0073EA]/30" : "border-zinc-200"
                         }`}
                       >
                         <div

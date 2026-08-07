@@ -558,7 +558,7 @@ function AiStandUpCard({ firstName }: { firstName: string }) {
     <DashCard
       title="AI StandUp"
       subtitle="Last 7 days"
-      titleIcon={<Sparkles className="w-3.5 h-3.5 text-violet-500" />}
+      titleIcon={<Sparkles className="w-3.5 h-3.5 text-[#0073EA]" />}
       actions={
         <>
           <button type="button" aria-label="Refresh" className="p-1 rounded hover:bg-zinc-100 text-zinc-500" title="Refresh">

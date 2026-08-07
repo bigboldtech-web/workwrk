@@ -107,7 +107,7 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-12">
         <div className="max-w-md mx-auto text-center">
-          <ClipboardList className="w-8 h-8 mx-auto text-violet-400 mb-3" />
+          <ClipboardList className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
           <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">
             {picking ? "Change the connected form" : "Connect a form to this List"}
           </h3>
@@ -164,7 +164,7 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
   return (
     <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
-        <ClipboardList className="w-3.5 h-3.5 text-violet-500" />
+        <ClipboardList className="w-3.5 h-3.5 text-[#0073EA]" />
         <span className="text-[12.5px] font-medium text-zinc-800">Live form</span>
         <div className="flex-1" />
         <button

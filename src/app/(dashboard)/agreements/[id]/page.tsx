@@ -157,12 +157,12 @@ export default function AgreementEditorPage() {
               </button>
             ) : null}
             {ag?.isTemplate ? (
-              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
+              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
             ) : (
               <>
                 <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
                 <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
-                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                   {sendBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send to signers
                 </button>
               </>
@@ -174,7 +174,7 @@ export default function AgreementEditorPage() {
       />
 
       {loadErr ? (
-        <div className="px-6 py-8 text-sm text-zinc-500">Couldn&apos;t load this contract. <Link href="/agreements" className="text-violet-600 underline">Back</Link></div>
+        <div className="px-6 py-8 text-sm text-zinc-500">Couldn&apos;t load this contract. <Link href="/agreements" className="text-[#0073EA] underline">Back</Link></div>
       ) : !ag ? (
         <div className="flex items-center gap-2 px-6 py-8 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : (
@@ -240,7 +240,7 @@ export default function AgreementEditorPage() {
                     <div className="truncate text-[13px] font-medium text-zinc-800">{l.name}</div>
                     <div className="truncate text-[11px] text-zinc-400">{l.link}</div>
                   </div>
-                  <button type="button" onClick={() => copyText(l.link)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-violet-600 px-2.5 text-[12px] font-medium text-white hover:bg-violet-500"><Copy className="h-3 w-3" /> Copy</button>
+                  <button type="button" onClick={() => copyText(l.link)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#0073EA] px-2.5 text-[12px] font-medium text-white hover:bg-[#0060B9]"><Copy className="h-3 w-3" /> Copy</button>
                 </li>
               ))}
             </ul>

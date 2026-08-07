@@ -50,11 +50,11 @@ interface Props {
 }
 
 const KIND_META: Record<ApprovalKind, { label: string; icon: typeof DollarSign; color: string }> = {
-  expense: { label: "Expenses", icon: DollarSign, color: "text-green-400" },
-  po: { label: "Purchase orders", icon: ShoppingCart, color: "text-blue-400" },
-  invoice: { label: "Invoices", icon: Receipt, color: "text-violet-400" },
-  time_off: { label: "Time off", icon: CalendarOff, color: "text-amber-400" },
-  timesheet: { label: "Timesheets", icon: Clock, color: "text-cyan-400" },
+  expense: { label: "Expenses", icon: DollarSign, color: "text-green-600" },
+  po: { label: "Purchase orders", icon: ShoppingCart, color: "text-blue-600" },
+  invoice: { label: "Invoices", icon: Receipt, color: "text-zinc-500" },
+  time_off: { label: "Time off", icon: CalendarOff, color: "text-amber-600" },
+  timesheet: { label: "Timesheets", icon: Clock, color: "text-cyan-600" },
 };
 
 /** Build the fetch params for an approve/reject action against a given item. */

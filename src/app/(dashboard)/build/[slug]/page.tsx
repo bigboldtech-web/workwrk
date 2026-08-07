@@ -137,7 +137,7 @@ export default function BuildAppPage() {
             {app.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[10px] font-medium mb-1">
+            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-[10px] font-medium mb-1">
               <Wand2 size={10} /> Built with Vibe
             </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
@@ -149,7 +149,7 @@ export default function BuildAppPage() {
           <button
             type="button"
             onClick={() => setShowNewRow(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0073EA] hover:bg-[#0060B9] text-white text-sm font-medium"
           >
             <Plus size={14} /> New row
           </button>
@@ -180,7 +180,7 @@ export default function BuildAppPage() {
           <button
             type="button"
             onClick={() => setShowNewRow(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0073EA] hover:bg-[#0060B9] text-white text-xs font-medium"
           >
             <Plus size={11} /> Add first row
           </button>
@@ -256,7 +256,7 @@ function CellValue({ field, value }: { field: AppField; value: unknown }) {
       return (
         <div className="flex flex-wrap gap-1">
           {arr.map((v) => (
-            <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-950/40 text-violet-700">{v}</span>
+            <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
           ))}
         </div>
       );
@@ -266,9 +266,9 @@ function CellValue({ field, value }: { field: AppField; value: unknown }) {
       return <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
     }
     case "URL":
-      return <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
+      return <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;
     case "EMAIL":
-      return <a href={`mailto:${String(value)}`} className="text-xs text-violet-600 hover:underline">{String(value)}</a>;
+      return <a href={`mailto:${String(value)}`} className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;
     case "TEXTAREA":
       return <span className="line-clamp-2 text-xs text-zinc-500">{String(value)}</span>;
     default:
@@ -347,7 +347,7 @@ function NewRowModal({
                       key={c.value}
                       type="button"
                       onClick={() => toggleMulti(f.key, c.value)}
-                      className={"text-xs px-2 py-1 rounded-md border transition-colors " + (sel ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700" : "bg-white border-zinc-200 text-zinc-500 hover:border-muted-2")}
+                      className={"text-xs px-2 py-1 rounded-md border transition-colors " + (sel ? "bg-blue-100 dark:bg-blue-500/10 border-blue-300 text-blue-700" : "bg-white border-zinc-200 text-zinc-500 hover:border-muted-2")}
                     >
                       {c.label ?? c.value}
                     </button>
@@ -370,7 +370,7 @@ function NewRowModal({
             type="button"
             onClick={submit}
             disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-[#0073EA] hover:bg-[#0060B9] text-white disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
             {saving ? "Saving…" : "Save row"}

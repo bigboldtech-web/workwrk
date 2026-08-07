@@ -244,11 +244,11 @@ export function TemplateCenter({ open, onClose, kind, applyContext, onApplied }:
                     <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
                       {items.map((t) => (
                         <button key={t.id} type="button" onClick={() => openDetail(t.id)} className="text-left rounded-xl border border-zinc-200 bg-white hover:shadow-sm hover:border-zinc-300 transition-all p-3">
-                          <div className="h-20 rounded-lg bg-gradient-to-br from-zinc-50 to-zinc-100 mb-2.5 flex items-center justify-center text-zinc-300">
+                          <div className="h-20 rounded-lg bg-zinc-50 mb-2.5 flex items-center justify-center text-zinc-300">
                             <ListChecks className="w-6 h-6" />
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <CheckSquare className="w-3.5 h-3.5 text-fuchsia-500 shrink-0" />
+                            <CheckSquare className="w-3.5 h-3.5 text-[#0073EA] shrink-0" />
                             <span className="text-[13px] font-medium text-zinc-900 truncate">{t.name}</span>
                           </div>
                           <div className="mt-1.5 flex items-center gap-1.5">

@@ -321,7 +321,7 @@ function MyWeek({
           {active ? (
             <>
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <span className="w-2 h-2 rounded-full bg-violet-600 animate-pulse" />
+                <span className="w-2 h-2 rounded-full bg-[#00C875] animate-pulse" />
                 <div className="min-w-0">
                   <div className="text-sm font-medium">Clocked in</div>
                   <div className="text-xs text-muted">

@@ -151,8 +151,8 @@ export default function NewSopPage() {
           })}
         </div>
 
-        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-violet-100 bg-violet-50/50 px-4 py-2.5 text-center text-[12.5px] text-zinc-600">
-          <Sparkles className="h-4 w-4 shrink-0 text-violet-500" />
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-2.5 text-center text-[12.5px] text-zinc-600">
+          <Sparkles className="h-4 w-4 shrink-0 text-[#0073EA]" />
           Need inspiration? Sidekick can draft a first version for any of these — open it after creating.
         </div>
       </div>

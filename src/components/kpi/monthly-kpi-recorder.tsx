@@ -230,7 +230,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     return (
       <Card>
         <CardContent className="p-8 text-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-violet-500 border-t-transparent mx-auto" />
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0073EA] border-t-transparent mx-auto" />
           <p className="text-sm text-muted mt-3">Loading KPIs...</p>
         </CardContent>
       </Card>
@@ -344,7 +344,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                     definedFreq === "MONTHLY" ? "bg-surface-2 text-muted" :
                     definedFreq === "WEEKLY" ? "bg-cyan-500/10 text-cyan-400" :
                     definedFreq === "DAILY" ? "bg-blue-500/10 text-blue-400" :
-                    definedFreq === "QUARTERLY" ? "bg-purple-500/10 text-purple-400" :
+                    definedFreq === "QUARTERLY" ? "bg-blue-500/10 text-blue-600" :
                     "bg-amber-500/10 text-amber-400"; // ANNUALLY
                   return (
                     <div key={kpi.kpiId} className="border-b border-surface-2 last:border-b-0 px-4 py-3">

@@ -33,12 +33,12 @@ type ApiNotification = {
 
 interface TypeVisual { Icon: LucideIcon; color: string; label: string; bucket: "primary" | "other" }
 const TYPE_VISUAL: Record<string, TypeVisual> = {
-  mention:         { Icon: AtSign,        color: "#a855f7", label: "Mention",       bucket: "primary" },
+  mention:         { Icon: AtSign,        color: "#0073EA", label: "Mention",       bucket: "primary" },
   task_assigned:   { Icon: CheckSquare,   color: "#3b82f6", label: "Task assigned", bucket: "primary" },
   approval:        { Icon: ShieldAlert,   color: "#ef4444", label: "Approval",      bucket: "primary" },
   kudos:           { Icon: Heart,         color: "#ec4899", label: "Kudo",          bucket: "other" },
   task_due:        { Icon: Clock,         color: "#f97316", label: "Due",           bucket: "other" },
-  candor_session:  { Icon: MessageCircle, color: "#6366f1", label: "Candor",        bucket: "other" },
+  candor_session:  { Icon: MessageCircle, color: "#71717A", label: "Candor",        bucket: "other" },
   survey:          { Icon: ClipboardCheck,color: "#14b8a6", label: "Survey",        bucket: "other" },
   sop_published:   { Icon: BookOpen,      color: "#22c55e", label: "SOP",           bucket: "other" },
 };

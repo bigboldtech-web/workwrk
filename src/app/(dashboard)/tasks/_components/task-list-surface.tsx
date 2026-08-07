@@ -2603,7 +2603,7 @@ function TagsMenu({
         >
           Create
           {query.trim() ? (
-            <span className="rounded-full bg-violet-100 !px-2 py-0.5 text-[12px] font-medium text-violet-700">{query.trim()}</span>
+            <span className="rounded-full bg-blue-100 !px-2 py-0.5 text-[12px] font-medium text-blue-700">{query.trim()}</span>
           ) : null}
           <span className="ml-auto text-zinc-400">↵</span>
         </button>
@@ -3175,7 +3175,7 @@ function FormMode({
 
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-violet-100 bg-violet-50 !px-2 text-[11px] font-medium text-violet-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 !px-2 text-[11px] font-medium text-blue-700">
         <activeView.Icon className="h-3.5 w-3.5" />
         {activeView.label}
       </div>
@@ -3462,7 +3462,7 @@ function TaskDetailModal({
             </div>
             <h2 className="mb-4 text-[24px] font-semibold leading-tight text-zinc-950">{task.name}</h2>
             <div className="mb-5 rounded-lg bg-zinc-50 !px-3 py-2 text-[12px] text-zinc-600">
-              <Bot className="mr-1.5 inline h-3.5 w-3.5 text-fuchsia-500" />
+              <Bot className="mr-1.5 inline h-3.5 w-3.5 text-[#0073EA]" />
               Ask Brain to write a description, generate subtasks, or find similar tasks
             </div>
 
@@ -3600,7 +3600,7 @@ function TaskDetailModal({
                     {task.tags.length > 0 ? (
                       <span className="flex min-w-0 flex-wrap gap-1">
                         {task.tags.slice(0, 3).map((tag) => (
-                          <span key={tag} className="rounded-full bg-violet-50 !px-1.5 py-0.5 text-[11px] text-violet-700">
+                          <span key={tag} className="rounded-full bg-blue-50 !px-1.5 py-0.5 text-[11px] text-blue-700">
                             {tag}
                           </span>
                         ))}
@@ -3831,7 +3831,7 @@ function ActivityPanel({ task }: { task: TaskItem }) {
           <div className="flex items-center gap-1 text-zinc-400">
             <Plus className="h-4 w-4" />
             <span className="rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-600">Comment</span>
-            <Bot className="h-4 w-4 text-fuchsia-500" />
+            <Bot className="h-4 w-4 text-[#0073EA]" />
             <Paperclip className="h-4 w-4" />
             <button
               type="button"
@@ -4969,7 +4969,7 @@ function TagEditorPopover({
               <button
                 key={tag}
                 type="button"
-                className="inline-flex h-6 items-center gap-1 rounded-full bg-violet-50 !px-2 text-[11px] text-violet-700 hover:bg-violet-100"
+                className="inline-flex h-6 items-center gap-1 rounded-full bg-blue-50 !px-2 text-[11px] text-blue-700 hover:bg-blue-100"
                 onClick={() => onRemove(tag)}
               >
                 {tag}
@@ -4985,7 +4985,7 @@ function TagEditorPopover({
           onClick={onCreate}
         >
           <Tag className="h-3.5 w-3.5 text-zinc-500" />
-          Create {query.trim() ? <span className="rounded-full bg-violet-100 !px-1.5 text-violet-700">{query.trim()}</span> : "tag"}
+          Create {query.trim() ? <span className="rounded-full bg-blue-100 !px-1.5 text-blue-700">{query.trim()}</span> : "tag"}
         </button>
       </div>
     </div>

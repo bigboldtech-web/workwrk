@@ -185,7 +185,7 @@ export default function AgreementsPage() {
                         <div className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900">{r.title}</div>
                         <div className="flex shrink-0 items-center gap-1.5">
                           {r.isTemplate
-                            ? <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[11px] font-medium text-violet-700">template</span>
+                            ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">template</span>
                             : <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium capitalize ${STATUS_STYLE[r.status] ?? "bg-zinc-100 text-zinc-600"}`}>{r.status.replace(/_/g, " ").toLowerCase()}</span>}
                           <button type="button" onClick={(e) => openMenu(e, r)} className="rounded p-1 text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100" title="More"><MoreHorizontal className="h-4 w-4" /></button>
                         </div>
@@ -288,8 +288,8 @@ export default function AgreementsPage() {
                     {templates.map((t) => (
                       <li key={t.id}>
                         <button type="button" disabled={busy} onClick={() => createWith({ fromTemplateId: t.id })}
-                          className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 p-2.5 text-left hover:border-violet-300 hover:bg-violet-50/40 disabled:opacity-50">
-                          <LayoutTemplate className="h-4 w-4 shrink-0 text-violet-500" />
+                          className="flex w-full items-center gap-2 rounded-lg border border-zinc-200 p-2.5 text-left hover:border-blue-300 hover:bg-blue-50/40 disabled:opacity-50">
+                          <LayoutTemplate className="h-4 w-4 shrink-0 text-[#0073EA]" />
                           <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-800">{t.title}</span>
                           {t.category ? <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">{t.category}</span> : null}
                         </button>
@@ -318,8 +318,8 @@ function MenuItem({ Icon, label, onClick, danger }: { Icon: typeof Pencil; label
 function ChooserCard({ Icon, title, sub, onClick, disabled }: { Icon: typeof PenLine; title: string; sub: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button type="button" onClick={onClick} disabled={disabled}
-      className="flex flex-col items-start gap-2 rounded-xl border border-zinc-200 p-3.5 text-left transition-colors hover:border-violet-300 hover:bg-violet-50/40 disabled:cursor-not-allowed disabled:opacity-50">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-violet-50 text-violet-600"><Icon className="h-5 w-5" /></span>
+      className="flex flex-col items-start gap-2 rounded-xl border border-zinc-200 p-3.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-50">
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-[#0073EA]"><Icon className="h-5 w-5" /></span>
       <span className="text-[13px] font-semibold text-zinc-900">{title}</span>
       <span className="text-[11px] leading-snug text-zinc-500">{sub}</span>
     </button>

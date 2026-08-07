@@ -337,7 +337,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
               {err ? <div className="text-[12px] text-red-600">{err}</div> : null}
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" onClick={() => { setEditing(false); setErr(null); }} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
-                <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+                <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
                 </button>
               </div>
@@ -353,7 +353,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
               ) : null}
             </div>
           ) : (
-            <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[12.5px] text-zinc-500 hover:border-violet-300 hover:bg-violet-50/40">
+            <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[12.5px] text-zinc-500 hover:border-blue-300 hover:bg-blue-50/40">
               No credentials yet — click to add an ID &amp; password.
             </button>
           )}
