@@ -57,7 +57,7 @@ export default async function TeamOverviewPage() {
         {/* Headline stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Users} label="People" value={people} sub="active in org" accent="#0073EA" href="/people" />
-          <TeamStatTile icon={Briefcase} label="Roles" value={roles} sub="definitions" accent="#6366F1" href="/people/roles" />
+          <TeamStatTile icon={Briefcase} label="Roles" value={roles} sub="definitions" accent="#F59E0B" href="/people/roles" />
           <TeamStatTile icon={Star} label="KRAs" value={kras} sub="result areas" accent="#a78b6c" href="/kra-kpi" />
           <TeamStatTile icon={Gauge} label="KPIs" value={kpis} sub="metrics" accent="#16a34a" href="/kra-kpi" />
         </div>

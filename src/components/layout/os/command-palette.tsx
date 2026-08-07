@@ -261,7 +261,7 @@ const SOURCES: Array<{
   { key: "gmail",       label: "Gmail",        Icon: Mail,     tint: "#EA4335", connectable: true },
   { key: "drive",       label: "Google Drive", Icon: HardDrive,tint: "#34A853", connectable: true },
   { key: "sharepoint",  label: "SharePoint",   Icon: FileText, tint: "#0078D4", connectable: true },
-  { key: "apps",        label: "Apps",         Icon: Store,    tint: "#7C3AED" },
+  { key: "apps",        label: "Apps",         Icon: Store,    tint: "#F97316" },
 ];
 
 /** Type filter chip. Each defines its own predicate so a single chip can

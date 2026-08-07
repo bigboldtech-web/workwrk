@@ -18,7 +18,7 @@ const SECTIONS: { label: string; rows: Row[] }[] = [
     label: "People",
     rows: [
       { label: "Invite person", description: "Add someone + set access & manager", icon: UserPlus, href: "/settings/members?invite=1", iconColor: "#0073EA" },
-      { label: "New role", description: "Define a role (owns, KRAs, KPIs, SOPs)", icon: Briefcase, href: "/people/roles?new=1", iconColor: "#6366F1" },
+      { label: "New role", description: "Define a role (owns, KRAs, KPIs, SOPs)", icon: Briefcase, href: "/people/roles?new=1", iconColor: "#F59E0B" },
     ],
   },
   {

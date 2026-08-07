@@ -55,7 +55,7 @@ type StatusGroup = "ACTIVE" | "DONE" | "CLOSED";
 type StatusDef = { key: string; label: string; group: StatusGroup; color: string };
 const FALLBACK_STATUSES: StatusDef[] = [
   { key: "TO_DO", label: "TO DO", group: "ACTIVE", color: "#71717A" },
-  { key: "IN_PROGRESS", label: "IN PROGRESS", group: "ACTIVE", color: "#6366F1" },
+  { key: "IN_PROGRESS", label: "IN PROGRESS", group: "ACTIVE", color: "#3B82F6" },
   { key: "COMPLETE", label: "COMPLETE", group: "DONE", color: "#10B981" },
 ];
 const STATUS_GROUP_LABEL: Record<StatusGroup, string> = {
