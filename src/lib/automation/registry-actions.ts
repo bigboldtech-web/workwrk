@@ -69,7 +69,8 @@ function paramString(params: Record<string, unknown>, key: string, payload: Reco
 
 /**
  * Resolve a user-ish param: an explicit user id, or the special values
- * "assignee" / "actor" which read the trigger payload. Verifies org
+ * "assignee" / "actor" (read from the trigger payload) / "board_owner"
+ * (the owning board's ownerId, via payload.boardId). Verifies org
  * membership + ACTIVE status (the plan's "inactive assignee" edge case).
  */
 async function resolveUser(
@@ -85,6 +86,16 @@ async function resolveUser(
     const v = ctx.payload.actorId;
     if (typeof v !== "string" || !v) throw new Error("The trigger payload has no actor to resolve");
     userId = v;
+  } else if (raw === "board_owner") {
+    const boardId = typeof ctx.payload.boardId === "string" && ctx.payload.boardId ? ctx.payload.boardId : null;
+    if (!boardId) throw new Error("The trigger payload has no board to resolve an owner from");
+    const board = await prisma.board.findFirst({
+      where: { id: boardId, organizationId: ctx.organizationId },
+      select: { ownerId: true },
+    });
+    if (!board) throw new Error("Board no longer exists (deleted or outside this workspace)");
+    if (!board.ownerId) throw new Error("This board has no owner to resolve");
+    userId = board.ownerId;
   }
   const user = await prisma.user.findFirst({
     where: { id: userId, organizationId: ctx.organizationId },
@@ -134,7 +145,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     safeToRetry: true, // idempotent state-set
     available: true,
     params: [
-      { key: "userId", label: "Assignee", type: "user", required: true, help: 'A member, or "assignee"/"actor" from the trigger' },
+      { key: "userId", label: "Assignee", type: "user", required: true, help: 'A member, or "assignee"/"actor"/"board_owner" from the trigger' },
       { key: "itemId", label: "Task", type: "string", required: false, help: "Defaults to the triggering task" },
     ],
     async execute(ctx, params) {
@@ -263,7 +274,7 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
     safeToRetry: true,
     available: true,
     params: [
-      { key: "userId", label: "Recipient", type: "user", required: true, help: 'A member, or "assignee"/"actor" from the trigger' },
+      { key: "userId", label: "Recipient", type: "user", required: true, help: 'A member, "assignee"/"actor"/"board_owner" from the trigger, or "admins" for every workspace admin' },
       { key: "title", label: "Title", type: "string", required: false },
       { key: "message", label: "Message", type: "text", required: true, help: "Supports {{field}} tokens from the trigger" },
       { key: "link", label: "Link", type: "string", required: false },
@@ -273,17 +284,40 @@ export const AUTOMATION_ACTIONS: AutomationAction[] = [
       const message = paramString(params, "message", ctx.payload);
       if (!raw) throw new Error("create_notification requires a userId param");
       if (!message) throw new Error("create_notification requires a message param");
-      const user = await resolveUser(ctx, raw);
       const fallbackTitle = typeof ctx.payload.title === "string" && ctx.payload.title ? ctx.payload.title : "Automation";
       const link =
         paramString(params, "link", ctx.payload) ??
         (ctx.recordType === "task" && ctx.recordId ? `/item/${ctx.recordId}` : null);
+      const title = paramString(params, "title", ctx.payload) ?? fallbackTitle;
+
+      // "admins" fans out to every active workspace admin (idempotent
+      // enough for retry: the whole step either wrote or threw before
+      // createMany — the only write — so a re-run can't double-insert
+      // after success because succeeded steps are never re-run).
+      if (raw === "admins" || raw === "org_admins") {
+        const admins = await prisma.user.findMany({
+          where: {
+            organizationId: ctx.organizationId,
+            status: "ACTIVE",
+            deletedAt: null,
+            accessLevel: { in: ["COMPANY_ADMIN", "SUPER_ADMIN"] },
+          },
+          select: { id: true },
+        });
+        if (admins.length === 0) throw new Error("No active workspace admins to notify");
+        await prisma.notification.createMany({
+          data: admins.map((a) => ({ userId: a.id, type: "automation", title, message, link })),
+        });
+        return { recipients: admins.length, fanOut: "admins" };
+      }
+
+      const user = await resolveUser(ctx, raw);
       // Same shape the board comment mention fan-out writes.
       const created = await prisma.notification.create({
         data: {
           userId: user.id,
           type: "automation",
-          title: paramString(params, "title", ctx.payload) ?? fallbackTitle,
+          title,
           message,
           link,
         },
