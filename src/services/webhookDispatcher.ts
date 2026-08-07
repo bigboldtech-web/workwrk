@@ -1,5 +1,6 @@
 import { createHmac, randomBytes } from "crypto";
 import { prisma } from "@/lib/prisma";
+import { runAutomationsForEvent } from "@/lib/automation/engine";
 
 /**
  * Webhook dispatcher.
@@ -33,6 +34,12 @@ const DELIVERY_TIMEOUT_MS = 10_000;
 
 export async function dispatchEvent(input: DispatchEventInput): Promise<void> {
   const { organizationId, event, payload } = input;
+
+  // Automation engine fan-in — fire-and-forget, NEVER throws into the
+  // product write-path that dispatched this event. Kicked off before the
+  // subscription gate below so automations run even when the org has no
+  // webhook subscribers.
+  runAutomationsForEvent({ organizationId, event, payload }).catch(() => {});
 
   const subs = await prisma.webhookSubscription.findMany({
     where: {

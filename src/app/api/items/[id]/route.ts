@@ -13,6 +13,7 @@ import { getBoardStatuses } from "@/lib/board-items-shared";
 import { nextOccurrence, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
+import { dispatchEvent } from "@/services/webhookDispatcher";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const item = await prisma.item.findUnique({
@@ -181,6 +182,46 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   try {
     const updated = await updateBoardItem(id, parsed.data, c.userId);
+    // Event pipes ("lay pipes as you go") — flat payloads: ids + the
+    // fields automation conditions test. Fire-and-forget, never throws.
+    if (parsed.data.status !== undefined && gate.item.status !== updated.status) {
+      dispatchEvent({
+        organizationId: c.organizationId,
+        event: "task.status_changed",
+        payload: {
+          id: updated.id,
+          boardId: gate.item.boardId,
+          title: updated.title,
+          status: updated.status,
+          previousStatus: gate.item.status,
+          ownerId: updated.ownerId,
+          assigneeId: updated.ownerId,
+          priority: updated.priority,
+          dueAt: updated.dueAt,
+          actorId: c.userId,
+          updatedAt: updated.updatedAt,
+        },
+      }).catch(() => {});
+    }
+    if (parsed.data.ownerId !== undefined && gate.item.ownerId !== updated.ownerId) {
+      dispatchEvent({
+        organizationId: c.organizationId,
+        event: "task.assignee_changed",
+        payload: {
+          id: updated.id,
+          boardId: gate.item.boardId,
+          title: updated.title,
+          status: updated.status,
+          ownerId: updated.ownerId,
+          assigneeId: updated.ownerId,
+          previousAssigneeId: gate.item.ownerId,
+          priority: updated.priority,
+          dueAt: updated.dueAt,
+          actorId: c.userId,
+          updatedAt: updated.updatedAt,
+        },
+      }).catch(() => {});
+    }
     // Repeat turned on/off/changed → (re)compute the anchor's spawn schedule.
     if (parsed.data.recurRule !== undefined) {
       const rescheduled = await applyRecurrenceSchedule(id, parsed.data.recurRule ?? null, c.userId);
