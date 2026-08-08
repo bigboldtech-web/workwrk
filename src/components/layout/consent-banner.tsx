@@ -20,14 +20,14 @@ import type { ConsentState } from "@/lib/compliance/consent-client";
  * Styling note: the app runs with `.dark` on <html> by default, so semantic
  * tokens (bg-background / text-foreground / bg-surface) resolve to DARK values.
  * The visible product chrome is built from EXPLICIT light classes (bg-white,
- * zinc text, violet accent) — this banner matches that so it stays a white card
+ * zinc text, brand-blue accent) — this banner matches that so it stays a white card
  * on the white UI regardless of theme.
  */
 const BTN_SECONDARY =
   "inline-flex h-9 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3.5 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50";
 const BTN_PRIMARY =
-  "inline-flex h-9 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500";
-const LINK = "font-medium text-violet-600 underline underline-offset-2 hover:text-violet-700";
+  "inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13px] font-medium text-white hover:bg-[#0060B9]";
+const LINK = "font-medium text-[#0073EA] underline underline-offset-2 hover:text-[#0060B9]";
 
 export function ConsentBanner() {
   const { geo, showBanner, accept, acceptAll, rejectAll } = useConsent();
@@ -52,7 +52,7 @@ export function ConsentBanner() {
         {!showDetails ? (
           <>
             <div className="flex items-start gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#0073EA]">
                 <Shield size={18} />
               </div>
               <div className="min-w-0 flex-1">
@@ -187,7 +187,7 @@ function Row({
         disabled={disabled}
         onChange={(e) => onChange?.(e.target.checked)}
         className="mt-1 h-4 w-4"
-        style={{ accentColor: "#7c3aed" }}
+        style={{ accentColor: "#0073EA" }}
       />
     </label>
   );

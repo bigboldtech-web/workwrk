@@ -16366,8 +16366,14 @@ table.os-tbl {
 }
 .bn-mention:hover { background: color-mix(in srgb, var(--men-hue) 24%, transparent); }
 .bn-mention--user { --men-hue: var(--os-brand); }
-.bn-mention--doc  { --men-hue: #8b5cf6; }
+.bn-mention--doc  { --men-hue: var(--os-brand); }
 .bn-mention__icon { width: 13px; height: 13px; flex: 0 0 13px; }
+/* Focusable inline pills (tabIndex=0 role=link): browsers restore focus to
+   the last-clicked one on back-navigation and paint the default thick blue
+   ring. Same treatment as .bn-subpage — no outline, quiet tint on keyboard. */
+.bn-mention:focus,
+.bn-mention:focus-visible { outline: none; }
+.bn-mention:focus-visible { background: color-mix(in srgb, var(--men-hue) 16%, transparent); }
 .bn-mention__label { font-weight: 600; }
 
 /* ──────────── BN custom block: Equation (KaTeX) ──────────── */

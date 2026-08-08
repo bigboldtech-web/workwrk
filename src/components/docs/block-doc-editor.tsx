@@ -417,6 +417,16 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // single persist() writer (below) so title + body can never fire two
   // concurrent PUTs that 409 each other against the same knownUpdatedAt.
   const titleRef = useRef(title);
+  // Freshly created sub-pages arrive with ?new=1 — focus + select the title
+  // so the writer names the page instead of re-clicking Add subpage.
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  const focusedNewRef = useRef(false);
+  useEffect(() => {
+    if (focusedNewRef.current || !doc || searchParams.get("new") !== "1") return;
+    focusedNewRef.current = true;
+    const el = titleInputRef.current;
+    if (el) { el.focus(); el.select(); }
+  }, [doc, searchParams]);
   const bnDocRef = useRef(bnDoc);
   const blocksRef = useRef(blocks);
   const metaRef = useRef(meta);
@@ -580,7 +590,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // keepalive, so navigating away mid-edit is already safe.
   async function addSubpage() {
     const id = await createChildPage(docId);
-    if (id) router.push(`/docs/${id}`);
+    // ?new=1 → the destination editor focuses the title so the natural next
+    // action is NAMING the page, not clicking Add subpage again (which
+    // nested a child-of-a-child on every click).
+    if (id) router.push(`/docs/${id}?new=1`);
     else toast("Couldn't create page");
   }
 
@@ -1040,6 +1053,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
         <input
           type="text"
+          ref={titleInputRef}
           className="bdoc__title text-[40px]! font-bold! tracking-[-0.02em]! pt-1.5! pb-2!"
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
@@ -1093,21 +1107,19 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         {pane === "primary" && !readingMode && !meta.locked && myRole !== "view" && legacy === null && blocks !== null &&
           (blocks.length === 0 ||
             (blocks.length === 1 && blocks[0].kind === "paragraph" && !(blocks[0] as { text: string }).text.trim())) && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[13px] text-zinc-400">
-            <span>{"Write, or type '/' for commands"}</span>
+          <div
+            // Just the Ask chip — the editor placeholder already says
+            // "type / for commands" (no duplicate line), and Add subpage
+            // lives in the header; keeping it here invited accidental
+            // child-of-child chains on every fresh page.
+            className="mt-1 flex flex-wrap items-center gap-1.5"
+          >
             <button
               type="button"
               onClick={() => setPanel({ kind: "ask" })}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
             >
               <Sparkles className="h-3.5 w-3.5" /> Help me write
-            </button>
-            <button
-              type="button"
-              onClick={() => void addSubpage()}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
-            >
-              <FilePlus className="h-3.5 w-3.5" /> Add subpage
             </button>
           </div>
         )}

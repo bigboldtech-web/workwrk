@@ -263,7 +263,8 @@ function PagesTree({ docs, query, activePath, onOpen, onMenu, onChanged }: {
 
   const addPage = useCallback(async (parentId: string | null) => {
     const id = await createChildPage(parentId);
-    if (id) onOpen(id);
+    // ?new=1 -> destination editor focuses the title (see block-doc-editor).
+    if (id) onOpen(`${id}?new=1`);
     onChanged();
   }, [onOpen, onChanged]);
 
