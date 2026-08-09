@@ -137,8 +137,11 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
   let recurNextAt: Date | null = null;
   if (rule && (rule.trigger ?? "SCHEDULE") === "SCHEDULE") {
     const base = new Date(item.dueAt ?? item.startAt ?? new Date());
-    const threshold = new Date(Math.max(Date.now(), base.getTime()));
-    recurNextAt = nextOccurrenceAfter(threshold, rule, base);
+    // Step from the ANCHOR, not from now: an occurrence whose date already
+    // arrived must still spawn (the cron's capped catch-up handles any
+    // backlog + records skips). max(now, …) here silently swallowed today's
+    // instance when the rule was saved after its time-of-day had passed.
+    recurNextAt = nextOccurrenceAfter(base, rule, base);
     md.lastSpawnedKey = occurrenceKey(base);
   }
   return updateBoardItem(itemId, { recurNextAt, metadata: md }, actorId);
