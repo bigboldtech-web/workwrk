@@ -4,17 +4,22 @@
 // "use client" component.
 //
 // Spawn model: the rule lives on the SERIES ANCHOR task as columns
-//   recurRule   = { freq: "DAY"|"WEEK"|"MONTH"|"QUARTER"|"YEAR", interval }
+//   recurRule   = { freq, interval, weekdays?, monthDay?, yearMonth?, yearDay?, ... }
 //   recurNextAt = when the cron spawns the next fresh copy.
-// The cron clones the anchor (+ its subtree) as a fresh open task each cycle and
-// advances recurNextAt. Copies carry no rule, so only the anchor recurs.
+// The anchor's due date IS the series anchor: occurrences are computed from it
+// (preserving its time-of-day) and changing the due date re-anchors the series.
+// Spawn bookkeeping lives in Item.metadata:
+//   anchor:  lastSpawnedKey (occurrence key of the last handled cycle) +
+//            skippedOccurrences (keys collapsed by the catch-up cap)
+//   copies:  recurrenceSourceId + recurrenceKey (per-occurrence idempotency).
 
 export type RecurFreq = "DAY" | "WEEK" | "MONTH" | "QUARTER" | "YEAR";
 
 /** When the next cycle fires:
- *  - SCHEDULE    — date/cron driven (Item.recurNextAt). Default.
- *  - ON_COMPLETE — fires the moment the task is marked done (ClickUp's
- *                  "On status change: Complete"); recurNextAt stays null. */
+ *  - SCHEDULE    — "On schedule": the cron spawns a NEW task per occurrence
+ *                  (Item.recurNextAt drives it). Default.
+ *  - ON_COMPLETE — "After completion": marking the task done rolls ITS due
+ *                  date forward; recurNextAt stays null, no new rows. */
 export type RecurTrigger = "SCHEDULE" | "ON_COMPLETE";
 
 export interface RecurrenceRule {
@@ -24,7 +29,8 @@ export interface RecurrenceRule {
   /** What advances the series. Default SCHEDULE. */
   trigger?: RecurTrigger;
   /** true  = spawn a fresh copy each cycle (each period gets its own record);
-   *  false = roll THIS same task forward. Default true (back-compat). */
+   *  false = roll THIS same task forward. Default true (back-compat). The new
+   *  UI derives it from the trigger (SCHEDULE=true, ON_COMPLETE=false). */
   createNew?: boolean;
   /** false = the series ends after `count` occurrences or once a cycle passes
    *  `until`. Default true (never ends until Repeat is turned off). */
@@ -36,19 +42,36 @@ export interface RecurrenceRule {
   /** Status value to set when the task recurs (the new copy, or the rolled-
    *  forward task). null/absent = the board's first open status. */
   resetStatus?: string | null;
-  /** Keep the due date in step with the recurrence each cycle. Default true. */
+  /** Legacy: keep the due date in step with the recurrence each cycle.
+   *  Default true. The new UI never writes it (always-sync). */
   syncDue?: boolean;
+  /** WEEK only — ISO weekdays (1=Mon .. 7=Sun) the rule fires on, within every
+   *  Nth week. null/absent = plain every-N-weeks stepping (legacy rules). */
+  weekdays?: number[] | null;
+  /** MONTH only — day of month (1-31; 29-31 clamp to the month's last day).
+   *  null/absent = plain every-N-months stepping (legacy rules). */
+  monthDay?: number | null;
+  /** YEAR only — month (1-12). null/absent = plain yearly stepping. */
+  yearMonth?: number | null;
+  /** YEAR only — day of `yearMonth` (1-31, clamped to the month's length). */
+  yearDay?: number | null;
 }
 
 const FREQS: readonly RecurFreq[] = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"];
-const UNIT_LABEL: Record<RecurFreq, string> = { DAY: "day", WEEK: "week", MONTH: "month", QUARTER: "quarter", YEAR: "year" };
+const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = ISO weekday - 1
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function intInRange(v: unknown, min: number, max: number): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= min && v <= max ? v : null;
+}
 
 /** Validate an arbitrary blob (Item.recurRule column or legacy
  *  metadata.recurrence) into a rule. Returns null when absent/malformed so
- *  callers can treat "no recurrence" uniformly. Extra ClickUp-parity options
- *  (trigger / createNew / forever / count / until / resetStatus / syncDue) are
- *  read when present and defaulted otherwise, so old {freq,interval} rules keep
- *  their original spawn-a-copy-on-schedule behavior. */
+ *  callers can treat "no recurrence" uniformly. Extra options are read when
+ *  present and defaulted otherwise, so old {freq,interval} rules keep their
+ *  original spawn-a-copy-on-schedule behavior; the calendar fields (weekdays /
+ *  monthDay / yearMonth / yearDay) parse to null when absent so legacy rules
+ *  fall back to plain interval stepping. */
 export function parseRecurrence(raw: unknown): RecurrenceRule | null {
   if (!raw || typeof raw !== "object") return null;
   // Tolerate a legacy metadata wrapper ({ recurrence: {...} }).
@@ -70,7 +93,23 @@ export function parseRecurrence(raw: unknown): RecurrenceRule | null {
   const resetStatus = typeof o.resetStatus === "string" && o.resetStatus ? o.resetStatus : null;
   const syncDue = typeof o.syncDue === "boolean" ? o.syncDue : true;
 
-  return { freq: freq as RecurFreq, interval, trigger, createNew, forever, count, until, resetStatus, syncDue };
+  // Calendar-aware fields. An empty/invalid weekday set parses to null so a
+  // malformed payload can never wedge the iterator (it falls back to stepping).
+  let weekdays: number[] | null = null;
+  if (Array.isArray(o.weekdays)) {
+    const cleaned = Array.from(new Set(
+      o.weekdays.filter((w): w is number => typeof w === "number" && Number.isInteger(w) && w >= 1 && w <= 7),
+    )).sort((a, b) => a - b);
+    weekdays = cleaned.length > 0 ? cleaned : null;
+  }
+  const monthDay = intInRange(o.monthDay, 1, 31);
+  const yearMonth = intInRange(o.yearMonth, 1, 12);
+  const yearDay = intInRange(o.yearDay, 1, 31);
+
+  return {
+    freq: freq as RecurFreq, interval, trigger, createNew, forever, count, until,
+    resetStatus, syncDue, weekdays, monthDay, yearMonth, yearDay,
+  };
 }
 
 /** True once the series has run its course under a non-forever rule: the
@@ -86,7 +125,8 @@ export function seriesEnded(rule: RecurrenceRule, nextCycle: Date): boolean {
 }
 
 /** Advance a date by one cycle of the rule. Calendar-aware (setMonth /
- *  setFullYear handle month-length + leap years). QUARTER = 3 months. */
+ *  setFullYear handle month-length + leap years). QUARTER = 3 months. Legacy
+ *  plain stepping — the calendar fields are handled by the iterator below. */
 export function advanceDate(from: Date | string, rule: RecurrenceRule): Date {
   const d = new Date(from);
   const n = Math.max(1, rule.interval);
@@ -100,21 +140,196 @@ export function advanceDate(from: Date | string, rule: RecurrenceRule): Date {
   return d;
 }
 
-/** The next occurrence strictly after `now`, starting from `from` and stepping
- *  by the rule. Used to (a) seed recurNextAt when repeat is turned on and
- *  (b) fast-forward past missed cycles if the cron was down, so at most one
- *  copy spawns per anchor per tick. */
-export function nextOccurrence(from: Date | string, rule: RecurrenceRule, now: Date = new Date()): Date {
-  let d = new Date(from);
-  // Guard against a pathological rule causing an infinite loop.
-  for (let i = 0; i < 10000 && d.getTime() <= now.getTime(); i++) {
-    d = advanceDate(d, rule);
-  }
-  return d;
+/** ISO weekday of a date: 1=Mon .. 7=Sun. */
+export function isoWeekday(d: Date): number {
+  const w = d.getDay();
+  return w === 0 ? 7 : w;
 }
 
-/** Human summary, e.g. "Every day", "Every 2 weeks", "Every quarter". */
+/** Local-date occurrence key, YYYY-MM-DD. Sorts lexicographically. Used for
+ *  spawn idempotency (metadata.lastSpawnedKey / metadata.recurrenceKey). */
+export function occurrenceKey(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// Hard cap on iterator steps so a pathological rule can never spin forever.
+const MAX_STEPS = 20000;
+
+/**
+ * Monotonic occurrence-grid iterator for a rule anchored at `anchor` (the
+ * task's due date; its time-of-day is re-applied to every occurrence). Each
+ * call returns the next grid point, STARTING AT OR BEFORE the anchor itself
+ * (week 0 / month 0 can contain days before the anchor) — callers filter with
+ * their own lower bound. Grids:
+ *   WEEK + weekdays    — the selected weekdays within every Nth week.
+ *   MONTH + monthDay   — day D of every Nth month, 29-31 clamped to month end.
+ *   YEAR + yearMonth   — yearMonth/yearDay of every Nth year (clamped).
+ *   everything else    — plain advanceDate stepping from the anchor (legacy).
+ */
+function makeOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => Date {
+  const anchor = new Date(anchorInput);
+  const n = Math.max(1, rule.interval);
+  const h = anchor.getHours(), mi = anchor.getMinutes(), se = anchor.getSeconds(), ms = anchor.getMilliseconds();
+
+  if (rule.freq === "WEEK" && rule.weekdays && rule.weekdays.length > 0) {
+    const days = Array.from(new Set(rule.weekdays)).sort((a, b) => a - b);
+    // Monday of the anchor's week — week offsets count from here.
+    const monday = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() - (isoWeekday(anchor) - 1));
+    let w = 0, i = 0;
+    return () => {
+      const d = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + w * 7 + (days[i] - 1), h, mi, se, ms);
+      i++;
+      if (i >= days.length) { i = 0; w += n; }
+      return d;
+    };
+  }
+  if (rule.freq === "MONTH" && rule.monthDay != null) {
+    const wanted = Math.min(31, Math.max(1, rule.monthDay));
+    let k = 0;
+    return () => {
+      const m0 = anchor.getMonth() + k;
+      k += n;
+      const daysInMonth = new Date(anchor.getFullYear(), m0 + 1, 0).getDate();
+      return new Date(anchor.getFullYear(), m0, Math.min(wanted, daysInMonth), h, mi, se, ms);
+    };
+  }
+  if (rule.freq === "YEAR" && rule.yearMonth != null) {
+    const m0 = Math.min(12, Math.max(1, rule.yearMonth)) - 1;
+    const wanted = rule.yearDay != null ? Math.min(31, Math.max(1, rule.yearDay)) : anchor.getDate();
+    let k = 0;
+    return () => {
+      const y = anchor.getFullYear() + k;
+      k += n;
+      const daysInMonth = new Date(y, m0 + 1, 0).getDate();
+      return new Date(y, m0, Math.min(wanted, daysInMonth), h, mi, se, ms);
+    };
+  }
+  // Legacy grid: the anchor itself, then plain interval steps.
+  let cur: Date | null = null;
+  return () => {
+    cur = cur === null ? new Date(anchor) : advanceDate(cur, rule);
+    return cur;
+  };
+}
+
+/** The next `count` occurrences strictly after `fromDate` (which doubles as
+ *  the series anchor). Pure — drives both the engine and unit smoke tests. */
+export function nextOccurrences(rule: RecurrenceRule, fromDate: Date | string, count: number): Date[] {
+  const anchor = new Date(fromDate);
+  const next = makeOccurrenceIterator(rule, anchor);
+  const out: Date[] = [];
+  for (let i = 0; i < MAX_STEPS && out.length < count; i++) {
+    const d = next();
+    if (d.getTime() > anchor.getTime()) out.push(d);
+  }
+  return out;
+}
+
+/** First occurrence of the series (anchored at `anchor`) strictly after
+ *  `after`. Seeds recurNextAt and re-arms the cron after each spawn batch. */
+export function nextOccurrenceAfter(after: Date | string, rule: RecurrenceRule, anchor: Date | string): Date {
+  const cutoff = new Date(after).getTime();
+  const next = makeOccurrenceIterator(rule, new Date(anchor));
+  let d = new Date(anchor);
+  for (let i = 0; i < MAX_STEPS; i++) {
+    d = next();
+    if (d.getTime() > cutoff) return d;
+  }
+  return advanceDate(d, rule); // unreachable in practice; keeps the result monotonic
+}
+
+export interface OccurrenceBatch {
+  /** Occurrences to spawn now, chronological. At most `cap`. */
+  spawn: { key: string; date: Date }[];
+  /** Occurrence keys collapsed by the catch-up cap (oldest first). */
+  skipped: string[];
+}
+
+/**
+ * All occurrences due for spawning: on the rule's grid (anchored at
+ * `anchorDue`), at or after `from` (the claimed recurNextAt), strictly after
+ * `afterKey` (the last handled occurrence key, when recorded), and not after
+ * `now`. When more than `cap` are due (cron outage catch-up), the most recent
+ * `cap` spawn and the older ones are returned as `skipped` keys.
+ */
+export function occurrencesSince(
+  rule: RecurrenceRule,
+  anchorDue: Date | string,
+  afterKey: string | null,
+  from: Date | string,
+  now: Date = new Date(),
+  cap = 7,
+): OccurrenceBatch {
+  const fromT = new Date(from).getTime();
+  const nowT = now.getTime();
+  const next = makeOccurrenceIterator(rule, new Date(anchorDue));
+  const eligible: { key: string; date: Date }[] = [];
+  for (let i = 0; i < MAX_STEPS; i++) {
+    const d = next();
+    if (d.getTime() > nowT) break; // grid is monotonic
+    if (d.getTime() < fromT) continue;
+    const key = occurrenceKey(d);
+    if (afterKey && key <= afterKey) continue;
+    eligible.push({ key, date: d });
+    if (eligible.length >= 400) break; // sanity ceiling
+  }
+  if (eligible.length <= cap) return { spawn: eligible, skipped: [] };
+  return {
+    spawn: eligible.slice(eligible.length - cap),
+    skipped: eligible.slice(0, eligible.length - cap).map((e) => e.key),
+  };
+}
+
+function ordinal(nth: number): string {
+  const r10 = nth % 10, r100 = nth % 100;
+  const suffix = r100 >= 11 && r100 <= 13 ? "th" : r10 === 1 ? "st" : r10 === 2 ? "nd" : r10 === 3 ? "rd" : "th";
+  return `${nth}${suffix}`;
+}
+
+/** Plain-English summary of a rule, e.g. "Repeats every day",
+ *  "Repeats every 2 weeks on Mon, Thu", "Repeats monthly on the 15th ·
+ *  ends Dec 31, 2026", "Repeats yearly on Aug 8 · 12 times". Shown live in
+ *  the Repeat tab and as the recurrence badge tooltip. */
+export function buildRecurrenceSummary(rule: RecurrenceRule): string {
+  const n = Math.max(1, rule.interval);
+  let s: string;
+  switch (rule.freq) {
+    case "DAY":
+      s = n === 1 ? "Repeats every day" : `Repeats every ${n} days`;
+      break;
+    case "WEEK": {
+      s = n === 1 ? "Repeats weekly" : `Repeats every ${n} weeks`;
+      if (rule.weekdays && rule.weekdays.length > 0) {
+        const names = Array.from(new Set(rule.weekdays)).sort((a, b) => a - b).map((w) => WEEKDAY_SHORT[w - 1]);
+        s += ` on ${names.join(", ")}`;
+      }
+      break;
+    }
+    case "MONTH":
+      s = n === 1 ? "Repeats monthly" : `Repeats every ${n} months`;
+      if (rule.monthDay != null) s += ` on the ${ordinal(rule.monthDay)}`;
+      break;
+    case "QUARTER":
+      s = n === 1 ? "Repeats quarterly" : `Repeats every ${n} quarters`;
+      break;
+    case "YEAR":
+      s = n === 1 ? "Repeats yearly" : `Repeats every ${n} years`;
+      if (rule.yearMonth != null) s += ` on ${MONTH_SHORT[rule.yearMonth - 1]} ${rule.yearDay ?? 1}`;
+      break;
+  }
+  if (rule.forever === false) {
+    const end = rule.until ? new Date(rule.until) : null;
+    if (end && !Number.isNaN(end.getTime())) {
+      s += ` · ends ${end.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+    } else if (typeof rule.count === "number" && rule.count > 0) {
+      s += ` · ${rule.count} ${rule.count === 1 ? "time" : "times"}`;
+    }
+  }
+  return s;
+}
+
+/** Back-compat alias — existing imports keep compiling. */
 export function describeRecurrence(rule: RecurrenceRule): string {
-  const unit = UNIT_LABEL[rule.freq];
-  return rule.interval === 1 ? `Every ${unit}` : `Every ${rule.interval} ${unit}s`;
+  return buildRecurrenceSummary(rule);
 }

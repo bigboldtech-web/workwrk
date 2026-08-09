@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Network, Pencil, Plus, Repeat, X } from "lucide-react";
 import { PRIORITY_OPTIONS, isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
-import { describeRecurrence } from "@/lib/recurrence";
+import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
 import { AssigneePicker } from "./assignee-picker";
@@ -482,7 +482,7 @@ function KanbanCard({
               {card.recurRule ? (
                 <span
                   className="inline-flex items-center align-middle ml-1 text-zinc-400"
-                  title={`Repeats · ${describeRecurrence(card.recurRule)}`}
+                  title={buildRecurrenceSummary(card.recurRule)}
                   aria-label="Recurring task"
                 >
                   <Repeat className="w-3 h-3" />

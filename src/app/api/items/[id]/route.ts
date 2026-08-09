@@ -10,7 +10,7 @@ import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
-import { nextOccurrence, parseRecurrence } from "@/lib/recurrence";
+import { nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
@@ -113,27 +113,35 @@ async function loadAndGate(itemId: string, c: { userId: string; accessLevel: str
   return { item };
 }
 
-// Recurrence ("Set Recurring") config. After a patch sets/clears recurRule,
-// compute the anchor's recurNextAt. SCHEDULE-triggered series get a spawn time
-// (first cycle strictly after the anchor's own due date AND after now, so the
-// anchor covers the current cycle and the first spawned copy is the next one).
-// ON_COMPLETE series never use the cron, so recurNextAt stays null — completing
-// the task advances them. Clearing the rule clears recurNextAt too. Returns the
-// re-updated row or null.
+// Recurrence ("Set Recurring") config. After a patch sets/clears recurRule (or
+// moves the due date, which re-anchors the series), compute the anchor's
+// recurNextAt. SCHEDULE-triggered series get a spawn time (first occurrence
+// strictly after the anchor's own due date AND after now, so the anchor covers
+// the current cycle and the first spawned copy is the next one) plus a seeded
+// metadata.lastSpawnedKey so the cron only spawns cycles after the anchor's
+// own. ON_COMPLETE series never use the cron, so recurNextAt stays null —
+// completing the task advances them. Clearing the rule clears recurNextAt and
+// the spawn bookkeeping too. Returns the re-updated row or null.
 async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId: string) {
   const rule = parseRecurrence(rawRule);
   const item = await prisma.item.findUnique({
     where: { id: itemId },
-    select: { dueAt: true, startAt: true },
+    select: { dueAt: true, startAt: true, metadata: true },
   });
   if (!item) return null;
+  const md = item.metadata && typeof item.metadata === "object"
+    ? { ...(item.metadata as Record<string, unknown>) }
+    : {};
+  delete md.lastSpawnedKey;
+  delete md.skippedOccurrences;
   let recurNextAt: Date | null = null;
   if (rule && (rule.trigger ?? "SCHEDULE") === "SCHEDULE") {
-    const base = item.dueAt ?? item.startAt ?? new Date();
-    const threshold = new Date(Math.max(Date.now(), new Date(base).getTime()));
-    recurNextAt = nextOccurrence(base, rule, threshold);
+    const base = new Date(item.dueAt ?? item.startAt ?? new Date());
+    const threshold = new Date(Math.max(Date.now(), base.getTime()));
+    recurNextAt = nextOccurrenceAfter(threshold, rule, base);
+    md.lastSpawnedKey = occurrenceKey(base);
   }
-  return updateBoardItem(itemId, { recurNextAt }, actorId);
+  return updateBoardItem(itemId, { recurNextAt, metadata: md }, actorId);
 }
 
 const recurRuleSchema = z.object({
@@ -147,6 +155,12 @@ const recurRuleSchema = z.object({
   until: z.string().datetime().nullable().optional(),
   resetStatus: z.string().max(40).nullable().optional(),
   syncDue: z.boolean().optional(),
+  // Calendar-aware fields — weekly weekday set (ISO 1=Mon..7=Sun), monthly
+  // day-of-month (29-31 clamp to month end), yearly month/day.
+  weekdays: z.array(z.number().int().min(1).max(7)).max(7).nullable().optional(),
+  monthDay: z.number().int().min(1).max(31).nullable().optional(),
+  yearMonth: z.number().int().min(1).max(12).nullable().optional(),
+  yearDay: z.number().int().min(1).max(31).nullable().optional(),
 });
 
 const patchSchema = z.object({
@@ -226,6 +240,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (parsed.data.recurRule !== undefined) {
       const rescheduled = await applyRecurrenceSchedule(id, parsed.data.recurRule ?? null, c.userId);
       if (rescheduled) return NextResponse.json({ item: rescheduled });
+    } else if (parsed.data.dueAt !== undefined) {
+      // The due date IS the series anchor — moving it re-anchors an active
+      // SCHEDULE series (recurNextAt + lastSpawnedKey recomputed from it).
+      const storedRule = parseRecurrence(gate.item.recurRule);
+      if (storedRule && (storedRule.trigger ?? "SCHEDULE") === "SCHEDULE") {
+        const rescheduled = await applyRecurrenceSchedule(id, gate.item.recurRule, c.userId);
+        if (rescheduled) return NextResponse.json({ item: rescheduled });
+      }
     }
     // Completing an ON_COMPLETE recurring task advances its series in place —
     // return the rolled-forward row so the board updates without a refetch.

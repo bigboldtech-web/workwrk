@@ -29,7 +29,7 @@ import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { DetailPatch } from "./board-item-detail";
 import { useAnchorPos } from "./use-anchor-pos";
 import {
-  parseRecurrence, describeRecurrence, type RecurFreq, type RecurTrigger, type RecurrenceRule,
+  parseRecurrence, buildRecurrenceSummary, isoWeekday, type RecurFreq, type RecurTrigger, type RecurrenceRule,
 } from "@/lib/recurrence";
 
 type Tab = "date" | "reminder" | "repeat";
@@ -76,7 +76,13 @@ function sameDay(a: Date, b: Date) {
 
 const FREQ_LABEL: Record<RecurFreq, string> = { DAY: "Daily", WEEK: "Weekly", MONTH: "Monthly", QUARTER: "Quarterly", YEAR: "Yearly" };
 const FREQ_UNIT: Record<RecurFreq, string> = { DAY: "day", WEEK: "week", MONTH: "month", QUARTER: "quarter", YEAR: "year" };
-const FREQS: RecurFreq[] = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"];
+// Quarterly is legacy-only: hidden from the picker unless the open rule uses it.
+const BASE_FREQS: RecurFreq[] = ["DAY", "WEEK", "MONTH", "YEAR"];
+const WEEKDAY_CHIPS: { v: number; label: string }[] = [
+  { v: 1, label: "Mo" }, { v: 2, label: "Tu" }, { v: 3, label: "We" }, { v: 4, label: "Th" },
+  { v: 5, label: "Fr" }, { v: 6, label: "Sa" }, { v: 7, label: "Su" },
+];
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Quick-date offsets, ClickUp's set. Each returns a due Date (end of workday).
 function quickDate(kind: string): Date {
@@ -236,7 +242,11 @@ export function DatePlanner({
       <CalendarPlus className={due ? "w-3 h-3" : "w-[17px] h-[17px]"} />
       {due ? new Date(due).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null}
       {hasReminder ? <Bell className="w-2.5 h-2.5 text-amber-500" /> : null}
-      {recurrence ? <Repeat className="w-2.5 h-2.5 text-[var(--os-brand)]" /> : null}
+      {recurrence ? (
+        <span className="inline-flex" title={buildRecurrenceSummary(recurrence)}>
+          <Repeat className="w-2.5 h-2.5 text-[var(--os-brand)]" />
+        </span>
+      ) : null}
     </button>
   ) : (
     <button
@@ -249,7 +259,11 @@ export function DatePlanner({
       <CalendarDays className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
       <span className={`truncate ${summary ? "" : "text-zinc-400"}`}>{summary || "Set date"}</span>
       {hasReminder ? <Bell className="w-3 h-3 text-amber-500 flex-shrink-0" /> : null}
-      {recurrence ? <Repeat className="w-3 h-3 text-[var(--os-brand)] flex-shrink-0" /> : null}
+      {recurrence ? (
+        <span className="inline-flex flex-shrink-0" title={buildRecurrenceSummary(recurrence)}>
+          <Repeat className="w-3 h-3 text-[var(--os-brand)]" />
+        </span>
+      ) : null}
     </button>
   );
 
@@ -296,8 +310,9 @@ export function DatePlanner({
                       <span className={`block ${LABEL}`}>Quick reminders</span>
                       {due ? (
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <button type="button" className={chip} onClick={() => addReminder(new Date(due))}>At due time</button>
-                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 10 * 60000))}>10m before</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(due))}>At due date</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 5 * 60000))}>5m before</button>
+                          <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 30 * 60000))}>30m before</button>
                           <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 60 * 60000))}>1h before</button>
                           <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 24 * 60 * 60000))}>1d before</button>
                         </div>
@@ -484,8 +499,13 @@ function DateTab({
           onClick={onRepeat}
           className="w-full flex items-center justify-between h-8 px-2 rounded-md text-[12.5px] text-zinc-700 hover:bg-zinc-100 transition-colors"
         >
-          <span className="inline-flex items-center gap-2"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
-          <span className="text-[11.5px] font-medium text-[var(--os-brand)]">{recurrence ? describeRecurrence(recurrence) : ""}</span>
+          <span className="inline-flex items-center gap-2 shrink-0"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
+          <span
+            className="text-[11.5px] font-medium text-[var(--os-brand)] truncate min-w-0"
+            title={recurrence ? buildRecurrenceSummary(recurrence) : undefined}
+          >
+            {recurrence ? buildRecurrenceSummary(recurrence) : ""}
+          </span>
         </button>
       </div>
     </div>
@@ -517,7 +537,8 @@ function CustomReminder({ onAdd }: { onAdd: (at: Date) => void }) {
 
 // ── Repeat tab: the full "Set Recurring" panel ─────────────────────
 // Buffered — nothing is written until Save, matching ClickUp. Options live on
-// the left; the month calendar (same due-date picker) sits on the right.
+// the left; the month calendar (same due-date picker) sits on the right. The
+// anchor is ALWAYS the task's due date (changing it re-anchors the series).
 function RepeatTab({
   rule, statuses, due, onPickDay, onCancel, onSave,
 }: {
@@ -528,31 +549,73 @@ function RepeatTab({
   onCancel: () => void;
   onSave: (r: RecurrenceRule | null) => void;
 }) {
+  // The due date seeds the frequency defaults (weekday / month day / year date).
+  const dueDate = useMemo(() => {
+    const d = due ? new Date(due) : null;
+    return d && !Number.isNaN(d.getTime()) ? d : new Date();
+  }, [due]);
+
   const [freq, setFreq] = useState<RecurFreq>(rule?.freq ?? "WEEK");
   const [interval, setIntervalN] = useState<number>(rule?.interval ?? 1);
-  const [trigger, setTrigger] = useState<RecurTrigger>(rule?.trigger ?? "SCHEDULE");
-  const [createNew, setCreateNew] = useState<boolean>(rule?.createNew ?? true);
-  const [forever, setForever] = useState<boolean>(rule?.forever ?? true);
+  const [trigger, setTrigger] = useState<RecurTrigger>(rule?.trigger === "ON_COMPLETE" ? "ON_COMPLETE" : "SCHEDULE");
+  const [weekdays, setWeekdays] = useState<number[]>(
+    rule?.weekdays?.length ? [...rule.weekdays].sort((a, b) => a - b) : [isoWeekday(dueDate)],
+  );
+  const [monthDay, setMonthDay] = useState<number>(rule?.monthDay ?? dueDate.getDate());
+  const [yearMonth, setYearMonth] = useState<number>(rule?.yearMonth ?? dueDate.getMonth() + 1);
+  const [yearDay, setYearDay] = useState<number>(rule?.yearDay ?? dueDate.getDate());
+  const [ends, setEnds] = useState<"never" | "until" | "count">(
+    rule && rule.forever === false ? (rule.until ? "until" : "count") : "never",
+  );
+  const [untilDate, setUntilDate] = useState<string>(() => {
+    if (rule?.until) {
+      const d = new Date(rule.until);
+      if (!Number.isNaN(d.getTime())) return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+    return "";
+  });
   const [count, setCount] = useState<number>(rule?.count && rule.count > 0 ? rule.count : 5);
   const firstOpen = statuses.find((s) => s.group === "ACTIVE")?.value ?? statuses[0]?.value ?? "";
   const [resetOn, setResetOn] = useState<boolean>(rule?.resetStatus != null);
   const [resetStatus, setResetStatus] = useState<string>(rule?.resetStatus ?? firstOpen);
-  const [syncDue, setSyncDue] = useState<boolean>(rule?.syncDue ?? true);
 
-  const save = () => {
-    onSave({
-      freq, interval,
-      trigger,
-      createNew,
-      forever,
-      count: forever ? null : Math.max(1, count),
-      until: null,
-      resetStatus: resetOn ? resetStatus || null : null,
-      syncDue,
+  // Quarterly is legacy-only — keep it in the picker only for an open QUARTER rule.
+  const freqOptions = rule?.freq === "QUARTER" ? (["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"] as RecurFreq[]) : BASE_FREQS;
+
+  // The rule Save would write — also feeds the live plain-English summary.
+  const draft: RecurrenceRule = useMemo(() => ({
+    freq,
+    interval,
+    trigger,
+    // The two spec modes: On schedule spawns fresh copies; After completion
+    // rolls this task forward. syncDue is never written (always-sync).
+    createNew: trigger === "SCHEDULE",
+    forever: ends === "never",
+    count: ends === "count" ? Math.max(1, count) : null,
+    until: ends === "until" && untilDate
+      ? (() => {
+          const [y, m, d] = untilDate.split("-").map(Number);
+          return new Date(y, m - 1, d, 23, 59, 59, 999).toISOString();
+        })()
+      : null,
+    resetStatus: resetOn ? resetStatus || null : null,
+    weekdays: freq === "WEEK" ? weekdays : null,
+    monthDay: freq === "MONTH" ? monthDay : null,
+    yearMonth: freq === "YEAR" ? yearMonth : null,
+    yearDay: freq === "YEAR" ? yearDay : null,
+  }), [freq, interval, trigger, ends, count, untilDate, resetOn, resetStatus, weekdays, monthDay, yearMonth, yearDay]);
+
+  const saveDisabled = ends === "until" && !untilDate;
+
+  const toggleWeekday = (v: number) => {
+    setWeekdays((prev) => {
+      if (prev.includes(v)) return prev.length > 1 ? prev.filter((x) => x !== v) : prev; // at least one day
+      return [...prev, v].sort((a, b) => a - b);
     });
   };
 
   const check = "w-3.5 h-3.5 rounded border-zinc-300 accent-[var(--os-brand)]";
+  const radio = "w-3.5 h-3.5 accent-[var(--os-brand)]";
 
   return (
     <div>
@@ -562,7 +625,7 @@ function RepeatTab({
           <div className="space-y-1">
             <span className={`block ${LABEL}`}>Recurring</span>
             <select value={freq} onChange={(e) => setFreq(e.target.value as RecurFreq)} className={`${FIELD} w-full`}>
-              {FREQS.map((f) => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
+              {freqOptions.map((f) => <option key={f} value={f}>{FREQ_LABEL[f]}</option>)}
             </select>
           </div>
 
@@ -576,46 +639,123 @@ function RepeatTab({
             {FREQ_UNIT[freq]}{interval > 1 ? "s" : ""}
           </label>
 
-          <select value={trigger} onChange={(e) => setTrigger(e.target.value as RecurTrigger)} className={`${FIELD} w-full`}>
-            <option value="SCHEDULE">On due date</option>
-            <option value="ON_COMPLETE">On status change: Complete</option>
-          </select>
-
-          <div className="space-y-2.5 pt-0.5">
-            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-              <input type="checkbox" className={check} checked={createNew} onChange={(e) => setCreateNew(e.target.checked)} />
-              Create new task
-            </label>
-            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-              <input type="checkbox" className={check} checked={forever} onChange={(e) => setForever(e.target.checked)} />
-              Recur forever
-            </label>
-            {!forever ? (
-              <label className="flex items-center gap-2 text-[12px] text-zinc-600 pl-[22px]">
-                Ends after
+          {/* Frequency-specific controls — only what each frequency needs. */}
+          {freq === "WEEK" ? (
+            <div className="space-y-1">
+              <span className={`block ${LABEL}`}>On days</span>
+              <div className="grid grid-cols-7 gap-1">
+                {WEEKDAY_CHIPS.map((w) => {
+                  const on = weekdays.includes(w.v);
+                  return (
+                    <button
+                      key={w.v}
+                      type="button"
+                      onClick={() => toggleWeekday(w.v)}
+                      className={`h-7 rounded-md text-[11.5px] font-medium transition-colors ${
+                        on ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {w.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {freq === "MONTH" ? (
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-[12px] text-zinc-600">
+                On day
                 <input
-                  type="number" min={1} max={999} value={count}
-                  onChange={(e) => setCount(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
+                  type="number" min={1} max={31} value={monthDay}
+                  onChange={(e) => setMonthDay(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
                   className={`${FIELD} w-14`}
                 />
-                times
               </label>
-            ) : null}
-            <div>
-              <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-                <input type="checkbox" className={check} checked={resetOn} onChange={(e) => setResetOn(e.target.checked)} disabled={statuses.length === 0} />
-                Update status to:
-              </label>
-              {resetOn ? (
-                <select value={resetStatus} onChange={(e) => setResetStatus(e.target.value)} className={`${FIELD} mt-1.5 ml-[22px] w-[calc(100%-22px)]`}>
-                  {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
+              {monthDay >= 29 ? (
+                <p className="text-[11px] text-zinc-400">Days 29-31 fall on the last day of shorter months.</p>
               ) : null}
             </div>
+          ) : null}
+          {freq === "YEAR" ? (
+            <div className="flex items-center gap-2 text-[12px] text-zinc-600">
+              On
+              <select value={yearMonth} onChange={(e) => setYearMonth(Number(e.target.value))} className={`${FIELD} flex-1 min-w-0`}>
+                {MONTHS_SHORT.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+              </select>
+              <input
+                type="number" min={1} max={31} value={yearDay}
+                onChange={(e) => setYearDay(Math.max(1, Math.min(31, Number(e.target.value) || 1)))}
+                className={`${FIELD} w-14`}
+              />
+            </div>
+          ) : null}
+
+          {/* Repeat trigger — the ONE control that picks the recurrence mode. */}
+          <div className="space-y-1">
+            <span className={`block ${LABEL}`}>Repeat trigger</span>
+            <div className="space-y-1.5">
+              {([
+                { v: "SCHEDULE", label: "On schedule", hint: "Each occurrence creates a new task" },
+                { v: "ON_COMPLETE", label: "After completion", hint: "This task's due date moves forward" },
+              ] as { v: RecurTrigger; label: string; hint: string }[]).map((o) => (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={() => setTrigger(o.v)}
+                  className={`w-full text-left px-2.5 py-1.5 rounded-md border transition-colors ${
+                    trigger === o.v ? "border-[var(--os-brand)] bg-[#0073EA]/[0.04]" : "border-zinc-200 hover:bg-zinc-50"
+                  }`}
+                >
+                  <span className={`block text-[12.5px] font-medium ${trigger === o.v ? "text-[var(--os-brand)]" : "text-zinc-700"}`}>
+                    {o.label}
+                  </span>
+                  <span className="block text-[11px] text-zinc-400">{o.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ends: Never / On date / After N times */}
+          <div className="space-y-1.5">
+            <span className={`block ${LABEL}`}>Ends</span>
             <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
-              <input type="checkbox" className={check} checked={syncDue} onChange={(e) => setSyncDue(e.target.checked)} />
-              Sync recurrence to due date
+              <input type="radio" name="recur-ends" className={radio} checked={ends === "never"} onChange={() => setEnds("never")} />
+              Never
             </label>
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="radio" name="recur-ends" className={radio} checked={ends === "until"} onChange={() => setEnds("until")} />
+              On date
+              {ends === "until" ? (
+                <input type="date" value={untilDate} onChange={(e) => setUntilDate(e.target.value)} className={`${FIELD} flex-1 min-w-0`} />
+              ) : null}
+            </label>
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="radio" name="recur-ends" className={radio} checked={ends === "count"} onChange={() => setEnds("count")} />
+              After
+              {ends === "count" ? (
+                <>
+                  <input
+                    type="number" min={1} max={999} value={count}
+                    onChange={(e) => setCount(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
+                    className={`${FIELD} w-14`}
+                  />
+                  times
+                </>
+              ) : null}
+            </label>
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2 text-[12.5px] text-zinc-700">
+              <input type="checkbox" className={check} checked={resetOn} onChange={(e) => setResetOn(e.target.checked)} disabled={statuses.length === 0} />
+              Update status to:
+            </label>
+            {resetOn ? (
+              <select value={resetStatus} onChange={(e) => setResetStatus(e.target.value)} className={`${FIELD} mt-1.5 ml-[22px] w-[calc(100%-22px)]`}>
+                {statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            ) : null}
           </div>
         </div>
 
@@ -625,20 +765,24 @@ function RepeatTab({
         </div>
       </div>
 
-      {/* Footer: Don't Recur · Cancel · Save */}
-      <div className="flex items-center gap-2 pt-3 mt-4 border-t border-zinc-100">
-        {rule ? (
-          <button type="button" onClick={() => onSave(null)} className="text-[12px] font-medium text-red-600 hover:text-red-700 transition-colors">Don&apos;t Recur</button>
-        ) : null}
-        <div className="flex-1" />
-        <button type="button" onClick={onCancel} className="inline-flex items-center h-8 px-3 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
-        <button
-          type="button"
-          onClick={save}
-          className="inline-flex items-center h-8 px-4 rounded-md text-[12.5px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 transition-opacity"
-        >
-          Save
-        </button>
+      {/* Live plain-English summary + footer: Don't Recur · Cancel · Save */}
+      <div className="pt-3 mt-4 border-t border-zinc-100">
+        <p className="text-[12.5px] text-zinc-500">{buildRecurrenceSummary(draft)}</p>
+        <div className="flex items-center gap-2 mt-3">
+          {rule ? (
+            <button type="button" onClick={() => onSave(null)} className="text-[12px] font-medium text-red-600 hover:text-red-700 transition-colors">Don&apos;t Recur</button>
+          ) : null}
+          <div className="flex-1" />
+          <button type="button" onClick={onCancel} className="inline-flex items-center h-8 px-3 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
+          <button
+            type="button"
+            onClick={() => onSave(draft)}
+            disabled={saveDisabled}
+            className="inline-flex items-center h-8 px-4 rounded-md text-[12.5px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
+          >
+            Save
+          </button>
+        </div>
       </div>
     </div>
   );

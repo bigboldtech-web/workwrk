@@ -1,29 +1,46 @@
 // Recurring tasks — server logic behind the "Set Recurring" panel.
 //
 // A rule lives on the SERIES ANCHOR task (Item.recurRule) with an optional
-// Item.recurNextAt spawn time. How the series advances depends on the rule:
+// Item.recurNextAt spawn time. Two spec modes (what the new UI writes):
 //
-//   trigger   SCHEDULE     — the hourly cron (recurNextAt) advances it.
-//             ON_COMPLETE  — marking the task done advances it (recurNextAt null).
+//   "On schedule"   (trigger SCHEDULE, createNew true) — the cron spawns a NEW
+//        task per occurrence. Prior instances are never touched: done stays
+//        done, open stays overdue. Spawning is idempotent: the anchor records
+//        metadata.lastSpawnedKey and every copy carries
+//        metadata.recurrenceSourceId + metadata.recurrenceKey; catch-up after
+//        an outage is capped at 7 occurrences (older keys recorded in
+//        metadata.skippedOccurrences).
 //
-//   createNew true  — a fresh copy (+ subtasks) is spawned each cycle.
-//             false — the SAME task rolls forward (dates advance, status resets).
+//   "After completion" (trigger ON_COMPLETE, createNew false) — marking the
+//        task done rolls ITS dates forward to the next occurrence. No new rows.
+//
+// Two legacy combos keep their original engine branches so stored rules never
+// change behavior: SCHEDULE+createNew=false (cron rolls the same row) and
+// ON_COMPLETE+createNew=true (completion spawns a copy that carries the series).
 //
 //   forever/count/until — a non-forever series stops once its occurrences run
-//             out; the rule (and recurNextAt) are cleared on the last cycle.
-//
+//        out; the rule (and recurNextAt) are cleared on the last cycle.
 //   resetStatus — the status the new/rolled task lands in (else first open).
-//   syncDue     — when false, dates are kept in place instead of shifted.
+//   syncDue     — legacy flag: when false, dates are kept in place on roll.
 
 import { prisma } from "@/lib/prisma";
 import { createBoardItem, updateBoardItem, type BoardItemRow } from "@/lib/board-items";
 import { getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
-import { parseRecurrence, advanceDate, seriesEnded, type RecurrenceRule } from "@/lib/recurrence";
+import {
+  parseRecurrence, advanceDate, seriesEnded, occurrenceKey, occurrencesSince,
+  nextOccurrenceAfter, type RecurrenceRule,
+} from "@/lib/recurrence";
 
-// A clone starts fresh: uncheck any checklist and drop legacy recurrence state.
+// A clone starts fresh: uncheck any checklist and drop recurrence bookkeeping
+// (legacy wrapper + anchor spawn state + any stale per-copy stamps — the root
+// copy is re-stamped by the caller when it is a spawned occurrence).
 function cloneMetadata(md: unknown): Record<string, unknown> {
   const src = md && typeof md === "object" ? { ...(md as Record<string, unknown>) } : {};
   delete src.recurrence; // legacy completion-model key, never carried onto copies
+  delete src.lastSpawnedKey;
+  delete src.skippedOccurrences;
+  delete src.recurrenceSourceId;
+  delete src.recurrenceKey;
   const cl = src.checklist;
   if (Array.isArray(cl)) {
     src.checklist = cl.map((c) =>
@@ -65,6 +82,9 @@ type CloneSrc = {
  * `rootStatus` (children in the board's first open status). When `carryRule` is
  * given the new root becomes the series anchor (its recurRule is set), used by
  * the ON_COMPLETE + create-new flow where the series hops to the fresh copy.
+ * When `occurrence` is given (schedule-mode spawns) the root copy is stamped
+ * with metadata.recurrenceSourceId + metadata.recurrenceKey and its dueAt is
+ * pinned to `cycleDue` (idempotency + spec: dueAt = the occurrence date).
  * Returns the new root id, or null if the source is gone.
  */
 export async function cloneItemTree(
@@ -73,6 +93,7 @@ export async function cloneItemTree(
   actorId: string | null = null,
   rootStatus: string | null = null,
   carryRule: RecurrenceRule | null = null,
+  occurrence: { sourceId: string; key: string } | null = null,
 ): Promise<string | null> {
   const root = await prisma.item.findUnique({
     where: { id: rootId },
@@ -88,22 +109,30 @@ export async function cloneItemTree(
   const shift = (d: Date | null): Date | null => (d ? new Date(d.getTime() + delta) : null);
 
   const cloneOne = async (src: CloneSrc, newParentId: string | null): Promise<string> => {
+    const isRoot = newParentId === null;
+    const metadata = cloneMetadata(src.metadata);
+    if (isRoot && occurrence) {
+      metadata.recurrenceSourceId = occurrence.sourceId;
+      metadata.recurrenceKey = occurrence.key;
+    }
     const created = await createBoardItem({
       organizationId: root.organizationId,
       boardId: src.boardId,
       title: src.title,
-      status: newParentId === null ? rootResolved : firstOpen,
+      status: isRoot ? rootResolved : firstOpen,
       ownerId: src.ownerId ?? undefined,
-      metadata: cloneMetadata(src.metadata),
+      metadata,
       startAt: shift(src.startAt),
-      dueAt: shift(src.dueAt),
+      // Spec: a spawned occurrence's due date IS the occurrence date (covers
+      // anchors with no due date, where delta is 0).
+      dueAt: isRoot && occurrence ? cycleDue : shift(src.dueAt),
       priority: src.priority ?? null,
       itemTypeId: src.itemTypeId ?? null,
       parentItemId: newParentId,
       tagIds: await tagIdsFor(src.id),
       actorId,
     });
-    if (newParentId === null && carryRule) {
+    if (isRoot && carryRule) {
       // The fresh copy becomes the anchor (ON_COMPLETE series hop). recurNextAt
       // stays null — a completion, not the cron, fires the next occurrence.
       await updateBoardItem(created.id, { recurRule: carryRule as unknown as Record<string, unknown>, recurNextAt: null }, actorId);
@@ -124,19 +153,20 @@ type AnchorWithBoard = {
   board: { statuses: unknown } | null;
 };
 
-/** Roll the SAME task forward one cycle: advance its dates (unless syncDue is
- *  off), reset its status, and write the (decremented / cleared) rule. Returns
- *  the updated row so the caller can hand it straight back to the client. */
+/** Roll the SAME task forward to `nextDue`: advance its dates (unless syncDue
+ *  is off), reset its status, and write the (decremented / cleared) rule.
+ *  Returns the updated row so the caller can hand it straight to the client. */
 async function rollAnchorForward(
   anchor: AnchorWithBoard,
   statuses: StatusOption[],
   rule: RecurrenceRule,
   nextRule: RecurrenceRule | null,
+  nextDue: Date,
   actorId: string | null,
 ): Promise<BoardItemRow> {
   const doShift = rule.syncDue !== false;
   const oldAnchorDate = anchor.dueAt ?? anchor.startAt ?? new Date();
-  const delta = doShift ? advanceDate(oldAnchorDate, rule).getTime() - new Date(oldAnchorDate).getTime() : 0;
+  const delta = doShift ? nextDue.getTime() - new Date(oldAnchorDate).getTime() : 0;
   const shift = (d: Date | null): Date | null => (d ? new Date(d.getTime() + delta) : null);
   return updateBoardItem(anchor.id, {
     status: resolveStatus(statuses, rule.resetStatus),
@@ -157,8 +187,9 @@ function stepSeries(rule: RecurrenceRule, nextCycle: Date): { nextRule: Recurren
 
 /**
  * Marking a task done advanced its ON_COMPLETE series. Returns the rolled-forward
- * row (create-new=false) so the client can update in place, or recurred=false
- * (create-new=true) after spawning a fresh copy that carries the series.
+ * row (create-new=false, the spec "After completion" mode) so the client can
+ * update in place, or recurred=false (legacy create-new=true) after spawning a
+ * fresh copy that carries the series.
  */
 export async function advanceSeriesOnComplete(
   itemId: string,
@@ -177,16 +208,20 @@ export async function advanceSeriesOnComplete(
   if (!isDoneGroupStatus(statuses, newStatus)) return { recurred: false };
 
   const base = anchor.dueAt ?? anchor.startAt ?? new Date();
-  const nextDue = advanceDate(base, rule);
-  const { nextRule } = stepSeries(rule, nextDue);
 
   if (rule.createNew === false) {
-    const rolled = await rollAnchorForward(anchor, statuses, rule, nextRule, actorId);
+    // Spec "After completion": roll this task's due date to the next occurrence
+    // on the calendar-aware grid (weekday / month-day / year-date rules).
+    const nextDue = nextOccurrenceAfter(new Date(base), rule, new Date(base));
+    const { nextRule } = stepSeries(rule, nextDue);
+    const rolled = await rollAnchorForward(anchor, statuses, rule, nextRule, nextDue, actorId);
     return { recurred: true, item: rolled };
   }
 
-  // create-new: spawn the next occurrence (carrying the series when it continues)
-  // and strip the rule off the just-completed task so it stays done.
+  // Legacy ON_COMPLETE + create-new: spawn the next occurrence (carrying the
+  // series when it continues) and strip the rule off the just-completed task.
+  const nextDue = advanceDate(base, rule);
+  const { nextRule } = stepSeries(rule, nextDue);
   const cycleDue = rule.syncDue === false ? (anchor.dueAt ?? nextDue) : nextDue;
   await cloneItemTree(anchor.id, cycleDue, actorId, rule.resetStatus ?? null, nextRule);
   await updateBoardItem(anchor.id, { recurRule: null, recurNextAt: null }, actorId);
@@ -194,15 +229,20 @@ export async function advanceSeriesOnComplete(
 }
 
 /**
- * Spawn/advance the current cycle for every SCHEDULE anchor whose recurNextAt is
- * due. Fast-forwards past missed cycles (at most one action per anchor per run)
- * so a lapsed cron never floods the list. Safe to run concurrently: the claim is
- * an optimistic updateMany on the exact recurNextAt value.
+ * Spawn/advance the current cycle for every SCHEDULE anchor whose recurNextAt
+ * is due. Safe to run hourly and concurrently:
+ *   - the claim is an optimistic updateMany on the exact recurNextAt value;
+ *   - each occurrence is double-guarded by metadata.lastSpawnedKey on the
+ *     anchor and a recurrenceSourceId+recurrenceKey lookup, so a re-run never
+ *     duplicates a spawn;
+ *   - catch-up after an outage is capped at 7 occurrences per anchor; older
+ *     missed keys are recorded in metadata.skippedOccurrences.
+ * Prior spawned instances are never modified. Never throws into the route.
  */
 export async function spawnDueRecurringTasks(
   now: Date = new Date(),
   limit = 200,
-): Promise<{ anchors: number; spawned: number }> {
+): Promise<{ anchors: number; spawned: number; skipped: number }> {
   const due = await prisma.item.findMany({
     where: { archivedAt: null, recurNextAt: { not: null, lte: now } },
     include: { board: { select: { statuses: true } } },
@@ -210,37 +250,29 @@ export async function spawnDueRecurringTasks(
   });
 
   let spawned = 0;
+  let skippedTotal = 0;
   for (const anchor of due) {
-    const rule = parseRecurrence(anchor.recurRule);
-    if (!rule || !anchor.recurNextAt) continue;
-    if ((rule.trigger ?? "SCHEDULE") !== "SCHEDULE") continue; // ON_COMPLETE never uses the cron
-
-    // The cycle to run now = latest occurrence <= now; the next spawn time =
-    // the first occurrence strictly after now.
-    let cycleDue = new Date(anchor.recurNextAt);
-    let nextAt = advanceDate(cycleDue, rule);
-    for (let i = 0; i < 10000 && nextAt.getTime() <= now.getTime(); i++) {
-      cycleDue = nextAt;
-      nextAt = advanceDate(nextAt, rule);
-    }
-
-    const { nextRule, ended } = stepSeries(rule, nextAt);
-    const statuses = getBoardStatuses(anchor.board);
-
-    // Claim by advancing recurNextAt from the exact value we read. If another
-    // worker already advanced it, count is 0 and we skip (no double-run). The
-    // rule bookkeeping (decrement/clear) is persisted just after via the safe
-    // updateBoardItem wrapper, which handles nullable-Json correctly.
-    const claim = await prisma.item.updateMany({
-      where: { id: anchor.id, recurNextAt: anchor.recurNextAt },
-      data: { recurNextAt: ended ? null : nextAt },
-    });
-    if (claim.count !== 1) continue;
-
     try {
+      const rule = parseRecurrence(anchor.recurRule);
+      if (!rule || !anchor.recurNextAt) continue;
+      if ((rule.trigger ?? "SCHEDULE") !== "SCHEDULE") continue; // ON_COMPLETE never uses the cron
+      const statuses = getBoardStatuses(anchor.board);
+
       if (rule.createNew === false) {
-        // Roll the same anchor forward (dates + status), keeping its schedule,
-        // and persist the stepped/cleared rule in the same write.
+        // Legacy SCHEDULE + roll-the-same-row branch, preserved verbatim: the
+        // cycle to run now = latest occurrence <= now (missed cycles collapse).
+        let cycleDue = new Date(anchor.recurNextAt);
+        let nextAt = advanceDate(cycleDue, rule);
+        for (let i = 0; i < 10000 && nextAt.getTime() <= now.getTime(); i++) {
+          cycleDue = nextAt;
+          nextAt = advanceDate(nextAt, rule);
+        }
+        const { nextRule, ended } = stepSeries(rule, nextAt);
+        const claim = await prisma.item.updateMany({
+          where: { id: anchor.id, recurNextAt: anchor.recurNextAt },
+          data: { recurNextAt: ended ? null : nextAt },
+        });
+        if (claim.count !== 1) continue;
         const doShift = rule.syncDue !== false;
         const oldAnchorDate = anchor.dueAt ?? anchor.startAt ?? cycleDue;
         const delta = doShift ? cycleDue.getTime() - new Date(oldAnchorDate).getTime() : 0;
@@ -251,16 +283,94 @@ export async function spawnDueRecurringTasks(
           dueAt: shift(anchor.dueAt),
           recurRule: ended ? null : (nextRule as unknown as Record<string, unknown>),
         }, null);
-      } else {
-        await cloneItemTree(anchor.id, cycleDue, null, rule.resetStatus ?? null);
-        // Copy carries no rule; the anchor keeps recurring. Persist the step.
-        await updateBoardItem(anchor.id, { recurRule: ended ? null : (nextRule as unknown as Record<string, unknown>) }, null);
+        spawned++;
+        continue;
       }
-      spawned++;
+
+      // Spec "On schedule" mode: one NEW task per occurrence since the last
+      // spawn. The anchor's due date is the grid anchor (time-of-day source);
+      // anchors without dates fall back to the claimed recurNextAt.
+      const anchorDue = new Date(anchor.dueAt ?? anchor.startAt ?? anchor.recurNextAt);
+      const md = anchor.metadata && typeof anchor.metadata === "object"
+        ? { ...(anchor.metadata as Record<string, unknown>) }
+        : {};
+      const prevKey = typeof md.lastSpawnedKey === "string" ? (md.lastSpawnedKey as string) : null;
+
+      const batch = occurrencesSince(rule, anchorDue, prevKey, anchor.recurNextAt, now, 7);
+      let spawnList = batch.spawn;
+      const nextAt = nextOccurrenceAfter(now, rule, anchorDue);
+
+      // End conditions: never spawn past `until`; spend `count` per spawn.
+      let ended = false;
+      if (rule.until) {
+        const end = new Date(rule.until);
+        if (!Number.isNaN(end.getTime())) {
+          spawnList = spawnList.filter((s) => s.date.getTime() <= end.getTime());
+          if (nextAt.getTime() > end.getTime()) ended = true;
+        }
+      }
+      let nextCount: number | null = typeof rule.count === "number" ? rule.count : null;
+      if (rule.forever === false && typeof rule.count === "number") {
+        if (spawnList.length >= rule.count) {
+          spawnList = spawnList.slice(0, Math.max(0, rule.count));
+          nextCount = 0;
+          ended = true;
+        } else {
+          nextCount = rule.count - spawnList.length;
+        }
+      }
+
+      // Claim by advancing recurNextAt from the exact value we read. If another
+      // worker already advanced it, count is 0 and we skip (no double-run).
+      const claim = await prisma.item.updateMany({
+        where: { id: anchor.id, recurNextAt: anchor.recurNextAt },
+        data: { recurNextAt: ended ? null : nextAt },
+      });
+      if (claim.count !== 1) continue;
+
+      let lastKey = prevKey;
+      for (const k of batch.skipped) if (!lastKey || k > lastKey) lastKey = k;
+
+      for (const occ of spawnList) {
+        // Belt-and-braces idempotency: skip when an instance for this exact
+        // occurrence already exists (any state — archived spawns still block).
+        const existing = await prisma.item.findFirst({
+          where: {
+            boardId: anchor.boardId,
+            AND: [
+              { metadata: { path: ["recurrenceSourceId"], equals: anchor.id } },
+              { metadata: { path: ["recurrenceKey"], equals: occ.key } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!existing) {
+          await cloneItemTree(anchor.id, occ.date, null, rule.resetStatus ?? null, null, {
+            sourceId: anchor.id,
+            key: occ.key,
+          });
+          spawned++;
+        }
+        if (!lastKey || occ.key > lastKey) lastKey = occ.key;
+      }
+      // Nothing handled this tick (e.g. everything past `until`): still seed
+      // the key from the claimed recurNextAt so no retro-spawning can happen.
+      if (!lastKey) lastKey = occurrenceKey(new Date(anchor.recurNextAt));
+
+      md.lastSpawnedKey = lastKey;
+      if (batch.skipped.length > 0) {
+        const prevSkipped = Array.isArray(md.skippedOccurrences) ? (md.skippedOccurrences as unknown[]) : [];
+        md.skippedOccurrences = [...prevSkipped, ...batch.skipped].slice(-50);
+        skippedTotal += batch.skipped.length;
+      }
+      await updateBoardItem(anchor.id, {
+        metadata: md,
+        recurRule: ended ? null : ({ ...rule, count: nextCount } as unknown as Record<string, unknown>),
+      }, null);
     } catch (e) {
       console.error("spawnDueRecurringTasks: cycle failed for", anchor.id, e);
     }
   }
 
-  return { anchors: due.length, spawned };
+  return { anchors: due.length, spawned, skipped: skippedTotal };
 }

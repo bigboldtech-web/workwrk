@@ -19,7 +19,9 @@ export async function GET() {
   });
   const fired: { id: string; title: string }[] = [];
   for (const r of due) {
-    try { await fireReminder(r); fired.push({ id: r.id, title: r.title }); }
+    // fireReminder returns false when another worker (org cron) already
+    // claimed this row — don't toast it twice.
+    try { if (await fireReminder(r)) fired.push({ id: r.id, title: r.title }); }
     catch (e) { console.error("fireReminder failed", e); }
   }
   return NextResponse.json({ fired });
