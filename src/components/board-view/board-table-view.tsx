@@ -2779,9 +2779,19 @@ function TitleCell({
         <span className="truncate flex-1 min-w-0 font-medium">{row.title}</span>
         {row.recurRule ? (
           <span
-            className="inline-flex items-center text-zinc-400 shrink-0"
-            title={buildRecurrenceSummary(row.recurRule)}
-            aria-label="Recurring task"
+            className="inline-flex items-center text-[var(--os-brand)] shrink-0"
+            title={`${buildRecurrenceSummary(row.recurRule)} — this is the repeating task; each occurrence appears as its own row`}
+            aria-label="Repeating task"
+          >
+            <Repeat className="w-3 h-3" />
+          </span>
+        ) : (row.metadata as { recurrenceSourceId?: string } | undefined)?.recurrenceSourceId ? (
+          // A spawned occurrence carries no rule of its own — without this it
+          // looked like an unrelated one-off task appearing from nowhere.
+          <span
+            className="inline-flex items-center text-zinc-300 shrink-0"
+            title="Created automatically by a repeating task"
+            aria-label="From a repeating task"
           >
             <Repeat className="w-3 h-3" />
           </span>
