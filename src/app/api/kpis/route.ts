@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { KPI_ORDER } from "@/lib/alignment";
 import type { Prisma } from "@/generated/prisma";
 
@@ -21,6 +22,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const kraId = searchParams.get("kraId");
   const userId = searchParams.get("userId");
+
+  // KPI definitions are org reference data, but a person's RECORDS are
+  // not: reading someone else's readings requires self / report-tree /
+  // org-wide standing (three-door scoping).
+  if (userId && !(await canTouchUserAlignment(session, userId))) {
+    return jsonError("You can only view KPI records for yourself or your reports.", 403);
+  }
 
   const where: Prisma.KPIWhereInput = { organizationId: getOrgId(session) };
   if (kraId) where.kraId = kraId;

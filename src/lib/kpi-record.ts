@@ -5,7 +5,49 @@
 
 import { prisma } from "@/lib/prisma";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
-import type { KPIRecordStatus } from "@/generated/prisma";
+import { kpiDirection } from "@/lib/alignment";
+import type { KpiDirection, KPIRecordStatus } from "@/generated/prisma";
+
+// ---------------------------------------------------------------------------
+// Scoring — the ONE rule all three KPIRecord writers share
+// (/api/kpi-records POST, /batch, /self-report), so they stop disagreeing.
+// ---------------------------------------------------------------------------
+
+export interface ScoreKpiInput {
+  targetValue: number | null;
+  direction?: KpiDirection | null;
+  lowerIsBetter?: boolean | null;
+}
+
+/**
+ * Score a reading against its KPI's healthy line, direction-aware.
+ *
+ * - NULL (or zero / non-finite) target → null score. "No baseline yet"
+ *   is a real state: we store the actual and NEVER invent a line
+ *   (health derives as "no_target" via src/lib/alignment.ts).
+ * - HIGHER   → actual/target · 100, capped at 120.
+ * - LOWER    → target/actual · 100 (actual 0 = 120), capped at 120.
+ * - MAINTAIN → 100 minus the % deviation from the line, floored at 0.
+ */
+export function scoreKpiRecord(
+  kpi: ScoreKpiInput,
+  actual: number | null | undefined,
+): number | null {
+  if (actual == null || !Number.isFinite(actual)) return null;
+  const target = kpi.targetValue;
+  if (target == null || !Number.isFinite(target) || target === 0) return null;
+
+  const direction = kpiDirection(kpi);
+  if (direction === "MAINTAIN") {
+    const deviation = Math.abs(actual - target) / Math.abs(target);
+    return Math.max(0, Math.round((1 - deviation) * 100));
+  }
+  if (direction === "LOWER") {
+    if (actual === 0) return 120;
+    return Math.min(Math.round((target / actual) * 100), 120);
+  }
+  return Math.min(Math.round((actual / target) * 100), 120);
+}
 
 export interface KpiReviewQueueItem {
   id: string;

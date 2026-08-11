@@ -1,8 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { isHrAdminLevel } from "@/lib/alignment-scope";
+import { getTeamUserIds } from "@/lib/team";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { logActivity } from "@/lib/activity";
+import type { Prisma, CycleStatus } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -12,10 +15,24 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status");
   const pagination = parsePaginationParams(req);
 
-  const where: any = { organizationId: getOrgId(session) };
-  if (status) where.status = status;
+  const where: Prisma.ReviewCycleWhereInput = { organizationId: getOrgId(session) };
+  if (status) where.status = status as CycleStatus;
   if (pagination.search) {
     where.name = { contains: pagination.search, mode: "insensitive" };
+  }
+
+  // A review's scores/outcomes are between the subject, their reporting
+  // line and HR — never org-public. Below hr-admin, cycles keep their
+  // shells (names + counts render) but the review rows are filtered to
+  // ones the caller is IN: their own, ones they review, and (for
+  // managers) their report tree's.
+  let reviewsWhere: Prisma.ReviewWhereInput | undefined;
+  if (!isHrAdminLevel(session)) {
+    const callerId = getUserId(session);
+    const subjectIds = isManager(session)
+      ? await getTeamUserIds(getOrgId(session), callerId)
+      : [callerId];
+    reviewsWhere = { OR: [{ subjectId: { in: subjectIds } }, { reviewerId: callerId }] };
   }
 
   const [cycles, total] = await Promise.all([
@@ -23,6 +40,7 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         reviews: {
+          ...(reviewsWhere ? { where: reviewsWhere } : {}),
           select: {
             id: true,
             status: true,

@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { isOrgWideAlignment } from "@/lib/alignment-scope";
+import { getTeamUserIds } from "@/lib/team";
 import { enrichKeyResultGroups, enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
@@ -18,11 +20,37 @@ export async function GET(req: NextRequest) {
   const ownerId = url.searchParams.get("ownerId");
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
+  const and: Prisma.OKRWhereInput[] = [];
   if (level) where.level = level;
   if (quarter) {
-    where.OR = [{ quarter }, { quarter: null }, { quarter: "" }];
+    and.push({ OR: [{ quarter }, { quarter: null }, { quarter: "" }] });
   }
   if (ownerId) where.ownerId = ownerId;
+
+  // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
+  // is not org-public: everyone sees COMPANY objectives and their own
+  // department's TEAM objectives; a person always sees their own; a
+  // manager additionally sees their report tree's (plus unowned
+  // objectives, which managers create); admin / exec / HR see the org.
+  if (!isOrgWideAlignment(session)) {
+    const callerId = getUserId(session);
+    const visible: Prisma.OKRWhereInput[] = [
+      { level: "COMPANY" },
+      { ownerId: callerId },
+    ];
+    const me = await prisma.user.findUnique({
+      where: { id: callerId },
+      select: { departmentId: true },
+    });
+    if (me?.departmentId) visible.push({ level: "TEAM", departmentId: me.departmentId });
+    if (isManager(session)) {
+      const teamIds = await getTeamUserIds(orgId, callerId);
+      visible.push({ ownerId: { in: teamIds } });
+      visible.push({ ownerId: null });
+    }
+    and.push({ OR: visible });
+  }
+  if (and.length > 0) where.AND = and;
 
   const okrs = await prisma.oKR.findMany({
     where,
@@ -71,6 +99,17 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim()) return jsonError("Title required");
 
+  // Door 1: an employee's objective is their OWN — they can't file goals
+  // under someone else's name. Managers may assign anyone in the org.
+  const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
+  if (effectiveOwnerId) {
+    const owner = await prisma.user.findFirst({
+      where: { id: effectiveOwnerId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!owner) return jsonError("Owner not found in this organization", 404);
+  }
+
   const cadence =
     checkInCadence && ["WEEKLY", "BIWEEKLY", "MONTHLY"].includes(checkInCadence)
       ? checkInCadence
@@ -110,7 +149,7 @@ export async function POST(req: NextRequest) {
       quarter: quarter || null,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
-      ownerId: ownerId || null,
+      ownerId: effectiveOwnerId,
       departmentId: departmentId || null,
       parentId: parentId || null,
       checkInCadence: cadence,
@@ -195,25 +234,63 @@ export async function POST(req: NextRequest) {
   return jsonSuccess(createdPayload, 201);
 }
 
+// Columns a PATCH may touch — an unvalidated spread must never reach
+// prisma (organizationId / id / createdAt are not editable, ever).
+const OKR_PATCH_KEYS = [
+  "title", "description", "level", "status", "progress", "quarter",
+  "startDate", "endDate", "ownerId", "departmentId", "parentId",
+  "checkInCadence", "position",
+] as const;
+
 export async function PATCH(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { id, ...updates } = body;
+  const { id, ...rawUpdates } = body;
 
   if (!id) return jsonError("OKR ID required");
 
   const existing = await prisma.oKR.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("OKR not found", 404);
 
-  if (updates.startDate) updates.startDate = new Date(updates.startDate);
-  if (updates.endDate) updates.endDate = new Date(updates.endDate);
+  // Edit gate: the owner, a manager with the owner in their report tree
+  // (unowned objectives stay manager-editable), or an org-wide level.
+  const callerId = getUserId(session);
+  let canEdit = isOrgWideAlignment(session) || existing.ownerId === callerId;
+  if (!canEdit && isManager(session)) {
+    canEdit = existing.ownerId
+      ? (await getTeamUserIds(orgId, callerId)).includes(existing.ownerId)
+      : true;
+  }
+  if (!canEdit) {
+    return jsonError("You can only edit your own goals or your reports' goals.", 403);
+  }
+
+  const updates: Record<string, unknown> = {};
+  for (const key of OKR_PATCH_KEYS) {
+    if (key in rawUpdates) updates[key] = rawUpdates[key];
+  }
+  // Employees can't re-home a goal onto someone else or escalate its level.
+  if (!isManager(session)) {
+    delete updates.ownerId;
+    delete updates.level;
+  }
+  if (typeof updates.ownerId === "string" && updates.ownerId !== existing.ownerId) {
+    const owner = await prisma.user.findFirst({
+      where: { id: updates.ownerId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!owner) return jsonError("Owner not found in this organization", 404);
+  }
+
+  if (updates.startDate) updates.startDate = new Date(updates.startDate as string);
+  if (updates.endDate) updates.endDate = new Date(updates.endDate as string);
 
   const updated = await prisma.oKR.update({
     where: { id },
-    data: updates,
+    data: updates as Prisma.OKRUpdateInput,
     include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
   });
 

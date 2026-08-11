@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canEditOkrOwner } from "@/lib/alignment-scope";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import {
@@ -25,6 +26,17 @@ export async function POST(
   const { keyResultId, value, note } = body;
 
   if (!keyResultId || value == null) return jsonError("keyResultId and value required");
+
+  // Checking in is a WRITE on the objective — owner, tree-manager of the
+  // owner, or org-wide level only (a peer can't move someone else's goal).
+  const okrRef = await prisma.oKR.findFirst({
+    where: { id: okrId, organizationId: getOrgId(session) },
+    select: { ownerId: true },
+  });
+  if (!okrRef) return jsonError("OKR not found", 404);
+  if (!(await canEditOkrOwner(session, okrRef.ownerId))) {
+    return jsonError("You can only check in on your own goals or your reports' goals.", 403);
+  }
 
   const kr = await prisma.keyResult.findFirst({
     where: { id: keyResultId, okrId },

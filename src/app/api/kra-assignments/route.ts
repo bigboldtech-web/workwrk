@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 
 // Roles that may assign org-wide; everyone else is scoped to their own
@@ -17,9 +18,16 @@ export async function GET(req: NextRequest) {
   const period = searchParams.get("period");
 
   const orgId = getOrgId(session);
+  const callerId = getUserId(session);
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
+  const isOrgWide = ORG_WIDE_ASSIGNERS.has(callerLevel);
 
-  // If managerId is provided, get assignments for all direct reports
+  // If managerId is provided, get assignments for all direct reports.
+  // Only that manager themselves (or an org-wide level) may ask.
   if (managerId) {
+    if (managerId !== callerId && !isOrgWide) {
+      return jsonError("You can only view your own team's assignments.", 403);
+    }
     const directReports = await prisma.user.findMany({
       where: { managerId, organizationId: orgId },
       select: { id: true },
@@ -42,31 +50,37 @@ export async function GET(req: NextRequest) {
     return jsonSuccess(assignments);
   }
 
-  // If no userId, check if requesting all org assignments
+  // If no userId, check if requesting all org assignments (door 3 only —
+  // the org-wide grid is admin / exec / HR territory).
   const all = searchParams.get("all");
   if (all === "true") {
+    if (!isOrgWide) {
+      return jsonError("Org-wide assignments are visible to admins, execs and HR only.", 403);
+    }
     const page = parseInt(searchParams.get("page") || "1");
     const limit = Math.min(parseInt(searchParams.get("limit") || "100"), 200);
     const skip = (page - 1) * limit;
 
-    const [assignments, total] = await Promise.all([
-      prisma.kRAAssignment.findMany({
-        where: { kra: { organizationId: orgId } },
-        include: {
-          kra: { select: { id: true, name: true, category: true, kpis: { select: { id: true, name: true, unit: true } } } },
-          user: { select: { id: true, firstName: true, lastName: true } },
-        },
-        orderBy: { createdAt: "desc" },
-        take: limit,
-        skip,
-      }),
-      prisma.kRAAssignment.count({ where: { kra: { organizationId: orgId } } }),
-    ]);
+    const assignments = await prisma.kRAAssignment.findMany({
+      where: { kra: { organizationId: orgId } },
+      include: {
+        kra: { select: { id: true, name: true, category: true, kpis: { select: { id: true, name: true, unit: true } } } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      skip,
+    });
     return jsonSuccess(assignments);
   }
 
-  // Get assignments for a specific user or current user
-  const targetUserId = userId || getUserId(session);
+  // Get assignments for a specific user or current user. Reading another
+  // person's assignments (and their KPI records nested below) requires
+  // self / report-tree / org-wide standing.
+  const targetUserId = userId || callerId;
+  if (!(await canTouchUserAlignment(session, targetUserId))) {
+    return jsonError("You can only view KRA assignments for yourself or your reports.", 403);
+  }
 
   const assignments = await prisma.kRAAssignment.findMany({
     where: {
@@ -141,7 +155,7 @@ export async function POST(req: NextRequest) {
 
   // Governance: managers may only assign KRAs to people in their own
   // report tree. Org-wide roles (admin / exec / HR) assign anywhere.
-  const callerLevel = (session.user as any).accessLevel as string;
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
   if (!ORG_WIDE_ASSIGNERS.has(callerLevel)) {
     const teamIds = await getTeamUserIds(orgId, getUserId(session));
     if (!teamIds.includes(userId)) {

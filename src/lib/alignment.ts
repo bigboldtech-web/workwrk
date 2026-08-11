@@ -17,7 +17,7 @@
 // so a new KPIRecord is reflected everywhere the moment it lands.
 
 import { prisma } from "@/lib/prisma";
-import type { KpiDirection, KpiOwnership } from "@/generated/prisma";
+import type { KpiDirection, KpiOwnership, Prisma } from "@/generated/prisma";
 
 // ---------------------------------------------------------------------------
 // Direction + health
@@ -213,6 +213,26 @@ export interface LatestKpiValue {
 }
 
 /**
+ * Canonical KPIRecord period key: "YYYY-MM". Legacy keys ("2026-W33",
+ * "2026-Q3") out-sort every real month in max-string ordering ("W"/"Q" >
+ * any digit), so derivation filters them out — the stored rows themselves
+ * are never modified, they just stop driving "latest" readings.
+ */
+const CANONICAL_PERIOD = /^\d{4}-\d{2}$/;
+export const isCanonicalPeriod = (period: string): boolean =>
+  CANONICAL_PERIOD.test(period);
+
+/** Prisma-side approximation of {@link isCanonicalPeriod} ("YYYY-Www" /
+ *  "YYYY-Qn" rows carry a W or Q); the JS regex re-checks whatever gets
+ *  through. Spread into a KPIRecord `where`. */
+const CANONICAL_PERIOD_WHERE: { AND: Prisma.KPIRecordWhereInput[] } = {
+  AND: [
+    { period: { not: { contains: "W" } } },
+    { period: { not: { contains: "Q" } } },
+  ],
+};
+
+/**
  * Latest usable KPIRecord per KPI. "Latest" = highest period string
  * (KPIRecord.period is "YYYY-MM" everywhere in this codebase), tie-broken
  * by most recently updated. REJECTED records and records without an
@@ -233,6 +253,7 @@ export async function latestKpiValues(
     kpiId: { in: ids },
     actualValue: { not: null },
     status: { not: "REJECTED" as const },
+    ...CANONICAL_PERIOD_WHERE,
     ...(opts.userId ? { userId: opts.userId } : {}),
   };
 
@@ -254,6 +275,7 @@ export async function latestKpiValues(
 
   for (const row of rows) {
     if (out.has(row.kpiId) || row.actualValue == null) continue;
+    if (!isCanonicalPeriod(row.period)) continue;
     out.set(row.kpiId, {
       kpiId: row.kpiId,
       value: row.actualValue,
@@ -295,6 +317,7 @@ export async function latestKpiValuesByUser(
     userId: { in: userIds },
     actualValue: { not: null },
     status: { not: "REJECTED" as const },
+    ...CANONICAL_PERIOD_WHERE,
   };
 
   const maxes = await prisma.kPIRecord.groupBy({
@@ -311,6 +334,7 @@ export async function latestKpiValuesByUser(
     where: {
       actualValue: { not: null },
       status: { not: "REJECTED" as const },
+      ...CANONICAL_PERIOD_WHERE,
       OR: rowFilter,
     },
     select: { kpiId: true, actualValue: true, period: true, userId: true, updatedAt: true },
@@ -320,6 +344,7 @@ export async function latestKpiValuesByUser(
   for (const row of rows) {
     const key = pairKey(row.kpiId, row.userId);
     if (out.has(key) || row.actualValue == null) continue;
+    if (!isCanonicalPeriod(row.period)) continue;
     out.set(key, {
       kpiId: row.kpiId,
       value: row.actualValue,

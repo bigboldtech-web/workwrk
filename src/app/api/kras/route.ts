@@ -13,6 +13,8 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const category = searchParams.get("category");
+  // Job-title-first workspace: one role's KRAs only.
+  const roleId = searchParams.get("roleId");
   // scope:
   //   "all"  — every KRA in the org (admins / execs / HR)
   //   "team" — KRAs assigned to anyone in my recursive team
@@ -31,6 +33,7 @@ export async function GET(req: NextRequest) {
 
   const where: Prisma.KRAWhereInput = { organizationId: orgId };
   if (category) where.category = category;
+  if (roleId) where.roleId = roleId;
 
   const effectiveScope = isOrgWide
     ? (requestedScope || "all")
@@ -88,6 +91,18 @@ export async function POST(req: NextRequest) {
 
   if (!name) return jsonError("KRA name is required");
 
+  // Role-first spine: a KRA exists ONLY inside a job title. Legacy
+  // orphans (roleId null) stay readable and fixable via PATCH, but no
+  // new orphan can ever be born.
+  if (!roleId || typeof roleId !== "string") {
+    return jsonError("KRA must belong to a job title — pick a role (roleId) first.");
+  }
+  const role = await prisma.role.findFirst({
+    where: { id: roleId, organizationId: getOrgId(session) },
+    select: { id: true },
+  });
+  if (!role) return jsonError("Job title not found in this organization", 404);
+
   const kra = await prisma.kRA.create({
     data: {
       name,
@@ -128,6 +143,16 @@ export async function PATCH(req: NextRequest) {
     where: { id, organizationId: getOrgId(session) },
   });
   if (!existing) return jsonError("KRA not found", 404);
+
+  // Attaching to a job title must point at a real role of THIS org.
+  // (Clearing to null stays possible so admins can re-home a KRA.)
+  if (roleId) {
+    const role = await prisma.role.findFirst({
+      where: { id: roleId, organizationId: getOrgId(session) },
+      select: { id: true },
+    });
+    if (!role) return jsonError("Job title not found in this organization", 404);
+  }
 
   const kra = await prisma.kRA.update({
     where: { id },

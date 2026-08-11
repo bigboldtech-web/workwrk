@@ -13,6 +13,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canEditOkrOwner } from "@/lib/alignment-scope";
 import {
   enrichKeyResults,
   inferKeyResultDirection,
@@ -50,6 +51,12 @@ export async function PATCH(
 
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
+
+  // Editing a KR is a WRITE on the objective — owner / tree-manager /
+  // org-wide only.
+  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
+    return jsonError("You can only edit your own goals or your reports' goals.", 403);
+  }
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
@@ -113,6 +120,10 @@ export async function DELETE(
 
   const kr = await findScopedKeyResult(okrId, krId, orgId);
   if (!kr) return jsonError("Key Result not found", 404);
+
+  if (!(await canEditOkrOwner(session, kr.okr.ownerId))) {
+    return jsonError("You can only edit your own goals or your reports' goals.", 403);
+  }
 
   await prisma.keyResult.delete({ where: { id: kr.id } });
   const rollup = await persistOkrRollup(okrId);

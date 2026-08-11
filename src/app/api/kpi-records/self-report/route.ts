@@ -1,14 +1,24 @@
+// POST /api/kpi-records/self-report — the employee door for recording
+// their own KPI numbers. Validates every kpiId against the caller's own
+// ACTIVE KRA assignments, scores direction-aware via the shared
+// scoreKpiRecord rule, and writes SUBMITTED records so the existing
+// /team/kpi-reviews approval loop (PENDING → SUBMITTED → APPROVED |
+// REJECTED) picks them up unchanged.
+//
+// NULL-target spine: a KPI with no targetValue still accepts a reading —
+// the actual is stored with score null (health derives as "no_target").
+// We never substitute 0 for a missing line.
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@/generated/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { scoreKpiRecord } from "@/lib/kpi-record";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
 
   const userId = getUserId(session);
-  const orgId = getOrgId(session);
   const body = await req.json();
   const { period, records } = body;
 
@@ -19,27 +29,36 @@ export async function POST(req: NextRequest) {
   // Verify KPIs belong to this user's KRA assignments
   const assignments = await prisma.kRAAssignment.findMany({
     where: { userId, status: "ACTIVE" },
-    include: { kra: { select: { kpis: { select: { id: true, targetValue: true, lowerIsBetter: true } } } } },
+    include: {
+      kra: {
+        select: {
+          kpis: { select: { id: true, targetValue: true, direction: true, lowerIsBetter: true } },
+        },
+      },
+    },
   });
   const allowedKpiIds = new Set(assignments.flatMap((a) => a.kra.kpis.map((k) => k.id)));
   const kpiMap = new Map(
-    assignments.flatMap((a) => a.kra.kpis.map((k) => [k.id, k]))
+    assignments.flatMap((a) => a.kra.kpis.map((k) => [k.id, k] as const))
   );
 
-  const ops = records
-    .filter((r: any) => allowedKpiIds.has(r.kpiId))
-    .map((r: any) => {
+  interface SelfReportRecordInput {
+    kpiId: string;
+    actualValue?: number | string | null;
+    notes?: string | null;
+    evidence?: string | null;
+  }
+  const rows = records as SelfReportRecordInput[];
+
+  const ops = rows
+    .filter((r) => allowedKpiIds.has(r.kpiId))
+    .map((r) => {
       const kpi = kpiMap.get(r.kpiId);
       if (!kpi) return null;
 
-      const target = kpi.targetValue ?? 0;
       const actual = r.actualValue != null ? Number(r.actualValue) : null;
-      let score: number | null = null;
-      if (actual != null && target > 0) {
-        score = kpi.lowerIsBetter
-          ? (actual === 0 ? 120 : Math.min(Math.round((target / actual) * 100), 120))
-          : Math.min(Math.round((actual / target) * 100), 120);
-      }
+      // Direction-aware, null-target-safe. Score null when no line exists.
+      const score = scoreKpiRecord(kpi, actual);
 
       return prisma.kPIRecord.upsert({
         where: { kpiId_userId_period: { kpiId: r.kpiId, userId, period } },
@@ -47,7 +66,8 @@ export async function POST(req: NextRequest) {
           kpiId: r.kpiId,
           userId,
           period,
-          targetValue: target,
+          // Non-nullable column: 0 is only the "no baseline yet" sentinel.
+          targetValue: kpi.targetValue ?? 0,
           actualValue: actual,
           score,
           notes: r.notes || null,
@@ -56,7 +76,7 @@ export async function POST(req: NextRequest) {
         },
         update: {
           actualValue: actual,
-          targetValue: target,
+          targetValue: kpi.targetValue ?? 0,
           score,
           notes: r.notes || null,
           evidence: r.evidence || null,
@@ -64,9 +84,9 @@ export async function POST(req: NextRequest) {
         },
       });
     })
-    .filter(Boolean);
+    .filter((op): op is NonNullable<typeof op> => op !== null);
 
-  const results = await prisma.$transaction(ops as any[]);
+  const results = await prisma.$transaction(ops);
 
   return jsonSuccess({ saved: results.length, period, status: "SUBMITTED" });
 }

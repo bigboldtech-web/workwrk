@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-scope";
+import { scoreKpiRecord } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 
 export async function GET(req: NextRequest) {
@@ -15,9 +17,17 @@ export async function GET(req: NextRequest) {
   const limit = parseInt(url.searchParams.get("limit") || "50", 10);
   const skip = (page - 1) * limit;
 
+  // Three-door scoping: employees read their own records, managers their
+  // report tree's, admin/exec/HR the whole org. A record is a person's
+  // performance data — never org-public.
+  const visibleIds = await visibleAlignmentUserIds(session);
+  if (visibleIds !== null && userId && !visibleIds.includes(userId)) {
+    return jsonError("You can only view KPI records for yourself or your reports.", 403);
+  }
+
   const where = {
     kpi: { organizationId: orgId },
-    ...(userId ? { userId } : {}),
+    ...(userId ? { userId } : visibleIds !== null ? { userId: { in: visibleIds } } : {}),
     ...(kpiId ? { kpiId } : {}),
   };
 
@@ -49,15 +59,40 @@ export async function POST(req: NextRequest) {
     return jsonError("kpiId, userId, and period are required");
   }
 
-  // Auto-pull target from KPI definition, fallback to manual
-  const kpi = await prisma.kPI.findUnique({ where: { id: kpiId }, select: { targetValue: true, organizationId: true } });
+  // Write gate: self-report, manager-in-report-tree, or org-wide level.
+  // Peers can no longer overwrite each other's submitted numbers.
+  const callerId = getUserId(session);
+  const isSelf = userId === callerId;
+  if (!(await canTouchUserAlignment(session, userId))) {
+    return jsonError("You can only record KPI numbers for yourself or your reports.", 403);
+  }
+
+  const orgId = getOrgId(session);
+  const kpi = await prisma.kPI.findFirst({
+    where: { id: kpiId, organizationId: orgId },
+    select: { targetValue: true, direction: true, lowerIsBetter: true, organizationId: true },
+  });
   if (!kpi) return jsonError("KPI not found", 404);
 
-  const target = kpi.targetValue ?? manualTarget;
-  if (target == null) return jsonError("Target value not set on this KPI. Please set it first.");
+  const subject = await prisma.user.findFirst({
+    where: { id: userId, organizationId: orgId },
+    select: { id: true },
+  });
+  if (!subject) return jsonError("User not found", 404);
 
-  // Calculate score: actual/target * 100, capped at 120%
-  const score = actualValue != null ? Math.min(Math.round((actualValue / target) * 100), 120) : null;
+  // Target comes from the KPI definition, falling back to a manual one.
+  // NULL means "no baseline yet" — the actual is stored with score null
+  // (health derives as no_target); we never invent a line. The record
+  // column is non-nullable, so 0 is stored purely as the empty sentinel.
+  const target = kpi.targetValue ?? (manualTarget != null ? Number(manualTarget) : null);
+  const actual = actualValue != null ? Number(actualValue) : null;
+  const score = scoreKpiRecord(
+    { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
+    actual,
+  );
+
+  // Manager notes belong to the review loop — a self-report can't write them.
+  const reviewNotes = isSelf ? undefined : managerNotes;
 
   const record = await prisma.kPIRecord.upsert({
     where: { kpiId_userId_period: { kpiId, userId, period } },
@@ -65,27 +100,27 @@ export async function POST(req: NextRequest) {
       kpiId,
       userId,
       period,
-      targetValue: target,
-      actualValue,
+      targetValue: target ?? 0,
+      actualValue: actual,
       score,
       notes,
-      managerNotes,
+      managerNotes: reviewNotes ?? null,
       evidence,
-      status: actualValue != null ? "SUBMITTED" : "PENDING",
+      status: actual != null ? "SUBMITTED" : "PENDING",
     },
     update: {
-      actualValue,
-      targetValue: target,
+      actualValue: actual,
+      targetValue: target ?? 0,
       score,
       notes,
-      managerNotes,
+      ...(reviewNotes !== undefined && { managerNotes: reviewNotes }),
       evidence,
-      status: actualValue != null ? "SUBMITTED" : "PENDING",
+      status: actual != null ? "SUBMITTED" : "PENDING",
     },
   });
 
   // Auto-recalculate performance score
-  if (kpi.organizationId) triggerRecalculation(userId, kpi.organizationId);
+  triggerRecalculation(userId, orgId);
 
   return jsonSuccess(record, 201);
 }

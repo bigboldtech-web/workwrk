@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
+import { scoreKpiRecord } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 
 export async function POST(req: NextRequest) {
@@ -23,29 +25,41 @@ export async function POST(req: NextRequest) {
   });
   if (!user) return jsonError("User not found", 404);
 
+  // A manager records numbers for their own report tree only; org-wide
+  // levels (admin / exec / HR) may record for anyone in the org.
+  if (!(await canTouchUserAlignment(session, userId))) {
+    return jsonError("You can only record KPI numbers for yourself or your reports.", 403);
+  }
+
+  interface BatchRecordInput {
+    kpiId: string;
+    actualValue?: number | string | null;
+    targetValue?: number | string | null;
+    managerNotes?: string | null;
+  }
+  const rows = records as BatchRecordInput[];
+
   // Fetch all KPIs in one query
-  const kpiIds = records.map((r: any) => r.kpiId);
+  const kpiIds = rows.map((r) => r.kpiId);
   const kpis = await prisma.kPI.findMany({
     where: { id: { in: kpiIds }, organizationId: orgId },
-    select: { id: true, targetValue: true, lowerIsBetter: true },
+    select: { id: true, targetValue: true, direction: true, lowerIsBetter: true },
   });
   const kpiMap = new Map(kpis.map((k) => [k.id, k]));
 
   // Build upsert operations
-  const ops = records.map((r: any) => {
+  const ops = rows.map((r) => {
     const kpi = kpiMap.get(r.kpiId);
     if (!kpi) return null;
 
-    const target = kpi.targetValue ?? r.targetValue ?? null;
+    // NULL target = "no baseline yet": actual is stored, score stays null
+    // (0 in the non-nullable column is only the empty sentinel).
+    const target = kpi.targetValue ?? (r.targetValue != null ? Number(r.targetValue) : null);
     const actual = r.actualValue != null ? Number(r.actualValue) : null;
-    let score: number | null = null;
-    if (actual != null && target != null && target > 0) {
-      if (kpi.lowerIsBetter) {
-        score = actual === 0 ? 120 : Math.min(Math.round((target / actual) * 100), 120);
-      } else {
-        score = Math.min(Math.round((actual / target) * 100), 120);
-      }
-    }
+    const score = scoreKpiRecord(
+      { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
+      actual,
+    );
 
     return prisma.kPIRecord.upsert({
       where: { kpiId_userId_period: { kpiId: r.kpiId, userId, period } },
@@ -67,9 +81,9 @@ export async function POST(req: NextRequest) {
         status: actual != null ? "SUBMITTED" : "PENDING",
       },
     });
-  }).filter(Boolean);
+  }).filter((op): op is NonNullable<typeof op> => op !== null);
 
-  const results = await prisma.$transaction(ops as any[]);
+  const results = await prisma.$transaction(ops);
 
   // Recalculate performance score once
   triggerRecalculation(userId, orgId);

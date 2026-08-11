@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
 
 // GET /api/users/[id]/kpis?period=2026-04
 // Returns all KPIs assigned to this user (via KRA assignments) with existing records for the period
@@ -14,6 +15,12 @@ export async function GET(
   const orgId = getOrgId(session);
   const { id: userId } = await params;
   const period = new URL(req.url).searchParams.get("period") || "";
+
+  // Three-door gate: a person's KPI setup + records are visible to
+  // themselves, their reporting line, and org-wide levels only.
+  if (!(await canTouchUserAlignment(session, userId))) {
+    return jsonError("You can only view KPIs for yourself or your reports.", 403);
+  }
 
   // Verify user belongs to org
   const user = await prisma.user.findFirst({
@@ -61,7 +68,7 @@ export async function GET(
   const kras = assignments.map((a) => ({
     kraId: a.kra.id,
     kraName: a.kra.name,
-    category: (a.kra as any).category || null,
+    category: a.kra.category || null,
     kpis: a.kra.kpis.map((kpi) => {
       const record = recordMap.get(kpi.id);
       return {
