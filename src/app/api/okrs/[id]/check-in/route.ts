@@ -3,6 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
+import {
+  enrichKeyResults,
+  keyResultProgress,
+  KR_KPI_SELECT,
+  okrStatusFor,
+  rollUpOkrProgress,
+} from "@/lib/alignment";
 
 // POST: Check in on a key result (update progress)
 export async function POST(
@@ -21,8 +28,19 @@ export async function POST(
 
   const kr = await prisma.keyResult.findFirst({
     where: { id: keyResultId, okrId },
+    include: { kpi: { select: KR_KPI_SELECT } },
   });
   if (!kr) return jsonError("Key Result not found", 404);
+
+  // A KR linked to a role KPI is measured BY that gauge — its number comes
+  // from the KPI's records, not from a hand-typed check-in. Refuse rather
+  // than accept a value we would then ignore on read.
+  if (kr.kpiId) {
+    return jsonError(
+      `"${kr.title}" is measured by the KPI "${kr.kpi?.name ?? "linked KPI"}" — record the KPI reading instead of checking in here.`,
+      409,
+    );
+  }
 
   // Create check-in
   await prisma.kRCheckIn.create({
@@ -30,23 +48,31 @@ export async function POST(
   });
 
   // Update key result current value and progress
-  const progress = kr.targetValue > kr.startValue
-    ? Math.min(Math.round(((Number(value) - kr.startValue) / (kr.targetValue - kr.startValue)) * 100), 100)
-    : 100;
+  const progress = keyResultProgress(kr.startValue, kr.targetValue, Number(value));
 
   await prisma.keyResult.update({
     where: { id: keyResultId },
     data: { currentValue: Number(value), progress },
   });
 
-  // Update OKR overall progress (average of all key results)
-  const allKRs = await prisma.keyResult.findMany({
-    where: { okrId },
-    select: { progress: true },
+  // Update OKR overall progress (average of all key results). KPI-linked KRs
+  // contribute their DERIVED progress — their stored column is not the truth.
+  const okrRow = await prisma.oKR.findUnique({
+    where: { id: okrId },
+    select: {
+      ownerId: true,
+      keyResults: {
+        select: {
+          id: true, startValue: true, targetValue: true, currentValue: true,
+          progress: true, kpiId: true, kpi: { select: KR_KPI_SELECT },
+        },
+      },
+    },
   });
-  const avgProgress = Math.round(allKRs.reduce((sum, k) => sum + k.progress, 0) / allKRs.length);
+  const allKRs = await enrichKeyResults(okrRow?.keyResults ?? [], { userId: okrRow?.ownerId });
+  const avgProgress = rollUpOkrProgress(allKRs) ?? 0;
 
-  const status = avgProgress >= 100 ? "COMPLETED" : avgProgress >= 70 ? "ON_TRACK" : avgProgress >= 40 ? "AT_RISK" : "BEHIND";
+  const status = okrStatusFor(avgProgress);
 
   await prisma.oKR.update({
     where: { id: okrId },

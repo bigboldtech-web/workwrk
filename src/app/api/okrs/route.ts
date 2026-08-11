@@ -1,9 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { enrichKeyResultGroups, enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import type { Prisma } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -15,7 +17,7 @@ export async function GET(req: NextRequest) {
   const quarter = url.searchParams.get("quarter");
   const ownerId = url.searchParams.get("ownerId");
 
-  const where: any = { organizationId: orgId };
+  const where: Prisma.OKRWhereInput = { organizationId: orgId };
   if (level) where.level = level;
   if (quarter) {
     where.OR = [{ quarter }, { quarter: null }, { quarter: "" }];
@@ -26,7 +28,11 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       keyResults: {
-        include: { _count: { select: { checkIns: true } } },
+        include: {
+          _count: { select: { checkIns: true } },
+          // The role-level gauge this KR pushes, when linked.
+          kpi: { select: KR_KPI_SELECT },
+        },
         orderBy: { createdAt: "asc" },
       },
       children: { select: { id: true, title: true, progress: true, level: true, ownerId: true } },
@@ -35,7 +41,20 @@ export async function GET(req: NextRequest) {
     take: 100,
   });
 
-  return jsonSuccess(okrs);
+  // Derivation is read-side: a KR linked to a KPI reports the gauge's latest
+  // reading, not the hand-typed number still sitting on its row. Objective
+  // progress then rolls up from those live KR numbers (an OKR with no key
+  // results keeps whatever progress was set on it directly).
+  const groups = await enrichKeyResultGroups(
+    okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
+  );
+  const enriched = okrs.map((okr, i) => {
+    const keyResults = groups[i];
+    const rolled = rollUpOkrProgress(keyResults);
+    return { ...okr, keyResults, progress: rolled ?? okr.progress };
+  });
+
+  return jsonSuccess(enriched);
 }
 
 export async function POST(req: NextRequest) {
@@ -57,6 +76,32 @@ export async function POST(req: NextRequest) {
       ? checkInCadence
       : "WEEKLY";
 
+  // `kpiId` on a key result links it UP at a role KPI. Validate the whole
+  // batch against the caller's org BEFORE creating anything, so a bad id
+  // never leaves an orphan objective behind.
+  const requestedKpiIds = Array.isArray(keyResults)
+    ? Array.from(
+        new Set(
+          keyResults
+            .map((kr) => kr?.kpiId)
+            .filter((v): v is string => typeof v === "string" && v.length > 0),
+        ),
+      )
+    : [];
+  const validKpiIds = new Set(
+    requestedKpiIds.length > 0
+      ? (
+          await prisma.kPI.findMany({
+            where: { id: { in: requestedKpiIds }, organizationId: orgId },
+            select: { id: true },
+          })
+        ).map((k) => k.id)
+      : [],
+  );
+  if (requestedKpiIds.some((id) => !validKpiIds.has(id))) {
+    return jsonError("One or more kpiId values are not KPIs of this organization", 400);
+  }
+
   const okr = await prisma.oKR.create({
     data: {
       title: title.trim(),
@@ -73,14 +118,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  // Create key results if provided
+  // Create key results if provided.
   if (Array.isArray(keyResults) && keyResults.length > 0) {
     await prisma.keyResult.createMany({
-      data: keyResults.map((kr: any) => ({
+      data: keyResults.map((kr) => ({
         title: kr.title,
         unit: kr.unit || null,
         startValue: kr.startValue || 0,
         targetValue: kr.targetValue || 100,
+        kpiId: typeof kr.kpiId === "string" && validKpiIds.has(kr.kpiId) ? kr.kpiId : null,
         okrId: okr.id,
       })),
     });
@@ -88,8 +134,14 @@ export async function POST(req: NextRequest) {
 
   const created = await prisma.oKR.findUnique({
     where: { id: okr.id },
-    include: { keyResults: true },
+    include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
   });
+  const createdPayload = created
+    ? {
+        ...created,
+        keyResults: await enrichKeyResults(created.keyResults, { userId: created.ownerId }),
+      }
+    : created;
 
   logActivity({
     type: "okr_created",
@@ -140,7 +192,7 @@ export async function POST(req: NextRequest) {
     } catch (err) { console.error("[OKR] Email setup failed:", err); }
   }
 
-  return jsonSuccess(created, 201);
+  return jsonSuccess(createdPayload, 201);
 }
 
 export async function PATCH(req: NextRequest) {
@@ -162,8 +214,11 @@ export async function PATCH(req: NextRequest) {
   const updated = await prisma.oKR.update({
     where: { id },
     data: updates,
-    include: { keyResults: true },
+    include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
   });
 
-  return jsonSuccess(updated);
+  return jsonSuccess({
+    ...updated,
+    keyResults: await enrichKeyResults(updated.keyResults, { userId: updated.ownerId }),
+  });
 }

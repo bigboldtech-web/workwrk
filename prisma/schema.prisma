@@ -1134,6 +1134,13 @@ model KPI {
   // 🆕 Operating core — baseline→target, formula, and owned-vs-shared.
   // OWNED = the role controls it (graded); SHARED = influences (reviewed).
   ownership      KpiOwnership @default(OWNED)
+  // Direction of "good". `lowerIsBetter` (legacy boolean) still works;
+  // when `direction` is set it wins. MAINTAIN = must hold AT the target
+  // (e.g. attribution accuracy 100%), which grading treats differently
+  // from "higher is better".
+  direction      KpiDirection?
+  // North-star gauge for its KRA — surfaced first on role + person pages.
+  isNorthStar    Boolean      @default(false)
   formula        String?
   baselineValue  Float?
   baselineLabel  String?
@@ -1142,6 +1149,8 @@ model KPI {
   kraId          String?
   kra            KRA?         @relation(fields: [kraId], references: [id])
   records        KPIRecord[]
+  // OKR Key Results that measure themselves against this gauge.
+  keyResults     KeyResult[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -1152,6 +1161,12 @@ model KPI {
 enum KpiOwnership {
   OWNED
   SHARED
+}
+
+enum KpiDirection {
+  HIGHER
+  LOWER
+  MAINTAIN
 }
 
 enum KPIType {
@@ -2692,6 +2707,12 @@ model KeyResult {
   // this KR. Used to avoid spamming the owner — see scripts/api
   // /api/cron/okr-reminders.
   lastReminderAt DateTime?
+  // The role-level gauge this KR is pushing. Optional: a KR can still be
+  // a one-off number. When set, currentValue is derived from the KPI's
+  // latest record instead of being hand-typed — that link is what stops
+  // quarterly targets drifting from the permanent gauge.
+  kpiId          String?
+  kpi            KPI?        @relation(fields: [kpiId], references: [id], onDelete: SetNull)
   okrId          String
   okr            OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
   checkIns       KRCheckIn[]
@@ -2699,6 +2720,7 @@ model KeyResult {
   updatedAt      DateTime    @updatedAt
 
   @@index([okrId])
+  @@index([kpiId])
 }
 
 model KRCheckIn {

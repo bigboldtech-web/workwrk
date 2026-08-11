@@ -4,6 +4,8 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManage
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
 import { logActivity } from "@/lib/activity";
+import { KPI_ORDER } from "@/lib/alignment";
+import type { Prisma } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -22,12 +24,12 @@ export async function GET(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
-  const callerLevel = (session.user as any).accessLevel as string;
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
   const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
   const isOrgWide = orgWideRoles.has(callerLevel);
   const isManagerLevel = isManager(session);
 
-  const where: any = { organizationId: orgId };
+  const where: Prisma.KRAWhereInput = { organizationId: orgId };
   if (category) where.category = category;
 
   const effectiveScope = isOrgWide
@@ -55,7 +57,15 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         role: { select: { id: true, title: true } },
-        kpis: { select: { id: true, name: true, unit: true, type: true, frequency: true, targetValue: true, lowerIsBetter: true, description: true, kraId: true } },
+        kpis: {
+          select: {
+            id: true, name: true, unit: true, type: true, frequency: true, targetValue: true,
+            lowerIsBetter: true, direction: true, isNorthStar: true, ownership: true,
+            description: true, kraId: true,
+          },
+          // North-star gauge first, then alphabetical.
+          orderBy: KPI_ORDER,
+        },
         _count: { select: { assignments: true } },
       },
       orderBy: { name: "asc" },

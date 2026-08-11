@@ -1,6 +1,18 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { KPI_ORDER } from "@/lib/alignment";
+import type { Prisma } from "@/generated/prisma";
+
+// Direction of "good" + north-star flag. `direction` (when set) wins over
+// the legacy `lowerIsBetter` boolean; null explicitly clears it back to
+// the legacy fallback. Validated here so a typo'd direction can never
+// silently corrupt how a gauge is graded.
+const alignmentFieldsSchema = z.object({
+  direction: z.enum(["HIGHER", "LOWER", "MAINTAIN"]).nullable().optional(),
+  isNorthStar: z.boolean().optional(),
+});
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -10,7 +22,7 @@ export async function GET(req: NextRequest) {
   const kraId = searchParams.get("kraId");
   const userId = searchParams.get("userId");
 
-  const where: any = { organizationId: getOrgId(session) };
+  const where: Prisma.KPIWhereInput = { organizationId: getOrgId(session) };
   if (kraId) where.kraId = kraId;
 
   const kpis = await prisma.kPI.findMany({
@@ -23,7 +35,8 @@ export async function GET(req: NextRequest) {
         take: 6,
       } : false,
     },
-    orderBy: { name: "asc" },
+    // North-star gauges first, then alphabetical.
+    orderBy: KPI_ORDER,
   });
 
   return jsonSuccess(kpis);
@@ -40,6 +53,12 @@ export async function POST(req: NextRequest) {
 
   if (!name) return jsonError("KPI name is required");
 
+  const parsedAlignment = alignmentFieldsSchema.safeParse(body);
+  if (!parsedAlignment.success) {
+    return jsonError("direction must be HIGHER, LOWER or MAINTAIN; isNorthStar must be a boolean");
+  }
+  const { direction, isNorthStar } = parsedAlignment.data;
+
   const kpi = await prisma.kPI.create({
     data: {
       name,
@@ -52,6 +71,9 @@ export async function POST(req: NextRequest) {
       lowerIsBetter: lowerIsBetter === true,
       // 🆕 Operating core — owned vs shared, formula, baseline.
       ownership: ownership === "SHARED" ? "SHARED" : "OWNED",
+      // Direction of "good" (wins over lowerIsBetter when set) + north star.
+      direction: direction ?? null,
+      isNorthStar: isNorthStar === true,
       formula: formula ?? null,
       baselineValue: baselineValue != null ? Number(baselineValue) : null,
       baselineLabel: baselineLabel ?? null,
@@ -74,6 +96,12 @@ export async function PATCH(req: NextRequest) {
 
   if (!id) return jsonError("KPI id is required");
 
+  const parsedAlignment = alignmentFieldsSchema.safeParse(body);
+  if (!parsedAlignment.success) {
+    return jsonError("direction must be HIGHER, LOWER or MAINTAIN; isNorthStar must be a boolean");
+  }
+  const { direction, isNorthStar } = parsedAlignment.data;
+
   const existing = await prisma.kPI.findFirst({
     where: { id, organizationId: getOrgId(session) },
   });
@@ -91,6 +119,9 @@ export async function PATCH(req: NextRequest) {
       ...(targetValue !== undefined && { targetValue: targetValue != null ? Number(targetValue) : null }),
       ...(targetLabel !== undefined && { targetLabel: targetLabel || null }),
       ...(lowerIsBetter !== undefined && { lowerIsBetter: lowerIsBetter === true }),
+      // Direction of "good" — null clears back to the lowerIsBetter fallback.
+      ...(direction !== undefined && { direction }),
+      ...(isNorthStar !== undefined && { isNorthStar }),
       // 🆕 Operating core fields.
       ...(ownership !== undefined && { ownership: ownership === "SHARED" ? "SHARED" : "OWNED" }),
       ...(formula !== undefined && { formula: formula || null }),

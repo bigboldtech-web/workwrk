@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
+import { enrichKeyResultGroups, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import type { Prisma } from "@/generated/prisma";
 
 /**
  * GET /api/okrs/my-okrs
@@ -32,17 +34,14 @@ export async function GET(req: Request) {
     select: { departmentId: true },
   });
 
-  const where: any = {
-    organizationId: orgId,
-    quarter,
-    OR: [
-      { level: "COMPANY" },
-      { ownerId: userId },
-    ],
-  };
+  const or: Prisma.OKRWhereInput[] = [
+    { level: "COMPANY" },
+    { ownerId: userId },
+  ];
   if (me?.departmentId) {
-    where.OR.push({ level: "TEAM", departmentId: me.departmentId });
+    or.push({ level: "TEAM", departmentId: me.departmentId });
   }
+  const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
 
   const okrs = await prisma.oKR.findMany({
     where,
@@ -50,7 +49,9 @@ export async function GET(req: Request) {
       keyResults: {
         select: {
           id: true, title: true, startValue: true, currentValue: true,
-          targetValue: true, unit: true, progress: true,
+          targetValue: true, unit: true, progress: true, kpiId: true,
+          // The role-level gauge this KR pushes, when linked.
+          kpi: { select: KR_KPI_SELECT },
           // Last 8 check-ins, oldest → newest, for sparkline rendering.
           checkIns: {
             orderBy: { createdAt: "desc" },
@@ -80,9 +81,15 @@ export async function GET(req: Request) {
   const STALE_AFTER_DAYS = 7;
   const now = Date.now();
 
+  // KRs linked to a role KPI report that gauge's latest reading for their
+  // owner (read-side derivation) instead of the hand-typed number.
+  const derivedGroups = await enrichKeyResultGroups(
+    okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
+  );
+
   // Compute progress per OKR + per-KR staleness
-  const enriched = okrs.map((o) => {
-    const krs = o.keyResults.map((kr) => {
+  const enriched = okrs.map((o, oi) => {
+    const krs = derivedGroups[oi].map((kr) => {
       // Reverse so oldest → newest for nicer sparkline path math.
       const history = [...kr.checkIns].reverse();
       const lastAt = kr.checkIns[0]?.createdAt ?? null;
@@ -98,17 +105,7 @@ export async function GET(req: Request) {
       };
     });
 
-    let progress = 0;
-    if (krs.length > 0) {
-      const total = krs.reduce((sum, kr) => {
-        const range = (kr.targetValue || 0) - (kr.startValue || 0);
-        if (range <= 0) return sum + 0;
-        const current = kr.currentValue || 0;
-        const pct = Math.max(0, Math.min(100, ((current - (kr.startValue || 0)) / range) * 100));
-        return sum + pct;
-      }, 0);
-      progress = Math.round(total / krs.length);
-    }
+    const progress = rollUpOkrProgress(krs) ?? 0;
 
     return {
       ...o,

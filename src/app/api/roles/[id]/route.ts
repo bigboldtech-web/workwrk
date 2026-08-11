@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
+import { KPI_ORDER } from "@/lib/alignment";
 
 // GET: the full role-definition bundle — the Block-B view of a role.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -18,9 +19,11 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           kpis: {
             select: {
               id: true, name: true, description: true, unit: true, frequency: true,
-              type: true, ownership: true, formula: true,
+              type: true, ownership: true, formula: true, direction: true, isNorthStar: true,
               baselineValue: true, baselineLabel: true, targetValue: true, targetLabel: true, lowerIsBetter: true,
             },
+            // North-star gauge first, then alphabetical.
+            orderBy: KPI_ORDER,
           },
           sops: { select: { id: true, title: true, status: true } },
           _count: { select: { assignments: true } },
