@@ -34,8 +34,6 @@ model Organization {
   meetings              Meeting[]
   aiQueries             AIQuery[]
   invitations           Invitation[]
-  onboardingTemplates   OnboardingTemplate[]
-  trainingCourses       TrainingCourse[]
   integrations          Integration[]
   subscription          Subscription?
   apiKeys               ApiKey[]
@@ -58,39 +56,22 @@ model Organization {
   secrets               OrgSecret[]
   tags                  Tag[]
   tagAssignments        TagAssignment[]
-  expenses              Expense[]
-  compensationCycles    CompensationCycle[]
-  compensationDecisions CompensationDecision[]
-  timeOffPolicies       TimeOffPolicy[]
-  timeOffRequests       TimeOffRequest[]
   timesheets            Timesheet[]
   timeEntries           TimeEntry[]
-  jobs                  Job[]
-  candidates            Candidate[]
-  applications          Application[]
   identityProviders     IdentityProvider[]
   scimTokens            ScimToken[]
   vendors               Vendor[]
   purchaseOrders        PurchaseOrder[]
   invoices              Invoice[]
-  headcountPlans        HeadcountPlan[]
-  interviews            Interview[]
   payGroups             PayGroup[]
-  payRuns               PayRun[]
   earningCodes          EarningCode[]
   deductionCodes        DeductionCode[]
-  payslips              Payslip[]
-  benefitPlans          BenefitPlan[]
-  openEnrollments       OpenEnrollment[]
-  enrollments           BenefitEnrollment[]
-  dependents            Dependent[]
   lifeEvents            LifeEvent[]
   glAccounts            GlAccount[]
   fiscalYears           FiscalYear[]
   accountingPeriods     AccountingPeriod[]
   journalEntries        JournalEntry[]
   costCenters           CostCenter[]
-  salaryBands           SalaryBand[]
   plans                 BudgetPlan[]
   planScenarios         PlanScenario[]
   planLines             PlanLine[]
@@ -506,9 +487,6 @@ model User {
   notifications           Notification[]
   consentRecords          ConsentRecord[]
   headOfDepartments       Department[]                 @relation("DepartmentHead")
-  onboardingInstances     OnboardingInstance[]
-  buddyForOnboarding      OnboardingInstance[]         @relation("OnboardingBuddy")
-  courseEnrollments       CourseEnrollment[]
   externalData            ExternalData[]
   activityLogs            ActivityLog[]
   performanceScores       PerformanceScore[]
@@ -527,25 +505,12 @@ model User {
   calendarSubscriptions   CalendarSubscription[]       @relation("CalendarSubscriptionUser")
   sopFolderAccess         SOPFolderAccess[]            @relation("SOPFolderAccessUser")
   sopsAuthored            SOP[]                        @relation("SOPAuthor")
-  expensesReported        Expense[]                    @relation("ExpenseReporter")
-  expensesApproved        Expense[]                    @relation("ExpenseApprover")
-  compDecisionsAsSubject  CompensationDecision[]       @relation("CompDecisionSubject")
-  compDecisionsProposed   CompensationDecision[]       @relation("CompDecisionProposer")
-  timeOffRequested        TimeOffRequest[]             @relation("TimeOffSubject")
-  timeOffApproved         TimeOffRequest[]             @relation("TimeOffApprover")
   timesheetsAsSubject     Timesheet[]                  @relation("TimesheetSubject")
   timesheetsApproved      Timesheet[]                  @relation("TimesheetApprover")
   timeEntriesAsSubject    TimeEntry[]                  @relation("TimeEntrySubject")
-  jobsAsHiringManager     Job[]                        @relation("JobHiringManager")
-  applicationsAsRecruiter Application[]                @relation("ApplicationRecruiter")
-  candidateRecord         Candidate[]                  @relation("CandidateHiredUser")
   purchaseOrdersRequested PurchaseOrder[]              @relation("POrequester")
   purchaseOrdersApproved  PurchaseOrder[]              @relation("POapprover")
   invoicesApproved        Invoice[]                    @relation("InvoiceApprover")
-  interviewsAsInterviewer Interview[]                  @relation("InterviewInterviewer")
-  payslips                Payslip[]                    @relation("PayslipSubject")
-  benefitEnrollments      BenefitEnrollment[]          @relation("BenefitEnrollmentSubject")
-  dependents              Dependent[]                  @relation("DependentOwner")
   lifeEvents              LifeEvent[]                  @relation("LifeEventSubject")
   journalEntriesPosted    JournalEntry[]               @relation("JournalEntryPostedBy")
   journalEntriesApproved  JournalEntry[]               @relation("JournalEntryApprovedBy")
@@ -858,8 +823,6 @@ model Department {
   members        User[]           @relation("DepartmentMembers")
   roles          Role[]
   goals          DepartmentGoal[]
-  jobs           Job[]
-  headcountPlans HeadcountPlan[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -2018,83 +1981,6 @@ model Reminder {
 // MODULE 9: ONBOARDING & TRAINING
 // ==========================================
 
-model OnboardingTemplate {
-  id             String               @id @default(cuid())
-  name           String
-  description    String?
-  roleId         String?
-  departmentId   String?
-  steps          Json                 @default("[]")
-  durationDays   Int                  @default(30)
-  organizationId String
-  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  instances      OnboardingInstance[]
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-
-  @@index([organizationId])
-}
-
-model OnboardingInstance {
-  id          String             @id @default(cuid())
-  templateId  String
-  template    OnboardingTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  buddyId     String?
-  buddy       User?              @relation("OnboardingBuddy", fields: [buddyId], references: [id])
-  startDate   DateTime           @default(now())
-  targetDate  DateTime?
-  completedAt DateTime?
-  progress    Json               @default("[]")
-  status      OnboardingStatus   @default(IN_PROGRESS)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-
-  @@index([userId])
-}
-
-enum OnboardingStatus {
-  NOT_STARTED
-  IN_PROGRESS
-  COMPLETED
-  OVERDUE
-}
-
-model TrainingCourse {
-  id             String             @id @default(cuid())
-  title          String
-  description    String?
-  category       String?
-  content        Json               @default("{}")
-  duration       Int?
-  mandatory      Boolean            @default(false)
-  organizationId String
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  enrollments    CourseEnrollment[]
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-
-  @@index([organizationId])
-}
-
-model CourseEnrollment {
-  id          String         @id @default(cuid())
-  courseId    String
-  course      TrainingCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  userId      String
-  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  progress    Int            @default(0)
-  score       Float?
-  completedAt DateTime?
-  startedAt   DateTime       @default(now())
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  @@unique([courseId, userId])
-  @@index([userId])
-}
-
 // ==========================================
 // MODULE 10: INTEGRATIONS (HRMS, etc.)
 // ==========================================
@@ -3244,64 +3130,6 @@ enum TagEntityType {
 // Decimal(12,2) for `amount`: 10 digits of dollars + 2 cents. Float
 // is wrong for money — at Fortune-500 volume the rounding bites.
 
-model Expense {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  reporterId String
-  reporter   User   @relation("ExpenseReporter", fields: [reporterId], references: [id])
-
-  description String // short headline visible in lists
-  notes       String? // longer context, only on detail
-  category    ExpenseCategory
-
-  amount   Decimal @db.Decimal(12, 2)
-  currency String  @default("USD") // ISO 4217
-
-  expenseDate DateTime
-  receiptUrl  String? // S3 URL after upload
-
-  status      ExpenseStatus @default(DRAFT)
-  submittedAt DateTime?
-
-  approverId   String?
-  approver     User?     @relation("ExpenseApprover", fields: [approverId], references: [id])
-  decisionAt   DateTime?
-  decisionNote String? // why approved / rejected
-
-  reimbursedAt DateTime? // future: link to a Payment row when payroll lands
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([organizationId, status])
-  @@index([organizationId, expenseDate])
-  @@index([reporterId, status])
-  @@index([approverId, status])
-}
-
-enum ExpenseCategory {
-  TRAVEL
-  MEALS
-  LODGING
-  TRANSPORT
-  SUPPLIES
-  SUBSCRIPTION
-  EQUIPMENT
-  CLIENT_ENTERTAINMENT
-  TRAINING
-  OTHER
-}
-
-enum ExpenseStatus {
-  DRAFT
-  SUBMITTED
-  APPROVED
-  REJECTED
-  REIMBURSED
-}
-
 // ==========================================
 // COMPENSATION CYCLES (Phase 2)
 // ==========================================
@@ -3315,84 +3143,6 @@ enum ExpenseStatus {
 // own row, proposer (manager) sees rows for their reports, HR sees
 // everything.
 
-model CompensationCycle {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  name        String
-  description String?
-  status      CompCycleStatus @default(DRAFT)
-  startDate   DateTime
-  endDate     DateTime
-
-  // Optional org-wide budget guidance for managers — e.g. "stay under
-  // 5% across the team." Stored as percent, signed Decimal(5,2).
-  budgetPct         Decimal? @db.Decimal(5, 2)
-  reportingCurrency String   @default("USD")
-
-  closedAt  DateTime?
-  decisions CompensationDecision[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([organizationId, status])
-  @@index([organizationId, startDate])
-}
-
-model CompensationDecision {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  cycleId String
-  cycle   CompensationCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-
-  subjectId    String
-  subject      User    @relation("CompDecisionSubject", fields: [subjectId], references: [id])
-  proposedById String?
-  proposedBy   User?   @relation("CompDecisionProposer", fields: [proposedById], references: [id])
-
-  currentSalary  Decimal? @db.Decimal(12, 2)
-  proposedSalary Decimal? @db.Decimal(12, 2)
-  currency       String   @default("USD")
-  // Signed so we can encode pay cuts (rare but legal). Two decimals
-  // avoids float surprises — 5.50% vs 5.499999%.
-  changePct      Decimal? @db.Decimal(6, 2)
-  bonusAmount    Decimal? @db.Decimal(12, 2)
-  reasoning      String?
-
-  status       CompDecisionStatus @default(DRAFT)
-  decisionNote String?
-  // Audit fields without relations — HR ops can swap who finalized
-  // without rewiring rows. The id should resolve via User lookup.
-  decidedById  String?
-  decidedAt    DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([cycleId, subjectId])
-  @@index([organizationId, status])
-  @@index([cycleId, status])
-  @@index([subjectId])
-  @@index([proposedById])
-}
-
-enum CompCycleStatus {
-  DRAFT
-  OPEN
-  CLOSED
-}
-
-enum CompDecisionStatus {
-  DRAFT
-  PROPOSED
-  APPROVED
-  REJECTED
-}
-
 // ==========================================
 // TIME OFF (Phase 2)
 // ==========================================
@@ -3405,91 +3155,6 @@ enum CompDecisionStatus {
 // Timesheets (clock-in/out, hours per task) are a separate surface
 // that lands in v2 — they need a different UX (calendar grid + timer)
 // and different permission rules.
-
-model TimeOffPolicy {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  name        String
-  type        TimeOffType @default(PTO)
-  color       String?
-  description String?
-
-  annualHours      Decimal @db.Decimal(8, 2)
-  carryoverHours   Decimal @default(0) @db.Decimal(8, 2)
-  requiresApproval Boolean @default(true)
-  archived         Boolean @default(false)
-
-  // Accrual config (Phase 2 v2). UPFRONT grants annualHours on
-  // anniversary; ACCRUE drips hours each period. accrualRate is
-  // computed from annualHours when null, otherwise overrides
-  // (lets jurisdictions with hour-based laws use a fixed rate).
-  accrualMode       AccrualMode      @default(UPFRONT)
-  accrualFrequency  AccrualFrequency @default(MONTHLY)
-  accrualRate       Decimal?         @db.Decimal(8, 4)
-  waitingPeriodDays Int              @default(0)
-  maxBalanceHours   Decimal?         @db.Decimal(8, 2)
-
-  requests TimeOffRequest[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([organizationId, name])
-  @@index([organizationId])
-  @@index([organizationId, archived])
-}
-
-model TimeOffRequest {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  userId String
-  user   User   @relation("TimeOffSubject", fields: [userId], references: [id])
-
-  policyId String
-  policy   TimeOffPolicy @relation(fields: [policyId], references: [id], onDelete: Restrict)
-
-  startDate DateTime
-  endDate   DateTime
-  // Explicit so partial-day requests (e.g. 4-hour afternoon doctor
-  // visit) work — we don't infer days × 8 server-side.
-  hours     Decimal  @db.Decimal(6, 2)
-  reason    String?
-
-  status       TimeOffStatus @default(PENDING)
-  approverId   String?
-  approver     User?         @relation("TimeOffApprover", fields: [approverId], references: [id])
-  decisionAt   DateTime?
-  decisionNote String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([organizationId, status])
-  @@index([userId, status])
-  @@index([approverId, status])
-  @@index([userId, startDate])
-}
-
-enum TimeOffType {
-  PTO
-  SICK
-  PERSONAL
-  BEREAVEMENT
-  PARENTAL
-  UNPAID
-  OTHER
-}
-
-enum TimeOffStatus {
-  PENDING
-  APPROVED
-  REJECTED
-  CANCELLED
-}
 
 // ==========================================
 // TIME TRACKING / TIMESHEETS (Phase 2)
@@ -3620,133 +3285,6 @@ enum TimeEntrySource {
 // units and the same person legitimately applies through more than
 // one. Cross-org dedup happens at the user-account layer when they're
 // hired, not at the candidate layer.
-
-model Job {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String? // nullable: legacy rows are workspace-agnostic
-
-  title          String
-  description    String?
-  status         JobStatus      @default(DRAFT)
-  employmentType EmploymentType @default(FULL_TIME)
-  // Location can be a city, "Remote", or "Hybrid - SF". v2 splits to
-  // a structured location relation; for v1 free text is enough.
-  location       String?
-
-  departmentId    String?
-  department      Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-  hiringManagerId String?
-  hiringManager   User?       @relation("JobHiringManager", fields: [hiringManagerId], references: [id], onDelete: SetNull)
-
-  // Optional posted salary range. Two separate Decimals so an "at
-  // least" or "at most" range works without a sentinel.
-  salaryMin      Decimal? @db.Decimal(12, 2)
-  salaryMax      Decimal? @db.Decimal(12, 2)
-  salaryCurrency String   @default("USD")
-
-  openings    Int       @default(1)
-  publishedAt DateTime?
-  closedAt    DateTime?
-
-  applications Application[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([organizationId, status])
-  @@index([organizationId, departmentId])
-  @@index([organizationId, workspaceId])
-  @@index([hiringManagerId])
-}
-
-model Candidate {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspaceId    String? // nullable: legacy rows are workspace-agnostic
-
-  firstName String
-  lastName  String
-  email     String
-  phone     String?
-  resumeUrl String?
-  source    String? // free text, e.g. "LinkedIn", "Referral - Mary G."
-  notes     String?
-
-  // Once a candidate is hired we link them to the User they became.
-  // Set by the HIRED transition; null otherwise.
-  hiredUserId String?
-  hiredUser   User?   @relation("CandidateHiredUser", fields: [hiredUserId], references: [id], onDelete: SetNull)
-
-  applications Application[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([organizationId, email])
-  @@index([organizationId])
-  @@index([organizationId, workspaceId])
-  @@index([hiredUserId])
-}
-
-model Application {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  jobId       String
-  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  candidateId String
-  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-
-  stage           ApplicationStage @default(APPLIED)
-  rejectionReason String?
-  source          String? // optional, mirrors Candidate.source for per-app variation
-
-  recruiterId String?
-  recruiter   User?   @relation("ApplicationRecruiter", fields: [recruiterId], references: [id], onDelete: SetNull)
-
-  notes String?
-
-  interviews Interview[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([jobId, candidateId])
-  @@index([organizationId, stage])
-  @@index([jobId, stage])
-  @@index([recruiterId, stage])
-  @@index([candidateId])
-}
-
-enum JobStatus {
-  DRAFT
-  OPEN
-  ON_HOLD
-  CLOSED
-  FILLED
-}
-
-enum EmploymentType {
-  FULL_TIME
-  PART_TIME
-  CONTRACT
-  INTERN
-  TEMPORARY
-}
-
-enum ApplicationStage {
-  APPLIED
-  SCREENING
-  INTERVIEW
-  OFFER
-  HIRED
-  REJECTED
-  WITHDRAWN
-}
 
 // ==========================================
 // ENTERPRISE IDENTITY (SSO / SCIM)
@@ -3959,31 +3497,6 @@ enum InvoiceStatus {
 // proposed salaries. Multi-scenario plans (Optimistic / Tight) are
 // v2 — add a `scenarioName` column when the time comes.
 
-model HeadcountPlan {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  departmentId String?
-  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
-
-  // Free-form period token. Org picks granularity: "2026", "2026-Q1",
-  // "2026-H1", "FY27", etc. Treated opaquely server-side; the UI
-  // sorts asciibetically which matches lexical year/quarter ordering.
-  period String
-
-  plannedHeadcount Int
-  plannedBudget    Decimal? @db.Decimal(14, 2)
-  budgetCurrency   String   @default("USD")
-  notes            String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([organizationId, departmentId, period])
-  @@index([organizationId, period])
-}
-
 // ==========================================
 // INTERVIEW SCHEDULING (Phase 2 v2 — extends ATS)
 // ==========================================
@@ -3991,55 +3504,6 @@ model HeadcountPlan {
 // Multi-interviewer rounds in v3; for v1 a single interviewer
 // suffices for SMB/mid-market hiring loops. Scorecard is a numeric
 // score + notes; structured per-competency rubric is v2.
-
-model Interview {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  applicationId String
-  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-
-  interviewerId String
-  interviewer   User   @relation("InterviewInterviewer", fields: [interviewerId], references: [id])
-
-  scheduledAt     DateTime
-  durationMinutes Int           @default(30)
-  type            InterviewType @default(SCREEN)
-  // Free-text — meeting URL, room name, or on-site address. Linking
-  // to the Meeting model is v2.
-  location        String?
-
-  status InterviewStatus @default(SCHEDULED)
-
-  // Post-interview scorecard. 1-5 numeric; notes free-text. v2
-  // expands to per-competency rubric.
-  score Int?
-  notes String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([organizationId, status])
-  @@index([applicationId, status])
-  @@index([interviewerId, scheduledAt])
-}
-
-enum InterviewType {
-  SCREEN
-  TECHNICAL
-  BEHAVIORAL
-  ONSITE
-  FINAL
-  OTHER
-}
-
-enum InterviewStatus {
-  SCHEDULED
-  COMPLETED
-  CANCELLED
-  NO_SHOW
-}
 
 // ==========================================
 // Payroll (Phase 4)
@@ -4071,8 +3535,6 @@ model PayGroup {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  payRuns  PayRun[]
-  payslips Payslip[]
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -4083,46 +3545,6 @@ enum PayFrequency {
   BIWEEKLY
   SEMIMONTHLY
   MONTHLY
-}
-
-model PayRun {
-  id              String       @id @default(cuid())
-  organizationId  String
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  payGroupId      String
-  payGroup        PayGroup     @relation(fields: [payGroupId], references: [id], onDelete: Cascade)
-  periodStart     DateTime
-  periodEnd       DateTime
-  payDate         DateTime
-  status          PayRunStatus @default(DRAFT)
-  // Totals are derived from Payslip rows but cached here so list
-  // views don't N+1. Recomputed on transition to CALCULATED.
-  totalGross      Decimal      @default(0) @db.Decimal(14, 2)
-  totalNet        Decimal      @default(0) @db.Decimal(14, 2)
-  totalTax        Decimal      @default(0) @db.Decimal(14, 2)
-  totalDeductions Decimal      @default(0) @db.Decimal(14, 2)
-  // Vendor reference — opaque id from the provider (CheckHQ run id,
-  // etc.) so we can reconcile filings.
-  providerRef     String?
-  notes           String?
-  calculatedAt    DateTime?
-  postedAt        DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  payslips Payslip[]
-
-  @@unique([payGroupId, periodStart])
-  @@index([organizationId, status])
-  @@index([payDate])
-}
-
-enum PayRunStatus {
-  DRAFT // open for adjustments
-  CALCULATING // provider crunching numbers
-  CALCULATED // ready for review
-  POSTED // funds released; immutable
-  CANCELLED
 }
 
 // Earnings catalog — regular hours, overtime, bonus, commission.
@@ -4140,7 +3562,6 @@ model EarningCode {
   active         Boolean      @default(true)
   createdAt      DateTime     @default(now())
 
-  payslipLines PayslipLine[] @relation("PayslipLineEarning")
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -4162,86 +3583,9 @@ model DeductionCode {
   active         Boolean      @default(true)
   createdAt      DateTime     @default(now())
 
-  payslipLines PayslipLine[] @relation("PayslipLineDeduction")
 
   @@unique([organizationId, code])
   @@index([organizationId])
-}
-
-// One paystub for one employee for one pay period. Lines roll up
-// into the totals on the parent. Stored even after the run is
-// POSTED so the employee can always reprint.
-model Payslip {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  payRunId       String
-  payRun         PayRun       @relation(fields: [payRunId], references: [id], onDelete: Cascade)
-  payGroupId     String
-  payGroup       PayGroup     @relation(fields: [payGroupId], references: [id], onDelete: Restrict)
-  subjectId      String
-  subject        User         @relation("PayslipSubject", fields: [subjectId], references: [id], onDelete: Cascade)
-  // Cached totals — sum of lines. Recomputed when lines change.
-  gross          Decimal      @default(0) @db.Decimal(12, 2)
-  net            Decimal      @default(0) @db.Decimal(12, 2)
-  tax            Decimal      @default(0) @db.Decimal(12, 2)
-  deductions     Decimal      @default(0) @db.Decimal(12, 2)
-  hoursWorked    Decimal      @default(0) @db.Decimal(8, 2)
-  // Provider reference (CheckHQ paystub id) — null until posted.
-  providerRef    String?
-  // Where the paid funds went — stored for the employee record. Last
-  // 4 digits only; full account info lives at the provider.
-  payMethod      PayMethod    @default(DIRECT_DEPOSIT)
-  bankLast4      String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  lines PayslipLine[]
-
-  @@unique([payRunId, subjectId])
-  @@index([organizationId, subjectId])
-  @@index([payGroupId])
-}
-
-enum PayMethod {
-  DIRECT_DEPOSIT
-  CHECK
-  WIRE
-  MANUAL
-}
-
-// One line on a paystub. Either an earning OR a deduction OR a tax
-// — exactly one of those three id columns is non-null. Discriminated
-// by `kind` for fast filtering.
-model PayslipLine {
-  id              String          @id @default(cuid())
-  payslipId       String
-  payslip         Payslip         @relation(fields: [payslipId], references: [id], onDelete: Cascade)
-  kind            PayslipLineKind
-  // For EARNING lines:
-  earningCodeId   String?
-  earningCode     EarningCode?    @relation("PayslipLineEarning", fields: [earningCodeId], references: [id], onDelete: Restrict)
-  hours           Decimal?        @db.Decimal(8, 2)
-  rate            Decimal?        @db.Decimal(10, 4)
-  // For DEDUCTION lines:
-  deductionCodeId String?
-  deductionCode   DeductionCode?  @relation("PayslipLineDeduction", fields: [deductionCodeId], references: [id], onDelete: Restrict)
-  // For TAX lines: human-readable label only. Provider does the math.
-  taxLabel        String?
-  amount          Decimal         @db.Decimal(12, 2)
-  // YTD running total at the moment this line was generated. Used
-  // for cap enforcement + W-2 reconciliation.
-  ytdAmount       Decimal?        @db.Decimal(12, 2)
-
-  @@index([payslipId])
-  @@index([earningCodeId])
-  @@index([deductionCodeId])
-}
-
-enum PayslipLineKind {
-  EARNING
-  DEDUCTION
-  TAX
 }
 
 // ==========================================
@@ -4251,177 +3595,6 @@ enum PayslipLineKind {
 // → pay-period deduction lines. Dependents and life events drive
 // off-cycle changes (marriage, birth, qualifying event).
 // ==========================================
-
-model BenefitPlan {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  type           BenefitType
-  name           String
-  carrier        String?
-  description    String?
-  // Default tier costs per pay period — can be overridden per
-  // BenefitTier row for richer plans.
-  employeeCost   Decimal      @default(0) @db.Decimal(10, 2)
-  employerCost   Decimal      @default(0) @db.Decimal(10, 2)
-  // Effective window — outside this range the plan can't be elected.
-  effectiveFrom  DateTime
-  effectiveTo    DateTime?
-  active         Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  tiers             BenefitTier[]
-  enrollments       BenefitEnrollment[]
-  enrollmentsInOpen OpenEnrollmentPlan[]
-
-  @@unique([organizationId, name])
-  @@index([organizationId, type])
-}
-
-enum BenefitType {
-  MEDICAL
-  DENTAL
-  VISION
-  LIFE
-  DISABILITY_SHORT
-  DISABILITY_LONG
-  RETIREMENT_401K
-  RETIREMENT_ROTH
-  HSA
-  FSA
-  COMMUTER
-  OTHER
-}
-
-model BenefitTier {
-  id            String      @id @default(cuid())
-  benefitPlanId String
-  benefitPlan   BenefitPlan @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
-  // Coverage tier label — "Employee", "Employee + Spouse",
-  // "Employee + Children", "Family", or org-custom strings.
-  tier          String
-  employeeCost  Decimal     @db.Decimal(10, 2)
-  employerCost  Decimal     @db.Decimal(10, 2)
-
-  enrollments BenefitEnrollment[]
-
-  @@unique([benefitPlanId, tier])
-}
-
-model OpenEnrollment {
-  id             String               @id @default(cuid())
-  organizationId String
-  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  // Window during which employees can submit elections.
-  startDate      DateTime
-  endDate        DateTime
-  // When the elections take effect (typically Jan 1).
-  effectiveDate  DateTime
-  status         OpenEnrollmentStatus @default(DRAFT)
-  notes          String?
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
-
-  plans       OpenEnrollmentPlan[]
-  enrollments BenefitEnrollment[]
-
-  @@index([organizationId, status])
-}
-
-enum OpenEnrollmentStatus {
-  DRAFT
-  OPEN
-  CLOSED
-  ARCHIVED
-}
-
-// Junction — which plans are offered in a given OE window.
-model OpenEnrollmentPlan {
-  id               String         @id @default(cuid())
-  openEnrollmentId String
-  openEnrollment   OpenEnrollment @relation(fields: [openEnrollmentId], references: [id], onDelete: Cascade)
-  benefitPlanId    String
-  benefitPlan      BenefitPlan    @relation(fields: [benefitPlanId], references: [id], onDelete: Cascade)
-
-  @@unique([openEnrollmentId, benefitPlanId])
-}
-
-// One employee's election for one plan. Always linked to the OE
-// window that produced it (or the LifeEvent for off-cycle changes).
-// Status moves DRAFT → SUBMITTED → ACTIVE → ENDED.
-model BenefitEnrollment {
-  id               String           @id @default(cuid())
-  organizationId   String
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  subjectId        String
-  subject          User             @relation("BenefitEnrollmentSubject", fields: [subjectId], references: [id], onDelete: Cascade)
-  benefitPlanId    String
-  benefitPlan      BenefitPlan      @relation(fields: [benefitPlanId], references: [id], onDelete: Restrict)
-  benefitTierId    String?
-  benefitTier      BenefitTier?     @relation(fields: [benefitTierId], references: [id], onDelete: Restrict)
-  openEnrollmentId String?
-  openEnrollment   OpenEnrollment?  @relation(fields: [openEnrollmentId], references: [id], onDelete: SetNull)
-  lifeEventId      String?
-  lifeEvent        LifeEvent?       @relation(fields: [lifeEventId], references: [id], onDelete: SetNull)
-  // Per-pay-period cost snapshot at time of election. Pulling from
-  // BenefitTier directly would lose history when tier costs change.
-  employeeCost     Decimal          @db.Decimal(10, 2)
-  employerCost     Decimal          @db.Decimal(10, 2)
-  effectiveStart   DateTime
-  effectiveEnd     DateTime?
-  status           EnrollmentStatus @default(DRAFT)
-  notes            String?
-  // Provider reference (carrier confirmation id) — null until the
-  // adapter has acknowledged the election.
-  providerRef      String?
-  submittedAt      DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-
-  @@index([organizationId, subjectId])
-  @@index([benefitPlanId, status])
-  @@index([openEnrollmentId])
-  @@index([lifeEventId])
-}
-
-enum EnrollmentStatus {
-  DRAFT
-  SUBMITTED
-  ACTIVE
-  ENDED
-  CANCELLED
-}
-
-model Dependent {
-  id             String                @id @default(cuid())
-  organizationId String
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  ownerId        String
-  owner          User                  @relation("DependentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  firstName      String
-  lastName       String
-  relationship   DependentRelationship
-  dateOfBirth    DateTime?
-  // Last 4 only — full SSN never stored at app layer; vendor handles.
-  ssnLast4       String?
-  // Whether this dependent currently appears on any benefit
-  // election. Maintained by the adapter when carriers confirm.
-  coveredOnPlan  Boolean               @default(false)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-
-  @@index([organizationId, ownerId])
-}
-
-enum DependentRelationship {
-  SPOUSE
-  DOMESTIC_PARTNER
-  CHILD
-  STEPCHILD
-  OTHER
-}
 
 // Qualifying life event — opens an off-cycle election window for
 // the affected employee. The benefits team approves before it
@@ -4442,7 +3615,6 @@ model LifeEvent {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  enrollments BenefitEnrollment[]
 
   @@index([organizationId, subjectId])
   @@index([status])
@@ -4466,17 +3638,6 @@ enum LifeEventStatus {
   APPROVED
   REJECTED
   ENROLLED
-}
-
-enum AccrualMode {
-  UPFRONT // grant annualHours on hire / anniversary
-  ACCRUE // drip hours per period
-}
-
-enum AccrualFrequency {
-  PER_PAY_PERIOD
-  MONTHLY
-  QUARTERLY
 }
 
 // ==========================================
@@ -4721,34 +3882,6 @@ model OvertimePolicy {
   updatedAt      DateTime     @updatedAt
 
   @@unique([organizationId, name])
-  @@index([organizationId, active])
-}
-
-// Salary band — min / mid / max for a role within a location and
-// (optionally) a level. Used during compensation cycles to flag
-// out-of-band proposals before they're approved.
-model SalaryBand {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  // Free-text role label and optional level (P3, M2, etc.) so
-  // orgs without a formal job-architecture can still slot bands
-  // against role names.
-  role           String
-  level          String?
-  location       String?
-  currency       String       @default("USD")
-  minAmount      Decimal      @db.Decimal(12, 2)
-  midAmount      Decimal      @db.Decimal(12, 2)
-  maxAmount      Decimal      @db.Decimal(12, 2)
-  effectiveFrom  DateTime
-  effectiveTo    DateTime?
-  active         Boolean      @default(true)
-  notes          String?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
-
-  @@unique([organizationId, role, level, location])
   @@index([organizationId, active])
 }
 

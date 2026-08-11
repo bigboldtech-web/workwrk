@@ -72,7 +72,6 @@ export function MarketingFooter() {
             title="Company"
             links={[
               ["About",   "/about"],
-              ["Careers", "/careers"],
               ["Contact", "/contact"],
               ["Privacy", "/privacy"],
               ["Terms",   "/terms"],

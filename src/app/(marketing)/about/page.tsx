@@ -55,7 +55,7 @@ export default function AboutPage() {
               between has been ignored. workwrk is for them.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button href="/careers" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
+              <Button href="/contact" variant="secondary" hue="fuchsia" size="lg" rightIcon={<ArrowRight size={15} />}>
                 Join the team
               </Button>
               <Button href="/contact" variant="outline" size="lg">Get in touch</Button>
@@ -132,8 +132,7 @@ export default function AboutPage() {
         hue="fuchsia"
         title={<>Want to <GradientText hue="amber">build with us</GradientText>?</>}
         body="We're hiring engineers, designers, and operators across India, UAE, and remote globally."
-        primary={{ label: "See open roles", href: "/careers" }}
-        secondary={{ label: "Get in touch",  href: "/contact" }}
+        primary={{ label: "Get in touch", href: "/contact" }}
       />
     </>
   );
