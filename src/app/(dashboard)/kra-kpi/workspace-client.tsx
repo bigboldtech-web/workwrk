@@ -27,6 +27,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 import { KraDialog } from "@/components/alignment/kra-dialog";
 
@@ -383,6 +384,39 @@ function OrphanRow({
   const [roleId, setRoleId] = useState("");
   const [busy, setBusy] = useState(false);
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+
+  // Not every legacy row is a real KRA. Vague, everyone-owns-it entries
+  // ("Collaboration", "Quality of work") measure nobody and belong to no
+  // job title — the admin clears them here rather than force-fitting them
+  // onto a role. Guarded by a destructive confirm that names what goes.
+  const remove = async () => {
+    const kpiNote = o.kpis.length > 0 ? ` and its ${o.kpis.length} KPI${o.kpis.length === 1 ? "" : "s"}` : "";
+    const peopleNote = o.activeAssignees.length > 0
+      ? ` It is currently assigned to ${o.activeAssignees.length} person${o.activeAssignees.length === 1 ? "" : "s"}.`
+      : "";
+    const ok = await confirm({
+      title: "Delete this KRA",
+      description: `Delete "${o.name}"${kpiNote}?${peopleNote} This cannot be undone.`,
+      destructive: true,
+      confirmLabel: "Delete KRA",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/kras?id=${encodeURIComponent(o.id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast(d?.error ?? "Couldn't delete the KRA");
+        return;
+      }
+      onAttached(`Deleted "${o.name}"`);
+    } catch {
+      toast("Couldn't delete the KRA");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const attach = async (targetRoleId: string, targetTitle: string) => {
     if (!targetRoleId) return;
@@ -465,6 +499,15 @@ function OrphanRow({
           className="h-7 px-2.5 rounded-md bg-zinc-900 text-white text-[12px] font-medium hover:bg-zinc-800 disabled:opacity-40"
         >
           Attach
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void remove()}
+          title="Not a KRA — delete it"
+          className="h-7 px-2.5 rounded-md text-[12px] font-medium text-[#E2445C] hover:bg-[#E2445C]/10 disabled:opacity-40"
+        >
+          Not a KRA
         </button>
       </span>
     </div>

@@ -61,6 +61,19 @@ export async function POST(req: NextRequest) {
 
   if (!name) return jsonError("KPI name is required");
 
+  // Same spine as KRA→job title: a KPI is a gauge UNDER a result area, so
+  // it cannot float on its own. (KRA → role → person is the whole chain;
+  // a parentless KPI measures nothing anybody owns.) Legacy parentless
+  // rows stay readable and re-homable via PATCH — no new ones are born.
+  if (!kraId || typeof kraId !== "string") {
+    return jsonError("KPI must sit under a KRA — pick the result area (kraId) it measures.");
+  }
+  const parentKra = await prisma.kRA.findFirst({
+    where: { id: kraId, organizationId: getOrgId(session) },
+    select: { id: true },
+  });
+  if (!parentKra) return jsonError("KRA not found in this organization", 404);
+
   const parsedAlignment = alignmentFieldsSchema.safeParse(body);
   if (!parsedAlignment.success) {
     return jsonError("direction must be HIGHER, LOWER or MAINTAIN; isNorthStar must be a boolean");
