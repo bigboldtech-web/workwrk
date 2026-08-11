@@ -16,9 +16,9 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
 import { Target, ScrollText, Plus, X, Sparkles, Loader2 } from "lucide-react";
 
-interface KraAssignment { id: string; kraId: string; weightage: number; kra?: { id: string; name: string; category?: string | null } }
+interface KraAssignment { id: string; kraId: string; weightage: number; kra?: { id: string; name: string; category?: string | null; role?: { id: string; title: string } | null } }
 interface SopAssignment { id: string; sopId: string; mandatory?: boolean; sop?: { id: string; title: string } }
-interface KraOption { id: string; name: string; category?: string | null }
+interface KraOption { id: string; name: string; category?: string | null; role?: { id: string; title: string } | null }
 interface SopOption { id: string; title: string }
 
 // The list endpoints return a few different envelope shapes across the
@@ -177,6 +177,13 @@ export function ManageAlignmentDialog({
                 {kraAssignments.map((a) => (
                   <li key={a.id} className="flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5">
                     <span className="flex-1 min-w-0 text-sm truncate">{a.kra?.name ?? "KRA"}</span>
+                    {/* Which job title this KRA belongs to — an orphan KRA is
+                        flagged so the manager spots it before assigning. */}
+                    {a.kra?.role ? (
+                      <span className="text-[10px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 truncate max-w-[120px]" title={a.kra.role.title}>{a.kra.role.title}</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">No job title</span>
+                    )}
                     {a.kra?.category ? <Badge variant="outline" className="text-[9px]">{a.kra.category}</Badge> : null}
                     <span className="text-[11px] text-zinc-400 tabular-nums w-10 text-right">{a.weightage}%</span>
                     <button type="button" onClick={() => void removeKra(a.id)} disabled={busy !== null}
@@ -191,7 +198,11 @@ export function ManageAlignmentDialog({
                 <select value={newKraId} onChange={(e) => setNewKraId(e.target.value)}
                   className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] bg-white">
                   <option value="">Add a KRA…</option>
-                  {availableKras.map((k) => <option key={k.id} value={k.id}>{k.name}</option>)}
+                  {availableKras.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.name}{k.role?.title ? ` · ${k.role.title}` : " · no job title"}
+                    </option>
+                  ))}
                 </select>
                 <Input type="number" min={1} max={100} value={newKraWeight}
                   onChange={(e) => setNewKraWeight(Number(e.target.value))}

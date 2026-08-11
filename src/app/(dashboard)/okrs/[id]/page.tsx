@@ -13,6 +13,8 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
+import { getTeamUserIds } from "@/lib/team";
 import {
   ArrowLeft, AlertTriangle, Target, Calendar, Clock, Sparkles,
   ChevronRight, Building2, Users, User as UserIcon, Activity,
@@ -95,6 +97,27 @@ export default async function OkrDetailPage(
     },
   });
   if (!okr) notFound();
+
+  // Three-door visibility, same rule as GET /api/okrs/[id]: COMPANY →
+  // everyone; own goal → always; TEAM → own department; manager tiers →
+  // report tree + unowned; org-wide alignment levels → all. Out of scope
+  // reads as not-found, not as a peek.
+  const viewerLevel = sessionUser.accessLevel ?? "";
+  let visible =
+    ORG_WIDE_ALIGNMENT_LEVELS.has(viewerLevel) ||
+    okr.level === "COMPANY" ||
+    okr.ownerId === sessionUser.id;
+  if (!visible && okr.level === "TEAM" && okr.departmentId) {
+    const meRow = await prisma.user.findUnique({
+      where: { id: sessionUser.id },
+      select: { departmentId: true },
+    });
+    visible = meRow?.departmentId === okr.departmentId;
+  }
+  if (!visible && MANAGER_LEVELS.has(viewerLevel)) {
+    visible = !okr.ownerId || (await getTeamUserIds(orgId, sessionUser.id)).includes(okr.ownerId);
+  }
+  if (!visible) notFound();
 
   const checkinUserIds = Array.from(
     new Set(okr.keyResults.flatMap((kr) => kr.checkIns.map((c) => c.userId))),

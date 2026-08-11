@@ -33,7 +33,7 @@ import { useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   SmilePlus, BellOff, Bell, ChevronRight, Settings, Palette, Command,
-  HelpCircle, Trash2, LogOut, Pin, PinOff,
+  HelpCircle, Trash2, LogOut, Pin, PinOff, CircleUser,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { PROFILE_TOOLS } from "./profile-tools";
@@ -157,6 +157,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
       <Divider />
 
       <div className="px-1.5 py-1.5">
+        <MenuRow icon={CircleUser}   label="My Profile"         onClick={() => goto("/people/me")} />
         <MenuRow icon={Settings}     label="Settings"           onClick={() => goto("/settings")} />
         <MenuRow icon={Bell}         label="Notifications"      onClick={() => goto("/inbox")} />
         <MenuRow icon={Palette}      label="Themes"             onClick={() => goto("/settings?tab=themes")} />

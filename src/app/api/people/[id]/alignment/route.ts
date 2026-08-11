@@ -28,7 +28,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
       firstName: true,
       lastName: true,
       avatar: true,
-      role: { select: { id: true, title: true } },
+      // The JD — Role.description is the mission the career home renders
+      // under "My role"; level + department frame it.
+      role: {
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          level: true,
+          department: { select: { id: true, name: true } },
+        },
+      },
+      manager: { select: { id: true, firstName: true, lastName: true } },
     },
   });
   if (!person) return jsonError("User not found", 404);

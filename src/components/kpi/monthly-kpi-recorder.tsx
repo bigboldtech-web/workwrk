@@ -44,6 +44,7 @@ interface KpiEntry {
     actualValue: number | null;
     score: number | null;
     managerNotes: string | null;
+    notes?: string | null;
     status: string;
   } | null;
 }
@@ -63,9 +64,19 @@ interface RecordFormData {
 
 interface Props {
   userId: string;
+  /**
+   * True when the recorder's subject IS the signed-in user. Self-reports
+   * save through POST /api/kpi-records/self-report (validates the
+   * caller's own ACTIVE assignments, writes SUBMITTED records into the
+   * manager approval loop); manager viewers keep the batch endpoint,
+   * which is tree-gated server-side. The notes field follows: a
+   * self-report writes `notes` (visible to the manager at sign-off),
+   * a manager writes `managerNotes`.
+   */
+  self?: boolean;
 }
 
-export function MonthlyKpiRecorder({ userId }: Props) {
+export function MonthlyKpiRecorder({ userId, self = false }: Props) {
   const [selectedPeriod, setSelectedPeriod] = useState<string | null>(null);
   const [kras, setKras] = useState<KraGroup[]>([]);
   const [totalKpis, setTotalKpis] = useState(0);
@@ -97,7 +108,9 @@ export function MonthlyKpiRecorder({ userId }: Props) {
         for (const kpi of kra.kpis) {
           fd[kpi.kpiId] = {
             actualValue: kpi.existingRecord?.actualValue?.toString() || "",
-            managerNotes: kpi.existingRecord?.managerNotes || "",
+            // The notes box edits the field this viewer owns: their own
+            // `notes` on a self-report, `managerNotes` for a manager.
+            managerNotes: (self ? kpi.existingRecord?.notes : kpi.existingRecord?.managerNotes) || "",
           };
         }
       }
@@ -110,7 +123,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [userId, toastError]);
+  }, [userId, self, toastError]);
 
   useEffect(() => {
     if (selectedPeriod) {
@@ -136,12 +149,18 @@ export function MonthlyKpiRecorder({ userId }: Props) {
       const records = Object.entries(snapshot).map(([kpiId, data]) => ({
         kpiId,
         actualValue: data.actualValue ? Number(data.actualValue) : null,
-        managerNotes: data.managerNotes || null,
+        ...(self
+          ? { notes: data.managerNotes || null }
+          : { managerNotes: data.managerNotes || null }),
       }));
-      const res = await fetch("/api/kpi-records/batch", {
+      const res = await fetch(self ? "/api/kpi-records/self-report" : "/api/kpi-records/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, period: selectedPeriod, records }),
+        body: JSON.stringify(
+          self
+            ? { period: selectedPeriod, records }
+            : { userId, period: selectedPeriod, records },
+        ),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -156,7 +175,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
         fetchKpis(selectedPeriod);
       }
     },
-    [selectedPeriod, userId, toastError, toastSuccess, fetchKpis],
+    [selectedPeriod, userId, self, toastError, toastSuccess, fetchKpis],
   );
 
   const handleSaveAll = async () => {
@@ -428,7 +447,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                           size="icon"
                           className="h-7 w-7 text-muted hover:text-foreground shrink-0"
                           onClick={() => toggleNotes(kpi.kpiId)}
-                          title="Manager feedback"
+                          title={self ? "Add a note for your manager" : "Manager feedback"}
                         >
                           <MessageSquare size={14} />
                         </Button>
@@ -440,7 +459,7 @@ export function MonthlyKpiRecorder({ userId }: Props) {
                           <Textarea
                             value={fd.managerNotes}
                             onChange={(e) => updateField(kpi.kpiId, "managerNotes", e.target.value)}
-                            placeholder="Manager feedback / notes..."
+                            placeholder={self ? "Context for your manager (what drove this number)..." : "Manager feedback / notes..."}
                             rows={2}
                             className="bg-transparent border-border text-xs"
                           />

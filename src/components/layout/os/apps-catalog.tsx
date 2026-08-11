@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
-  Video, Trophy, Clock,
+  Video, Trophy, Clock, CircleUser,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal,
   Plus, ChevronDown, ChevronRight, Pin, Star, X,
   Megaphone, Briefcase, BookOpen, Wrench, Building2,
@@ -27,6 +27,7 @@ import {
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
 import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
@@ -84,8 +85,9 @@ export interface AppEntry {
    *   "hr-admin"  — HR + COMPANY_ADMIN + SUPER_ADMIN (people management)
    *   "org-admin" — COMPANY_ADMIN + SUPER_ADMIN only (finance/legal)
    *
-   * ICs get the management surface as a top-bar popover instead of a
-   * full app entry — see ClickTopbar for the read/light-action versions.
+   * This hides the rail entry only — every gated page ALSO enforces the
+   * same tier server-side (src/lib/page-gates.ts). ICs keep their own
+   * door: "My Profile" (/people/me) carries their KRAs/KPIs/goals.
    */
   requiredAccess?: "manager" | "hr-admin" | "org-admin";
 }
@@ -771,6 +773,7 @@ function HomeSidebar() {
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname === "/people/me"} />
         <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
         <MoreNavItem />
       </ul>
@@ -872,12 +875,32 @@ function AiSidebar() {
 // Teams — a people-operation cockpit. Three buckets: who (People), what they
 // own & are measured on (Alignment), how they're doing (Performance), plus an
 // Overview landing. Every item has one clear job.
+//
+// The app entry is manager-gated, but this sidebar can still render for an
+// employee (route match on /people/[id] — their own career home), so it is
+// access-aware: below manager tier it shows only the personal door, and the
+// director-gated Rollup row is hidden below director (no dead controls).
+const DIRECTOR_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR"]);
+
 function TeamsSidebar() {
   const pathname = usePathname() || "";
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  const isManagerTier = MANAGER_LEVELS.has(accessLevel);
+
+  if (!isManagerTier) {
+    return (
+      <ul>
+        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname.startsWith("/people")} />
+      </ul>
+    );
+  }
+
   return (
     <>
       <ul>
         <NavItem href="/team" Icon={LayoutDashboard} label="Overview" active={pathname === "/team"} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname === "/people/me"} />
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
@@ -894,7 +917,9 @@ function TeamsSidebar() {
       <ul>
         <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
         <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
-        <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
+        {DIRECTOR_LEVELS.has(accessLevel) ? (
+          <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
+        ) : null}
         <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={pathname === "/team/workload"} />
       </ul>
     </>
@@ -972,6 +997,7 @@ function GoalsSidebar() {
       <ul>
         <NavItem href="/okrs" Icon={Trophy} label="All Goals" />
         <NavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" />
+        <NavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" />
       </ul>
       <SectionLabel>Favorites</SectionLabel>
       <EmptyState title="Star a Goal to see it here" />
@@ -1020,6 +1046,7 @@ export const APPS: AppEntry[] = [
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
+    requiredAccess: "manager",
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,

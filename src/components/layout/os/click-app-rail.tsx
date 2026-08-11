@@ -75,8 +75,13 @@ export function ClickAppRail() {
 
   // Ghost icon: the user is on a route that maps to an app they
   // haven't pinned. Surface it temporarily so the rail still reflects
-  // where they are, with a "Pin to keep" affordance.
-  const ghostApp = routeApp && !pinnedAppKeys.includes(routeApp.key) ? routeApp : null;
+  // where they are, with a "Pin to keep" affordance. Never ghost an app
+  // the user's access tier can't open (an employee on /people/me matches
+  // the manager-gated Teams app; the page is theirs, the app is not).
+  const ghostApp =
+    routeApp && canAccessApp(routeApp, accessLevel) && !pinnedAppKeys.includes(routeApp.key)
+      ? routeApp
+      : null;
 
   useEffect(() => () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);

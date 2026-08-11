@@ -70,6 +70,8 @@ export default async function RolePage(props: {
   });
   if (!role) notFound();
 
+  // Non-editors read the role as a JD: no org-wide user list, no holder
+  // emails. The workspace renders read-only off canEdit.
   const [allAreas, allRoles, allKras, scopes, orgUsers] = await Promise.all([
     prisma.ownershipArea.findMany({
       where: { organizationId: orgId },
@@ -79,8 +81,12 @@ export default async function RolePage(props: {
     prisma.role.findMany({ where: { organizationId: orgId }, select: { id: true, title: true }, orderBy: { title: "asc" } }),
     prisma.kRA.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, category: true }, orderBy: { name: "asc" } }),
     prisma.scope.findMany({ where: { organizationId: orgId }, select: { id: true, name: true, dimension: true }, orderBy: [{ dimension: "asc" }, { name: "asc" }] }),
-    prisma.user.findMany({ where: { organizationId: orgId, status: "ACTIVE" }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true }, orderBy: { firstName: "asc" } }),
+    canEdit
+      ? prisma.user.findMany({ where: { organizationId: orgId, status: "ACTIVE" }, select: { id: true, firstName: true, lastName: true, email: true, avatar: true }, orderBy: { firstName: "asc" } })
+      : Promise.resolve([]),
   ]);
+
+  const stripEmail = <T extends { email: string }>(p: T): T => (canEdit ? p : { ...p, email: "" });
 
   // Serialize into plain shapes the client workspace renders.
   const bundle = {
@@ -108,8 +114,8 @@ export default async function RolePage(props: {
     ownedAreas: role.ownedAreas,
     boundaries: role.boundaries.map((b) => ({ id: b.id, relation: b.relation as string, area: b.area })),
     thresholds: role.thresholds.map((t) => ({ id: t.id, label: t.label, trigger: t.trigger, value: t.value, unit: t.unit, businessHoursOnly: t.businessHoursOnly })),
-    instances: role.instances.map((i) => ({ id: i.id, name: i.name, status: i.status, scope: i.scope, user: i.user })),
-    people: role.users,
+    instances: role.instances.map((i) => ({ id: i.id, name: i.name, status: i.status, scope: i.scope, user: i.user ? stripEmail(i.user) : i.user })),
+    people: role.users.map(stripEmail),
     allAreas,
     allRoles,
     allKras,

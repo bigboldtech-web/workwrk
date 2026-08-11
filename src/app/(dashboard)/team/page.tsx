@@ -1,10 +1,11 @@
-// Teams — Overview. The landing for the Teams app: how the org/team is doing at
+// Teams — Overview. The landing for the Teams app: how the team is doing at
 // a glance, what needs the viewer (review/KPI approvals, people missing KRAs),
 // and a shortcut into every section. Server component; all read-only counts.
+//
+// Three-door scoping: manager tiers see THEIR recursive report tree, not the
+// org; org-wide levels (admin / exec / HR) keep org counts. Employees never
+// land here — the gate sends them to their own career home (/people/me).
 
-import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
@@ -14,25 +15,36 @@ import {
 import { TeamStatTile, TeamCard } from "@/components/team/ui";
 import { TeamPulse } from "@/components/team/team-pulse";
 import { TAUPE } from "@/components/ui/accent";
+import { requireManagerPage } from "@/lib/page-gates";
+import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
+import { getTeamUserIds } from "@/lib/team";
 
 export const dynamic = "force-dynamic";
 
 export default async function TeamOverviewPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string; name?: string };
-  if (!u.id || !u.organizationId) redirect("/login");
+  const u = await requireManagerPage();
   const orgId = u.organizationId;
   const me = u.id;
 
+  // Door 3 sees the org; door 2 sees their recursive report tree.
+  const orgWide = ORG_WIDE_ALIGNMENT_LEVELS.has(u.accessLevel);
+  const teamIds = orgWide ? null : await getTeamUserIds(orgId, me);
+  const peopleWhere = teamIds
+    ? { organizationId: orgId, status: "ACTIVE" as const, id: { in: teamIds } }
+    : { organizationId: orgId, status: "ACTIVE" as const };
+
   const [people, roles, kras, kpis, reviewsToApprove, kpiToApprove, missingKras] = await Promise.all([
-    prisma.user.count({ where: { organizationId: orgId, status: "ACTIVE" } }),
+    prisma.user.count({ where: peopleWhere }),
     prisma.role.count({ where: { organizationId: orgId } }),
-    prisma.kRA.count({ where: { organizationId: orgId } }),
-    prisma.kPI.count({ where: { organizationId: orgId } }),
+    teamIds
+      ? prisma.kRA.count({ where: { organizationId: orgId, assignments: { some: { userId: { in: teamIds }, status: "ACTIVE" } } } })
+      : prisma.kRA.count({ where: { organizationId: orgId } }),
+    teamIds
+      ? prisma.kPI.count({ where: { organizationId: orgId, kra: { assignments: { some: { userId: { in: teamIds }, status: "ACTIVE" } } } } })
+      : prisma.kPI.count({ where: { organizationId: orgId } }),
     prisma.weeklyReview.count({ where: { organizationId: orgId, managerId: me, status: "SUBMITTED" } }),
     prisma.kPIRecord.count({ where: { status: "SUBMITTED", user: { managerId: me, organizationId: orgId } } }),
-    prisma.user.count({ where: { organizationId: orgId, status: "ACTIVE", kraAssignments: { none: {} } } }),
+    prisma.user.count({ where: { ...peopleWhere, kraAssignments: { none: {} } } }),
   ]);
 
   const queue = [

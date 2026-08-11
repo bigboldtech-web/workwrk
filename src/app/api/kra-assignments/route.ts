@@ -95,6 +95,8 @@ export async function GET(req: NextRequest) {
           name: true,
           description: true,
           category: true,
+          // Which job title owns this KRA — lets the UI flag orphans.
+          role: { select: { id: true, title: true } },
           kpis: {
             select: {
               id: true,
