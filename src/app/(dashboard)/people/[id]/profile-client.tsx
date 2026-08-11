@@ -954,9 +954,43 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
               <h1 className="text-xl font-semibold text-zinc-900 truncate">{fullName}</h1>
               <div className="flex-1" />
               {mode === "manage" ? (
-                <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
-                  <Edit3 size={13} /> Edit profile
-                </button>
+                <>
+                  <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
+                    <Edit3 size={13} /> Edit profile
+                  </button>
+                  <button
+                    ref={personMenuBtnRef}
+                    type="button"
+                    onClick={() => setPersonMenuOpen((v) => !v)}
+                    aria-label="Person actions"
+                    aria-haspopup="menu"
+                    aria-expanded={personMenuOpen}
+                    title="More actions"
+                    className={`inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 shrink-0 ${
+                      personMenuOpen ? "bg-zinc-100 text-zinc-800" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
+                    }`}
+                  >
+                    <MoreHorizontal size={15} />
+                  </button>
+                  <MorePortal anchorRef={personMenuBtnRef} panelRef={personMenuPanelRef} width={232} open={personMenuOpen} placement="below">
+                    <MenuList>
+                      {user.deletedAt ? (
+                        <MenuItem
+                          icon={RotateCcw}
+                          label="Restore to company"
+                          onClick={() => { setPersonMenuOpen(false); setRestoreOpen(true); }}
+                        />
+                      ) : (
+                        <MenuItem
+                          icon={UserMinus}
+                          destructive
+                          label="Remove from company"
+                          onClick={() => { setPersonMenuOpen(false); setRemoveOpen(true); }}
+                        />
+                      )}
+                    </MenuList>
+                  </MorePortal>
+                </>
               ) : (
                 <Link href="/account/profile" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
                   <Edit3 size={13} /> Edit personal info
@@ -965,6 +999,13 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             </div>
             <div className="flex items-center gap-2 mt-1.5">
               <StatusChip color={statusColor(user.status)} label={String(user.status).replace(/_/g, " ")} />
+              {user.deletedAt ? (
+                <StatusChip
+                  color="#E2445C"
+                  label={`Removed ${new Date(user.deletedAt).toLocaleDateString()}`}
+                  title="No longer with the company. Restore from the actions menu."
+                />
+              ) : null}
               <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{String(user.accessLevel).replace(/_/g, " ")}</span>
             </div>
             {role ? (
@@ -1106,6 +1147,36 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             </div>
           </DialogContent>
         </Dialog>
+      ) : null}
+
+      {/* ── offboarding dialogs (manage mode) ────────────────────── */}
+      {mode === "manage" ? (
+        <>
+          <RemovePersonDialog
+            open={removeOpen}
+            onClose={() => setRemoveOpen(false)}
+            userId={id}
+            userName={fullName}
+            firstName={user.firstName || fullName}
+            candidates={allUsers.filter((u) => u.id !== id)}
+            onRemoved={() => {
+              setRemoveOpen(false);
+              loadUser();
+              loadAlignment();
+              router.refresh();
+            }}
+          />
+          <ConfirmDialog
+            open={restoreOpen}
+            onClose={() => setRestoreOpen(false)}
+            onConfirm={handleRestore}
+            title={`Restore ${fullName} to the company`}
+            description="They regain access on their next sign-in. Their history (tasks, docs, reviews and records) picks up exactly where it left off."
+            confirmLabel="Restore"
+            destructive={false}
+            loading={restoring}
+          />
+        </>
       ) : null}
 
       {/* ── the role: job title + JD ─────────────────────────────── */}
