@@ -11,6 +11,7 @@ import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
+import { KPI_ORDER } from "@/lib/alignment";
 import { RoleWorkspace } from "./role-workspace";
 
 export const dynamic = "force-dynamic";
@@ -40,11 +41,13 @@ export default async function RolePage(props: {
         orderBy: { name: "asc" },
         include: {
           kpis: {
-            orderBy: { name: "asc" },
+            // North-star gauge first, then alphabetical.
+            orderBy: KPI_ORDER,
             select: {
               id: true, name: true, description: true, unit: true, frequency: true, type: true,
               ownership: true, formula: true, baselineValue: true, baselineLabel: true,
               targetValue: true, targetLabel: true, lowerIsBetter: true,
+              direction: true, isNorthStar: true,
             },
           },
           sops: { select: { id: true, title: true, status: true } },
@@ -91,8 +94,15 @@ export default async function RolePage(props: {
     kras: role.kraTemplates.map((k) => ({
       id: k.id,
       name: k.name,
+      description: k.description,
       category: k.category,
-      kpis: k.kpis.map((p) => ({ ...p, ownership: p.ownership as string, type: p.type as string, frequency: p.frequency as string })),
+      kpis: k.kpis.map((p) => ({
+        ...p,
+        ownership: p.ownership as string,
+        type: p.type as string,
+        frequency: p.frequency as string,
+        direction: p.direction as "HIGHER" | "LOWER" | "MAINTAIN" | null,
+      })),
       sops: k.sops.map((s) => ({ id: s.id, title: s.title, status: s.status as string })),
     })),
     ownedAreas: role.ownedAreas,

@@ -6,25 +6,35 @@
 // router.refresh() to re-pull the server bundle (config surface, low frequency —
 // correctness over optimism). Reuses the app's design-system primitives.
 
-import { useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   LayoutDashboard, GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
   Target, FileText, Gauge, Users as UsersIcon, Loader2, Sparkles,
+  MoreHorizontal, Star, TrendingUp, TrendingDown, MoveRight, Pencil, Unlink,
+  type LucideIcon,
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { KraPicker } from "@/components/ui/kra-picker";
 import { useOsToast } from "@/components/layout/os/toast";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { KraDialog } from "@/components/alignment/kra-dialog";
+import { KpiDialog, type KpiDialogKpi } from "@/components/alignment/kpi-dialog";
 
 // ─────────────────────────── types ───────────────────────────
 type Person = { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null };
+type KpiDirection = "HIGHER" | "LOWER" | "MAINTAIN";
 type Kpi = {
   id: string; name: string; description: string | null; unit: string | null; frequency: string; type: string;
   ownership: string; formula: string | null; baselineValue: number | null; baselineLabel: string | null;
   targetValue: number | null; targetLabel: string | null; lowerIsBetter: boolean;
+  direction: KpiDirection | null; isNorthStar: boolean;
 };
-type Kra = { id: string; name: string; category: string | null; kpis: Kpi[]; sops: { id: string; title: string; status: string }[] };
+type Kra = { id: string; name: string; description: string | null; category: string | null; kpis: Kpi[]; sops: { id: string; title: string; status: string }[] };
 type Area = { id: string; name: string; ownerRole: { id: string; title: string } | null };
 type Boundary = { id: string; relation: string; area: { id: string; name: string; ownerRole: { id: string; title: string } | null } };
 type Threshold = { id: string; label: string; trigger: string; value: number; unit: string | null; businessHoursOnly: boolean };
@@ -53,7 +63,7 @@ export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; c
   return (
     <>
       <ViewTabStrip className="px-6">
-        <ViewTab icon={LayoutDashboard} iconTileColor="#6366F1" label="Overview" active={view === "overview"} href={`/people/roles/${roleId}`} />
+        <ViewTab icon={LayoutDashboard} iconTileColor="#0073EA" label="Overview" active={view === "overview"} href={`/people/roles/${roleId}`} />
         <ViewTab icon={UsersIcon} iconTileColor="#0073EA" label="Instances" trailing={bundle.instances.length ? <span className="text-[10px] text-zinc-400">{bundle.instances.length}</span> : undefined} active={view === "instances"} href={`/people/roles/${roleId}?view=instances`} />
       </ViewTabStrip>
 
@@ -61,13 +71,12 @@ export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; c
         {view === "overview" ? (
           <div className="max-w-5xl space-y-4">
             <IdentityCard bundle={bundle} canEdit={canEdit} />
+            <AlignmentCard bundle={bundle} canEdit={canEdit} />
             <BoundaryCard bundle={bundle} canEdit={canEdit} />
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-              <KraCard bundle={bundle} canEdit={canEdit} />
               <ThresholdsCard bundle={bundle} canEdit={canEdit} />
+              <SopCard bundle={bundle} />
             </div>
-            <KpiCard bundle={bundle} canEdit={canEdit} />
-            <SopCard bundle={bundle} />
           </div>
         ) : (
           <div className="max-w-5xl">
@@ -280,108 +289,313 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <li className="px-2 py-1.5 text-[11.5px] text-zinc-400">{children}</li>;
 }
 
-// ─────────────────────────── KRAs ───────────────────────────
-function KraCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
+// ─────────────────────────── KRAs & KPIs (the role's alignment template) ───────────────────────────
+//
+// KRA = heading card (a container: name + description, no number, no
+// progress bar). KPI = gauge row underneath: direction of good, healthy
+// line (nullable — "no baseline yet", never invented), OWNED/SHARED,
+// north-star first. OKRs never appear here: an OKR belongs to a person,
+// never to a role.
+
+/** Tiny "…" overflow trigger rendering a MorePortal menu. */
+function RowMenu({ items }: { items: { icon: LucideIcon; label: string; destructive?: boolean; onClick: () => void }[] }) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="More actions"
+        className="w-6 h-6 grid place-items-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 shrink-0"
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} aria-hidden />
+          <MorePortal anchorRef={anchorRef} width={210} open={open} placement="below">
+            <MenuList>
+              {items.map((it, i) => (
+                <Fragment key={it.label}>
+                  {it.destructive && i > 0 ? <MenuSeparator /> : null}
+                  <MenuItem
+                    icon={it.icon}
+                    label={it.label}
+                    destructive={it.destructive}
+                    onClick={() => { setOpen(false); it.onClick(); }}
+                  />
+                </Fragment>
+              ))}
+            </MenuList>
+          </MorePortal>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+const DIRECTION_META: Record<KpiDirection, { icon: LucideIcon; hint: string }> = {
+  HIGHER: { icon: TrendingUp, hint: "Higher is better" },
+  LOWER: { icon: TrendingDown, hint: "Lower is better" },
+  MAINTAIN: { icon: MoveRight, hint: "Hold the line" },
+};
+
+function resolvedDirection(p: Kpi): KpiDirection {
+  return p.direction ?? (p.lowerIsBetter ? "LOWER" : "HIGHER");
+}
+
+/** The KPI's healthy line as copy — never invents a number. */
+function healthyLine(p: Kpi): string | null {
+  if (p.targetValue == null) return null;
+  const unit = p.unit ? ` ${p.unit}` : "";
+  const dir = resolvedDirection(p);
+  if (dir === "MAINTAIN") return `hold at ${p.targetValue}${unit}`;
+  return `${dir === "LOWER" ? "≤" : "≥"} ${p.targetValue}${unit}`;
+}
+
+type ConfirmState =
+  | { kind: "detach-kra"; id: string; name: string }
+  | { kind: "delete-kra"; id: string; name: string }
+  | { kind: "delete-kpi"; id: string; name: string }
+  | null;
+
+function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
   const { call, busy } = useApi();
+  const router = useRouter();
+  const { toast } = useOsToast();
   const attachedIds = bundle.kras.map((k) => k.id);
-  return (
-    <Card title="KRAs" icon={Target} action={canEdit ? (
-      <div className="w-[180px]"><KraPicker kras={bundle.allKras.map((k) => ({ id: k.id, name: k.name, category: k.category ?? undefined }))} value="" excludeIds={attachedIds} placeholder="Attach a KRA" onChange={(kraId) => { if (kraId) call("/api/kras", "PATCH", { id: kraId, roleId: bundle.role.id }); }} /></div>
-    ) : undefined}>
-      {bundle.kras.length === 0 ? (
-        <p className="text-[12.5px] text-zinc-400 py-2">No KRAs on this role yet.</p>
-      ) : (
-        <ul className="space-y-1">
-          {bundle.kras.map((k) => (
-            <li key={k.id} className="group/kra flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-[13px]">
-              <Target className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-              <span className="flex-1 min-w-0 truncate text-zinc-800" title={k.name}>{k.name}</span>
-              <span className="text-[10.5px] text-zinc-400 shrink-0">{k.kpis.length} KPI{k.kpis.length === 1 ? "" : "s"}</span>
-              {canEdit ? <button type="button" disabled={busy} onClick={() => call("/api/kras", "PATCH", { id: k.id, roleId: null })} className="opacity-0 group-hover/kra:opacity-100 text-zinc-400 hover:text-red-500 shrink-0"><X className="w-3.5 h-3.5" /></button> : null}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
-  );
-}
 
-// ─────────────────────────── KPIs (owned vs shared, baseline→target) ───────────────────────────
-function KpiCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
-  const allKpis = bundle.kras.flatMap((k) => k.kpis.map((p) => ({ ...p, kraName: k.name })));
-  const owned = allKpis.filter((p) => p.ownership !== "SHARED");
-  const shared = allKpis.filter((p) => p.ownership === "SHARED");
-  return (
-    <Card title="KPIs" icon={Gauge}>
-      {allKpis.length === 0 ? (
-        <p className="text-[12.5px] text-zinc-400 py-2">No KPIs yet. Add KPIs under this role&rsquo;s KRAs.</p>
-      ) : (
-        <div className="space-y-4">
-          <KpiGroup title="Owned" hint="controlled by this role — graded" tone="#0073EA" kpis={owned} canEdit={canEdit} />
-          <KpiGroup title="Shared" hint="influenced — reviewed, not solely graded" tone="#a78b6c" kpis={shared} canEdit={canEdit} />
-        </div>
-      )}
-    </Card>
-  );
-}
+  const [kraDialog, setKraDialog] = useState<{ kra?: Kra } | null>(null);
+  const [kpiDialog, setKpiDialog] = useState<{ kraId: string; kraName: string; kpi?: KpiDialogKpi } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState>(null);
 
-function KpiGroup({ title, hint, tone, kpis, canEdit }: { title: string; hint: string; tone: string; kpis: (Kpi & { kraName: string })[]; canEdit: boolean }) {
-  if (kpis.length === 0) return null;
-  return (
-    <div>
-      <div className="flex items-baseline gap-2 mb-1.5">
-        <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: tone }}>{title}</span>
-        <span className="text-[11px] text-zinc-400">{hint}</span>
-      </div>
-      <div className="rounded-lg border border-zinc-200 overflow-hidden">
-        <div className="grid grid-cols-[1fr_120px_120px_92px] items-center px-3 py-1.5 border-b border-zinc-100 text-[10.5px] uppercase tracking-wide text-zinc-500">
-          <span>KPI</span><span>Baseline</span><span>Target</span><span>Ownership</span>
-        </div>
-        <ul>
-          {kpis.map((p) => <KpiRow key={p.id} p={p} canEdit={canEdit} />)}
-        </ul>
-      </div>
-    </div>
-  );
-}
+  const onSaved = (msg: string) => { toast(msg); router.refresh(); };
 
-function KpiRow({ p, canEdit }: { p: Kpi & { kraName: string }; canEdit: boolean }) {
-  const { call, busy } = useApi();
-  const [baseline, setBaseline] = useState(p.baselineValue?.toString() ?? "");
-  const [target, setTarget] = useState(p.targetValue?.toString() ?? "");
-  const saveNum = (field: "baselineValue" | "targetValue", raw: string) => {
-    const v = raw.trim() === "" ? null : Number(raw);
-    if (raw.trim() !== "" && !Number.isFinite(v)) return;
-    const orig = field === "baselineValue" ? p.baselineValue : p.targetValue;
-    if ((v ?? null) === (orig ?? null)) return;
-    call("/api/kpis", "PATCH", { id: p.id, [field]: v });
+  const runConfirm = async () => {
+    if (!confirm) return;
+    const ok =
+      confirm.kind === "detach-kra"
+        ? await call("/api/kras", "PATCH", { id: confirm.id, roleId: null })
+        : confirm.kind === "delete-kra"
+          ? await call(`/api/kras?id=${confirm.id}`, "DELETE")
+          : await call(`/api/kpis?id=${confirm.id}`, "DELETE");
+    if (ok) {
+      toast(
+        confirm.kind === "detach-kra"
+          ? `"${confirm.name}" moved to Needs a job title`
+          : confirm.kind === "delete-kra" ? "KRA deleted" : "KPI deleted",
+      );
+      setConfirm(null);
+    }
   };
-  return (
-    <li className="grid grid-cols-[1fr_120px_120px_92px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 text-[12.5px]">
-      <span className="min-w-0">
-        <span className="block truncate text-zinc-800" title={p.name}>{p.name}</span>
-        <span className="block text-[10.5px] text-zinc-400 truncate">{p.kraName}{p.unit ? ` · ${p.unit}` : ""}{p.lowerIsBetter ? " · lower is better" : ""}</span>
-      </span>
-      <NumCell value={baseline} onChange={setBaseline} onCommit={() => saveNum("baselineValue", baseline)} canEdit={canEdit} placeholder="—" />
-      <NumCell value={target} onChange={setTarget} onCommit={() => saveNum("targetValue", target)} canEdit={canEdit} placeholder="—" />
-      <span>
-        <button type="button" disabled={!canEdit || busy}
-          onClick={() => call("/api/kpis", "PATCH", { id: p.id, ownership: p.ownership === "SHARED" ? "OWNED" : "SHARED" })}
-          className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide disabled:opacity-60"
-          style={p.ownership === "SHARED" ? { background: "#a78b6c22", color: "#8e7165" } : { background: "#0073EA1a", color: "#0073EA" }}>
-          {p.ownership === "SHARED" ? "Shared" : "Owned"}
-        </button>
-      </span>
-    </li>
-  );
-}
 
-function NumCell({ value, onChange, onCommit, canEdit, placeholder }: { value: string; onChange: (v: string) => void; onCommit: () => void; canEdit: boolean; placeholder?: string }) {
-  if (!canEdit) return <span className="font-mono text-zinc-700">{value || placeholder}</span>;
+  const confirmCopy: Record<Exclude<ConfirmState, null>["kind"], { title: string; description: string; confirmLabel: string; destructive: boolean }> = {
+    "detach-kra": {
+      title: "Detach this KRA from the job title?",
+      description: "It moves to the “Needs a job title” list on the KRA/KPI page. People already assigned keep their assignment and history, but new holders of this title stop inheriting it until it is re-attached.",
+      confirmLabel: "Detach",
+      destructive: false,
+    },
+    "delete-kra": {
+      title: "Delete this KRA?",
+      description: "Everyone's assignment to it is removed and its KPI gauges are detached from the job title. Recorded readings on those gauges survive. This cannot be undone.",
+      confirmLabel: "Delete KRA",
+      destructive: true,
+    },
+    "delete-kpi": {
+      title: "Delete this KPI?",
+      description: "The gauge AND every recorded reading on it — for every person — are permanently deleted. Goal key results linked to it fall back to hand check-ins. This cannot be undone.",
+      confirmLabel: "Delete KPI",
+      destructive: true,
+    },
+  };
+
   return (
-    <input value={value} onChange={(e) => onChange(e.target.value)} onBlur={onCommit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-      inputMode="decimal" placeholder={placeholder}
-      className="w-[92px] font-mono text-[12.5px] rounded border border-transparent hover:border-zinc-200 focus:border-[var(--os-brand)] px-1.5 py-0.5 outline-none" />
+    <Card
+      title="KRAs & KPIs"
+      icon={Target}
+      action={canEdit ? (
+        <div className="flex items-center gap-1.5">
+          <div className="w-[170px]">
+            <KraPicker
+              kras={bundle.allKras.map((k) => ({ id: k.id, name: k.name, category: k.category ?? undefined }))}
+              value=""
+              excludeIds={attachedIds}
+              placeholder="Attach existing"
+              onChange={(kraId) => { if (kraId) void call("/api/kras", "PATCH", { id: kraId, roleId: bundle.role.id }); }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setKraDialog({})}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add KRA
+          </button>
+        </div>
+      ) : undefined}
+    >
+      <p className="text-[11.5px] text-zinc-400 mb-3 -mt-1">
+        Every person with this job title inherits these. Quarterly targets live
+        on each person&rsquo;s goals.
+      </p>
+
+      {bundle.kras.length === 0 ? (
+        <p className="text-[12.5px] text-zinc-400 py-2">
+          No KRAs yet. Add the first area of responsibility this job title owns.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {bundle.kras.map((k) => (
+            <section key={k.id} className="rounded-lg border border-zinc-200">
+              {/* KRA heading — a container: no number, no progress bar. */}
+              <header className="flex items-start gap-2.5 px-3 pt-2.5 pb-2">
+                <Target className="w-4 h-4 text-zinc-400 shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[13.5px] font-semibold text-zinc-900 truncate" title={k.name}>{k.name}</h3>
+                  {k.description ? (
+                    <p className="text-[12px] text-zinc-500 leading-snug mt-0.5">{k.description}</p>
+                  ) : null}
+                </div>
+                {canEdit ? (
+                  <RowMenu
+                    items={[
+                      { icon: Pencil, label: "Edit KRA", onClick: () => setKraDialog({ kra: k }) },
+                      { icon: Plus, label: "Add KPI", onClick: () => setKpiDialog({ kraId: k.id, kraName: k.name }) },
+                      { icon: Unlink, label: "Detach from job title", onClick: () => setConfirm({ kind: "detach-kra", id: k.id, name: k.name }) },
+                      { icon: Trash2, label: "Delete KRA", destructive: true, onClick: () => setConfirm({ kind: "delete-kra", id: k.id, name: k.name }) },
+                    ]}
+                  />
+                ) : null}
+              </header>
+
+              {/* KPI gauge rows */}
+              {k.kpis.length > 0 ? (
+                <ul className="border-t border-zinc-100">
+                  {k.kpis.map((p) => {
+                    const dir = resolvedDirection(p);
+                    const DirIcon = DIRECTION_META[dir].icon;
+                    const line = healthyLine(p);
+                    const shared = p.ownership === "SHARED";
+                    return (
+                      <li key={p.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-zinc-100 last:border-b-0">
+                        {p.isNorthStar ? (
+                          <Star className="w-3.5 h-3.5 text-amber-400 shrink-0" style={{ fill: "currentColor" }} aria-label="North-star gauge" />
+                        ) : (
+                          <Gauge className="w-3.5 h-3.5 text-zinc-300 shrink-0" />
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[12.5px] text-zinc-800 truncate" title={p.name}>{p.name}</span>
+                          <span className="block text-[10.5px] text-zinc-400 truncate">
+                            {[
+                              p.unit,
+                              shared ? "influenced · reviewed, not graded" : null,
+                              p.baselineValue != null ? `baseline ${p.baselineValue}` : null,
+                            ].filter(Boolean).join(" · ") || " "}
+                          </span>
+                        </span>
+                        <DirIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" aria-label={DIRECTION_META[dir].hint} />
+                        {line ? (
+                          <span className="text-[12px] font-mono text-zinc-700 shrink-0" title={`Healthy line — ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
+                        ) : (
+                          <span className="text-[11.5px] italic text-zinc-400 shrink-0">no baseline yet</span>
+                        )}
+                        <span
+                          className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0"
+                          style={shared ? { background: "#a78b6c22", color: "#8e7165" } : { background: "#0073EA1a", color: "#0073EA" }}
+                          title={shared ? "Influenced by this role — reviewed, not graded" : "Controlled by this role — graded"}
+                        >
+                          {shared ? "Shared" : "Owned"}
+                        </span>
+                        {canEdit ? (
+                          <RowMenu
+                            items={[
+                              { icon: Pencil, label: "Edit KPI", onClick: () => setKpiDialog({ kraId: k.id, kraName: k.name, kpi: p }) },
+                              { icon: Trash2, label: "Delete KPI", destructive: true, onClick: () => setConfirm({ kind: "delete-kpi", id: p.id, name: p.name }) },
+                            ]}
+                          />
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="border-t border-zinc-100 px-3 py-2 text-[11.5px] text-zinc-400">
+                  No gauges yet — how will this area be measured?
+                </p>
+              )}
+
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={() => setKpiDialog({ kraId: k.id, kraName: k.name })}
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 border-t border-zinc-100 text-[12px] text-zinc-500 hover:text-[var(--os-brand)] hover:bg-zinc-50 rounded-b-lg"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add KPI
+                </button>
+              ) : null}
+            </section>
+          ))}
+        </div>
+      )}
+
+      {/* People holding this job title — each inherits the template above. */}
+      {bundle.people.length > 0 ? (
+        <div className="mt-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">People with this job title</div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {bundle.people.map((p) => (
+              <Link
+                key={p.id}
+                href={`/people/${p.id}`}
+                title={personName(p)}
+                className="inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border border-zinc-200 hover:bg-zinc-50"
+              >
+                <Avatar className="h-5 w-5">
+                  {p.avatar ? <AvatarImage src={p.avatar} alt="" /> : null}
+                  <AvatarFallback className="text-[9px]">{initials(p)}</AvatarFallback>
+                </Avatar>
+                <span className="text-[12px] text-zinc-700">{personName(p)}</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      <KraDialog
+        open={kraDialog !== null}
+        onOpenChange={(v) => { if (!v) setKraDialog(null); }}
+        roles={bundle.allRoles}
+        defaultRoleId={bundle.role.id}
+        lockRole
+        kra={kraDialog?.kra ? { ...kraDialog.kra, roleId: bundle.role.id } : null}
+        onSaved={onSaved}
+      />
+      {kpiDialog ? (
+        <KpiDialog
+          open
+          onOpenChange={(v) => { if (!v) setKpiDialog(null); }}
+          kraId={kpiDialog.kraId}
+          kraName={kpiDialog.kraName}
+          kpi={kpiDialog.kpi ?? null}
+          onSaved={onSaved}
+        />
+      ) : null}
+      {confirm ? (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirm(null)}
+          onConfirm={() => void runConfirm()}
+          loading={busy}
+          title={confirmCopy[confirm.kind].title}
+          description={confirmCopy[confirm.kind].description}
+          confirmLabel={confirmCopy[confirm.kind].confirmLabel}
+          destructive={confirmCopy[confirm.kind].destructive}
+        />
+      ) : null}
+    </Card>
   );
 }
 
