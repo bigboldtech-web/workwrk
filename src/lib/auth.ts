@@ -3,10 +3,22 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
+import type { AccessLevel } from "@/generated/prisma";
 
 // Google OAuth is only registered when the env vars are present. This
 // keeps local dev painless — the app still boots with only credentials
 // if you haven't set GOOGLE_CLIENT_ID yet.
+/** The identity fields we mirror onto the JWT and back onto the session. */
+type AuthIdentity = {
+  id: string;
+  accessLevel: AccessLevel;
+  organizationId: string;
+  organizationName: string;
+  firstName: string;
+  lastName: string;
+  avatar: string | null;
+};
+
 const googleEnabled =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
@@ -34,6 +46,16 @@ const providers = [
       const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
       if (!isValid) {
         throw new Error("Invalid credentials");
+      }
+
+      // Offboarding must actually revoke access. Someone removed from the
+      // company (deletedAt) or deactivated (INACTIVE) cannot sign in —
+      // checked AFTER the password compare so this never doubles as an
+      // account-status oracle for an attacker guessing emails.
+      // ON_LEAVE / PROBATION / PIP / NOTICE_PERIOD are still employed and
+      // keep their access.
+      if (user.deletedAt || user.status === "INACTIVE") {
+        throw new Error("This account is no longer active. Contact your workspace admin.");
       }
 
       // If the user's anchored org is unusable (self-scheduled deletion or a
@@ -154,13 +176,14 @@ export const authOptions: NextAuthOptions = {
 
     async jwt({ token, user, account, trigger }) {
       if (user) {
-        token.id = (user as any).id;
-        token.accessLevel = (user as any).accessLevel;
-        token.organizationId = (user as any).organizationId;
-        token.organizationName = (user as any).organizationName;
-        token.firstName = (user as any).firstName;
-        token.lastName = (user as any).lastName;
-        token.avatar = (user as any).avatar;
+        const u = user as unknown as AuthIdentity;
+        token.id = u.id;
+        token.accessLevel = u.accessLevel;
+        token.organizationId = u.organizationId;
+        token.organizationName = u.organizationName;
+        token.firstName = u.firstName;
+        token.lastName = u.lastName;
+        token.avatar = u.avatar;
       }
 
       // Google flow: first-time sign-in returns only minimal identity;
@@ -182,6 +205,30 @@ export const authOptions: NextAuthOptions = {
         }
       }
 
+      // Offboarding revocation. A JWT lives for weeks, so removing someone
+      // would otherwise leave their live session working until it expired.
+      // Re-check the account against the DB at most every 5 minutes (cheap:
+      // one indexed lookup per token per window) and flag a revoked token —
+      // the session callback then withholds the identity, so every page gate
+      // and API treats them as signed out.
+      const REVALIDATE_MS = 5 * 60 * 1000;
+      const lastCheck = typeof token.checkedAt === "number" ? token.checkedAt : 0;
+      if (token.id && Date.now() - lastCheck > REVALIDATE_MS) {
+        const account_ = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          select: { deletedAt: true, status: true, accessLevel: true },
+        });
+        token.checkedAt = Date.now();
+        if (!account_ || account_.deletedAt || account_.status === "INACTIVE") {
+          token.revoked = true;
+        } else {
+          token.revoked = false;
+          // Access-level changes (promotion / demotion) take effect in the
+          // same window instead of waiting for a fresh sign-in.
+          token.accessLevel = account_.accessLevel;
+        }
+      }
+
       // Session-update path: triggered by the org-switcher calling
       // `session.update()` after `POST /api/me/switch-org` flips the
       // user's `organizationId`. We re-fetch so the JWT picks up the
@@ -200,14 +247,22 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
     async session({ session, token }) {
+      // Revoked (removed / deactivated) — hand back a session with no
+      // identity. requireSessionUser() and every API gate check for an id,
+      // so this reads as signed out everywhere without a special case.
+      if (token.revoked) {
+        return { ...session, user: undefined } as unknown as typeof session;
+      }
       if (session.user) {
-        (session.user as any).id = token.id;
-        (session.user as any).accessLevel = token.accessLevel;
-        (session.user as any).organizationId = token.organizationId;
-        (session.user as any).organizationName = token.organizationName;
-        (session.user as any).firstName = token.firstName;
-        (session.user as any).lastName = token.lastName;
-        (session.user as any).avatar = token.avatar;
+        Object.assign(session.user, {
+          id: token.id,
+          accessLevel: token.accessLevel,
+          organizationId: token.organizationId,
+          organizationName: token.organizationName,
+          firstName: token.firstName,
+          lastName: token.lastName,
+          avatar: token.avatar,
+        } satisfies Partial<AuthIdentity>);
       }
       return session;
     },
