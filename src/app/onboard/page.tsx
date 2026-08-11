@@ -25,7 +25,7 @@ const DEPARTMENTS: DepartmentOption[] = [
   { id: "hr",          label: "People & HR",       description: "Directory, reviews, timesheets, recognition",  Icon: Users,      gradient: "#FF158A" },
   { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "#00C875" },
   { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "#E8920C" },
-  { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "#14787E" },
+  { id: "finance",     label: "Finance",           description: "Dashboards, contracts, budget tracking",       Icon: Calculator, gradient: "#14787E" },
   { id: "it",          label: "IT",                description: "Tools, assets, access policies, SOPs",         Icon: Wrench,     gradient: "#0073EA" },
   { id: "marketing",   label: "Marketing",         description: "Content, forms, clips, dashboards",            Icon: Megaphone,  gradient: "#FF7A59" },
   { id: "engineering", label: "Engineering",       description: "Goals, docs, SOPs, dashboards",                Icon: Code2,      gradient: "#5B7FFF" },

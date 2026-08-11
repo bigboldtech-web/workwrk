@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
       "(a) 'approve' only when the item looks routine and low-risk based on its title + context. " +
       "(b) 'hold' if anything looks unusual — a number that's off, a vendor that's repeating, a request that's out-of-band. " +
       "(c) 'reassign' if the wrong person is being asked. " +
-      "(d) 'do' for non-approval items that need direct action (tasks due, courses to finish, interviews to prep). " +
+      "(d) 'do' for non-approval items that need direct action (tasks due, reviews to write, meetings to prep). " +
       "(e) 'review' when you genuinely cannot tell from the title alone. " +
       "Confidence reflects how sure you are. Keep rationale terse and concrete — no fluff. " +
       "Return ONLY the JSON array, no prose, no markdown.",

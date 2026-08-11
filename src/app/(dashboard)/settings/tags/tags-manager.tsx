@@ -179,7 +179,7 @@ export function TagsManager({ initial }: { initial: TagRow[] }) {
           <p className="text-muted text-sm mt-1 max-w-prose">
             Cost centers, business units, regions, projects, and any custom
             dimensions you want to slice reports by. Tags travel across People,
-            Tasks, KRAs, OKRs, and (soon) Expenses and Compensation.
+            Tasks, KRAs, and OKRs.
           </p>
         </div>
         <Button

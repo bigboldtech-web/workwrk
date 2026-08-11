@@ -18,7 +18,7 @@ import {
   MessageSquare,
   BarChart3,
   Bot,
-  GraduationCap,
+  Smile,
   ChevronRight,
   ChevronLeft,
   Check,
@@ -86,7 +86,7 @@ const MODULES = [
   { id: "reviews", name: "Performance Reviews", icon: Star, desc: "Review cycles, 360 feedback, calibration" },
   { id: "meetings", name: "Meetings & Check-ins", icon: MessageSquare, desc: "Standups, 1:1s, meeting notes" },
   { id: "analytics", name: "Reports & Analytics", icon: BarChart3, desc: "Dashboards, exports, insights" },
-  { id: "checkins", name: "Onboarding & Training", icon: GraduationCap, desc: "Employee onboarding workflows" },
+  { id: "checkins", name: "Check-ins", icon: Smile, desc: "1:1s and recurring check-ins" },
   { id: "ai", name: "AI Assistant", icon: Bot, desc: "Smart suggestions and analysis" },
 ];
 

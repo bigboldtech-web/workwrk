@@ -31,19 +31,11 @@ const AGENTS: Agent[] = [
   },
   {
     id: "priya", name: "Priya", role: "HR Ops",
-    desc: "Runs onboarding checklists, schedules 1:1s, drafts policy reminders, and routes time-off + expense approvals.",
+    desc: "Schedules 1:1s, drafts policy reminders, keeps the people directory current, and routes review + timesheet approvals.",
     initial: "P", gradient: GRAD.pinkPurple, category: "hr",
-    skills: ["Onboarding", "Approvals", "Slack", "Policies", "Calendar"],
+    skills: ["Reviews", "Approvals", "Slack", "Policies", "Calendar"],
     metrics: { drafts: 4, tasks: 17, saved: "8h/wk" },
     tier: "plus", installed: true,
-  },
-  {
-    id: "maya", name: "Maya", role: "Recruiter",
-    desc: "Sources candidates, schedules interviews, drafts offer letters, and keeps the ATS up-to-date as candidates move through the pipeline.",
-    initial: "M", gradient: GRAD.greenTeal, category: "hr",
-    skills: ["Sourcing", "ATS sync", "Calendly", "LinkedIn", "Offer letters"],
-    metrics: { drafts: 0, tasks: 8, saved: "12h/wk" },
-    tier: "suite", installed: false, badge: "New",
   },
   {
     id: "aman", name: "Aman", role: "IT Help Desk",

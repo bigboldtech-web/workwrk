@@ -14,7 +14,7 @@ import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 
-type Category = "messaging" | "code" | "storage" | "finance" | "analytics" | "ats" | "sso";
+type Category = "messaging" | "code" | "storage" | "finance" | "analytics" | "sso";
 
 type Integration = {
   id: string;
@@ -40,7 +40,6 @@ const INTEGRATIONS: Integration[] = [
   { id: "qb", name: "QuickBooks", category: "finance", tagline: "Mirror invoices, expenses, and journal entries", hue: C.green, Icon: Banknote, installed: false },
   { id: "looker", name: "Looker", category: "analytics", tagline: "Embed dashboards in any board", hue: C.blue, Icon: BarChart, installed: false },
   { id: "metabase", name: "Metabase", category: "analytics", tagline: "Pin saved questions to a tile", hue: C.orange, Icon: BarChart, installed: false },
-  { id: "greenhouse", name: "Greenhouse", category: "ats", tagline: "Sync candidate pipeline into Recruiting", hue: C.green, Icon: Briefcase, installed: false },
   { id: "okta", name: "Okta SSO", category: "sso", tagline: "SAML SSO + SCIM provisioning", hue: C.blue, Icon: CheckCircle2, installed: true },
   { id: "azuread", name: "Microsoft Entra ID", category: "sso", tagline: "SAML SSO + group sync", hue: C.indigo, Icon: CheckCircle2, installed: false },
 ];
@@ -52,7 +51,6 @@ const CATEGORY_LABEL: Record<Category | "all", string> = {
   storage: "Storage",
   finance: "Finance",
   analytics: "Analytics",
-  ats: "Recruiting",
   sso: "SSO & identity",
 };
 
@@ -88,7 +86,7 @@ export default function IntegrationsPage() {
     }
   }
 
-  const cats: (Category | "all")[] = ["all", "messaging", "code", "storage", "finance", "analytics", "ats", "sso"];
+  const cats: (Category | "all")[] = ["all", "messaging", "code", "storage", "finance", "analytics", "sso"];
 
   return (
     <>

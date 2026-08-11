@@ -54,12 +54,17 @@ function relativeDate(iso: string): string {
 
 const SAMPLE: ApiLog[] = [
   { id: "1", action: "LOGIN", actorName: "BB", ip: "203.0.113.42", createdAt: new Date(Date.now() - 12 * 60_000).toISOString() },
-  { id: "2", action: "CREATE", entityType: "Expense", actorName: "MK", createdAt: new Date(Date.now() - 90 * 60_000).toISOString(), metadata: { amount: 247 } },
+  { id: "2", action: "CREATE", entityType: "Timesheet", actorName: "MK", createdAt: new Date(Date.now() - 90 * 60_000).toISOString(), metadata: { hours: 8 } },
   { id: "3", action: "UPDATE", entityType: "Policy", actorName: "BB", createdAt: new Date(Date.now() - 6 * 60 * 60_000).toISOString() },
   { id: "4", action: "ROLE_CHANGE", entityType: "User", actorName: "BB", createdAt: new Date(Date.now() - 22 * 60 * 60_000).toISOString(), metadata: { from: "EMPLOYEE", to: "MANAGER" } },
   { id: "5", action: "DELETE", entityType: "ApiKey", actorName: "BB", createdAt: new Date(Date.now() - 1.5 * 86_400_000).toISOString() },
-  { id: "6", action: "EXPORT", entityType: "Payroll", actorName: "SC", createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString() },
+  { id: "6", action: "EXPORT", entityType: "Timesheet", actorName: "SC", createdAt: new Date(Date.now() - 2 * 86_400_000).toISOString() },
 ];
+
+// Reference point for the "last 24h" stat tile. Captured once at module
+// load so the stats memo stays pure (react-hooks/purity forbids
+// Date.now() during render).
+const PAGE_LOADED_AT = Date.now();
 
 export default function AuditLogPage() {
   const [logs, setLogs] = useState<ApiLog[] | null>(null);
@@ -70,7 +75,7 @@ export default function AuditLogPage() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/audit-logs?limit=200");
-      if (!res.ok) { setLogs(SAMPLE); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       const list: ApiLog[] = d.data ?? (Array.isArray(d) ? d : []);
       setLogs(list.length > 0 ? list : SAMPLE);
@@ -100,7 +105,7 @@ export default function AuditLogPage() {
   const stats = useMemo(() => {
     const list = logs ?? [];
     const day = 86_400_000;
-    const today = list.filter((l) => Date.now() - new Date(l.createdAt).getTime() < day).length;
+    const today = list.filter((l) => PAGE_LOADED_AT - new Date(l.createdAt).getTime() < day).length;
     const auth = list.filter((l) => l.action === "LOGIN" || l.action === "LOGOUT" || l.action === "AUTH").length;
     const changes = list.filter((l) => l.action === "CREATE" || l.action === "UPDATE" || l.action === "DELETE").length;
     return { total: list.length, today, auth, changes };
