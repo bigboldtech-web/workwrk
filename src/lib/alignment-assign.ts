@@ -58,3 +58,32 @@ export async function seedAlignmentForUser(args: {
 
   return { krasSeeded: kraRes.count, sopsSeeded };
 }
+
+
+/**
+ * The mirror of seedAlignmentForUser: when a KRA is added to a job title
+ * (or re-homed onto one), everyone who ALREADY holds that title inherits
+ * it immediately. Without this, inheritance only ran at hire/assignment
+ * time, so a KRA added to a role later reached nobody — the job title
+ * and its holders silently drifted apart.
+ *
+ * Idempotent: KRAAssignment @@unique([userId, kraId]) + skipDuplicates,
+ * so re-running never duplicates and never disturbs existing weightage.
+ */
+export async function seedKraToRoleHolders(args: {
+  kraId: string;
+  roleId: string;
+  organizationId: string;
+}): Promise<{ peopleSeeded: number }> {
+  const { kraId, roleId, organizationId } = args;
+  const holders = await prisma.user.findMany({
+    where: { roleId, organizationId, status: "ACTIVE" },
+    select: { id: true },
+  });
+  if (holders.length === 0) return { peopleSeeded: 0 };
+  const res = await prisma.kRAAssignment.createMany({
+    data: holders.map((h) => ({ userId: h.id, kraId })),
+    skipDuplicates: true,
+  });
+  return { peopleSeeded: res.count };
+}

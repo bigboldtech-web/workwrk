@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { seedKraToRoleHolders } from "@/lib/alignment-assign";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
@@ -113,6 +114,15 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Everyone already holding this job title inherits the new KRA at
+  // once — a role and its holders must never drift apart. Best-effort:
+  // a seeding hiccup must not fail the KRA creation.
+  try {
+    await seedKraToRoleHolders({ kraId: kra.id, roleId, organizationId: getOrgId(session) });
+  } catch (e) {
+    console.error("seedKraToRoleHolders failed", e);
+  }
+
   // KRAs anchor performance / KPI tracking — every creation should
   // show up in the org's history of "how did we measure people."
   logActivity({
@@ -163,6 +173,17 @@ export async function PATCH(req: NextRequest) {
       ...(roleId !== undefined && { roleId: roleId || null }),
     },
   });
+
+  // Re-homing a KRA onto a job title (incl. fixing a legacy orphan) hands
+  // it to everyone already holding that title. Same idempotent seed as
+  // creation; never fails the update.
+  if (roleId && roleId !== existing.roleId) {
+    try {
+      await seedKraToRoleHolders({ kraId: kra.id, roleId, organizationId: getOrgId(session) });
+    } catch (e) {
+      console.error("seedKraToRoleHolders failed", e);
+    }
+  }
 
   return jsonSuccess(kra);
 }
