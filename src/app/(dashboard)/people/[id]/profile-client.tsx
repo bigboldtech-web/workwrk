@@ -19,7 +19,7 @@
  * /api/users/[id]/avatar, and the recorder's self-report / batch routes.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,7 @@ import {
   Edit3, Save, Package, Laptop, Monitor, Smartphone,
   ArrowDownRight, ArrowUpRight, MoveRight, ChevronRight, Settings2,
   ClipboardCheck, Trophy, Gauge, Clock,
+  MoreHorizontal, UserMinus, RotateCcw,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,6 +51,10 @@ import { MonthlyKpiRecorder } from "@/components/kpi/monthly-kpi-recorder";
 import { KudosReactions } from "@/components/kudos/kudos-reactions";
 import { TagPicker } from "@/components/tags/tag-picker";
 import { ManageAlignmentDialog } from "./manage-alignment-dialog";
+import { RemovePersonDialog } from "./remove-person-dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuItem, MenuList } from "@/components/ui/menu";
 import Link from "next/link";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { StatusChip } from "@/components/ui/chip";
@@ -662,6 +667,31 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   const [saving, setSaving] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
+  // Offboarding — "…" person-actions menu + remove/restore dialogs
+  // (manage mode only; never rendered for self or peers).
+  const [personMenuOpen, setPersonMenuOpen] = useState(false);
+  const personMenuBtnRef = useRef<HTMLButtonElement>(null);
+  const personMenuPanelRef = useRef<HTMLDivElement>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
+
+  useEffect(() => {
+    if (!personMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (personMenuPanelRef.current?.contains(t) || personMenuBtnRef.current?.contains(t)) return;
+      setPersonMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPersonMenuOpen(false); };
+    window.addEventListener("mousedown", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [personMenuOpen]);
+
   useEffect(() => {
     if (mode !== "manage") return;
     Promise.all([
@@ -812,7 +842,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
     }
   };
 
-  useEffect(() => {
+  const loadUser = useCallback(() => {
     fetch(`/api/users/${id}`)
       .then((r) => r.json())
       .then((data) => {
@@ -821,6 +851,8 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
       })
       .catch(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => { loadUser(); }, [loadUser]);
 
   if (loading) {
     return (
@@ -845,6 +877,26 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
 
   const my = mode === "self";
   const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email || "?";
+
+  // Restore a removed person (DELETE ?restore=true clears deletedAt).
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const res = await fetch(`/api/users/${id}?restore=true`, { method: "DELETE" });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || "Failed to restore");
+      }
+      toastSuccess(`${fullName} restored`);
+      setRestoreOpen(false);
+      loadUser();
+      router.refresh();
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : "Failed to restore");
+    } finally {
+      setRestoring(false);
+    }
+  };
   const role: AlignRole | null = alignment?.user.role ?? (user.role ? { ...user.role, description: null, level: null, department: null } : null);
 
   /* ── peer: minimal directory card, nothing performance-shaped ──── */
@@ -1002,11 +1054,15 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                 <Select value={editStatus} onValueChange={setEditStatus}>
                   <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
                   <SelectContent>
+                    {/* PROBATION / PIP / NOTICE_PERIOD were HRIS lifecycle
+                        states — no workflow ever consumed them, so they are
+                        no longer offered. Existing values still display via
+                        statusColor; the enum stays in the schema. */}
                     <SelectItem value="ACTIVE">Active</SelectItem>
-                    <SelectItem value="PROBATION">Probation</SelectItem>
-                    <SelectItem value="PIP">PIP</SelectItem>
                     <SelectItem value="ON_LEAVE">On Leave</SelectItem>
-                    <SelectItem value="NOTICE_PERIOD">Notice Period</SelectItem>
+                    {editStatus && !["ACTIVE", "ON_LEAVE"].includes(editStatus) ? (
+                      <SelectItem value={editStatus}>{editStatus.replace(/_/g, " ")} (legacy)</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </div>
