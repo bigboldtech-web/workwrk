@@ -21,9 +21,6 @@ import {
 import { logActivity } from "@/lib/activity";
 
 const SUPPORTED = new Set([
-  "expense",
-  "time-off",
-  "comp-decision",
   "purchase-order",
   "invoice",
   "timesheet",
@@ -63,98 +60,7 @@ export async function POST(req: NextRequest) {
   const userId = getUserId(session);
   const result: Result = { total: ids.length, applied: 0, skipped: [] };
 
-  if (entityType === "expense") {
-    const rows = await prisma.expense.findMany({
-      where: { id: { in: ids }, organizationId: orgId },
-    });
-    for (const r of rows) {
-      if (r.status !== "SUBMITTED") {
-        result.skipped.push({ id: r.id, reason: `status=${r.status}` });
-        continue;
-      }
-      if (r.reporterId === userId) {
-        result.skipped.push({ id: r.id, reason: "self-decision blocked" });
-        continue;
-      }
-      await prisma.expense.update({
-        where: { id: r.id },
-        data: {
-          status: decision === "APPROVE" ? "APPROVED" : "REJECTED",
-          approverId: userId,
-          decisionAt: new Date(),
-          decisionNote: note,
-        },
-      });
-      result.applied++;
-    }
-    // Surface any ids that weren't found at all (already deleted, wrong org).
-    const found = new Set(rows.map((r) => r.id));
-    for (const id of ids) {
-      if (!found.has(id)) result.skipped.push({ id, reason: "not found" });
-    }
-  } else if (entityType === "time-off") {
-    const rows = await prisma.timeOffRequest.findMany({
-      where: { id: { in: ids }, organizationId: orgId },
-    });
-    for (const r of rows) {
-      if (r.status !== "PENDING") {
-        result.skipped.push({ id: r.id, reason: `status=${r.status}` });
-        continue;
-      }
-      if (r.userId === userId) {
-        result.skipped.push({ id: r.id, reason: "self-decision blocked" });
-        continue;
-      }
-      await prisma.timeOffRequest.update({
-        where: { id: r.id },
-        data: {
-          status: decision === "APPROVE" ? "APPROVED" : "REJECTED",
-          approverId: userId,
-          decisionAt: new Date(),
-          decisionNote: note,
-        },
-      });
-      result.applied++;
-    }
-    const found = new Set(rows.map((r) => r.id));
-    for (const id of ids) {
-      if (!found.has(id)) result.skipped.push({ id, reason: "not found" });
-    }
-  } else if (entityType === "comp-decision") {
-    if (!isOrgAdmin(session)) return jsonError("Forbidden", 403);
-    const rows = await prisma.compensationDecision.findMany({
-      where: { id: { in: ids }, organizationId: orgId },
-      include: { cycle: { select: { status: true } } },
-    });
-    for (const r of rows) {
-      if (r.status !== "PROPOSED") {
-        result.skipped.push({ id: r.id, reason: `status=${r.status}` });
-        continue;
-      }
-      if (r.cycle.status === "CLOSED") {
-        result.skipped.push({ id: r.id, reason: "cycle closed" });
-        continue;
-      }
-      if (r.subjectId === userId) {
-        result.skipped.push({ id: r.id, reason: "self-decision blocked" });
-        continue;
-      }
-      await prisma.compensationDecision.update({
-        where: { id: r.id },
-        data: {
-          status: decision === "APPROVE" ? "APPROVED" : "REJECTED",
-          decidedById: userId,
-          decidedAt: new Date(),
-          decisionNote: note,
-        },
-      });
-      result.applied++;
-    }
-    const found = new Set(rows.map((r) => r.id));
-    for (const id of ids) {
-      if (!found.has(id)) result.skipped.push({ id, reason: "not found" });
-    }
-  } else if (entityType === "purchase-order") {
+  if (entityType === "purchase-order") {
     const rows = await prisma.purchaseOrder.findMany({
       where: { id: { in: ids }, organizationId: orgId },
     });
@@ -178,6 +84,7 @@ export async function POST(req: NextRequest) {
       });
       result.applied++;
     }
+    // Surface any ids that weren't found at all (already deleted, wrong org).
     const found = new Set(rows.map((r) => r.id));
     for (const id of ids) {
       if (!found.has(id)) result.skipped.push({ id, reason: "not found" });

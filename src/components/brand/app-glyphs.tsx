@@ -191,30 +191,6 @@ const Trash: FC<P> = ({ size }) => {
   );
 };
 
-const Recruiting: FC<P> = ({ size }) => {
-  const { s, t } = HUE.green;
-  return (
-    <Svg size={size}>
-      <circle cx="9.5" cy="8" r="3.1" fill={t} />
-      <path d="M3.6 20 c0-3.1 2.6-4.9 5.9-4.9 1.3 0 2.5 .3 3.5 .8 H3.6 Z" fill={t} />
-      <circle cx="16.6" cy="16" r="4.3" fill={s} />
-      <path d="M16.6 13.7 V18.3 M14.3 16 H18.9" stroke={t} strokeWidth="1.7" strokeLinecap="round" />
-    </Svg>
-  );
-};
-
-const Onboarding: FC<P> = ({ size }) => {
-  const { s, t } = HUE.blue;
-  return (
-    <Svg size={size}>
-      <rect x="8.5" y="3.5" width="10" height="17" rx="2" fill={t} />
-      <rect x="8.5" y="3.5" width="10" height="17" rx="2" fill="none" stroke={s} strokeWidth="1.8" />
-      <circle cx="15.3" cy="12" r="1" fill={s} />
-      <path d="M2.6 12 H7.2 M4.8 9.7 L7.4 12 L4.8 14.3" stroke={s} strokeWidth="1.9" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-    </Svg>
-  );
-};
-
 const Reviews: FC<P> = ({ size }) => {
   const { s, t } = HUE.amber;
   return (
@@ -273,21 +249,6 @@ const Surveys: FC<P> = ({ size }) => {
   );
 };
 
-const TimeOff: FC<P> = ({ size }) => {
-  const { s, t } = HUE.amber;
-  return (
-    <Svg size={size}>
-      <circle cx="12" cy="9.5" r="6.4" fill={t} />
-      <circle cx="12" cy="9.5" r="3.6" fill={s} />
-      <g stroke={s} strokeWidth="1.6" strokeLinecap="round">
-        <path d="M12 2.6 V4.2" /><path d="M5.1 9.5 H6.7" /><path d="M17.3 9.5 H18.9" />
-        <path d="M7 4.5 L8.1 5.6" /><path d="M15.9 5.6 L17 4.5" />
-      </g>
-      <path d="M3 18.6 q3 -2.3 6 0 t6 0 t6 0" stroke={s} strokeWidth="1.7" fill="none" strokeLinecap="round" />
-    </Svg>
-  );
-};
-
 const Tools: FC<P> = ({ size }) => {
   const { s, t } = HUE.slate;
   return (
@@ -335,18 +296,6 @@ const Agreements: FC<P> = ({ size }) => {
   );
 };
 
-const Learning: FC<P> = ({ size }) => {
-  const { s, t } = HUE.blue;
-  return (
-    <Svg size={size}>
-      <path d="M7 11 V14.8 C7 16.4 9.2 17.4 12 17.4 S17 16.4 17 14.8 V11" fill={t} />
-      <path d="M12 5 L22 9 L12 13 L2 9 Z" fill={s} />
-      <path d="M21.5 9.2 V13.7" stroke={s} strokeWidth="1.3" strokeLinecap="round" />
-      <circle cx="21.5" cy="14.2" r="1.1" fill={s} />
-    </Svg>
-  );
-};
-
 const Build: FC<P> = ({ size }) => {
   const { s, t } = HUE.green;
   return (
@@ -384,10 +333,10 @@ export const APP_GLYPHS: Record<string, FC<P>> = {
   home: Home, planner: Calendar, ai: AI, teams: Teams, docs: Notes,
   dashboards: Dashboards, library: Library, forms: Forms, clips: Clips,
   goals: Goals, timesheets: Timesheets, sops: Sops, trash: Trash,
-  recruiting: Recruiting, onboarding: Onboarding, reviews: Reviews,
+  reviews: Reviews,
   candor: Candor, announcements: Announcements, kudos: Kudos, surveys: Surveys,
-  "time-off": TimeOff, tools: Tools, assets: Assets, policies: Policies,
-  agreements: Agreements, learning: Learning, build: Build, store: Store,
+  tools: Tools, assets: Assets, policies: Policies,
+  agreements: Agreements, build: Build, store: Store,
   settings: Settings,
 };
 

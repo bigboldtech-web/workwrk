@@ -112,7 +112,7 @@ export default function IdentitySettingsPage() {
                 <Field label="Org name" hint="Shown in the sidebar and notifications.">
                   <input type="text" value={data.orgName ?? ""} onChange={(e) => update("orgName", e.target.value)} placeholder="Acme Inc." />
                 </Field>
-                <Field label="Legal name" hint="Used on contracts, invoices, payslips.">
+                <Field label="Legal name" hint="Used on contracts and invoices.">
                   <input type="text" value={data.legalName ?? ""} onChange={(e) => update("legalName", e.target.value)} placeholder="Acme Inc., LLC" />
                 </Field>
                 <Field label="Domain" hint="Primary domain. Restricts auth.">

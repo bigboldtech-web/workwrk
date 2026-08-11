@@ -22,10 +22,8 @@ const RULES: { keyword: string; home: DeptHome }[] = [
   { keyword: "support",     home: { href: "/helpdesk",     label: "Support workspace", blurb: "Customer tickets, macros, CSAT." } },
   { keyword: "success",     home: { href: "/helpdesk",     label: "Success workspace", blurb: "Customer tickets, macros, CSAT." } },
   { keyword: "legal",       home: { href: "/legal",        label: "Legal workspace",  blurb: "Contracts, privacy, IP." } },
-  { keyword: "hr",          home: { href: "/people",       label: "People workspace", blurb: "Directory, time off, onboarding." } },
-  { keyword: "people",      home: { href: "/people",       label: "People workspace", blurb: "Directory, time off, onboarding." } },
-  { keyword: "finance",     home: { href: "/expenses",     label: "Finance workspace", blurb: "Expenses, planning, books." } },
-  { keyword: "account",     home: { href: "/expenses",     label: "Finance workspace", blurb: "Expenses, planning, books." } },
+  { keyword: "hr",          home: { href: "/people",       label: "People workspace", blurb: "Directory, org chart, timesheets." } },
+  { keyword: "people",      home: { href: "/people",       label: "People workspace", blurb: "Directory, org chart, timesheets." } },
   { keyword: "operation",   home: { href: "/procurement",  label: "Operations workspace", blurb: "Procurement, assets, field ops." } },
 ];
 

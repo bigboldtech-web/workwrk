@@ -134,8 +134,8 @@ export async function PATCH(
         decisionNote: note,
       },
     });
-    // Approve/reject on a timesheet feeds payroll. Bump to warning so the
-    // audit log makes it findable on review.
+    // Approve/reject on a timesheet is a billing-relevant decision. Bump to
+    // warning so the audit log makes it findable on review.
     logAuditEvent({
       type: `timesheet_${decision.toLowerCase()}`,
       actorId: userId,

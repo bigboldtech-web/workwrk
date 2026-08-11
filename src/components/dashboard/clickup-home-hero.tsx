@@ -13,18 +13,13 @@ import { prisma } from "@/lib/prisma";
 import {
   ArrowRight,
   BookOpen,
-  Briefcase,
-  CalendarOff,
   CheckSquare,
   Clock,
   Crosshair,
-  DollarSign,
-  GraduationCap,
+  FileText,
   Inbox as InboxIcon,
   Plus,
-  Receipt,
-  Star,
-  Target,
+  ThumbsUp,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -48,13 +43,9 @@ export async function ClickupHomeHero() {
   const [
     sopAssignmentCount,
     taskCount,
-    timeOffPendingCount,
-    expensesPendingCount,
     timesheetsPendingCount,
     posPendingCount,
     invoicesPendingCount,
-    upcomingInterviewsCount,
-    mandatoryCoursesCount,
     sopAssignments,
     todayTasks,
   ] = await Promise.all([
@@ -76,25 +67,6 @@ export async function ClickupHomeHero() {
         ],
       },
     }),
-    isManager
-      ? prisma.timeOffRequest.count({
-          where: {
-            organizationId: orgId,
-            status: "PENDING",
-            OR: [{ approverId: userId }, { approverId: null }],
-            userId: { not: userId },
-          },
-        })
-      : Promise.resolve(0),
-    isManager
-      ? prisma.expense.count({
-          where: {
-            organizationId: orgId,
-            status: "SUBMITTED",
-            approverId: userId,
-          },
-        })
-      : Promise.resolve(0),
     isManager
       ? prisma.timesheet.count({
           where: {
@@ -120,26 +92,6 @@ export async function ClickupHomeHero() {
           where: { organizationId: orgId, status: "PENDING" },
         })
       : Promise.resolve(0),
-    isManager
-      ? prisma.interview.count({
-          where: {
-            organizationId: orgId,
-            interviewerId: userId,
-            status: "SCHEDULED",
-            scheduledAt: {
-              gte: new Date(Date.now() - DAY_MS),
-              lte: horizonEnd,
-            },
-          },
-        })
-      : Promise.resolve(0),
-    prisma.courseEnrollment.count({
-      where: {
-        userId,
-        completedAt: null,
-        course: { organizationId: orgId, mandatory: true },
-      },
-    }),
     // Top-of-inbox preview (3 items). Mix from the most relevant
     // sources for this role.
     prisma.sOPAssignment.findMany({
@@ -177,13 +129,9 @@ export async function ClickupHomeHero() {
   const inboxTotal =
     sopAssignmentCount +
     taskCount +
-    timeOffPendingCount +
-    expensesPendingCount +
     timesheetsPendingCount +
     posPendingCount +
-    invoicesPendingCount +
-    upcomingInterviewsCount +
-    mandatoryCoursesCount;
+    invoicesPendingCount;
 
   const greeting = greetingFor(new Date());
 
@@ -252,8 +200,6 @@ export async function ClickupHomeHero() {
     tiles.push({
       label: "Approvals waiting",
       n:
-        timeOffPendingCount +
-        expensesPendingCount +
         timesheetsPendingCount +
         posPendingCount +
         invoicesPendingCount,
@@ -262,39 +208,22 @@ export async function ClickupHomeHero() {
       chipBg: "bg-emerald-50",
       chipFg: "text-emerald-600",
     });
-    tiles.push({
-      label: "Interviews this week",
-      n: upcomingInterviewsCount,
-      icon: Briefcase,
-      href: "/recruiting",
-      chipBg: "bg-violet-50",
-      chipFg: "text-violet-600",
-    });
-  } else {
-    tiles.push({
-      label: "Mandatory courses",
-      n: mandatoryCoursesCount,
-      icon: GraduationCap,
-      href: "/learning",
-      chipBg: "bg-orange-50",
-      chipFg: "text-orange-600",
-    });
-    tiles.push({
-      label: "Inbox total",
-      n: inboxTotal,
-      icon: InboxIcon,
-      href: "/inbox",
-      chipBg: "bg-emerald-50",
-      chipFg: "text-emerald-600",
-    });
   }
+  tiles.push({
+    label: "Inbox total",
+    n: inboxTotal,
+    icon: InboxIcon,
+    href: "/inbox",
+    chipBg: "bg-emerald-50",
+    chipFg: "text-emerald-600",
+  });
 
   // Quick actions — the 4 things people start most often.
   const quickActions: Array<{ label: string; icon: LucideIcon; href: string }> = [
-    { label: "Submit expense", icon: Receipt, href: "/expenses?create=1" },
-    { label: "Request time off", icon: CalendarOff, href: "/time-off?create=1" },
     { label: "Clock in / out", icon: Clock, href: "/timesheets" },
     { label: "Log OKR check-in", icon: Crosshair, href: "/okrs" },
+    { label: "New doc", icon: FileText, href: "/docs?new=1" },
+    { label: "Send kudos", icon: ThumbsUp, href: "/kudos" },
   ];
 
   // Lead message — confident, conversational, single sentence. The

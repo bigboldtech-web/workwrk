@@ -26,17 +26,15 @@ const CATEGORY_MAP: Record<string, StoreCategory> = {
   tasks: "core", meetings: "core", okrs: "core", sops: "core", docs: "core",
   whiteboards: "core", kudos: "core", announcements: "core", ideas: "core",
   policies: "core", activity: "core", inbox: "core",
-  people: "people", organization: "people", recruiting: "people", reviews: "people",
-  talent: "people", learning: "people", compensation: "people", benefits: "people",
-  "time-off": "people", timesheets: "people", clock: "people", payroll: "people",
-  onboarding: "people", "kra-kpi": "people", "workforce-planning": "people",
-  "my-benefits": "people",
+  people: "people", organization: "people", reviews: "people",
+  talent: "people", timesheets: "people", clock: "people",
+  "kra-kpi": "people",
   crm: "sales",
   procurement: "ops", assets: "ops", autopilot: "ops", "process-runs": "ops",
   itsm: "it",
   marketing: "marketing",
   dev: "engineering",
-  financials: "finance", planning: "finance", expenses: "finance",
+  financials: "finance", planning: "finance",
   legal: "legal",
   helpdesk: "support",
   sidekick: "ai", agents: "ai", ai: "ai", notetaker: "ai", analytics: "ai",
@@ -48,7 +46,7 @@ const TIER_MAP: Record<string, Tier> = {
   whiteboards: "core", kudos: "core", announcements: "core", ideas: "core",
   policies: "core", activity: "core", inbox: "core", favorites: "core",
   // Suite-level (premium)
-  payroll: "suite", benefits: "suite", legal: "suite",
+  legal: "suite",
   financials: "suite", planning: "suite",
   agents: "suite", autopilot: "suite", notetaker: "suite",
   // Most others are plus
@@ -56,10 +54,9 @@ const TIER_MAP: Record<string, Tier> = {
 
 const INSTALLED = new Set([
   "tasks", "meetings", "okrs", "sops", "docs", "inbox", "announcements",
-  "people", "organization", "recruiting", "reviews", "compensation",
-  "time-off", "timesheets", "payroll", "onboarding",
+  "people", "organization", "reviews", "timesheets",
   "crm", "marketing", "dev", "itsm", "helpdesk",
-  "expenses", "procurement", "assets",
+  "procurement", "assets",
   "sidekick", "agents", "ai", "settings", "account",
 ]);
 

@@ -76,7 +76,7 @@ function RegisterForm() {
         password: formData.password,
         redirect: false,
       });
-      if (result?.ok) router.push(token ? "/onboarding" : "/setup");
+      if (result?.ok) router.push(token ? "/welcome" : "/setup");
       else router.push("/login?registered=true");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");

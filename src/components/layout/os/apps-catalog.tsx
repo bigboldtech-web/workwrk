@@ -13,8 +13,8 @@ import {
   Video, Trophy, Clock, CircleUser,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal,
   Plus, ChevronDown, ChevronRight, Pin, Star, X,
-  Megaphone, Briefcase, BookOpen, Wrench, Building2,
-  HeartHandshake, GraduationCap, UserCheck, Award, ThumbsUp, FileSpreadsheet,
+  Megaphone, Briefcase, Wrench, Building2,
+  UserCheck, Award, ThumbsUp, FileSpreadsheet,
   HardDrive, Boxes, Layers,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
@@ -1012,7 +1012,6 @@ function TimesheetsSidebar() {
     <>
       <ul>
         <NavItem href="/timesheets" Icon={Clock} label="My Timesheets" />
-        <NavItem href="/time-off" Icon={Calendar} label="Time off" />
       </ul>
       <SectionLabel>Approvals</SectionLabel>
       <EmptyState title="No pending approvals" />
@@ -1071,7 +1070,7 @@ export const APPS: AppEntry[] = [
     category: "Core", defaultPinned: true,
     newAction: { label: "New Goal", href: "/okrs?new=1" } },
   { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets",
-    matchPaths: ["/timesheets", "/time-off"], Sidebar: TimesheetsSidebar,
+    matchPaths: ["/timesheets"], Sidebar: TimesheetsSidebar,
     category: "Core", defaultPinned: true,
     newAction: { label: "Log time", href: "/timesheets?new=1" } },
 
@@ -1082,21 +1081,7 @@ export const APPS: AppEntry[] = [
   // Tools + Assets ARE PPMS-core (per-employee provisioning) — see
   // the People section below.
 
-  // ── People & HR ─────────────────────────────────────────────
-  { key: "recruiting", label: "Recruiting", Icon: UserCheck, defaultHref: "/recruiting",
-    matchPaths: ["/recruiting"], category: "People", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([
-      { href: "/recruiting",            label: "Recruiting",      Icon: UserCheck },
-      { href: "/recruiting/jobs",       label: "Jobs",            Icon: Briefcase },
-      { href: "/recruiting/candidates", label: "Candidates",      Icon: Users },
-      { href: "/recruiting/pipeline",   label: "Hiring pipeline", Icon: Workflow },
-      { href: "/recruiting/interviews", label: "Interviews",      Icon: MessageSquare },
-    ]) },
-  { key: "onboarding", label: "Onboarding", Icon: HeartHandshake, defaultHref: "/onboarding",
-    matchPaths: ["/onboarding"], category: "People", requiredAccess: "hr-admin",
-    Sidebar: linksSidebar([
-      { href: "/onboarding", label: "Onboarding", Icon: HeartHandshake },
-    ]) },
+  // ── People ──────────────────────────────────────────────────
   { key: "reviews", label: "Reviews", Icon: ClipboardCheck, defaultHref: "/reviews",
     matchPaths: ["/reviews"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
@@ -1116,20 +1101,11 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/surveys"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
-  // ── Time off ────────────────────────────────────────────────
-  // PPMS scope: Payroll / Benefits / Expenses / Compensation are
-  // partner-integration targets (Phase 2 strategy), not in-house.
-  // Financials / Planning / Procurement / Dev sit outside PPMS —
-  // pages remain on disk; just not pinned to the rail.
-  { key: "time-off", label: "Time off", Icon: Calendar, defaultHref: "/time-off",
-    matchPaths: ["/time-off"], category: "Time & Pay",
-    Sidebar: linksSidebar([{ href: "/time-off", label: "Time off", Icon: Calendar }]) },
-
   // ── People resourcing — provisioning what employees need to do work.
   // Tools = SaaS subscriptions + access grants (Slack, GitHub, Figma…).
   // Assets = physical equipment (laptops, monitors, keys, badges).
   // Both are per-employee provisioning surfaces — natural fit under
-  // People. Tied to onboarding (grant) and offboarding (revoke) flows.
+  // People. Tied to joiner (grant) and offboarding (revoke) flows.
   { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools",
     matchPaths: ["/tools"], category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
@@ -1162,14 +1138,6 @@ export const APPS: AppEntry[] = [
       { href: "/agreements?view=templates", label: "Templates", Icon: Folder },
       { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
     ]) },
-  { key: "learning", label: "Learning", Icon: GraduationCap, defaultHref: "/learning",
-    matchPaths: ["/learning"], category: "Knowledge",
-    Sidebar: linksSidebar([
-      { href: "/learning/catalog", label: "Catalog",    Icon: BookOpen },
-      { href: "/learning/mine",    label: "My courses", Icon: GraduationCap },
-      { href: "/learning/manage",  label: "Manage",     Icon: SettingsIcon },
-    ]) },
-
   // ── Build & Extend ──────────────────────────────────────────
   { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build",
     matchPaths: ["/build"], category: "Build & Extend",
@@ -1218,7 +1186,7 @@ export const CATALOG_APPS: AppEntry[] = APPS.filter((a) => !a.hideFromCatalog);
 
 /** Stable category order in the More popover. */
 export const CATEGORY_ORDER: string[] = [
-  "Core", "Sales", "Marketing", "Service", "People", "Time & Pay",
+  "Core", "Sales", "Marketing", "Service", "People",
   "Finance", "Dev", "Knowledge", "Build & Extend", "Workspace",
 ];
 

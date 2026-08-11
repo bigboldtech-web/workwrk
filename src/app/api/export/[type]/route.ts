@@ -3,9 +3,7 @@
 //   - shapes the rows for human-readable column headers
 //   - logs the export to the audit trail (who exported what, when)
 //
-// Authorization is per-type: comp-decisions is org-admin only;
-// most others are manager+; expenses falls back to "mine" if the
-// caller isn't a manager.
+// Authorization is per-type: manager+ across the board.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -15,19 +13,14 @@ import {
   getUserId,
   jsonError,
   isManager,
-  isOrgAdmin,
 } from "@/lib/api-helpers";
 import { csvFilename, toCsv, type CsvCell } from "@/lib/csv";
 import { logActivity } from "@/lib/activity";
 
 const SUPPORTED = new Set([
-  "expenses",
-  "time-off",
   "timesheets",
-  "comp-decisions",
   "purchase-orders",
   "invoices",
-  "candidates",
   "audit",
 ]);
 
@@ -47,72 +40,7 @@ export async function GET(
   let rows: Record<string, CsvCell>[] = [];
   let columns: string[] | undefined;
 
-  if (type === "expenses") {
-    const scope = sp.get("scope") ?? (isManager(session) ? "all" : "mine");
-    if (scope === "approve" && !isManager(session)) return jsonError("Forbidden", 403);
-    if (scope === "all" && !isManager(session)) return jsonError("Forbidden", 403);
-
-    const where: Record<string, unknown> = { organizationId: orgId };
-    if (scope === "mine") where.reporterId = userId;
-    else if (scope === "approve") {
-      where.status = "SUBMITTED";
-      where.OR = [{ approverId: userId }, { approverId: null }];
-    }
-    const expenses = await prisma.expense.findMany({
-      where,
-      orderBy: { expenseDate: "desc" },
-      take: 5000,
-      include: {
-        reporter: { select: { firstName: true, lastName: true, email: true } },
-        approver: { select: { firstName: true, lastName: true } },
-      },
-    });
-    columns = ["Date", "Description", "Category", "Amount", "Currency", "Reporter", "Reporter Email", "Status", "Approver", "Submitted At", "Decided At"];
-    rows = expenses.map((e) => ({
-      "Date": e.expenseDate.toISOString().slice(0, 10),
-      "Description": e.description,
-      "Category": e.category,
-      "Amount": Number(e.amount),
-      "Currency": e.currency,
-      "Reporter": e.reporter ? `${e.reporter.firstName} ${e.reporter.lastName}` : "",
-      "Reporter Email": e.reporter?.email ?? "",
-      "Status": e.status,
-      "Approver": e.approver ? `${e.approver.firstName} ${e.approver.lastName}` : "",
-      "Submitted At": e.submittedAt?.toISOString() ?? "",
-      "Decided At": e.decisionAt?.toISOString() ?? "",
-    }));
-  } else if (type === "time-off") {
-    const scope = sp.get("scope") ?? (isManager(session) ? "all" : "mine");
-    if (scope !== "mine" && !isManager(session)) return jsonError("Forbidden", 403);
-
-    const where: Record<string, unknown> = { organizationId: orgId };
-    if (scope === "mine") where.userId = userId;
-
-    const requests = await prisma.timeOffRequest.findMany({
-      where,
-      orderBy: { startDate: "desc" },
-      take: 5000,
-      include: {
-        user: { select: { firstName: true, lastName: true, email: true } },
-        approver: { select: { firstName: true, lastName: true } },
-        policy: { select: { name: true, type: true } },
-      },
-    });
-    columns = ["Start", "End", "Hours", "Policy", "Type", "Employee", "Email", "Status", "Approver", "Decision At", "Reason"];
-    rows = requests.map((r) => ({
-      "Start": r.startDate.toISOString().slice(0, 10),
-      "End": r.endDate.toISOString().slice(0, 10),
-      "Hours": Number(r.hours),
-      "Policy": r.policy.name,
-      "Type": r.policy.type,
-      "Employee": r.user ? `${r.user.firstName} ${r.user.lastName}` : "",
-      "Email": r.user?.email ?? "",
-      "Status": r.status,
-      "Approver": r.approver ? `${r.approver.firstName} ${r.approver.lastName}` : "",
-      "Decision At": r.decisionAt?.toISOString() ?? "",
-      "Reason": r.reason ?? "",
-    }));
-  } else if (type === "timesheets") {
+  if (type === "timesheets") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
     const status = sp.get("status");
     const where: Record<string, unknown> = { organizationId: orgId };
@@ -142,36 +70,6 @@ export async function GET(
         "Approver": t.approver ? `${t.approver.firstName} ${t.approver.lastName}` : "",
       };
     });
-  } else if (type === "comp-decisions") {
-    if (!isOrgAdmin(session)) return jsonError("Forbidden — admin only", 403);
-    const cycleId = sp.get("cycleId");
-    const where: Record<string, unknown> = { organizationId: orgId };
-    if (cycleId) where.cycleId = cycleId;
-
-    const decisions = await prisma.compensationDecision.findMany({
-      where,
-      orderBy: { updatedAt: "desc" },
-      take: 5000,
-      include: {
-        subject: { select: { firstName: true, lastName: true, email: true } },
-        proposedBy: { select: { firstName: true, lastName: true } },
-        cycle: { select: { name: true } },
-      },
-    });
-    columns = ["Cycle", "Employee", "Email", "Currency", "Current", "Proposed", "Δ%", "Bonus", "Status", "Proposed by", "Reasoning"];
-    rows = decisions.map((d) => ({
-      "Cycle": d.cycle.name,
-      "Employee": d.subject ? `${d.subject.firstName} ${d.subject.lastName}` : "",
-      "Email": d.subject?.email ?? "",
-      "Currency": d.currency,
-      "Current": d.currentSalary === null ? "" : Number(d.currentSalary),
-      "Proposed": d.proposedSalary === null ? "" : Number(d.proposedSalary),
-      "Δ%": d.changePct === null ? "" : Number(d.changePct),
-      "Bonus": d.bonusAmount === null ? "" : Number(d.bonusAmount),
-      "Status": d.status,
-      "Proposed by": d.proposedBy ? `${d.proposedBy.firstName} ${d.proposedBy.lastName}` : "",
-      "Reasoning": d.reasoning ?? "",
-    }));
   } else if (type === "purchase-orders") {
     if (!isManager(session)) return jsonError("Forbidden", 403);
     const status = sp.get("status");
@@ -228,25 +126,6 @@ export async function GET(
       "Currency": inv.currency,
       "Status": inv.status,
       "Paid at": inv.paidAt?.toISOString() ?? "",
-    }));
-  } else if (type === "candidates") {
-    if (!isManager(session)) return jsonError("Forbidden", 403);
-    const candidates = await prisma.candidate.findMany({
-      where: { organizationId: orgId },
-      orderBy: { createdAt: "desc" },
-      take: 5000,
-      include: { _count: { select: { applications: true } } },
-    });
-    columns = ["First name", "Last name", "Email", "Phone", "Source", "Resume URL", "Applications", "Created"];
-    rows = candidates.map((c) => ({
-      "First name": c.firstName,
-      "Last name": c.lastName,
-      "Email": c.email,
-      "Phone": c.phone ?? "",
-      "Source": c.source ?? "",
-      "Resume URL": c.resumeUrl ?? "",
-      "Applications": c._count.applications,
-      "Created": c.createdAt.toISOString(),
     }));
   } else if (type === "audit") {
     if (!isManager(session)) return jsonError("Forbidden", 403);

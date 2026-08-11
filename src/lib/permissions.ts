@@ -184,13 +184,6 @@ export const PERMISSION_MODULES = {
       share: "Share tools with people",
     },
   },
-  onboarding: {
-    label: "Onboarding",
-    actions: {
-      view: "View onboarding instances",
-      manage: "Manage onboarding templates and assignments",
-    },
-  },
   settings: {
     label: "Settings",
     actions: {
@@ -233,7 +226,7 @@ const allFalse = (mod: PermissionModule): Record<string, boolean> => {
 // SUPER_ADMIN and COMPANY_ADMIN: full access to everything
 const fullAccess: PermissionMatrix[AccessLevel] = Object.fromEntries(
   Object.keys(PERMISSION_MODULES).map((m) => [m, allTrue(m as PermissionModule)])
-) as any;
+) as PermissionMatrix[AccessLevel];
 
 // EMPLOYEE: view-only with self-service
 const employeeAccess: PermissionMatrix[AccessLevel] = {
@@ -252,7 +245,6 @@ const employeeAccess: PermissionMatrix[AccessLevel] = {
   ideas: { view: true, submit: true, review: false, delete: false },
   analytics: { view: false, viewOrgWide: false, export: false },
   tools: { view: true, create: false, edit: false, delete: false, share: false },
-  onboarding: { view: true, manage: false },
   settings: { viewGeneral: false, editGeneral: false, manageBilling: false, manageIntegrations: false, manageAccessControl: false },
 };
 
@@ -273,7 +265,6 @@ const managerAccess: PermissionMatrix[AccessLevel] = {
   ideas: { view: true, submit: true, review: true, delete: false },
   analytics: { view: true, viewOrgWide: false, export: true },
   tools: { view: true, create: false, edit: false, delete: false, share: false },
-  onboarding: { view: true, manage: true },
   settings: { viewGeneral: true, editGeneral: false, manageBilling: false, manageIntegrations: false, manageAccessControl: false },
 };
 
@@ -284,7 +275,6 @@ const hrAccess: PermissionMatrix[AccessLevel] = {
   organization: { view: true, edit: false, manageDepartments: true, manageRoles: true, manageOffices: true },
   reviews: allTrue("reviews"),
   policies: allTrue("policies"),
-  onboarding: allTrue("onboarding"),
 };
 
 // C-Level / VP / Director: same as manager + more organization access
@@ -348,7 +338,7 @@ export function getEffectivePermissions(
   accessLevel: AccessLevel,
   matrix: PermissionMatrix | null | undefined
 ): Record<PermissionModule, Record<string, boolean>> {
-  const result: any = {};
+  const result = {} as Record<PermissionModule, Record<string, boolean>>;
   for (const mod of Object.keys(PERMISSION_MODULES) as PermissionModule[]) {
     result[mod] = {};
     for (const action of Object.keys(PERMISSION_MODULES[mod].actions)) {

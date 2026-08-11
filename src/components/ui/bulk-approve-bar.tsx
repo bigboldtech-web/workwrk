@@ -1,9 +1,9 @@
 "use client";
 
-// Specialized floating bar for approval queues — Expenses, Time off,
-// Comp decisions, POs, Invoices, Timesheets all share the same
-// approve/reject UX wired to /api/bulk-decide. Reject prompts the
-// user for a note; Approve is one click.
+// Specialized floating bar for approval queues — POs, Invoices and
+// Timesheets share the same approve/reject UX wired to
+// /api/bulk-decide. Reject prompts the user for a note; Approve is
+// one click.
 //
 // This is a thin wrapper around the generic BulkActionsBar; use that
 // directly when you need a different action set (bulk delete, bulk
@@ -16,9 +16,6 @@ import { CheckCircle2, XCircle } from "lucide-react";
 import { BulkActionsBar, type BulkAction } from "@/components/ui/bulk-actions-bar";
 
 export type BulkEntityType =
-  | "expense"
-  | "time-off"
-  | "comp-decision"
   | "purchase-order"
   | "invoice"
   | "timesheet";

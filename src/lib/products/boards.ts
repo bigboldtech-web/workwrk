@@ -26,11 +26,9 @@ import {
   Ticket, AlertTriangle, BookOpen,
   MessageSquareQuote, Headphones,
   Scale, Shield, Award,
-  Briefcase, UserPlus, GitBranch,
-  Banknote, Heart, Target,
+  Target,
   ShoppingCart, Receipt, Truck,
   BookText, Layers, ClipboardList,
-  GraduationCap, PlayCircle, Settings2,
 } from "lucide-react";
 
 export type BoardView = "table" | "kanban" | "gantt" | "calendar" | "chart";
@@ -61,13 +59,9 @@ export const CONVERTED_PRODUCTS = new Set<string>([
   "workwrk-itsm",
   "workwrk-help",
   "workwrk-contracts",
-  "workwrk-recruit",
-  "workwrk-pay",
-  "workwrk-benefits",
   "workwrk-fpa",
   "workwrk-procurement",
   "workwrk-books",
-  "workwrk-learn",
 ]);
 
 // Map of product slug → ordered list of boards inside that product.
@@ -106,20 +100,6 @@ export const PRODUCT_BOARDS: Record<string, ProductBoard[]> = {
     { key: "privacy", name: "Privacy (DSARs)", Icon: Shield, views: ["table"], tagline: "GDPR / CCPA queue" },
     { key: "ip", name: "IP portfolio", Icon: Award, views: ["table"], tagline: "Trademarks + patents" },
   ],
-  "workwrk-recruit": [
-    { key: "jobs", name: "Jobs", Icon: Briefcase, default: true, views: ["table"], tagline: "Open requisitions" },
-    { key: "candidates", name: "Candidates", Icon: UserPlus, views: ["table"], tagline: "Talent pool" },
-    { key: "pipeline", name: "Pipeline", Icon: GitBranch, views: ["kanban"], tagline: "Applications by stage" },
-    { key: "interviews", name: "Interviews", Icon: Calendar, views: ["table"], tagline: "Scheduled + scorecards" },
-  ],
-  "workwrk-pay": [
-    { key: "runs", name: "Pay runs", Icon: Banknote, default: true, views: ["table"], tagline: "Cycles + status" },
-    { key: "groups", name: "Pay groups", Icon: Users, views: ["table"], tagline: "Pay schedules" },
-  ],
-  "workwrk-benefits": [
-    { key: "plans", name: "Plans", Icon: Heart, default: true, views: ["table"], tagline: "Catalog + costs" },
-    { key: "oe", name: "Open enrollments", Icon: Calendar, views: ["table"], tagline: "Active windows" },
-  ],
   "workwrk-fpa": [
     { key: "plans", name: "Plans", Icon: Target, default: true, views: ["table"], tagline: "Driver-based forecasts" },
     { key: "variance", name: "Variance", Icon: BarChart3, views: ["table"], tagline: "Plan vs actuals" },
@@ -135,11 +115,6 @@ export const PRODUCT_BOARDS: Record<string, ProductBoard[]> = {
     { key: "reports", name: "Reports", Icon: BarChart3, views: ["table"], tagline: "P&L + Balance" },
     { key: "statements", name: "Statements", Icon: FileText, views: ["table"], tagline: "Published packs" },
     { key: "calendar", name: "Fiscal calendar", Icon: Calendar, views: ["table"], tagline: "Period close" },
-  ],
-  "workwrk-learn": [
-    { key: "mine", name: "My courses", Icon: GraduationCap, default: true, views: ["table"], tagline: "Your enrollments" },
-    { key: "catalog", name: "Catalog", Icon: PlayCircle, views: ["table"], tagline: "Available courses" },
-    { key: "manage", name: "Manage", Icon: Settings2, views: ["table"], tagline: "Admin: courses + assignments", managerOnly: true },
   ],
 };
 

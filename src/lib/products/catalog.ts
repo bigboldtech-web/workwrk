@@ -84,9 +84,9 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   {
     slug: "workwrk-people",
     name: "WorkwrK People",
-    tagline: "HR core: directory, time-off, timesheets",
+    tagline: "People core: directory, timesheets",
     description:
-      "Employee directory, org chart, departments, roles, time-off policies + requests, timesheets, clock-in/out with geolocation, headcount planning. The HR Workday-replacement core.",
+      "Employee directory, org chart, departments, roles, timesheets, clock-in/out with geolocation. The people core of the work-management platform.",
     iconKey: "Users",
     hue: "blue",
     suite: "PEOPLE",
@@ -96,34 +96,15 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     displayOrder: 100,
     legacyModuleKey: "people",
     pathPrefix: "/people",
-    seededAgents: ["priya-hr", "maya-onboarding"],
-    seededTemplates: ["employee-directory", "headcount-plan", "time-off-calendar"],
-  },
-  {
-    slug: "workwrk-recruit",
-    name: "WorkwrK Recruit",
-    tagline: "ATS: jobs, candidates, interviews",
-    description:
-      "Job postings, candidate pipeline (sourced → screen → interview → offer → hired), interview scheduling + scorecards, offer letter templates. Greenhouse-style ATS bundled into the platform.",
-    iconKey: "Briefcase",
-    hue: "violet",
-    suite: "PEOPLE",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 110,
-    legacyModuleKey: "recruiting",
-    pathPrefix: "/recruiting",
-    seededAgents: ["sam-recruiter", "nathan-sourcer"],
-    seededTemplates: ["sales-pipeline", "engineering-pipeline", "interview-scorecard"],
-    seededIntegrations: ["linkedin", "indeed", "google-calendar"],
+    seededAgents: ["priya-hr"],
+    seededTemplates: ["employee-directory"],
   },
   {
     slug: "workwrk-perform",
     name: "WorkwrK Perform",
-    tagline: "Reviews, calibration, 9-box, comp",
+    tagline: "Reviews, calibration, 9-box",
     description:
-      "Review cycles (self + manager + peer + 360), calibration sessions, 9-box talent grid, compensation cycles + decisions + salary bands. Lattice/Pave-style performance + comp module.",
+      "Review cycles (self + manager + peer + 360), calibration sessions, 9-box talent grid. Lattice-style performance module.",
     iconKey: "Star",
     hue: "amber",
     suite: "PEOPLE",
@@ -134,23 +115,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     legacyModuleKey: "reviews",
     pathPrefix: "/reviews",
     seededAgents: ["anya-review-coach", "tara-calibrator"],
-  },
-  {
-    slug: "workwrk-learn",
-    name: "WorkwrK Learn",
-    tagline: "LMS: courses, certifications, paths",
-    description:
-      "Course catalog with cover images + lesson player (video/text/quiz), enrollments, completion certificates, manager-assigned training, transcript per employee.",
-    iconKey: "GraduationCap",
-    hue: "violet",
-    suite: "PEOPLE",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 130,
-    legacyModuleKey: "checkins",
-    pathPrefix: "/learning",
-    seededAgents: ["leo-learning"],
   },
 
   // ─────────────────────────────────────────────
@@ -206,27 +170,6 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // ─────────────────────────────────────────────
 
   // ─────────────────────────────────────────────
-  // FINANCE SUITE
-  // ─────────────────────────────────────────────
-  {
-    slug: "workwrk-expense",
-    name: "WorkwrK Expense",
-    tagline: "T&E, receipts, mileage",
-    description:
-      "Expense submission with OCR receipt upload, category + project allocation, approval queue, mileage calculator, reimbursement export.",
-    iconKey: "Receipt",
-    hue: "amber",
-    suite: "FINANCE",
-    tier: "PLUS",
-    status: "LIVE",
-    defaultEnabled: false,
-    displayOrder: 720,
-    pathPrefix: "/expenses",
-    seededAgents: ["ex-expense-auditor"],
-    seededIntegrations: ["ramp", "brex", "stripe-cards"],
-  },
-
-  // ─────────────────────────────────────────────
   // LEGAL SUITE (NEW)
   // ─────────────────────────────────────────────
 
@@ -264,19 +207,12 @@ export const DEFAULT_INSTALLED_SLUGS: string[] = PRODUCT_CATALOG.filter(
 // during onboarding. The user can toggle anything; this is the default
 // pre-checked set.
 export const DEPARTMENT_RECOMMENDED_PRODUCTS: Record<string, string[]> = {
-  hr: [
-    "workwrk-people",
-    "workwrk-recruit",
-    "workwrk-perform",
-    "workwrk-learn",
-    "workwrk-pay",
-    "workwrk-benefits",
-  ],
+  hr: ["workwrk-people", "workwrk-perform"],
   sales: ["workwrk-crm"],
   operations: ["workwrk-procurement", "workwrk-assets"],
   it: ["workwrk-itsm", "workwrk-assets"],
   marketing: ["workwrk-campaigns"],
-  finance: ["workwrk-books", "workwrk-fpa", "workwrk-expense"],
+  finance: ["workwrk-books", "workwrk-fpa"],
   engineering: ["workwrk-dev"],
   legal: ["workwrk-contracts", "workwrk-privacy"],
   support: ["workwrk-help"],

@@ -1095,13 +1095,12 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                 <Select value={editStatus} onValueChange={setEditStatus}>
                   <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
                   <SelectContent>
-                    {/* PROBATION / PIP / NOTICE_PERIOD were HRIS lifecycle
-                        states — no workflow ever consumed them, so they are
-                        no longer offered. Existing values still display via
-                        statusColor; the enum stays in the schema. */}
+                    {/* ON_LEAVE / PROBATION / PIP / NOTICE_PERIOD were HRIS
+                        lifecycle states — no workflow consumes them anymore,
+                        so they are no longer offered. Existing values still
+                        display via statusColor; the enum stays in the schema. */}
                     <SelectItem value="ACTIVE">Active</SelectItem>
-                    <SelectItem value="ON_LEAVE">On Leave</SelectItem>
-                    {editStatus && !["ACTIVE", "ON_LEAVE"].includes(editStatus) ? (
+                    {editStatus && editStatus !== "ACTIVE" ? (
                       <SelectItem value={editStatus}>{editStatus.replace(/_/g, " ")} (legacy)</SelectItem>
                     ) : null}
                   </SelectContent>

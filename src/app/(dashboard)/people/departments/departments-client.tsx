@@ -242,7 +242,7 @@ export default function DepartmentsPage() {
             Icon={Building2}
             iconGradient="#0073EA"
             title="No departments yet"
-            subtitle="Departments organize your people and route policies, payroll, and announcements. Create your first one to get started."
+            subtitle="Departments organize your people and route policies and announcements. Create your first one to get started."
             cta="New department"
           />
         ) : filteredTree.length === 0 ? (

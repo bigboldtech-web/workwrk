@@ -38,7 +38,7 @@ type DrawerTab = "updates" | "files" | "activity" | "subitems";
  *  Share button and Maximize ("Open as page") icon link to `/{moduleId}/{itemId}`
  *  for these; everything else gets a fallback to the current page URL. */
 const MODULES_WITH_DETAIL = new Set([
-  "tasks", "crm", "meetings", "itsm", "helpdesk", "recruiting", "marketing", "procurement",
+  "tasks", "crm", "meetings", "itsm", "helpdesk", "marketing", "procurement",
 ]);
 
 // ─── Task-specific persistence mappings ─────────────────────

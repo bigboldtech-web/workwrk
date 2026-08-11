@@ -53,7 +53,7 @@ export const RECOMMENDED_ITEM_TYPES: RecommendedItemType[] = [
 
 export const ITEM_TYPE_CATEGORIES: string[] = [
   "Finance & Accounting", "Creative & Design", "IT", "Software Development",
-  "Marketing", "Sales & CRM", "HR & Recruiting", "Operations", "PMO",
+  "Marketing", "Sales & CRM", "People & HR", "Operations", "PMO",
   "Personal Use", "Support",
 ];
 

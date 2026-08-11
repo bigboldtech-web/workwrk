@@ -6,8 +6,8 @@
  *
  * Layout:
  *   Breadcrumb header (Teams / Directory) with icon tile + org nav links.
- *   TeamStatTile strip: Headcount · Departments · On leave · New (90d).
- *   Toolbar: search + status tabs (All / Active / On leave / New) + sort dropdown.
+ *   TeamStatTile strip: Headcount · Departments · New (90d).
+ *   Toolbar: search + status tabs (All / Active / New / Former) + sort dropdown.
  *   Department chip row (auto-derived).
  *   Grouped sections by department with colored dot + count + line.
  *   Person cards: TeamAvatar + name/role + dept/office chips + manager line + tenure.
@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Users, Search, Briefcase, MapPin,
-  Building2, Sparkles, Network, ArrowLeft, RotateCcw,
+  Building2, Sparkles, Network, RotateCcw,
 } from "lucide-react";
 import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -64,7 +64,7 @@ function tenure(join?: string | null): string {
 function isNewJoin(join?: string | null): boolean {
   return Boolean(join && (Date.now() - new Date(join).getTime()) < 90 * MS_DAY);
 }
-type Filter = "all" | "active" | "on-leave" | "new" | "former";
+type Filter = "all" | "active" | "new" | "former";
 type SortKey = "name" | "recent" | "tenure" | "reports";
 
 export default function PeopleDirectoryPage() {
@@ -131,7 +131,6 @@ export default function PeopleDirectoryPage() {
   // ─── Filter ──────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = users ?? [];
-    if (filter === "on-leave") list = list.filter((u) => u.status === "ON_LEAVE");
     if (filter === "new") list = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY);
     if (filter === "active") list = list.filter((u) => u.status === "ACTIVE" || !u.status);
     if (activeDept) list = list.filter((u) => (u.department?.id ?? "__none") === activeDept);
@@ -180,9 +179,8 @@ export default function PeopleDirectoryPage() {
   // ─── KPIs ────────────────────────────────────────────────
   const stats = useMemo(() => {
     const list = users ?? [];
-    const onLeave = list.filter((u) => u.status === "ON_LEAVE").length;
     const newHires = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY).length;
-    return { total: list.length, depts: depts.length, onLeave, newHires };
+    return { total: list.length, depts: depts.length, newHires };
   }, [users, depts.length]);
 
   return (
@@ -211,10 +209,9 @@ export default function PeopleDirectoryPage() {
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1280px]">
         {/* Stats */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
           <TeamStatTile icon={Users} label="Headcount" value={stats.total} accent="#0073EA" sub="active teammates" />
           <TeamStatTile icon={Building2} label="Departments" value={stats.depts} accent="#71717A" sub="org units" />
-          <TeamStatTile icon={ArrowLeft} label="On leave" value={stats.onLeave} accent="#f59e0b" sub={stats.onLeave > 0 ? "back when noted" : "everyone here"} />
           <TeamStatTile icon={Sparkles} label="New (90d)" value={stats.newHires} accent="#16a34a" sub="recent joiners" />
         </div>
 
@@ -225,7 +222,7 @@ export default function PeopleDirectoryPage() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find anyone by name, role, dept, email…" aria-label="Search people" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
           </div>
           <div className="inline-flex items-center gap-1">
-            {([["all", "All"], ["active", "Active"], ["on-leave", "On leave"], ["new", "New"], ["former", "Former"]] as const).map(([k, label]) => (
+            {([["all", "All"], ["active", "Active"], ["new", "New"], ["former", "Former"]] as const).map(([k, label]) => (
               <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[12.5px] ${filter === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
             ))}
           </div>
@@ -358,7 +355,6 @@ function FormerPersonCard({ user: u, onRestore, restoring }: { user: ApiUser; on
 
 function PersonCard({ user: u }: { user: ApiUser }) {
   const name = fullName(u);
-  const onLeave = u.status === "ON_LEAVE";
   const isNew = isNewJoin(u.joinDate);
   const reports = u._count?.directReports ?? 0;
 
@@ -369,7 +365,7 @@ function PersonCard({ user: u }: { user: ApiUser }) {
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium text-zinc-900 truncate flex items-center gap-1.5">
             <span className="truncate">{name}</span>
-            {onLeave ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700 shrink-0">On leave</span> : isNew ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 shrink-0">New</span> : null}
+            {isNew ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 shrink-0">New</span> : null}
           </div>
           {u.role?.title ? <div className="text-[12px] text-zinc-500 truncate">{u.role.title}</div> : null}
         </div>

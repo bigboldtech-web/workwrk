@@ -8,11 +8,11 @@
 import {
   // Cross-functional
   Home, Calendar as CalendarIcon, Inbox, Target, FileText, Lightbulb,
-  Megaphone, Activity, Heart, Star, MessageSquareHeart,
-  // People / HR
-  Users, UserPlus, Award, GraduationCap, Wallet, ShieldCheck, Plane,
-  Clock as ClockIcon, ClipboardList, CircleDollarSign, Briefcase,
-  TrendingUp, BookCopy, Building2, IdCard,
+  Megaphone, Activity, Star, MessageSquareHeart,
+  // People
+  Users, Award, ShieldCheck,
+  Clock as ClockIcon, ClipboardList, Briefcase,
+  TrendingUp, BookCopy, Building2,
   // Sales
   BarChart3, Handshake,
   // Operations
@@ -24,16 +24,16 @@ import {
   // Engineering
   Code2, GitBranch, Map as MapIcon,
   // Finance
-  Calculator, ChartPie, Receipt,
+  Calculator, ChartPie,
   // Legal
   Scale, Lock, Stamp,
   // Support
   Headphones, MessagesSquare, BookOpen,
   // Platform
   Sparkles, Bot, Cpu, Store as StoreIcon, Settings, Hammer,
-  PenTool, Palette, FlaskConical, Network, ClipboardCheck,
+  PenTool, Palette, FlaskConical, ClipboardCheck,
   CheckSquare, Pencil, Workflow, MessageCircle, BarChart, FileEdit,
-  Gift, Banknote, UserCircle2, BookMarked, BadgeCheck, AlertTriangle,
+  Banknote, UserCircle2, BookMarked, BadgeCheck, AlertTriangle,
   Coffee, Heart as HeartIcon, Boxes,
   type LucideIcon,
 } from "lucide-react";
@@ -499,44 +499,11 @@ const MODULES: ModuleDef[] = [
   }),
   stubModule({ id: "organization", name: "Organization", description: "Departments, roles, hierarchy", Icon: Building2, gradient: GRAD.purpleIndigo, newLabel: "New department" }),
   tableModule({
-    id: "recruiting", name: "Recruiting", description: "Jobs · candidates · interviews · offers",
-    Icon: UserPlus, gradient: GRAD.orangePink, newLabel: "Post a job",
-    columns: simpleStatusColumns, groups: genericGroups("Candidate"),
-    kanban: [
-      { id: "applied", title: "Applied", color: C.gray, cards: [{ id: "c1", title: "Anika Sharma — Senior PM", refId: "CAN-101", labels: [{ label: "Product", color: "blue" }], people: [PEOPLE.mk] }] },
-      { id: "screen",  title: "Screening", color: C.blue, cards: [{ id: "c2", title: "Rohan Verma — Eng Manager", refId: "CAN-098", labels: [{ label: "Engineering", color: "indigo" }], people: [PEOPLE.sc] }] },
-      { id: "interview", title: "Interview", color: C.orange, cards: [{ id: "c3", title: "Tara Iyer — Designer", refId: "CAN-095", labels: [{ label: "Design", color: "purple" }], people: [PEOPLE.mk, PEOPLE.bb] }] },
-      { id: "offer",   title: "Offer", color: C.purple, cards: [{ id: "c4", title: "Jay Mehta — Senior SDR", refId: "CAN-090", labels: [{ label: "Sales", color: "green" }], people: [PEOPLE.pr] }] },
-      { id: "hired",   title: "Hired", color: C.green, cards: [{ id: "c5", title: "Anika Nair — Marketing", refId: "CAN-085", labels: [{ label: "Marketing", color: "orange" }], people: [PEOPLE.bb] }] },
-    ],
-  }),
-  tableModule({
     id: "reviews", name: "Performance reviews", description: "Cycles · 360 feedback · calibration",
     Icon: Award, gradient: GRAD.purpleIndigo, newLabel: "New review",
     columns: simpleStatusColumns, groups: genericGroups("Review"),
   }),
   stubModule({ id: "talent", name: "Talent", description: "Skills · certifications · assessments", Icon: BadgeCheck, gradient: GRAD.greenTeal, newLabel: "Add assessment" }),
-  tableModule({
-    id: "learning", name: "Learning (LMS)", description: "Courses · enrollments · certifications",
-    Icon: GraduationCap, gradient: GRAD.indigoBlue, newLabel: "New course",
-    columns: simpleStatusColumns, groups: genericGroups("Course"),
-  }),
-  tableModule({
-    id: "compensation", name: "Compensation", description: "Cycles · decisions · salary bands",
-    Icon: Wallet, gradient: GRAD.tealGreen, newLabel: "New cycle",
-    columns: simpleStatusColumns, groups: genericGroups("Comp"),
-  }),
-  tableModule({
-    id: "benefits", name: "Benefits", description: "Plans · open enrollment · life events",
-    Icon: Gift, gradient: GRAD.pinkPurple, newLabel: "New plan",
-    columns: simpleStatusColumns, groups: genericGroups("Plan"),
-  }),
-  stubModule({ id: "my-benefits", name: "My benefits", description: "Your active plans · dependents · life events", Icon: Heart, gradient: GRAD.redPink }),
-  tableModule({
-    id: "time-off", name: "Time off", description: "Policies · requests · balances",
-    Icon: Plane, gradient: GRAD.bluePurple, newLabel: "Request time off",
-    columns: simpleStatusColumns, groups: genericGroups("Request"),
-  }),
   tableModule({
     id: "timesheets", name: "Timesheets", description: "Weekly submission · approval flow",
     Icon: ClockIcon, gradient: GRAD.indigoBlue, newLabel: "New entry",
@@ -544,21 +511,10 @@ const MODULES: ModuleDef[] = [
   }),
   stubModule({ id: "clock", name: "Clock in / out", description: "Punch in / out with geolocation", Icon: ClockIcon, gradient: GRAD.orangePink, newLabel: "Punch in" }),
   tableModule({
-    id: "payroll", name: "Payroll", description: "Pay runs · payslips · earning/deduction codes",
-    Icon: CircleDollarSign, gradient: GRAD.greenTeal, newLabel: "New pay run",
-    columns: simpleStatusColumns, groups: genericGroups("Pay run"),
-  }),
-  tableModule({
-    id: "onboarding", name: "Onboarding", description: "Templates · checklists · new-hire journeys",
-    Icon: IdCard, gradient: GRAD.orangePink, newLabel: "New hire",
-    columns: simpleStatusColumns, groups: genericGroups("Onboarding"),
-  }),
-  tableModule({
     id: "kra-kpi", name: "KRA / KPI", description: "Key result areas · performance indicators",
     Icon: TrendingUp, gradient: GRAD.indigoBlue, newLabel: "New KRA",
     columns: simpleStatusColumns, groups: genericGroups("KRA"),
   }),
-  stubModule({ id: "workforce-planning", name: "Workforce planning", description: "Headcount planning · scenario modeling", Icon: Network, gradient: GRAD.purpleIndigo }),
 
   // Sales
   tableModule({
@@ -623,12 +579,6 @@ const MODULES: ModuleDef[] = [
     Icon: ChartPie, gradient: GRAD.indigoBlue, newLabel: "New plan",
     columns: simpleStatusColumns, groups: genericGroups("Plan"),
   }),
-  tableModule({
-    id: "expenses", name: "Expenses", description: "Submission · OCR receipts · approval · reimbursement",
-    Icon: Receipt, gradient: GRAD.brownOrange, newLabel: "New expense",
-    columns: simpleStatusColumns, groups: genericGroups("Expense"),
-  }),
-
   // Legal
   tableModule({
     id: "legal", name: "Legal", description: "Contracts · privacy requests · IP portfolio",
@@ -651,7 +601,7 @@ const MODULES: ModuleDef[] = [
 
   // Platform / AI
   stubModule({ id: "sidekick", name: "Sidekick AI", description: "AI chat assistant · queries tasks/SOPs/people · runs scheduled tasks", Icon: Sparkles, gradient: GRAD.pinkPurple, newLabel: "New chat" }),
-  stubModule({ id: "agents", name: "Agents", description: "Marketplace of prebuilt agents — Ria SDR, Priya HR, Maya Recruiter, Aman IT", Icon: Bot, gradient: GRAD.bluePurple, newLabel: "Hire an agent" }),
+  stubModule({ id: "agents", name: "Agents", description: "Marketplace of prebuilt agents — Ria SDR, Priya HR, Aman IT", Icon: Bot, gradient: GRAD.bluePurple, newLabel: "Hire an agent" }),
   stubModule({ id: "ai", name: "AI", description: "Generic AI query interface · prompt templates", Icon: Cpu, gradient: GRAD.bluePurple, newLabel: "New query" }),
   stubModule({ id: "autopilot", name: "Autopilot", description: "Workflow automation · process orchestration", Icon: Workflow, gradient: GRAD.tealGreen, newLabel: "New workflow" }),
   stubModule({ id: "studio", name: "Studio", description: "User-built custom tables and kanbans · scoped to workspace", Icon: Hammer, gradient: GRAD.purpleIndigo, newLabel: "New board" }),
@@ -665,7 +615,6 @@ const MODULES: ModuleDef[] = [
   stubModule({ id: "account", name: "Account", description: "Profile · security · 2FA · active sessions", Icon: UserCircle2, gradient: GRAD.purpleIndigo }),
   stubModule({ id: "integrations", name: "Integrations", description: "Gmail, Slack, Salesforce, GitHub, Stripe and 50+ more", Icon: Boxes, gradient: GRAD.bluePurple }),
   stubModule({ id: "brand-guide", name: "Brand guide", description: "Logo · colors · fonts · guidelines", Icon: Palette, gradient: GRAD.pinkPurple }),
-  stubModule({ id: "redeem", name: "Redeem code", description: "Redeem an AppSumo or partner code", Icon: Gift, gradient: GRAD.greenTeal }),
 ];
 
 // Aliases — sub-pages we want to share the parent module's identity
@@ -675,10 +624,6 @@ const ALIASES: Record<string, string> = {
   "crm/activities": "crm",
   "crm/pipeline":   "crm",
   "crm/reports":    "crm",
-  "recruiting/jobs":       "recruiting",
-  "recruiting/candidates": "recruiting",
-  "recruiting/interviews": "recruiting",
-  "recruiting/pipeline":   "recruiting",
   "itsm/tickets":   "itsm",
   "itsm/incidents": "itsm",
   "itsm/kb":        "itsm",
@@ -700,8 +645,6 @@ const ALIASES: Record<string, string> = {
   "legal/contracts": "legal",
   "legal/privacy":   "legal",
   "legal/ip":        "legal",
-  "benefits/plans":  "benefits",
-  "benefits/oe":     "benefits",
   "settings/api":      "settings",
   "settings/audit":    "settings",
   "settings/identity": "settings",

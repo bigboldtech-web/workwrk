@@ -22,7 +22,7 @@ import {
 
 interface DepartmentOption { id: string; label: string; description: string; Icon: LucideIcon; gradient: string }
 const DEPARTMENTS: DepartmentOption[] = [
-  { id: "hr",          label: "People & HR",       description: "Hiring, onboarding, reviews, time-off",        Icon: Users,      gradient: "#FF158A" },
+  { id: "hr",          label: "People & HR",       description: "Directory, reviews, timesheets, recognition",  Icon: Users,      gradient: "#FF158A" },
   { id: "sales",       label: "Sales & Customers", description: "Pipelines, deals, renewals, contracts",        Icon: BarChart3,  gradient: "#00C875" },
   { id: "operations",  label: "Operations",        description: "Tools, assets, SOPs, forms",                   Icon: Boxes,      gradient: "#E8920C" },
   { id: "finance",     label: "Finance",           description: "Dashboards, contracts, expense tracking",      Icon: Calculator, gradient: "#14787E" },
@@ -35,7 +35,7 @@ const DEPARTMENTS: DepartmentOption[] = [
 ];
 
 const DEPT_RECS: Record<string, string[]> = {
-  hr:          ["teams", "recruiting", "onboarding", "reviews", "time-off", "timesheets", "learning", "kudos", "candor", "surveys", "announcements", "policies", "sops"],
+  hr:          ["teams", "reviews", "timesheets", "kudos", "candor", "surveys", "announcements", "policies", "sops"],
   sales:       ["goals", "dashboards", "docs", "forms", "agreements"],
   operations:  ["tools", "assets", "sops", "forms", "dashboards"],
   finance:     ["dashboards", "docs", "agreements", "tools"],
@@ -50,18 +50,17 @@ const TAGLINES: Record<string, string> = {
   home: "Your daily home base", planner: "Calendar & scheduling", ai: "AI workspace & agents",
   teams: "People & org chart", docs: "Notes & docs", dashboards: "Dashboards & reports",
   library: "Files, notes & whiteboards", forms: "Collect data with forms", clips: "Record quick videos",
-  goals: "OKRs, KRAs & KPIs", timesheets: "Track time", recruiting: "Jobs, candidates, interviews",
-  onboarding: "Onboard new hires", reviews: "Performance reviews", candor: "1:1s & feedback",
+  goals: "OKRs, KRAs & KPIs", timesheets: "Track time",
+  reviews: "Performance reviews", candor: "1:1s & feedback",
   announcements: "Company announcements", kudos: "Recognition & kudos", surveys: "Pulse surveys",
-  "time-off": "Time-off & leave", tools: "Tool & credential keeper", assets: "Asset & device tracking",
+  tools: "Tool & credential keeper", assets: "Asset & device tracking",
   sops: "Process docs & SOPs", policies: "Policies & compliance", agreements: "Contracts & e-signature",
-  learning: "Courses & training", build: "Low-code app builder",
+  build: "Low-code app builder",
 };
 
 const CATEGORY_GRADIENT: Record<string, string> = {
   Core: "#0073EA",
   People: "#FF158A",
-  "Time & Pay": "#14787E",
   Knowledge: "#E8920C",
   "Build & Extend": "#5B7FFF",
   Sales: "#00C875",

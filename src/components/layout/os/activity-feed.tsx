@@ -30,7 +30,6 @@ export const MODULE_ENTITY_TYPE: Record<string, string> = {
   crm: "opportunity",
   itsm: "ticket",
   helpdesk: "support_ticket",
-  recruiting: "application",
   meetings: "meeting",
   marketing: "campaign",
   procurement: "purchase_order",

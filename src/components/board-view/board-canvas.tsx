@@ -195,7 +195,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   );
 
   // Module ("ClickApp") gating from the Space. Custom Fields off → no custom
-  // columns + no Fields shelf; Priority/Tags/Time off → their built-in column
+  // columns + no Fields shelf; Priority/Tags/Time tracking → their built-in column
   // is force-hidden AND the same capability is hidden on cards / drawer / menu.
   const customFieldsOn = moduleGating?.customFields !== false;
   const priorityOn = moduleGating?.priority !== false;
