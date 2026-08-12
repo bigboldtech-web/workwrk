@@ -20,6 +20,8 @@ import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
   PRIORITY_OPTIONS,
   isDoneStatus,
+  splitBulkResults,
+  bulkFailureMessage,
   type BoardItemRow,
   type StatusOption,
   type ItemTag,
@@ -762,25 +764,25 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     setSelected(new Set(items.map((i) => i.id)));
   }, [items]);
 
-  // Bulk actions — each runs Promise.allSettled over /api/items/[id]
-  // since no server-side bulk endpoint exists yet. Optimistic local
-  // state update + clear selection on success.
+  // Bulk actions — each runs one request per id over /api/items/[id] since no
+  // server-side bulk endpoint exists yet. The local (and parent-reported)
+  // mutation applies ONLY to ids whose request genuinely succeeded (fulfilled
+  // AND res.ok — an HTTP error resolves fulfilled, so rejections alone lie).
+  // Failed ids stay visible, unmutated and selected, and get named in the
+  // error banner so the user can retry.
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Archive rows", description: `Archive ${selected.size} row${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const results = await Promise.allSettled(
-      ids.map((id) => fetch(`/api/items/${id}`, { method: "DELETE" })),
-    );
-    const failed = results.filter((r) => r.status === "rejected").length;
-    if (failed > 0) setError(`${failed} failed to archive — refreshing`);
-    // Optimistic: drop archived from local state
-    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
-    for (const id of ids) reportRemoved(id);
-    setSelected(new Set());
+    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}`, { method: "DELETE" }));
+    setError(failed.length > 0 ? bulkFailureMessage("archive", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.filter((r) => !ok.has(r.id)));
+    for (const id of succeeded) reportRemoved(id);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved]);
+  }, [selected, confirm, reportRemoved, items]);
 
   // Drag-to-reorder. Computes fractional midpoint position so we never
   // renumber the whole list — Linear/Folder pattern. Optimistic local
@@ -823,97 +825,45 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     }
   }, [items, boardId, onItemPatched, reportRefreshed]);
 
-  const bulkStatus = useCallback(async (status: string) => {
+  // Shared bulk-PATCH runner: `body` goes to the API, `local` is the display
+  // patch merged into rows whose request succeeded.
+  const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
     if (selected.size === 0) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    await Promise.allSettled(
-      ids.map((id) =>
-        fetch(`/api/items/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ status }),
-        }),
-      ),
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
     );
-    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, status } : r)));
-    for (const id of ids) onItemPatched?.(id, { status });
-    setSelected(new Set());
+    setError(failed.length > 0 ? bulkFailureMessage("update", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.map((r) => (ok.has(r.id) ? { ...r, ...local } : r)));
+    for (const id of succeeded) onItemPatched?.(id, local);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, onItemPatched]);
+  }, [selected, onItemPatched, items]);
 
-  const bulkOwner = useCallback(async (ownerId: string | null) => {
-    if (selected.size === 0) return;
-    setBulkBusy(true);
-    const ids = Array.from(selected);
-    await Promise.allSettled(
-      ids.map((id) =>
-        fetch(`/api/items/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ ownerId }),
-        }),
-      ),
-    );
-    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, ownerId } : r)));
-    for (const id of ids) onItemPatched?.(id, { ownerId });
-    setSelected(new Set());
-    setBulkBusy(false);
-  }, [selected, onItemPatched]);
-
-  const bulkDueAt = useCallback(async (iso: string | null) => {
-    if (selected.size === 0) return;
-    setBulkBusy(true);
-    const ids = Array.from(selected);
-    await Promise.allSettled(
-      ids.map((id) =>
-        fetch(`/api/items/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ dueAt: iso }),
-        }),
-      ),
-    );
-    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, dueAt: iso } : r)));
-    for (const id of ids) onItemPatched?.(id, { dueAt: iso });
-    setSelected(new Set());
-    setBulkBusy(false);
-  }, [selected, onItemPatched]);
-
-  const bulkPriority = useCallback(async (priority: string | null) => {
-    if (selected.size === 0) return;
-    setBulkBusy(true);
-    const ids = Array.from(selected);
-    await Promise.allSettled(
-      ids.map((id) =>
-        fetch(`/api/items/${id}`, {
-          method: "PATCH",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ priority }),
-        }),
-      ),
-    );
-    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, priority } : r)));
-    for (const id of ids) onItemPatched?.(id, { priority });
-    setSelected(new Set());
-    setBulkBusy(false);
-  }, [selected, onItemPatched]);
+  const bulkStatus = useCallback((status: string) => bulkPatch({ status }, { status }), [bulkPatch]);
+  const bulkOwner = useCallback((ownerId: string | null) => bulkPatch({ ownerId }, { ownerId }), [bulkPatch]);
+  const bulkDueAt = useCallback((iso: string | null) => bulkPatch({ dueAt: iso }, { dueAt: iso }), [bulkPatch]);
+  const bulkPriority = useCallback((priority: string | null) => bulkPatch({ priority }, { priority }), [bulkPatch]);
 
   const bulkTrash = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Delete tasks", description: `Delete ${selected.size} task${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const results = await Promise.allSettled(
-      ids.map((id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" })),
-    );
-    const failed = results.filter((r) => r.status === "rejected").length;
-    if (failed > 0) setError(`${failed} failed to delete`);
-    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
-    for (const id of ids) reportRemoved(id);
-    setSelected(new Set());
+    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" }));
+    setError(failed.length > 0 ? bulkFailureMessage("delete", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.filter((r) => !ok.has(r.id)));
+    for (const id of succeeded) reportRemoved(id);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved]);
+  }, [selected, confirm, reportRemoved, items]);
 
   // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
   // due / priority / tags) chosen inline before saving.
@@ -2192,29 +2142,34 @@ function AddSubtaskRow({
   onAutoFocusHandled?: () => void;
   onCreate: (title: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
-  const [open, setOpen] = useState(false);
+  // `open` is DERIVED from the parent's focus request (autoFocus) instead of
+  // state-synced in an effect (react-hooks/set-state-in-effect). The hover
+  // "Add subtask" button opens the row purely via the prop; once the input
+  // actually receives focus, its onFocus (an event, not an effect) latches
+  // openSelf so the row stays open, and releases the parent's request so a
+  // later request re-fires cleanly.
+  const [openSelf, setOpenSelf] = useState(false);
+  const open = openSelf || autoFocus;
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const pad = 60 + indent * 20;
 
-  // The hover "Add subtask" button opens + focuses this row via autoFocus.
-  // Focus directly here too: if the row is already open (e.g. holds typed-but-
-  // unsubmitted text), setOpen(true) is a no-op so the open→focus effect below
-  // wouldn't re-fire — focus the input now so the cursor still lands.
-  useEffect(() => {
-    if (autoFocus) {
-      setOpen(true);
-      inputRef.current?.focus();
-      onAutoFocusHandled?.();
-    }
-  }, [autoFocus, onAutoFocusHandled]);
+  // Closing also releases the parent's focus request (normally a no-op — the
+  // input's onFocus already did) so `open` can't stick true if focus never
+  // landed while autoFocus still points at this row.
+  const closeRow = () => { setOpenSelf(false); onAutoFocusHandled?.(); };
+
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+  // A repeat request on an already-open row (e.g. it holds typed-but-
+  // unsubmitted text, so `open` never toggles and the effect above won't
+  // re-fire) still needs the cursor to land in the input.
+  useEffect(() => { if (autoFocus) inputRef.current?.focus(); }, [autoFocus]);
 
   const save = async () => {
     const t = title.trim();
-    if (!t || busy) { if (!t) { setOpen(false); setFailed(null); } return; }
+    if (!t || busy) { if (!t) { closeRow(); setFailed(null); } return; }
     setBusy(true);
     setFailed(null);
     const res = await onCreate(t);
@@ -2232,12 +2187,13 @@ function AddSubtaskRow({
             <input
               ref={inputRef}
               value={title}
+              onFocus={() => { setOpenSelf(true); onAutoFocusHandled?.(); }}
               onChange={(e) => { setTitle(e.target.value); if (failed) setFailed(null); }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); void save(); }
-                if (e.key === "Escape") { setTitle(""); setFailed(null); setOpen(false); }
+                if (e.key === "Escape") { setTitle(""); setFailed(null); closeRow(); }
               }}
-              onBlur={() => { if (!title.trim() && !busy) setOpen(false); }}
+              onBlur={() => { if (!title.trim() && !busy) closeRow(); }}
               placeholder="Type a subtask and press Enter…"
               className="flex-1 text-[12.5px] bg-transparent outline-none placeholder:text-zinc-400"
             />
@@ -2247,7 +2203,7 @@ function AddSubtaskRow({
         ) : (
           <button
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={() => setOpenSelf(true)}
             className="inline-flex items-center gap-1.5 text-[12px] text-zinc-400 hover:text-zinc-700"
             style={{ paddingLeft: pad }}
           >

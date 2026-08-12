@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, Network, Pencil, Plus, Repeat, X } from "lucide-react";
-import { PRIORITY_OPTIONS, isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { PRIORITY_OPTIONS, isDoneStatus, splitBulkResults, bulkFailureMessage, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
 import { FieldValue } from "./field-value";
@@ -142,40 +142,51 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   }, [orderedIds]);
   const clearSelection = useCallback(() => { setSelected(new Set()); lastSelectedRef.current = null; }, []);
 
-  // Bulk actions — fan out over /api/items/[id] (no server bulk endpoint yet),
-  // optimistic local update, then clear selection.
+  // Bulk actions — fan out over /api/items/[id] (no server bulk endpoint yet).
+  // The local (and parent-reported) mutation applies ONLY to ids whose request
+  // genuinely succeeded (fulfilled AND res.ok — an HTTP error resolves
+  // fulfilled, so rejections alone lie). Failed ids stay visible, unmutated
+  // and selected, and get named in the error banner so the user can retry.
   const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
     if (selected.size === 0) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })));
-    setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, ...local } : r)));
-    for (const id of ids) onItemPatched?.(id, local);
-    setSelected(new Set());
+    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
+      fetch(`/api/items/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    );
+    setError(failed.length > 0 ? bulkFailureMessage("update", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.map((r) => (ok.has(r.id) ? { ...r, ...local } : r)));
+    for (const id of succeeded) onItemPatched?.(id, local);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, onItemPatched]);
+  }, [selected, onItemPatched, items]);
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Archive cards", description: `Archive ${selected.size} card${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "DELETE" })));
-    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
-    for (const id of ids) reportRemoved(id);
-    setSelected(new Set());
+    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}`, { method: "DELETE" }));
+    setError(failed.length > 0 ? bulkFailureMessage("archive", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.filter((r) => !ok.has(r.id)));
+    for (const id of succeeded) reportRemoved(id);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved]);
+  }, [selected, confirm, reportRemoved, items]);
   const bulkTrash = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Delete cards", description: `Delete ${selected.size} card${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" })));
-    setItems((prev) => prev.filter((r) => !selected.has(r.id)));
-    for (const id of ids) reportRemoved(id);
-    setSelected(new Set());
+    const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" }));
+    setError(failed.length > 0 ? bulkFailureMessage("delete", failed, ids.length, items) : null);
+    const ok = new Set(succeeded);
+    setItems((prev) => prev.filter((r) => !ok.has(r.id)));
+    for (const id of succeeded) reportRemoved(id);
+    setSelected(new Set(failed));
     setBulkBusy(false);
-  }, [selected, confirm, reportRemoved]);
+  }, [selected, confirm, reportRemoved, items]);
 
   // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
   const subtaskCountByParent = useMemo(() => {

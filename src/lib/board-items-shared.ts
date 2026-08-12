@@ -105,6 +105,47 @@ export interface ItemTag {
   color: string | null;
 }
 
+// ── Bulk fan-out helpers (2026-08-12) ───────────────────────────────────────
+// The board views run bulk actions as one request per id (no server bulk
+// endpoint yet). fetch() only REJECTS on network failure: an HTTP 404/403
+// resolves fulfilled, so a handler that checks rejections alone treats a
+// failed request as a win and mutates/removes a row that is unchanged on the
+// server. Split ids into genuine successes (fulfilled AND res.ok) vs failures
+// so the optimistic update can be scoped to what actually happened.
+export async function splitBulkResults(
+  ids: string[],
+  run: (id: string) => Promise<Response>,
+): Promise<{ succeeded: string[]; failed: string[] }> {
+  const results = await Promise.allSettled(ids.map((id) => run(id)));
+  const succeeded: string[] = [];
+  const failed: string[] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled" && r.value.ok) succeeded.push(ids[i]);
+    else failed.push(ids[i]);
+  });
+  return { succeeded, failed };
+}
+
+/** User-facing copy for a partial bulk failure: names the count and up to
+ *  three failing row titles (cheap: resolved from the rows already in local
+ *  state) so the user knows exactly which tasks kept their previous state. */
+export function bulkFailureMessage(
+  verb: string,
+  failedIds: string[],
+  total: number,
+  rows: readonly Pick<BoardItemRow, "id" | "title">[],
+): string {
+  const titleById = new Map(rows.map((r) => [r.id, r.title]));
+  const titles = failedIds
+    .map((id) => titleById.get(id))
+    .filter((t): t is string => !!t)
+    .slice(0, 3);
+  const names = titles.length > 0
+    ? ` (${titles.map((t) => `"${t}"`).join(", ")}${failedIds.length > titles.length ? `, +${failedIds.length - titles.length} more` : ""})`
+    : "";
+  return `Couldn't ${verb} ${failedIds.length} of ${total} task${total === 1 ? "" : "s"}${names}. They're unchanged and still selected.`;
+}
+
 export interface BoardItemRow {
   id: string;
   title: string;
