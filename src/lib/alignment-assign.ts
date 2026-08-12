@@ -28,17 +28,19 @@ export async function seedAlignmentForUser(args: {
 }): Promise<SeedResult> {
   const { userId, roleId, organizationId, assignedBy } = args;
 
-  // 1. Role's KRA templates.
+  // 1. Role's KRA templates (weight = the role-level default share).
   const kras = await prisma.kRA.findMany({
     where: { roleId, organizationId },
-    select: { id: true },
+    select: { id: true, weight: true },
   });
   const kraIds = kras.map((k) => k.id);
   if (kraIds.length === 0) return { krasSeeded: 0, sopsSeeded: 0 };
 
-  // 2. Seed KRA assignments (skip ones the person already has).
+  // 2. Seed KRA assignments (skip ones the person already has). Each
+  //    assignment inherits the KRA's role-level weight — leaving the 0
+  //    default here is what produced people with five KRAs all at 0%.
   const kraRes = await prisma.kRAAssignment.createMany({
-    data: kraIds.map((kraId) => ({ userId, kraId })),
+    data: kras.map((k) => ({ userId, kraId: k.id, weightage: k.weight })),
     skipDuplicates: true,
   });
 
@@ -76,13 +78,21 @@ export async function seedKraToRoleHolders(args: {
   organizationId: string;
 }): Promise<{ peopleSeeded: number }> {
   const { kraId, roleId, organizationId } = args;
-  const holders = await prisma.user.findMany({
-    where: { roleId, organizationId, status: "ACTIVE" },
-    select: { id: true },
-  });
+  const [holders, kra] = await Promise.all([
+    prisma.user.findMany({
+      where: { roleId, organizationId, status: "ACTIVE" },
+      select: { id: true },
+    }),
+    // The KRA's role-level weight — every holder inherits it as their
+    // starting weightage (still editable per-person afterwards).
+    prisma.kRA.findFirst({
+      where: { id: kraId, organizationId },
+      select: { weight: true },
+    }),
+  ]);
   if (holders.length === 0) return { peopleSeeded: 0 };
   const res = await prisma.kRAAssignment.createMany({
-    data: holders.map((h) => ({ userId: h.id, kraId })),
+    data: holders.map((h) => ({ userId: h.id, kraId, weightage: kra?.weight ?? 0 })),
     skipDuplicates: true,
   });
   return { peopleSeeded: res.count };

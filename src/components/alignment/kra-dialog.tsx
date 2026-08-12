@@ -21,6 +21,8 @@ export type KraDialogKra = {
   description?: string | null;
   category?: string | null;
   roleId?: string | null;
+  /** Role-level default weight (0..100) inherited by every holder. */
+  weight?: number | null;
 };
 
 export function KraDialog({
@@ -48,6 +50,7 @@ export function KraDialog({
   const [roleId, setRoleId] = useState("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [weight, setWeight] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +59,7 @@ export function KraDialog({
     setRoleId(kra?.roleId ?? defaultRoleId ?? "");
     setName(kra?.name ?? "");
     setDescription(kra?.description ?? "");
+    setWeight(kra?.weight ? String(kra.weight) : "");
     setError(null);
   }, [open, kra, defaultRoleId]);
 
@@ -63,6 +67,11 @@ export function KraDialog({
     const trimmed = name.trim();
     if (!trimmed) { setError("Give the KRA a name."); return; }
     if (!roleId) { setError("Pick the job title this KRA belongs to."); return; }
+    const weightNum = weight.trim() === "" ? 0 : Number(weight);
+    if (!Number.isFinite(weightNum) || weightNum < 0 || weightNum > 100) {
+      setError("Weight must be between 0 and 100.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -71,8 +80,8 @@ export function KraDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           editing
-            ? { id: kra!.id, name: trimmed, description: description.trim() || null, roleId }
-            : { name: trimmed, description: description.trim() || undefined, roleId },
+            ? { id: kra!.id, name: trimmed, description: description.trim() || null, roleId, weight: weightNum }
+            : { name: trimmed, description: description.trim() || undefined, roleId, weight: weightNum },
         ),
       });
       if (!res.ok) {
@@ -152,6 +161,24 @@ export function KraDialog({
               placeholder="What outcome does this area own?"
               className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-[13px] resize-none focus:outline-none focus:border-[#0073EA]"
             />
+          </label>
+
+          <label className="block">
+            <span className="text-[12px] font-medium text-zinc-600">
+              Weight % <span className="text-zinc-400 font-normal">(share of the job title, 0 to 100)</span>
+            </span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                placeholder="0"
+                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] text-right tabular-nums focus:outline-none focus:border-[#0073EA]"
+              />
+              <span className="text-[11.5px] text-zinc-400">Every holder inherits this as their starting weightage.</span>
+            </div>
           </label>
 
           {error ? <p className="text-[12px] text-red-600">{error}</p> : null}

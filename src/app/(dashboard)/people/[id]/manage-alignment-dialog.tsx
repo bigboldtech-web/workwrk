@@ -38,6 +38,43 @@ function asArray<T>(data: unknown, keys: string[]): T[] {
   return [];
 }
 
+/** Editable per-KRA weight. This used to be static text, so an assignment
+ *  seeded at 0% could never be corrected from here. Commits on blur/Enter,
+ *  Escape reverts. Keyed by the server value in the parent so a successful
+ *  reload remounts it fresh; a rejected save snaps the draft back. */
+function WeightCell({ value, disabled, onSave }: {
+  value: number;
+  disabled: boolean;
+  onSave: (weightage: number) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  const [saving, setSaving] = useState(false);
+  const commit = async () => {
+    const w = Number(draft);
+    if (!Number.isFinite(w) || w === value || draft.trim() === "") { setDraft(String(value)); return; }
+    setSaving(true);
+    const ok = await onSave(w);
+    setSaving(false);
+    if (!ok) setDraft(String(value));
+  };
+  return (
+    <span className="flex items-center gap-0.5 shrink-0">
+      <input
+        type="number" min={1} max={100} value={draft} disabled={disabled || saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
+          if (e.key === "Escape") { setDraft(String(value)); }
+        }}
+        aria-label="Weightage %"
+        className="w-12 h-6 px-1 rounded border border-zinc-200 text-[11px] text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50"
+      />
+      <span className="text-[11px] text-zinc-400">%</span>
+    </span>
+  );
+}
+
 export function ManageAlignmentDialog({
   open, onOpenChange, userId, userName, onChanged,
 }: {
@@ -99,6 +136,30 @@ export function ManageAlignmentDialog({
       if (!res.ok) { const d = await res.json().catch(() => ({})); error("Couldn't add KRA", d.error); return; }
       setNewKraId(""); setNewKraWeight(10);
       await load(); fireChanged(); success("KRA added");
+    } finally { setBusy(null); }
+  };
+
+  // Wired to the existing PUT /api/kra-assignments/[id], which validates
+  // 1..100 and caps the person's total at 100. Its rejection message (with
+  // the exact totals) is surfaced as a toast instead of failing silently.
+  const saveWeight = async (id: string, weightage: number): Promise<boolean> => {
+    if (weightage <= 0 || weightage > 100) {
+      error("Weight must be between 1 and 100");
+      return false;
+    }
+    setBusy(`weight-${id}`);
+    try {
+      const res = await fetch(`/api/kra-assignments/${id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weightage }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        error("Couldn't update weight", d.error);
+        return false;
+      }
+      await load(); fireChanged(); success("Weight updated");
+      return true;
     } finally { setBusy(null); }
   };
 
@@ -185,7 +246,7 @@ export function ManageAlignmentDialog({
                       <span className="text-[10px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">No job title</span>
                     )}
                     {a.kra?.category ? <Badge variant="outline" className="text-[9px]">{a.kra.category}</Badge> : null}
-                    <span className="text-[11px] text-zinc-400 tabular-nums w-10 text-right">{a.weightage}%</span>
+                    <WeightCell key={`w-${a.id}-${a.weightage}`} value={a.weightage} disabled={busy !== null} onSave={(w) => saveWeight(a.id, w)} />
                     <button type="button" onClick={() => void removeKra(a.id)} disabled={busy !== null}
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove KRA">
                       {busy === `del-kra-${a.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}

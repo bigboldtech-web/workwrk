@@ -88,9 +88,14 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
 
   const body = await req.json();
-  const { name, description, category, roleId } = body;
+  const { name, description, category, roleId, weight } = body;
 
   if (!name) return jsonError("KRA name is required");
+  // Role-level default weight: the share of the job title this area
+  // carries. Holders inherit it as their starting weightage.
+  if (weight != null && (typeof weight !== "number" || !Number.isFinite(weight) || weight < 0 || weight > 100)) {
+    return jsonError("Weight must be a number between 0 and 100");
+  }
 
   // Role-first spine: a KRA exists ONLY inside a job title. Legacy
   // orphans (roleId null) stay readable and fixable via PATCH, but no
@@ -110,6 +115,7 @@ export async function POST(req: NextRequest) {
       description,
       category,
       roleId,
+      ...(weight != null && { weight }),
       organizationId: getOrgId(session),
     },
   });
@@ -145,9 +151,12 @@ export async function PATCH(req: NextRequest) {
   if (denied) return denied;
 
   const body = await req.json();
-  const { id, name, description, category, roleId } = body;
+  const { id, name, description, category, roleId, weight } = body;
 
   if (!id) return jsonError("KRA id is required");
+  if (weight !== undefined && (typeof weight !== "number" || !Number.isFinite(weight) || weight < 0 || weight > 100)) {
+    return jsonError("Weight must be a number between 0 and 100");
+  }
 
   const existing = await prisma.kRA.findFirst({
     where: { id, organizationId: getOrgId(session) },
@@ -164,6 +173,9 @@ export async function PATCH(req: NextRequest) {
     if (!role) return jsonError("Job title not found in this organization", 404);
   }
 
+  // Changing the role-level weight never rewrites existing holders'
+  // weightage — per-person overrides stay put; only NEW seeds (and the
+  // zero-value backfill script) pick the new default up.
   const kra = await prisma.kRA.update({
     where: { id },
     data: {
@@ -171,6 +183,7 @@ export async function PATCH(req: NextRequest) {
       ...(description !== undefined && { description }),
       ...(category !== undefined && { category }),
       ...(roleId !== undefined && { roleId: roleId || null }),
+      ...(weight !== undefined && { weight }),
     },
   });
 

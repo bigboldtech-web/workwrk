@@ -34,7 +34,7 @@ type Kpi = {
   targetValue: number | null; targetLabel: string | null; lowerIsBetter: boolean;
   direction: KpiDirection | null; isNorthStar: boolean;
 };
-type Kra = { id: string; name: string; description: string | null; category: string | null; kpis: Kpi[]; sops: { id: string; title: string; status: string }[] };
+type Kra = { id: string; name: string; description: string | null; category: string | null; weight: number; kpis: Kpi[]; sops: { id: string; title: string; status: string }[] };
 type Area = { id: string; name: string; ownerRole: { id: string; title: string } | null };
 type Boundary = { id: string; relation: string; area: { id: string; name: string; ownerRole: { id: string; title: string } | null } };
 type Threshold = { id: string; label: string; trigger: string; value: number; unit: string | null; businessHoursOnly: boolean };
@@ -366,6 +366,9 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
   const router = useRouter();
   const { toast } = useOsToast();
   const attachedIds = bundle.kras.map((k) => k.id);
+  // Running total of the role-level weights, so a job title can visibly be
+  // made to sum to 100% (every holder inherits these shares).
+  const totalWeight = Math.round(bundle.kras.reduce((s, k) => s + (k.weight || 0), 0) * 100) / 100;
 
   const [kraDialog, setKraDialog] = useState<{ kra?: Kra } | null>(null);
   const [kpiDialog, setKpiDialog] = useState<{ kraId: string; kraName: string; kpi?: KpiDialogKpi } | null>(null);
@@ -437,10 +440,20 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
         </div>
       ) : undefined}
     >
-      <p className="text-[11.5px] text-zinc-400 mb-3 -mt-1">
-        Every person with this job title inherits these. Quarterly targets live
-        on each person&rsquo;s goals.
-      </p>
+      <div className="flex items-center justify-between gap-3 mb-3 -mt-1">
+        <p className="text-[11.5px] text-zinc-400">
+          Every person with this job title inherits these. Quarterly targets live
+          on each person&rsquo;s goals.
+        </p>
+        {bundle.kras.length > 0 ? (
+          <span
+            className={`text-[11px] tabular-nums shrink-0 ${totalWeight > 100 ? "text-[#E2445C]" : "text-zinc-400"}`}
+            title="Sum of this job title's KRA weights. Aim for 100%."
+          >
+            weight {totalWeight}% of 100
+          </span>
+        ) : null}
+      </div>
 
       {bundle.kras.length === 0 ? (
         <p className="text-[12.5px] text-zinc-400 py-2">
@@ -459,6 +472,12 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                     <p className="text-[12px] text-zinc-500 leading-snug mt-0.5">{k.description}</p>
                   ) : null}
                 </div>
+                <span
+                  className={`text-[12px] font-mono tabular-nums shrink-0 mt-0.5 ${k.weight ? "text-zinc-700" : "text-zinc-400"}`}
+                  title="Role-level weight — every holder inherits this share as their starting weightage"
+                >
+                  {k.weight || 0}%
+                </span>
                 {canEdit ? (
                   <RowMenu
                     items={[

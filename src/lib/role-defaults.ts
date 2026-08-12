@@ -360,12 +360,19 @@ export async function backfillUserRoleDefinitions(userId: string): Promise<{
   let sopAssignments = 0;
 
   if (kraIds.length > 0) {
-    const weight = Math.round((100 / kraIds.length) * 100) / 100;
+    // A KRA's role-level weight wins when set; starter KRAs (no weight
+    // yet) fall back to an even split so totals still land near 100.
+    const evenWeight = Math.round((100 / kraIds.length) * 100) / 100;
+    const kraWeights = await prisma.kRA.findMany({
+      where: { id: { in: kraIds } },
+      select: { id: true, weight: true },
+    });
+    const weightByKra = new Map(kraWeights.map((k) => [k.id, k.weight]));
     const result = await prisma.kRAAssignment.createMany({
       data: kraIds.map((kraId) => ({
         userId,
         kraId,
-        weightage: weight,
+        weightage: (weightByKra.get(kraId) ?? 0) > 0 ? weightByKra.get(kraId)! : evenWeight,
         period: "ongoing",
         status: "ACTIVE" as const,
       })),

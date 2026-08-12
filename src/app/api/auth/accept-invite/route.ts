@@ -100,16 +100,22 @@ export async function POST(req: Request) {
 
       // Role-definition fan-out. KRAs and SOPs were chosen by the
       // inviting admin and stamped on the Invitation; we materialize
-      // them as assignment rows here. Even weighting across KRAs
+      // them as assignment rows here. Each KRA's role-level weight is
+      // inherited when set; KRAs without one fall back to an even split
       // (admin can rebalance later from /kra-kpi). SOPs default to
       // mandatory acknowledgement.
       if (invitation.kraIds.length > 0) {
-        const weight = Math.round((100 / invitation.kraIds.length) * 100) / 100;
+        const evenWeight = Math.round((100 / invitation.kraIds.length) * 100) / 100;
+        const kraWeights = await tx.kRA.findMany({
+          where: { id: { in: invitation.kraIds } },
+          select: { id: true, weight: true },
+        });
+        const weightByKra = new Map(kraWeights.map((k) => [k.id, k.weight]));
         await tx.kRAAssignment.createMany({
           data: invitation.kraIds.map((kraId) => ({
             userId: user.id,
             kraId,
-            weightage: weight,
+            weightage: (weightByKra.get(kraId) ?? 0) > 0 ? weightByKra.get(kraId)! : evenWeight,
             period: "ongoing",
             status: "ACTIVE" as const,
           })),

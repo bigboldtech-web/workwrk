@@ -38,7 +38,7 @@ async function main() {
       id: true,
       title: true,
       organizationId: true,
-      kraTemplates: { select: { id: true, name: true } },
+      kraTemplates: { select: { id: true, name: true, weight: true } },
       users: {
         where: { status: "ACTIVE" },
         select: { id: true, firstName: true, lastName: true },
@@ -71,7 +71,7 @@ async function main() {
     for (const user of role.users) {
       for (const kra of role.kraTemplates) {
         if (!have.has(`${user.id}:${kra.id}`)) {
-          missing.push({ userId: user.id, kraId: kra.id, who: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(), what: kra.name });
+          missing.push({ userId: user.id, kraId: kra.id, weightage: kra.weight ?? 0, who: `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim(), what: kra.name });
         }
       }
     }
@@ -84,7 +84,7 @@ async function main() {
 
     if (COMMIT) {
       const res = await prisma.kRAAssignment.createMany({
-        data: missing.map((m) => ({ userId: m.userId, kraId: m.kraId })),
+        data: missing.map((m) => ({ userId: m.userId, kraId: m.kraId, weightage: m.weightage })),
         skipDuplicates: true,
       });
       totalWritten += res.count;

@@ -102,6 +102,7 @@ export default async function RolePage(props: {
       name: k.name,
       description: k.description,
       category: k.category,
+      weight: k.weight,
       kpis: k.kpis.map((p) => ({
         ...p,
         ownership: p.ownership as string,
