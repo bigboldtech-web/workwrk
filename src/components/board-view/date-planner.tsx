@@ -564,6 +564,9 @@ function RepeatTab({
   const [monthDay, setMonthDay] = useState<number>(rule?.monthDay ?? dueDate.getDate());
   const [yearMonth, setYearMonth] = useState<number>(rule?.yearMonth ?? dueDate.getMonth() + 1);
   const [yearDay, setYearDay] = useState<number>(rule?.yearDay ?? dueDate.getDate());
+  // Explicit time-of-day ("HH:MM") — empty = inherit the due date's time.
+  // Never prefilled: an unset rule stays unset until the user picks a time.
+  const [atTime, setAtTime] = useState<string>(rule?.atTime ?? "");
   const [ends, setEnds] = useState<"never" | "until" | "count">(
     rule && rule.forever === false ? (rule.until ? "until" : "count") : "never",
   );
@@ -603,7 +606,10 @@ function RepeatTab({
     monthDay: freq === "MONTH" ? monthDay : null,
     yearMonth: freq === "YEAR" ? yearMonth : null,
     yearDay: freq === "YEAR" ? yearDay : null,
-  }), [freq, interval, trigger, ends, count, untilDate, resetOn, resetStatus, weekdays, monthDay, yearMonth, yearDay]);
+    // "HH:MM" (some engines emit "HH:MM:SS" — trim); empty input = null =
+    // occurrences keep inheriting the due date's time-of-day.
+    atTime: /^([01]\d|2[0-3]):[0-5]\d/.test(atTime) ? atTime.slice(0, 5) : null,
+  }), [freq, interval, trigger, ends, count, untilDate, resetOn, resetStatus, weekdays, monthDay, yearMonth, yearDay, atTime]);
 
   const saveDisabled = ends === "until" && !untilDate;
 
@@ -690,6 +696,30 @@ function RepeatTab({
               />
             </div>
           ) : null}
+
+          {/* Explicit occurrence time — empty = inherit the due date's time. */}
+          <div className="space-y-1">
+            <span className={`block ${LABEL}`}>At</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="time"
+                value={atTime}
+                onChange={(e) => setAtTime(e.target.value)}
+                className={`${FIELD} w-[110px]`}
+              />
+              {atTime ? (
+                <button
+                  type="button"
+                  onClick={() => setAtTime("")}
+                  className="text-[11px] text-zinc-400 hover:text-zinc-600 transition-colors"
+                >
+                  clear
+                </button>
+              ) : (
+                <span className="text-[11px] text-zinc-400">same time as the due date</span>
+              )}
+            </div>
+          </div>
 
           {/* Repeat trigger — the ONE control that picks the recurrence mode. */}
           <div className="space-y-1">

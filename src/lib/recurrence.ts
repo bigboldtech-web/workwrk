@@ -55,7 +55,15 @@ export interface RecurrenceRule {
   yearMonth?: number | null;
   /** YEAR only — day of `yearMonth` (1-31, clamped to the month's length). */
   yearDay?: number | null;
+  /** Explicit time-of-day for every occurrence, "HH:MM" 24-hour LOCAL time
+   *  (e.g. "09:00"). null/absent = inherit the anchor's time-of-day (the
+   *  behavior every stored rule had before this field existed). */
+  atTime?: string | null;
 }
+
+// "HH:MM" 24-hour. parseRecurrence + applyTimeOfDay both gate on this so a
+// malformed value degrades to "no explicit time", never to a wrong time.
+const AT_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
 const FREQS: readonly RecurFreq[] = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR"];
 const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = ISO weekday - 1
@@ -105,11 +113,26 @@ export function parseRecurrence(raw: unknown): RecurrenceRule | null {
   const monthDay = intInRange(o.monthDay, 1, 31);
   const yearMonth = intInRange(o.yearMonth, 1, 12);
   const yearDay = intInRange(o.yearDay, 1, 31);
+  // Explicit time-of-day — absent/invalid parses to null, NEVER invented, so
+  // every pre-existing rule keeps inheriting the anchor's time.
+  const atTime = typeof o.atTime === "string" && AT_TIME_RE.test(o.atTime) ? o.atTime : null;
 
   return {
     freq: freq as RecurFreq, interval, trigger, createNew, forever, count, until,
-    resetStatus, syncDue, weekdays, monthDay, yearMonth, yearDay,
+    resetStatus, syncDue, weekdays, monthDay, yearMonth, yearDay, atTime,
   };
+}
+
+/** The date with the rule's explicit `atTime` applied in LOCAL time, or the
+ *  date unchanged when the rule has none (occurrences then inherit the
+ *  anchor's time-of-day exactly as before this field existed). Never shifts
+ *  the calendar day — occurrenceKey() stays stable either way. */
+export function applyTimeOfDay(date: Date, rule: RecurrenceRule): Date {
+  const m = rule.atTime ? AT_TIME_RE.exec(rule.atTime) : null;
+  if (!m) return date;
+  const d = new Date(date);
+  d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  return d;
 }
 
 /** True once the series has run its course under a non-forever rule: the
@@ -166,8 +189,16 @@ const MAX_STEPS = 20000;
  *   MONTH + monthDay   — day D of every Nth month, 29-31 clamped to month end.
  *   YEAR + yearMonth   — yearMonth/yearDay of every Nth year (clamped).
  *   everything else    — plain advanceDate stepping from the anchor (legacy).
+ * Every emitted date passes through applyTimeOfDay, so a rule's explicit
+ * atTime overrides the inherited time-of-day without moving the calendar day
+ * (the grid stays monotonic: days are distinct, only the clock changes).
  */
 function makeOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => Date {
+  const raw = makeRawOccurrenceIterator(rule, anchorInput);
+  return () => applyTimeOfDay(raw(), rule);
+}
+
+function makeRawOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => Date {
   const anchor = new Date(anchorInput);
   const n = Math.max(1, rule.interval);
   const h = anchor.getHours(), mi = anchor.getMinutes(), se = anchor.getSeconds(), ms = anchor.getMilliseconds();
@@ -209,7 +240,7 @@ function makeOccurrenceIterator(rule: RecurrenceRule, anchorInput: Date): () => 
   let cur: Date | null = null;
   return () => {
     cur = cur === null ? new Date(anchor) : advanceDate(cur, rule);
-    return cur;
+    return new Date(cur);
   };
 }
 
@@ -236,7 +267,7 @@ export function nextOccurrenceAfter(after: Date | string, rule: RecurrenceRule, 
     d = next();
     if (d.getTime() > cutoff) return d;
   }
-  return advanceDate(d, rule); // unreachable in practice; keeps the result monotonic
+  return applyTimeOfDay(advanceDate(d, rule), rule); // unreachable in practice; keeps the result monotonic
 }
 
 export interface OccurrenceBatch {
@@ -287,10 +318,11 @@ function ordinal(nth: number): string {
   return `${nth}${suffix}`;
 }
 
-/** Plain-English summary of a rule, e.g. "Repeats every day",
- *  "Repeats every 2 weeks on Mon, Thu", "Repeats monthly on the 15th ·
- *  ends Dec 31, 2026", "Repeats yearly on Aug 8 · 12 times". Shown live in
- *  the Repeat tab and as the recurrence badge tooltip. */
+/** Plain-English summary of a rule, e.g. "Repeats every day at 9:00 AM",
+ *  "Repeats every 2 weeks on Mon, Thu at 6:30 PM", "Repeats monthly on the
+ *  15th · ends Dec 31, 2026", "Repeats yearly on Aug 8 · 12 times". The
+ *  " at …" part appears only when the rule carries an explicit atTime. Shown
+ *  live in the Repeat tab and as the recurrence badge tooltip. */
 export function buildRecurrenceSummary(rule: RecurrenceRule): string {
   const n = Math.max(1, rule.interval);
   let s: string;
@@ -317,6 +349,11 @@ export function buildRecurrenceSummary(rule: RecurrenceRule): string {
       s = n === 1 ? "Repeats yearly" : `Repeats every ${n} years`;
       if (rule.yearMonth != null) s += ` on ${MONTH_SHORT[rule.yearMonth - 1]} ${rule.yearDay ?? 1}`;
       break;
+  }
+  const t = rule.atTime ? AT_TIME_RE.exec(rule.atTime) : null;
+  if (t) {
+    const when = new Date(2000, 0, 1, Number(t[1]), Number(t[2]));
+    s += ` at ${when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
   }
   if (rule.forever === false) {
     const end = rule.until ? new Date(rule.until) : null;

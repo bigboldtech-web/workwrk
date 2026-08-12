@@ -288,8 +288,9 @@ export async function spawnDueRecurringTasks(
       }
 
       // Spec "On schedule" mode: one NEW task per occurrence since the last
-      // spawn. The anchor's due date is the grid anchor (time-of-day source);
-      // anchors without dates fall back to the claimed recurNextAt.
+      // spawn. The anchor's due date is the grid anchor (time-of-day source —
+      // unless the rule carries an explicit atTime, which the occurrence math
+      // applies); anchors without dates fall back to the claimed recurNextAt.
       const anchorDue = new Date(anchor.dueAt ?? anchor.startAt ?? anchor.recurNextAt);
       const md = anchor.metadata && typeof anchor.metadata === "object"
         ? { ...(anchor.metadata as Record<string, unknown>) }

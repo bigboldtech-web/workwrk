@@ -10,7 +10,7 @@ import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
-import { nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
+import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
@@ -134,9 +134,19 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     : {};
   delete md.lastSpawnedKey;
   delete md.skippedOccurrences;
+  // Explicit time-of-day: a rule carrying atTime re-times the anchor's OWN due
+  // date to that clock time on its existing calendar day (so "today's"
+  // occurrence is corrected too) and recurNextAt is computed from the re-timed
+  // anchor. Rules without atTime never touch dueAt — occurrences keep
+  // inheriting whatever time the anchor carries, exactly as before.
+  let retimedDue: Date | null = null;
+  if (rule?.atTime && item.dueAt) {
+    const timed = applyTimeOfDay(new Date(item.dueAt), rule);
+    if (timed.getTime() !== new Date(item.dueAt).getTime()) retimedDue = timed;
+  }
   let recurNextAt: Date | null = null;
   if (rule && (rule.trigger ?? "SCHEDULE") === "SCHEDULE") {
-    const base = new Date(item.dueAt ?? item.startAt ?? new Date());
+    const base = new Date(retimedDue ?? item.dueAt ?? item.startAt ?? new Date());
     // Step from the ANCHOR, not from now: an occurrence whose date already
     // arrived must still spawn (the cron's capped catch-up handles any
     // backlog + records skips). max(now, …) here silently swallowed today's
@@ -144,7 +154,11 @@ async function applyRecurrenceSchedule(itemId: string, rawRule: unknown, actorId
     recurNextAt = nextOccurrenceAfter(base, rule, base);
     md.lastSpawnedKey = occurrenceKey(base);
   }
-  return updateBoardItem(itemId, { recurNextAt, metadata: md }, actorId);
+  return updateBoardItem(itemId, {
+    recurNextAt,
+    metadata: md,
+    ...(retimedDue ? { dueAt: retimedDue } : {}),
+  }, actorId);
 }
 
 const recurRuleSchema = z.object({
@@ -164,6 +178,9 @@ const recurRuleSchema = z.object({
   monthDay: z.number().int().min(1).max(31).nullable().optional(),
   yearMonth: z.number().int().min(1).max(12).nullable().optional(),
   yearDay: z.number().int().min(1).max(31).nullable().optional(),
+  // Explicit occurrence time, "HH:MM" 24-hour local. null/absent = inherit
+  // the anchor's time-of-day (legacy behavior).
+  atTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).nullable().optional(),
 });
 
 const patchSchema = z.object({
