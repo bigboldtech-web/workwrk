@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/components/ui/toast";
-import { Target, Flame, Clock, TrendingUp, Send, Loader2 } from "lucide-react";
+import { Target, Flame, Clock, TrendingUp, Send, Loader2, type LucideIcon } from "lucide-react";
 import { Sparkline } from "@/components/okrs/sparkline";
 
 interface CheckIn {
@@ -35,7 +35,7 @@ interface OKR {
   id: string;
   title: string;
   description: string | null;
-  level: "COMPANY" | "TEAM" | "INDIVIDUAL";
+  level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   quarter: string;
   status: "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED" | "DRAFT";
   progress: number;
@@ -220,7 +220,7 @@ export function MyOkrsHero({ onRefresh }: Props) {
 function SummaryTile({
   icon: Icon, label, value, hint, progress, tone = "default",
 }: {
-  icon: any; label: string; value: string; hint?: string; progress?: number; tone?: "default" | "amber";
+  icon: LucideIcon; label: string; value: string; hint?: string; progress?: number; tone?: "default" | "amber";
 }) {
   return (
     <Card>

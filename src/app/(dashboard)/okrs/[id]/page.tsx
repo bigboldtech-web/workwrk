@@ -13,14 +13,14 @@ import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
-import { getTeamUserIds } from "@/lib/team";
+import { canSeeGoal, listGoalAssigneeEntries, resolveGoalMembersBatch } from "@/lib/goal-audience";
 import {
   ArrowLeft, AlertTriangle, Target, Calendar, Clock, Sparkles,
   ChevronRight, Building2, Users, User as UserIcon, Activity,
 } from "lucide-react";
 import { OkrCheckInForm } from "./okr-checkin-form";
 import { OkrLinkedWork } from "./okr-linked-work";
+import { OkrAudience } from "@/components/okrs/okr-audience";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 const MANAGER_LEVELS = new Set([
@@ -49,9 +49,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const LEVEL_ICON: Record<string, { Icon: typeof Building2; color: string; label: string }> = {
-  COMPANY:    { Icon: Building2, color: "var(--os-c-purple)", label: "Company" },
-  TEAM:       { Icon: Users,     color: "var(--os-c-blue)",   label: "Team" },
-  INDIVIDUAL: { Icon: UserIcon,  color: "var(--os-c-teal)",   label: "Individual" },
+  COMPANY:    { Icon: Building2, color: "var(--os-c-blue)", label: "Company" },
+  DEPARTMENT: { Icon: Users,     color: "var(--os-c-blue)", label: "Department" },
+  INDIVIDUAL: { Icon: UserIcon,  color: "var(--os-c-teal)", label: "Individual" },
 };
 
 function fmtDate(d: Date | null | undefined): string {
@@ -111,26 +111,12 @@ export default async function OkrDetailPage(
   });
   if (!okr) notFound();
 
-  // Three-door visibility, same rule as GET /api/okrs/[id]: COMPANY →
-  // everyone; own goal → always; TEAM → own department; manager tiers →
-  // report tree + unowned; org-wide alignment levels → all. Out of scope
-  // reads as not-found, not as a peek.
-  const viewerLevel = sessionUser.accessLevel ?? "";
-  let visible =
-    ORG_WIDE_ALIGNMENT_LEVELS.has(viewerLevel) ||
-    okr.level === "COMPANY" ||
-    okr.ownerId === sessionUser.id;
-  if (!visible && okr.level === "DEPARTMENT" && okr.departmentId) {
-    const meRow = await prisma.user.findUnique({
-      where: { id: sessionUser.id },
-      select: { departmentId: true },
-    });
-    visible = meRow?.departmentId === okr.departmentId;
-  }
-  if (!visible && MANAGER_LEVELS.has(viewerLevel)) {
-    visible = !okr.ownerId || (await getTeamUserIds(orgId, sessionUser.id)).includes(okr.ownerId);
-  }
-  if (!visible) notFound();
+  // Visibility, same rule as GET /api/okrs/[id] (src/lib/goal-audience.ts):
+  // COMPANY → everyone; own goal → always; resolved audience member →
+  // always (dept/role assignments resolve to people at read time);
+  // manager tiers → report tree (owner or member) + unowned; org-wide
+  // alignment levels → all. Out of scope reads as not-found, not a peek.
+  if (!(await canSeeGoal(session, okr))) notFound();
 
   const checkinUserIds = Array.from(
     new Set(okr.keyResults.flatMap((kr) => kr.checkIns.map((c) => c.userId))),
@@ -143,7 +129,7 @@ export default async function OkrDetailPage(
     : [];
   const userById = new Map(checkinUsers.map((u) => [u.id, u]));
 
-  const [parent, owner] = await Promise.all([
+  const [parent, owner, audienceEntries, membersByOkr] = await Promise.all([
     okr.parentId
       ? prisma.oKR.findUnique({
           where: { id: okr.parentId },
@@ -156,7 +142,13 @@ export default async function OkrDetailPage(
           select: { id: true, firstName: true, lastName: true },
         })
       : Promise.resolve(null),
+    // Audience: labeled entries feed the edit picker; resolved members
+    // (owner + direct + dept members + role holders, ACTIVE only,
+    // resolved NOW) feed the avatar stack.
+    listGoalAssigneeEntries(okr.id),
+    resolveGoalMembersBatch(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
   ]);
+  const audienceMembers = membersByOkr.get(okr.id) ?? [];
 
   const lastCheckIn = okr.keyResults
     .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
@@ -225,6 +217,17 @@ export default async function OkrDetailPage(
           </div>
           <h1 className="okrd__title"><Target /> {okr.title}</h1>
           {okr.description && <p className="okrd__desc">{okr.description}</p>}
+          {/* One shared goal, many contributors — resolved avatar stack +
+              (for editors) the mixed people/departments/roles picker. */}
+          <div className="mt-2">
+            <OkrAudience
+              okrId={okr.id}
+              canEdit={canEditLinks}
+              initialEntries={audienceEntries}
+              initialMembers={audienceMembers.slice(0, 5)}
+              initialTotal={audienceMembers.length}
+            />
+          </div>
         </div>
         <div className="okrd__progress">
           <div className="okrd__progress-ring">

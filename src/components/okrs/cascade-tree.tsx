@@ -22,7 +22,7 @@ import { Globe, Building2, User, Target, Loader2 } from "lucide-react";
 interface OKR {
   id: string;
   title: string;
-  level: "COMPANY" | "TEAM" | "INDIVIDUAL";
+  level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   status: string;
   progress: number;
   parentId: string | null;
@@ -46,7 +46,7 @@ function progressColor(p: number) {
 }
 
 const LEVEL_ICON: Record<string, typeof Globe> = {
-  COMPANY: Globe, TEAM: Building2, INDIVIDUAL: User,
+  COMPANY: Globe, DEPARTMENT: Building2, INDIVIDUAL: User,
 };
 
 interface UserLite { id: string; firstName: string; lastName: string }
@@ -54,11 +54,13 @@ interface UserLite { id: string; firstName: string; lastName: string }
 export function CascadeTree({ quarter }: { quarter: string }) {
   const [okrs, setOkrs] = useState<OKR[]>([]);
   const [users, setUsers] = useState<Map<string, UserLite>>(new Map());
-  const [loading, setLoading] = useState(true);
+  // Loading is DERIVED (which quarter the data on screen belongs to), so
+  // the effect never has to setState synchronously to flip a spinner.
+  const [loadedQuarter, setLoadedQuarter] = useState<string | null>(null);
+  const loading = loadedQuarter !== quarter;
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
     Promise.all([
       fetch(`/api/okrs?quarter=${encodeURIComponent(quarter)}`).then((r) => r.ok ? r.json() : { data: [] }),
       fetch("/api/users?limit=300").then((r) => r.ok ? r.json() : { data: [] }),
@@ -70,7 +72,7 @@ export function CascadeTree({ quarter }: { quarter: string }) {
         const userList = Array.isArray(userRes) ? userRes : userRes.data || [];
         setUsers(new Map(userList.map((u: UserLite) => [u.id, u])));
       })
-      .finally(() => { if (alive) setLoading(false); });
+      .finally(() => { if (alive) setLoadedQuarter(quarter); });
     return () => { alive = false; };
   }, [quarter]);
 

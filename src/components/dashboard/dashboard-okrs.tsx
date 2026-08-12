@@ -9,7 +9,7 @@ import { Crosshair, Building2, Users, User, ChevronRight } from "lucide-react";
 interface OKR {
   id: string;
   title: string;
-  level: "COMPANY" | "TEAM" | "INDIVIDUAL";
+  level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   progress: number;
   quarter: string;
   owner?: { firstName: string; lastName: string };
@@ -26,19 +26,19 @@ function progressColor(p: number) {
 
 function levelIcon(level: string) {
   if (level === "COMPANY") return <Building2 size={12} />;
-  if (level === "TEAM") return <Users size={12} />;
+  if (level === "DEPARTMENT") return <Users size={12} />;
   return <User size={12} />;
 }
 
 function levelLabel(level: string) {
   if (level === "COMPANY") return "Company";
-  if (level === "TEAM") return "Team";
+  if (level === "DEPARTMENT") return "Department";
   return "Individual";
 }
 
 function levelStyle(level: string) {
   if (level === "COMPANY") return "bg-[rgba(212,255,46,0.1)] text-[color:var(--accent-strong)] border-[rgba(212,255,46,0.3)]";
-  if (level === "TEAM") return "bg-[rgba(74,158,255,0.1)] text-[#4a9eff] border-[rgba(74,158,255,0.3)]";
+  if (level === "DEPARTMENT") return "bg-[rgba(74,158,255,0.1)] text-[#4a9eff] border-[rgba(74,158,255,0.3)]";
   return "bg-[rgba(255,153,51,0.1)] text-[#ff9933] border-[rgba(255,153,51,0.3)]";
 }
 
@@ -63,8 +63,8 @@ export function DashboardOkrs() {
   if (loading) return <Card><CardContent className="p-4"><div className="h-20 bg-surface-2 rounded animate-pulse" /></CardContent></Card>;
   if (okrs.length === 0) return null;
 
-  // Sort: company first, then team, then individual
-  const order = { COMPANY: 0, TEAM: 1, INDIVIDUAL: 2 };
+  // Sort: company first, then department, then individual
+  const order = { COMPANY: 0, DEPARTMENT: 1, INDIVIDUAL: 2 };
   const sorted = [...okrs].sort((a, b) => order[a.level] - order[b.level]);
 
   return (

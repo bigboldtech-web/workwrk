@@ -42,7 +42,7 @@ interface MyItemRow {
 interface ApiMyOkr {
   id: string;
   title: string;
-  level: "COMPANY" | "TEAM" | "INDIVIDUAL";
+  level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   progress: number;
 }
 
@@ -167,15 +167,18 @@ export default function MyTasksPage() {
     } catch { setOkrs([]); }
   }, []);
 
+  // Depend on the primitive id (not `u?.id` inline) so the compiler's
+  // inferred dependency matches the declared one exactly.
+  const uid = u?.id;
   const loadKras = useCallback(async () => {
-    if (!u?.id) return;
+    if (!uid) return;
     try {
-      const res = await fetch(`/api/users/${u.id}/kpis`, { cache: "no-store" });
+      const res = await fetch(`/api/users/${uid}/kpis`, { cache: "no-store" });
       if (!res.ok) { setKras([]); return; }
       const data = await res.json();
       setKras(Array.isArray(data.kras) ? data.kras : []);
     } catch { setKras([]); }
-  }, [u?.id]);
+  }, [uid]);
 
   const loadLayout = useCallback(async () => {
     try {

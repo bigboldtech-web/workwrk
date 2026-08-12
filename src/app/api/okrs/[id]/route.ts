@@ -1,37 +1,10 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { isOrgAdminLevel, isOrgWideAlignment } from "@/lib/alignment-scope";
+import { isOrgAdminLevel } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import { enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
-
-/**
- * Three-door visibility for a single objective (mirrors GET /api/okrs):
- * COMPANY → everyone; own goal → always; TEAM → own department; manager →
- * report tree + unowned; admin / exec / HR → org-wide.
- */
-async function canSeeOkr(
-  session: unknown,
-  okr: { level: string; ownerId: string | null; departmentId: string | null },
-): Promise<boolean> {
-  if (isOrgWideAlignment(session)) return true;
-  const callerId = getUserId(session);
-  if (okr.level === "COMPANY") return true;
-  if (okr.ownerId === callerId) return true;
-  if (okr.level === "DEPARTMENT" && okr.departmentId) {
-    const me = await prisma.user.findUnique({
-      where: { id: callerId },
-      select: { departmentId: true },
-    });
-    if (me?.departmentId === okr.departmentId) return true;
-  }
-  if (isManager(session)) {
-    if (!okr.ownerId) return true;
-    const teamIds = await getTeamUserIds(getOrgId(session), callerId);
-    return teamIds.includes(okr.ownerId);
-  }
-  return false;
-}
+import { canSeeGoal, summarizeGoalAudiences } from "@/lib/goal-audience";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -50,13 +23,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     },
   });
   if (!okr) return jsonError("Not found", 404);
-  if (!(await canSeeOkr(session, okr))) return jsonError("Not found", 404);
+  // Visibility: own it, be a resolved audience member, manage someone who
+  // is, or COMPANY level — see src/lib/goal-audience.ts.
+  if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
   // KRs linked to a KPI read the gauge's latest number (read-side derivation);
   // objective progress rolls up from those live values.
-  const keyResults = await enrichKeyResults(okr.keyResults, { userId: okr.ownerId });
+  const orgId = getOrgId(session);
+  const [keyResults, audiences] = await Promise.all([
+    enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
+    summarizeGoalAudiences(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
+  ]);
   const rolled = rollUpOkrProgress(keyResults);
-  return jsonSuccess({ ...okr, keyResults, progress: rolled ?? okr.progress });
+  return jsonSuccess({ ...okr, keyResults, progress: rolled ?? okr.progress, audience: audiences.get(okr.id) });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

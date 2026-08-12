@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Target, Plus, ChevronRight, ChevronDown, TrendingUp, AlertTriangle,
-  CheckCircle2, Trophy, Loader2, Sparkles, Building2, Users, User as UserIcon,
+  CheckCircle2, Trophy, Sparkles, Building2, Users, User as UserIcon,
   type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -24,9 +24,11 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { CreateGoalModal } from "@/components/okrs/create-goal-modal";
+import { MemberAvatarStack, type AudienceMember } from "@/components/okrs/goal-audience-picker";
 
 type OkrStatus = "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED";
-type OkrLevel = "COMPANY" | "TEAM" | "INDIVIDUAL";
+type OkrLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
 
 type ApiOkr = {
   id: string;
@@ -41,6 +43,8 @@ type ApiOkr = {
   ownerId?: string | null;
   owner?: { firstName?: string | null; lastName?: string | null } | null;
   keyResults?: { id: string; title: string; progress?: number; targetValue?: number; currentValue?: number }[];
+  /** Resolved audience summary — avatars + overflow count (read-time). */
+  audience?: { members: AudienceMember[]; totalMembers: number; assigneeCount: number };
 };
 
 const STATUS_LABELS: Record<OkrStatus, string> = {
@@ -51,12 +55,12 @@ const STATUS_COLOR: Record<OkrStatus, string> = {
 };
 
 const LEVEL_META: Record<OkrLevel, { label: string; sub: string; Icon: LucideIcon; color: string }> = {
-  COMPANY:    { label: "Company OKRs",    sub: "What the whole company is pushing toward", Icon: Building2, color: C.purple },
-  TEAM:       { label: "Team OKRs",       sub: "How each team supports the company goals", Icon: Users,     color: C.blue },
-  INDIVIDUAL: { label: "Individual OKRs", sub: "What each person commits to this cycle",   Icon: UserIcon,  color: C.teal },
+  COMPANY:    { label: "Company OKRs",    sub: "What the whole company is pushing toward",       Icon: Building2, color: C.blue },
+  DEPARTMENT: { label: "Department OKRs", sub: "How each department supports the company goals", Icon: Users,     color: C.blue },
+  INDIVIDUAL: { label: "Individual OKRs", sub: "What each person commits to this cycle",         Icon: UserIcon,  color: C.teal },
 };
 
-const LEVEL_ORDER: OkrLevel[] = ["COMPANY", "TEAM", "INDIVIDUAL"];
+const LEVEL_ORDER: OkrLevel[] = ["COMPANY", "DEPARTMENT", "INDIVIDUAL"];
 
 const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
@@ -91,18 +95,10 @@ export default function OkrsPage() {
   const v = rowVersion("okrs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  async function newObjective(level: OkrLevel) {
+  // Opens the create-goal modal (title + level + audience picker) —
+  // creation itself happens inside CreateGoalModal via POST /api/okrs.
+  function newObjective(level: OkrLevel) {
     setCreating(level);
-    try {
-      const res = await fetch("/api/okrs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled objective", level }),
-      });
-      if (!res.ok) throw new Error();
-      void load();
-      toast(`New ${LEVEL_META[level].label.replace(" OKRs", "")} objective added`);
-    } catch { toast("Couldn't create objective"); }
-    finally { setCreating(null); }
   }
 
   function toggleExpand(id: string) {
@@ -145,7 +141,7 @@ export default function OkrsPage() {
         morePeople={5}
         actions={
           <button type="button" className="okrs__new" onClick={() => newObjective("INDIVIDUAL")} disabled={creating !== null}>
-            {creating === "INDIVIDUAL" ? <><Loader2 className="okrs__spin" /> Creating…</> : <><Plus /> New objective</>}
+            <Plus /> New objective
           </button>
         }
       />
@@ -155,7 +151,7 @@ export default function OkrsPage() {
       ) : okrs === null ? (
         <div className="okrs__loading">Loading objectives…</div>
       ) : stats.total === 0 ? (
-        <OsEmptyView Icon={Target} iconGradient={GRAD.indigoBlue} title="No OKRs yet" subtitle="Set your first objective. Pick Company / Team / Individual to anchor it on the cascade." chips={["Company", "Team", "Individual"]} cta="New objective" />
+        <OsEmptyView Icon={Target} iconGradient={GRAD.indigoBlue} title="No OKRs yet" subtitle="Set your first objective. Pick Company / Department / Individual to anchor it on the cascade." chips={["Company", "Department", "Individual"]} cta="New objective" />
       ) : (
         <div className="okrs">
           {/* Stats hero */}
@@ -205,7 +201,7 @@ export default function OkrsPage() {
                   </div>
                   <span className="okrs__level-count">{items.length}</span>
                   <button type="button" className="okrs__level-add" onClick={() => newObjective(level)} disabled={creating !== null}>
-                    {creating === level ? <Loader2 className="okrs__spin" /> : <Plus />}
+                    <Plus />
                     Add
                   </button>
                 </header>
@@ -230,6 +226,20 @@ export default function OkrsPage() {
             );
           })}
         </div>
+      )}
+
+      {creating !== null && (
+        <CreateGoalModal
+          key={creating}
+          open
+          level={creating}
+          onClose={() => setCreating(null)}
+          onCreated={() => {
+            setCreating(null);
+            toast("Objective created");
+            void load();
+          }}
+        />
       )}
     </>
   );
@@ -285,6 +295,10 @@ function ObjectiveCard({ okr, expanded, onToggle }: { okr: ApiOkr; expanded: boo
               <span className="okr-card__avatar" style={{ background: ownerColor }}>{ownerInitials}</span>
               {okr.owner ? `${okr.owner.firstName ?? ""} ${okr.owner.lastName ?? ""}`.trim() || "Owner" : "Unassigned"}
             </span>
+            {/* Resolved audience — one shared goal, many contributors. */}
+            {okr.audience && okr.audience.assigneeCount > 0 && okr.audience.totalMembers > 0 && (
+              <MemberAvatarStack members={okr.audience.members} total={okr.audience.totalMembers} size={20} />
+            )}
             {okr.quarter && <span className="okr-card__chip">{okr.quarter}</span>}
             {okr.endDate && <span className="okr-card__chip">Ends {fmtDate(okr.endDate)}</span>}
             <span className="okr-card__chip okr-card__chip--krs"><Sparkles /> {krs.length} key result{krs.length === 1 ? "" : "s"}</span>

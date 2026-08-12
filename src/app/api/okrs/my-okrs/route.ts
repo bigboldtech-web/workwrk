@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { enrichKeyResultGroups, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import { memberVisibilityOr } from "@/lib/goal-audience";
 import type { Prisma } from "@/generated/prisma";
 
 /**
@@ -9,6 +10,8 @@ import type { Prisma } from "@/generated/prisma";
  * - Company OKRs (level=COMPANY)
  * - Team OKRs where user's department matches
  * - Individual OKRs where user is the owner
+ * - Goals whose audience covers the user (assigned directly, or through
+ *   their department / role — resolved at read time)
  *
  * Each Key Result gets the last 8 check-ins so the client can render
  * a sparkline + "stale check-in" nudge without an extra round trip.
@@ -28,10 +31,10 @@ export async function GET(req: Request) {
     return `Q${q} ${d.getFullYear()}`;
   })();
 
-  // Get the user's department
+  // Get the user's department + role (both feed audience resolution)
   const me = await prisma.user.findUnique({
     where: { id: userId },
-    select: { departmentId: true },
+    select: { departmentId: true, roleId: true },
   });
 
   const or: Prisma.OKRWhereInput[] = [
@@ -41,6 +44,8 @@ export async function GET(req: Request) {
   if (me?.departmentId) {
     or.push({ level: "DEPARTMENT", departmentId: me.departmentId });
   }
+  // Resolved membership: goals assigned to me, my department, or my role.
+  or.push(...memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId }));
   const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
 
   const okrs = await prisma.oKR.findMany({

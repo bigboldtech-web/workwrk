@@ -9,12 +9,16 @@
 //    a gauge is read per-person), its health against the healthy line,
 //    and their current-period record with its approval status. A KPI with
 //    no targetValue reports "no_target": no line is invented.
-//  - okrs: the person's OWN objectives for the requested cycle
-//    (default = current quarter), with KR→KPI links resolved and derived
-//    currentValue/progress. OKRs attach to the person, never the role —
-//    two holders of the same role share kras but never okrs.
+//  - okrs: the person's objectives for the requested cycle (default =
+//    current quarter) — goals they OWN plus goals whose audience resolves
+//    to them (assigned directly, or through their department / role;
+//    GoalAssignee resolution happens at read time, so it always reflects
+//    today's org chart). KR→KPI links resolved and derived
+//    currentValue/progress. A shared goal stays ONE record with one
+//    scoreboard — appearing on several people's pages is the same row.
 
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@/generated/prisma";
 import {
   enrichKeyResultGroups,
   kpiDirection,
@@ -43,6 +47,24 @@ export async function buildPersonAlignment(
 ) {
   const quarter = opts.quarter || currentQuarterLabel();
   const currentPeriod = currentPeriodKey();
+
+  // Audience membership is resolved NOW (dept/role refs, never a frozen
+  // list): only an ACTIVE, non-deleted person inherits dept/role goals.
+  const person = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { departmentId: true, roleId: true, status: true, deletedAt: true },
+  });
+  const isActive = person?.status === "ACTIVE" && !person.deletedAt;
+  const goalOr: Prisma.OKRWhereInput[] = [
+    { ownerId: userId },
+    { assignees: { some: { userId } } },
+  ];
+  if (isActive && person?.departmentId) {
+    goalOr.push({ assignees: { some: { departmentId: person.departmentId } } });
+  }
+  if (isActive && person?.roleId) {
+    goalOr.push({ assignees: { some: { roleId: person.roleId } } });
+  }
 
   const [assignments, okrs] = await Promise.all([
     prisma.kRAAssignment.findMany({
@@ -73,7 +95,7 @@ export async function buildPersonAlignment(
       orderBy: { createdAt: "asc" },
     }),
     prisma.oKR.findMany({
-      where: { organizationId: orgId, ownerId: userId, quarter },
+      where: { organizationId: orgId, quarter, OR: goalOr },
       include: {
         keyResults: {
           include: { kpi: { select: KR_KPI_SELECT } },

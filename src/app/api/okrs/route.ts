@@ -4,6 +4,15 @@ import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSucces
 import { isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import { enrichKeyResultGroups, enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import {
+  addGoalAssignees,
+  memberVisibilityOr,
+  summarizeGoalAudiences,
+  syncGoalAssignees,
+  teamAudienceVisibilityOr,
+  validateGoalAssignees,
+  type GoalAudienceRef,
+} from "@/lib/goal-audience";
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
@@ -38,9 +47,12 @@ export async function GET(req: NextRequest) {
 
   // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
   // is not org-public: everyone sees COMPANY objectives and their own
-  // department's TEAM objectives; a person always sees their own; a
-  // manager additionally sees their report tree's (plus unowned
-  // objectives, which managers create); admin / exec / HR see the org.
+  // department's TEAM objectives; a person always sees their own — owned
+  // OR resolved-member via the goal's audience (their user row, their
+  // department, their role — resolved at read time, so new hires inherit
+  // and leavers drop out); a manager additionally sees their report
+  // tree's (owned or audience-covered, plus unowned objectives, which
+  // managers create); admin / exec / HR see the org.
   if (!isOrgWideAlignment(session)) {
     const callerId = getUserId(session);
     const visible: Prisma.OKRWhereInput[] = [
@@ -49,13 +61,15 @@ export async function GET(req: NextRequest) {
     ];
     const me = await prisma.user.findUnique({
       where: { id: callerId },
-      select: { departmentId: true },
+      select: { departmentId: true, roleId: true },
     });
     if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
+    visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId }));
     if (isManager(session)) {
       const teamIds = await getTeamUserIds(orgId, callerId);
       visible.push({ ownerId: { in: teamIds } });
       visible.push({ ownerId: null });
+      visible.push(...(await teamAudienceVisibilityOr(teamIds)));
     }
     and.push({ OR: visible });
   }
@@ -82,13 +96,23 @@ export async function GET(req: NextRequest) {
   // reading, not the hand-typed number still sitting on its row. Objective
   // progress then rolls up from those live KR numbers (an OKR with no key
   // results keeps whatever progress was set on it directly).
-  const groups = await enrichKeyResultGroups(
-    okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
-  );
+  const [groups, audiences] = await Promise.all([
+    enrichKeyResultGroups(
+      okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
+    ),
+    // Resolved assignee summaries — avatars + overflow count, never raw
+    // join rows. Resolution happens here, at read time.
+    summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+  ]);
   const enriched = okrs.map((okr, i) => {
     const keyResults = groups[i];
     const rolled = rollUpOkrProgress(keyResults);
-    return { ...okr, keyResults, progress: rolled ?? okr.progress };
+    return {
+      ...okr,
+      keyResults,
+      progress: rolled ?? okr.progress,
+      audience: audiences.get(okr.id) ?? { members: [], totalMembers: 0, assigneeCount: 0 },
+    };
   });
 
   return jsonSuccess(enriched);
@@ -100,13 +124,23 @@ export async function POST(req: NextRequest) {
   // Employees can create INDIVIDUAL OKRs for themselves; managers can create any
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults, checkInCadence } = body;
+  const { title, description, level, quarter, startDate, endDate, ownerId, departmentId, parentId, keyResults, checkInCadence, assignees } = body;
 
   if (!isManager(session) && level !== "INDIVIDUAL") {
     return jsonError("Only managers can create Company/Team OKRs", 403);
   }
 
   if (!title?.trim()) return jsonError("Title required");
+
+  // Audience — contributors beside the single accountable owner. Validate
+  // BEFORE creating anything: shape, one-subject-per-row, de-dupe, and
+  // every id must live inside the caller's organization.
+  let audience: GoalAudienceRef[] = [];
+  if (assignees !== undefined) {
+    const parsed = await validateGoalAssignees(orgId, assignees);
+    if (!parsed.ok) return jsonError(parsed.error, 400);
+    audience = parsed.entries;
+  }
 
   // Door 1: an employee's objective is their OWN — they can't file goals
   // under someone else's name. Managers may assign anyone in the org.
@@ -117,6 +151,16 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     });
     if (!owner) return jsonError("Owner not found in this organization", 404);
+  }
+
+  // departmentId is a real FK since the goals rebuild — a cross-org or
+  // unknown id must 400 here, not 500 at the constraint.
+  if (departmentId) {
+    const dept = await prisma.department.findFirst({
+      where: { id: departmentId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!dept) return jsonError("Department not found in this organization", 404);
   }
 
   const cadence =
@@ -166,6 +210,12 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  // Audience rows — refs to users/departments/roles, resolved to people
+  // at read time (one shared goal, one scoreboard; no per-person copies).
+  if (audience.length > 0) {
+    await addGoalAssignees(okr.id, audience);
+  }
+
   // Create key results if provided.
   if (Array.isArray(keyResults) && keyResults.length > 0) {
     await prisma.keyResult.createMany({
@@ -188,6 +238,7 @@ export async function POST(req: NextRequest) {
     ? {
         ...created,
         keyResults: await enrichKeyResults(created.keyResults, { userId: created.ownerId }),
+        audience: (await summarizeGoalAudiences(orgId, [{ id: created.id, ownerId: created.ownerId }])).get(created.id),
       }
     : created;
 
@@ -299,6 +350,24 @@ export async function PATCH(req: NextRequest) {
     });
     if (!owner) return jsonError("Owner not found in this organization", 404);
   }
+  // departmentId is a real FK — validate before Prisma hits the constraint.
+  if (typeof updates.departmentId === "string" && updates.departmentId.length > 0) {
+    const dept = await prisma.department.findFirst({
+      where: { id: updates.departmentId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!dept) return jsonError("Department not found in this organization", 404);
+  }
+
+  // Audience full-replacement: `assignees: [{type, id}]` becomes the
+  // goal's exact audience (validated, de-duped, org-checked; diff-synced
+  // so untouched rows keep their createdAt).
+  let audience: GoalAudienceRef[] | null = null;
+  if (rawUpdates.assignees !== undefined) {
+    const parsed = await validateGoalAssignees(orgId, rawUpdates.assignees);
+    if (!parsed.ok) return jsonError(parsed.error, 400);
+    audience = parsed.entries;
+  }
 
   if (updates.startDate) updates.startDate = new Date(updates.startDate as string);
   if (updates.endDate) updates.endDate = new Date(updates.endDate as string);
@@ -308,9 +377,13 @@ export async function PATCH(req: NextRequest) {
     data: updates as Prisma.OKRUpdateInput,
     include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
   });
+  if (audience !== null) {
+    await syncGoalAssignees(id, audience);
+  }
 
   return jsonSuccess({
     ...updated,
     keyResults: await enrichKeyResults(updated.keyResults, { userId: updated.ownerId }),
+    audience: (await summarizeGoalAudiences(orgId, [{ id: updated.id, ownerId: updated.ownerId }])).get(updated.id),
   });
 }
