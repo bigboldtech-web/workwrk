@@ -6,7 +6,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
-import { createBoardItem, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
+import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -85,7 +85,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       parentItemId: parsed.data.parentItemId ?? null,
       actorId: c.userId,
     });
-    return NextResponse.json({ item }, { status: 201 });
+    // Respond with the FULL enriched row (counts/links/time/creator — the
+    // exact listBoardItems shape): clients append this straight into their
+    // cached list, and a lean row there diverges from refetched rows.
+    return NextResponse.json({ item: (await getBoardItemRow(item.id)) ?? item }, { status: 201 });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to create item" },

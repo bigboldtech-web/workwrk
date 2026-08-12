@@ -124,12 +124,15 @@ export function BoardItemDrawer({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data?.error ?? "Failed to save");
-        // Reload truth.
+        // Reload truth — merged, so a leaner GET shape can't strip fields.
         const fresh = await fetch(`/api/items/${item.id}`).then((r) => r.json()).catch(() => null);
-        if (fresh?.item) setItem(fresh.item);
+        if (fresh?.item) setItem((prev) => (prev ? { ...prev, ...fresh.item } : fresh.item));
         return;
       }
-      setItem(data.item);
+      // MERGE the response over the current item — never blind-replace. A
+      // response missing enriched fields (subtaskCount, comment/link counts)
+      // must not be able to strip them off the drawer's cached item again.
+      setItem((prev) => (prev ? { ...prev, ...data.item } : data.item));
       onItemChanged?.(data.item);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");

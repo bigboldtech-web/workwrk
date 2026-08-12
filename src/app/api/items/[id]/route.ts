@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveBoardItem, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
+import { archiveBoardItem, getBoardItemRow, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { moveToTrash } from "@/lib/trash";
 import { canEditBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
@@ -257,16 +257,20 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }).catch(() => {});
     }
     // Repeat turned on/off/changed → (re)compute the anchor's spawn schedule.
+    // Every return below responds with the FULL enriched row (counts/links/
+    // time/creator — the exact listBoardItems shape). The old lean writer
+    // shape silently stripped those fields when the client merged/replaced
+    // its cached row, which is how a saved task "disappeared" until refresh.
     if (parsed.data.recurRule !== undefined) {
       const rescheduled = await applyRecurrenceSchedule(id, parsed.data.recurRule ?? null, c.userId);
-      if (rescheduled) return NextResponse.json({ item: rescheduled });
+      if (rescheduled) return NextResponse.json({ item: (await getBoardItemRow(id)) ?? rescheduled });
     } else if (parsed.data.dueAt !== undefined) {
       // The due date IS the series anchor — moving it re-anchors an active
       // SCHEDULE series (recurNextAt + lastSpawnedKey recomputed from it).
       const storedRule = parseRecurrence(gate.item.recurRule);
       if (storedRule && (storedRule.trigger ?? "SCHEDULE") === "SCHEDULE") {
         const rescheduled = await applyRecurrenceSchedule(id, gate.item.recurRule, c.userId);
-        if (rescheduled) return NextResponse.json({ item: rescheduled });
+        if (rescheduled) return NextResponse.json({ item: (await getBoardItemRow(id)) ?? rescheduled });
       }
     }
     // Completing an ON_COMPLETE recurring task advances its series in place —
@@ -274,10 +278,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (parsed.data.status !== undefined) {
       const recur = await advanceSeriesOnComplete(id, updated.status, c.userId);
       if (recur.recurred && recur.item) {
-        return NextResponse.json({ item: recur.item, recurred: true });
+        return NextResponse.json({ item: (await getBoardItemRow(id)) ?? recur.item, recurred: true });
       }
     }
-    return NextResponse.json({ item: updated });
+    return NextResponse.json({ item: (await getBoardItemRow(id)) ?? updated });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to update item" },
@@ -300,5 +304,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     return NextResponse.json({ ok: true });
   }
   const archived = await archiveBoardItem(id, c.userId);
-  return NextResponse.json({ item: archived });
+  // Full enriched row, same as PATCH — the client merges this into its cache.
+  return NextResponse.json({ item: (await getBoardItemRow(id)) ?? archived });
 }

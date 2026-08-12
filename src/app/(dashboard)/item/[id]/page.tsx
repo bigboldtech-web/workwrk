@@ -62,7 +62,9 @@ export default function ItemDetailPage() {
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok && data.item) setItem(data.item);
+      // Merge — never blind-replace: a lean response must not strip
+      // enriched fields (subtaskCount, counts) off the cached item.
+      if (res.ok && data.item) setItem((prev) => (prev ? { ...prev, ...data.item } : data.item));
       else void load();
     } catch { void load(); }
   }, [item, load]);

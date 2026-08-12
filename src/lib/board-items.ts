@@ -175,22 +175,34 @@ async function syncItemTags(
   return tagIds.filter((id) => byId.has(id)).map((id) => byId.get(id)!);
 }
 
-export async function listBoardItems(boardId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardItemRow[]> {
-  const rows = await prisma.item.findMany({
-    where: {
-      boardId,
-      ...(opts.includeArchived ? {} : { archivedAt: null }),
-    },
-    orderBy: { position: "asc" },
-  });
+/** The Prisma Item row fields enrichment needs — what findMany/findUnique return. */
+type ItemSource = Parameters<typeof rowFrom>[0] & { id: string; ownerId: string | null };
 
+/**
+ * Enrich raw Item rows into full BoardItemRows — the ONE implementation of
+ * the counts/links/time/creator decoration. listBoardItems (batch) and
+ * getBoardItemRow (single) both go through here, so a single item's shape
+ * can never drift from a list row's shape again (the old lean writer-return
+ * silently stripped subtask/comment counts out of client caches).
+ */
+async function enrichItemRows(
+  rows: ItemSource[],
+  opts: {
+    /** Precomputed direct-children counts. listBoardItems derives these from
+     *  its own board fetch (no extra query); when absent we query them. */
+    subtaskCountByParent?: Map<string, number>;
+    /** spaceId per item id — the single-item path passes the board's spaceId. */
+    spaceIdByItem?: Map<string, string | null>;
+  } = {},
+): Promise<BoardItemRow[]> {
   const itemIds = rows.map((r) => r.id);
   const ownerIds = Array.from(new Set(rows.map((r) => r.ownerId).filter((x): x is string => !!x)));
 
   // Parallel batches — owners + comment counts + links (by type) + tags +
-  // time-tracked sum + creator activity. All polymorphic aggregates key off
+  // time-tracked sum + creator activity (+ subtask counts when the caller
+  // didn't already derive them). All polymorphic aggregates key off
   // (entityType/entityId or sourceType/sourceId) via groupBy, so no N+1.
-  const [owners, commentGroups, linkGroups, tagsById, timeGroups, createdActs] = await Promise.all([
+  const [owners, commentGroups, linkGroups, tagsById, timeGroups, createdActs, subtaskGroups] = await Promise.all([
     ownerIds.length
       ? prisma.user.findMany({
           where: { id: { in: ownerIds } },
@@ -225,6 +237,13 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
           select: { entityId: true, actorId: true },
         })
       : Promise.resolve([] as { entityId: string; actorId: string | null }[]),
+    !opts.subtaskCountByParent && itemIds.length
+      ? prisma.item.groupBy({
+          by: ["parentItemId"],
+          where: { parentItemId: { in: itemIds }, archivedAt: null },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as { parentItemId: string | null; _count: { _all: number } }[]),
   ]);
 
   const ownerById = new Map(owners.map((o) => [o.id, o] as const));
@@ -260,17 +279,21 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
     for (const u of extra) creatorUserById.set(u.id, u);
   }
 
-  // Subtask counts derived from the same fetched rows — no extra query.
-  // Top-level item (parentItemId = null) gets count of its direct children.
-  const subtaskCountByParent = new Map<string, number>();
-  for (const r of rows) {
-    if (r.parentItemId) {
-      subtaskCountByParent.set(r.parentItemId, (subtaskCountByParent.get(r.parentItemId) ?? 0) + 1);
-    }
-  }
+  // Subtask counts: the caller's precomputed map, else the batched groupBy.
+  const subtaskCountByParent = opts.subtaskCountByParent
+    ?? new Map(
+      subtaskGroups
+        .filter((g): g is typeof g & { parentItemId: string } => !!g.parentItemId)
+        .map((g) => [g.parentItemId, g._count._all] as const),
+    );
 
   return rows.map((r) => {
-    const base = rowFrom(r, r.ownerId ? ownerById.get(r.ownerId) ?? null : null, tagsById.get(r.id) ?? []);
+    const base = rowFrom(
+      r,
+      r.ownerId ? ownerById.get(r.ownerId) ?? null : null,
+      tagsById.get(r.id) ?? [],
+      opts.spaceIdByItem?.get(r.id) ?? null,
+    );
     base.commentCount = commentCountById.get(r.id) ?? 0;
     base.attachmentCount = attachmentCountById.get(r.id) ?? 0;
     base.subtaskCount = subtaskCountByParent.get(r.id) ?? 0;
@@ -282,6 +305,46 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
     base.createdBy = cid ? creatorUserById.get(cid) ?? null : null;
     return base;
   });
+}
+
+export async function listBoardItems(boardId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardItemRow[]> {
+  const rows = await prisma.item.findMany({
+    where: {
+      boardId,
+      ...(opts.includeArchived ? {} : { archivedAt: null }),
+    },
+    orderBy: { position: "asc" },
+  });
+
+  // Subtask counts derived from the same fetched rows — no extra query.
+  // Top-level item (parentItemId = null) gets count of its direct children.
+  const subtaskCountByParent = new Map<string, number>();
+  for (const r of rows) {
+    if (r.parentItemId) {
+      subtaskCountByParent.set(r.parentItemId, (subtaskCountByParent.get(r.parentItemId) ?? 0) + 1);
+    }
+  }
+
+  return enrichItemRows(rows, { subtaskCountByParent });
+}
+
+/**
+ * One item, enriched to the exact same field coverage as a listBoardItems
+ * row. API write routes respond with this so the client's optimistic caches
+ * always merge a COMPLETE row — a lean writer-return here is what made rows
+ * "disappear" client-side after a date/recurrence save.
+ * Returns null when the item no longer exists.
+ */
+export async function getBoardItemRow(itemId: string): Promise<BoardItemRow | null> {
+  const row = await prisma.item.findUnique({
+    where: { id: itemId },
+    include: { board: { select: { spaceId: true } } },
+  });
+  if (!row) return null;
+  const [enriched] = await enrichItemRows([row], {
+    spaceIdByItem: new Map<string, string | null>([[row.id, row.board.spaceId]]),
+  });
+  return enriched ?? null;
 }
 
 export interface CreateBoardItemInput {
