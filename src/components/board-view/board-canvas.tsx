@@ -264,7 +264,15 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
   }, []);
   const handleItemPatched = useCallback((id: string, patch: Partial<BoardItemRow>) => {
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    setItems((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, ...patch } : r));
+      // A `position` patch is a drag-reorder. The ledger must stay in the same
+      // position order listBoardItems hands back, otherwise the renderer
+      // re-syncs from a snapshot that still holds the pre-drag order and the
+      // dropped row visibly snaps back (the server keeps the new order).
+      if (patch.position === undefined) return next;
+      return [...next].sort((a, b) => a.position - b.position);
+    });
   }, []);
   const handleItemRemoved = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));

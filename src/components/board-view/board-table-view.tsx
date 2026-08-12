@@ -469,7 +469,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
           return sortCol.dir === "desc" ? -r : r;
         })
       : sortKey === "none"
-        ? topFiltered
+        // "No sorting" means board order, which is position order — the same
+        // rule childrenByParent already follows. Relying on raw array order
+        // here made a drag-reorder snap back whenever the parent re-synced.
+        ? [...topFiltered].sort((a, b) => a.position - b.position)
         : [...topFiltered].sort((a, b) => compareRows(a, b, sortKey));
     return { topLevel: topSorted, childrenByParent: byParent };
   }, [items, query, sortKey, sortCol, statuses, mineOnly, currentUserId]);
