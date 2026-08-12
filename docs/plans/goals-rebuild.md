@@ -143,12 +143,36 @@ audiences automatically.
 
 ---
 
-## Phase 3 — collapse the second goal model
+## Phase 3 — collapse the second goal model  ✅ SHIPPED
 
 `DepartmentGoal` folds into `OKR` with `level = DEPARTMENT` and a
-`GoalAssignee` row pointing at the department. Migrate rows first, verify
-counts match, then drop the table in a separate commit. One goal concept,
-one place.
+`GoalAssignee` row pointing at the department. One goal concept, one place.
+
+Shipped as migration `20260812150000_collapse_department_goal`. The data
+move happens **inside the migration SQL** (same transaction as the
+structural change — production applies it via `migrate deploy` with no
+separate script to remember):
+
+- Each `DepartmentGoal` row becomes an `OKR` with `level = DEPARTMENT`,
+  `organizationId` from its `Department`, `deadline → endDate`, and status
+  mapped `OFF_TRACK → BEHIND` (the rest map 1:1).
+- `targetValue`/`currentValue`/`unit` are carried onto a `KeyResult`
+  whenever there is a number to keep, so no metric is lost.
+- A `GoalAssignee` row targets the department.
+- Idempotent by construction: deterministic provenance ids
+  (`deptgoal_`/`deptgoalkr_`/`deptgoalga_` + source id), targetless
+  `ON CONFLICT DO NOTHING`, and the whole body guarded by
+  `to_regclass` so any re-run is a no-op.
+- The table is **renamed** to `_archived_DepartmentGoal`, NOT dropped —
+  production data cannot be inspected from dev, and a rename is
+  reversible. The Prisma model, the `GoalStatus` enum, the
+  `Department.goals` relation and all code references are gone.
+
+**FOLLOW-UP (do not forget):** once production is confirmed migrated
+(`SELECT count(*) FROM "_archived_DepartmentGoal"` equals
+`SELECT count(*) FROM "OKR" WHERE id LIKE 'deptgoal\_%'`), ship a
+separate migration that drops `"_archived_DepartmentGoal"` and the
+then-unused `"GoalStatus"` enum type.
 
 ---
 

@@ -1,5 +1,5 @@
-// DESTRUCTIVE: wipe the goals layer (OKRs, their key results and check-ins,
-// plus department goals) so goals can be rebuilt on the new audience model.
+// DESTRUCTIVE: wipe the goals layer (OKRs with their key results and
+// check-ins) so goals can be rebuilt on the new audience model.
 //
 // EXPLICITLY OUT OF SCOPE — never touched, and asserted afterwards:
 //   • SOPs and SOP assignments. Goals have no link to them at all; the
@@ -13,14 +13,18 @@
 //   • KRCheckIn   (cascades from KeyResult)
 //   • KeyResult   (cascades from OKR)
 //   • OKR         (the whole goal tree for the org, parents included)
-//   • DepartmentGoal for departments in this org
+//
+// DepartmentGoal no longer exists: Phase 3 of the goals rebuild collapsed
+// it into OKR (level DEPARTMENT + a GoalAssignee per department), so those
+// rows are OKRs now and fall under the OKR wipe above. The old table
+// survives read-only as "_archived_DepartmentGoal" until production is
+// confirmed; this script leaves it alone.
 //
 // A full JSON backup of everything deleted is written BEFORE any delete,
 // so the wipe is recoverable.
 //
 //   node scripts/reset-goals.mjs --org <orgId>            # dry run
 //   node scripts/reset-goals.mjs --org <orgId> --commit
-//   …--keep-department-goals    (leave DepartmentGoal rows alone)
 //
 import { PrismaClient } from "../src/generated/prisma/client.js";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -29,7 +33,6 @@ import { writeFileSync } from "node:fs";
 const argv = process.argv.slice(2);
 const flag = (n, d = null) => { const i = argv.indexOf(n); return i === -1 ? d : argv[i + 1]; };
 const COMMIT = argv.includes("--commit");
-const KEEP_DEPT_GOALS = argv.includes("--keep-department-goals");
 const ORG = flag("--org");
 
 const connectionString = process.env.DATABASE_URL;
@@ -54,15 +57,10 @@ async function main() {
   const krIds = okrs.flatMap((o) => o.keyResults.map((k) => k.id));
   const checkInCount = okrs.reduce((s, o) => s + o.keyResults.reduce((t, k) => t + k.checkIns.length, 0), 0);
 
-  const deptGoals = KEEP_DEPT_GOALS
-    ? []
-    : await prisma.departmentGoal.findMany({ where: { department: { organizationId: ORG } } });
-
   console.log("To delete:");
   console.log(`  OKRs ...................... ${okrs.length}`);
   console.log(`  Key results ............... ${krIds.length}`);
   console.log(`  Check-ins ................. ${checkInCount}`);
-  console.log(`  Department goals .......... ${deptGoals.length}${KEEP_DEPT_GOALS ? "  (kept by flag)" : ""}`);
 
   // ---- the things that must not move ---------------------------------
   const before = await counts();
@@ -73,7 +71,7 @@ async function main() {
   console.log(`  KPIs ...................... ${before.kpi}`);
   console.log(`  KPI records ............... ${before.kpiRecord}`);
 
-  if (okrs.length === 0 && deptGoals.length === 0) {
+  if (okrs.length === 0) {
     console.log("\nNothing to delete.");
     return;
   }
@@ -85,7 +83,7 @@ async function main() {
   // ---- backup before touching anything -------------------------------
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const path = `/tmp/workwrk-goals-backup-${stamp}.json`;
-  writeFileSync(path, JSON.stringify({ org, okrs, deptGoals }, null, 2));
+  writeFileSync(path, JSON.stringify({ org, okrs }, null, 2));
   console.log(`\nBackup written: ${path}`);
 
   // ---- delete, children first ----------------------------------------
@@ -100,10 +98,6 @@ async function main() {
     await prisma.oKR.updateMany({ where: { id: { in: okrIds } }, data: { parentId: null } });
     const o = await prisma.oKR.deleteMany({ where: { id: { in: okrIds } } });
     console.log(`  deleted OKRs .............. ${o.count}`);
-  }
-  if (deptGoals.length) {
-    const d = await prisma.departmentGoal.deleteMany({ where: { id: { in: deptGoals.map((g) => g.id) } } });
-    console.log(`  deleted department goals .. ${d.count}`);
   }
 
   // ---- assert nothing else moved --------------------------------------

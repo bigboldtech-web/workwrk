@@ -824,7 +824,6 @@ model Department {
   head           User?            @relation("DepartmentHead", fields: [headId], references: [id])
   members        User[]           @relation("DepartmentMembers")
   roles          Role[]
-  goals          DepartmentGoal[]
   // 🆕 Goals rebuild — OKRs anchored to this department (real FK), and
   // audience rows targeting every member of the department.
   okrs            OKR[]
@@ -836,27 +835,12 @@ model Department {
   @@index([organizationId])
 }
 
-model DepartmentGoal {
-  id           String     @id @default(cuid())
-  title        String
-  description  String?
-  targetValue  Float?
-  currentValue Float?     @default(0)
-  unit         String?
-  deadline     DateTime?
-  status       GoalStatus @default(ON_TRACK)
-  departmentId String
-  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-}
-
-enum GoalStatus {
-  ON_TRACK
-  AT_RISK
-  OFF_TRACK
-  COMPLETED
-}
+// DepartmentGoal was collapsed into OKR (level = DEPARTMENT + a
+// GoalAssignee row per department) by the collapse_department_goal
+// migration. The table survives in Postgres as
+// "_archived_DepartmentGoal" (with its "GoalStatus" enum type) until
+// production counts are confirmed; a follow-up migration drops both.
+// See docs/plans/goals-rebuild.md, Phase 3.
 
 model Role {
   id             String       @id @default(cuid())

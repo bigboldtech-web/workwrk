@@ -12,7 +12,6 @@ export async function GET() {
       head: { select: { id: true, firstName: true, lastName: true, avatar: true } },
       _count: { select: { members: true } },
       subDepartments: true,
-      goals: true,
     },
     orderBy: { name: "asc" },
   });
