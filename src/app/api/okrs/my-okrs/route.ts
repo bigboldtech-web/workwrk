@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
-import { enrichKeyResultGroups, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import { computeGoalRollups, enrichKeyResultGroups, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { memberVisibilityOr } from "@/lib/goal-audience";
 import type { Prisma } from "@/generated/prisma";
 
@@ -87,10 +87,15 @@ export async function GET(req: Request) {
   const now = Date.now();
 
   // KRs linked to a role KPI report that gauge's latest reading for their
-  // owner (read-side derivation) instead of the hand-typed number.
-  const derivedGroups = await enrichKeyResultGroups(
-    okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
-  );
+  // owner (read-side derivation) instead of the hand-typed number. Goal
+  // progress/status come from the shared org-wide rollup (live KRs +
+  // measured children) — the same number every other surface shows.
+  const [derivedGroups, rollupCtx] = await Promise.all([
+    enrichKeyResultGroups(
+      okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
+    ),
+    computeGoalRollups(orgId),
+  ]);
 
   // Compute progress per OKR + per-KR staleness
   const enriched = okrs.map((o, oi) => {
@@ -110,12 +115,16 @@ export async function GET(req: Request) {
       };
     });
 
-    const progress = rollUpOkrProgress(krs) ?? 0;
+    const rollup = goalRollupFor(rollupCtx, o);
 
     return {
       ...o,
       keyResults: krs,
-      progress,
+      progress: rollup.progress,
+      status: rollup.status,
+      // "NONE" = nothing measurable, nothing hand-set — clients render an
+      // honest "—" instead of a fake 0%.
+      progressSource: rollup.source,
       owner: o.ownerId ? ownerMap.get(o.ownerId) || null : null,
       department: o.departmentId ? deptMap.get(o.departmentId) || null : null,
       // Whether *I* own this OKR (drives "your goal" framing in the UI).

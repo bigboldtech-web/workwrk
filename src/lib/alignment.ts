@@ -511,22 +511,55 @@ export async function enrichKeyResultGroups<T extends RawKeyResultWithKpi>(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Goal rollup — one number per goal, everywhere
+// ---------------------------------------------------------------------------
+//
+// A goal's effective progress is derived, never trusted from the stored
+// column, so the same goal can never show two different numbers on two
+// screens:
+//
+//   leaf    → mean of its key results' LIVE progress (KPI-linked KRs
+//             contribute the gauge's derived number, scoped to the owner).
+//   parent  → mean of its own KRs (if any) plus each measured child's
+//             effective progress, recursively.
+//   neither → nothing to derive. `source` says so honestly: "MANUAL" when
+//             someone hand-set a progress, "NONE" when there is nothing —
+//             the UI shows "—", not a fake 0% that reads as "behind".
+//
+// The whole org is computed in one pass (goals are a small table — this is
+// the goal graph, not the task table) so a parent's number is right even
+// when the viewer can't see every child.
+
+export type GoalProgressSource = "ROLLUP" | "MANUAL" | "NONE";
+
+export interface GoalRollup {
+  /** Effective progress 0-100 (stored value when source is not ROLLUP). */
+  progress: number;
+  /** Display status — derived thresholds for ROLLUP, stored otherwise. */
+  status: string;
+  source: GoalProgressSource;
+}
+
+export interface GoalRollupContext {
+  rollups: Map<string, GoalRollup>;
+  /** parentId per goal (only parents that exist in the org count). */
+  parentOf: Map<string, string | null>;
+  /** The stored progress/status columns, for change detection on persist. */
+  stored: Map<string, { progress: number; status: string }>;
+}
+
 /**
- * Recompute an objective's rolled-up progress/status from its key results'
- * LIVE numbers (KPI-linked KRs contribute their derived progress, not the
- * stale stored column) and persist it on the OKR row. Read paths still
- * derive fresh — this just keeps the stored summary honest after a KR
- * mutation. An OKR with no key results keeps its own progress untouched.
+ * Effective rollup for every goal in the org: two bounded queries + pure
+ * recursion. Unmeasured (source "NONE") children contribute nothing to
+ * their parent — three empty sub-goals must not drag a measured sibling's
+ * 60% down to 15%.
  */
-export async function persistOkrRollup(
-  okrId: string,
-): Promise<{ progress: number; status: string } | null> {
-  const okr = await prisma.oKR.findUnique({
-    where: { id: okrId },
+export async function computeGoalRollups(orgId: string): Promise<GoalRollupContext> {
+  const okrs = await prisma.oKR.findMany({
+    where: { organizationId: orgId },
     select: {
-      progress: true,
-      status: true,
-      ownerId: true,
+      id: true, parentId: true, ownerId: true, progress: true, status: true,
       keyResults: {
         select: {
           id: true, startValue: true, targetValue: true, currentValue: true,
@@ -535,17 +568,117 @@ export async function persistOkrRollup(
       },
     },
   });
+
+  const groups = await enrichKeyResultGroups(
+    okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
+  );
+
+  const byId = new Map(okrs.map((o, i) => [o.id, { ...o, live: groups[i] }]));
+  const parentOf = new Map<string, string | null>();
+  const childrenOf = new Map<string, string[]>();
+  for (const o of okrs) {
+    const parentId = o.parentId && byId.has(o.parentId) ? o.parentId : null;
+    parentOf.set(o.id, parentId);
+    if (parentId) {
+      const kids = childrenOf.get(parentId);
+      if (kids) kids.push(o.id);
+      else childrenOf.set(parentId, [o.id]);
+    }
+  }
+
+  const rollups = new Map<string, GoalRollup>();
+  const visiting = new Set<string>();
+
+  const resolve = (id: string): GoalRollup => {
+    const memo = rollups.get(id);
+    if (memo) return memo;
+    const node = byId.get(id)!;
+    if (visiting.has(id)) {
+      // parentId cycle — treat the back-edge as unmeasured, don't recurse.
+      return { progress: clampPct(node.progress), status: node.status, source: "NONE" };
+    }
+    visiting.add(id);
+    const contributions: Array<{ progress: number }> = [...node.live];
+    for (const childId of childrenOf.get(id) ?? []) {
+      const child = resolve(childId);
+      if (child.source !== "NONE") contributions.push({ progress: child.progress });
+    }
+    visiting.delete(id);
+
+    const rolled = rollUpOkrProgress(contributions);
+    const rollup: GoalRollup =
+      rolled == null
+        ? {
+            progress: clampPct(node.progress),
+            status: node.status,
+            source: node.progress > 0 ? "MANUAL" : "NONE",
+          }
+        : { progress: rolled, status: okrStatusFor(rolled), source: "ROLLUP" };
+    rollups.set(id, rollup);
+    return rollup;
+  };
+  for (const o of okrs) resolve(o.id);
+
+  return {
+    rollups,
+    parentOf,
+    stored: new Map(okrs.map((o) => [o.id, { progress: o.progress, status: o.status }])),
+  };
+}
+
+/** Context lookup with a safe fallback for a row created mid-request. */
+export function goalRollupFor(
+  ctx: GoalRollupContext,
+  okr: { id: string; progress: number; status: string },
+): GoalRollup {
+  return (
+    ctx.rollups.get(okr.id) ?? {
+      progress: clampPct(okr.progress),
+      status: okr.status,
+      source: okr.progress > 0 ? "MANUAL" : "NONE",
+    }
+  );
+}
+
+/**
+ * Recompute and PERSIST the effective progress/status of a goal and every
+ * ancestor above it (parent chain), from live KR numbers and measured
+ * children. Called after a check-in, a KR mutation, or a re-parent, so
+ * the stored summary any raw reader sees matches what the derived read
+ * paths show. Goals with nothing to derive (MANUAL / NONE) are never
+ * overwritten — a hand-set number is user data.
+ */
+export async function persistGoalRollupChain(okrId: string): Promise<GoalRollup | null> {
+  const okr = await prisma.oKR.findUnique({
+    where: { id: okrId },
+    select: { organizationId: true },
+  });
   if (!okr) return null;
 
-  const enriched = await enrichKeyResults(okr.keyResults, { userId: okr.ownerId });
-  const progress = rollUpOkrProgress(enriched);
-  if (progress == null) return { progress: okr.progress, status: okr.status };
+  const ctx = await computeGoalRollups(okr.organizationId);
 
-  const status = okrStatusFor(progress);
-  if (progress !== okr.progress || status !== okr.status) {
-    await prisma.oKR.update({ where: { id: okrId }, data: { progress, status } });
+  const writes: Prisma.PrismaPromise<unknown>[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = okrId;
+  while (cursor && !seen.has(cursor)) {
+    seen.add(cursor);
+    const roll = ctx.rollups.get(cursor);
+    const before = ctx.stored.get(cursor);
+    if (
+      roll && before && roll.source === "ROLLUP" &&
+      (roll.progress !== before.progress || roll.status !== before.status)
+    ) {
+      writes.push(
+        prisma.oKR.update({
+          where: { id: cursor },
+          data: { progress: roll.progress, status: roll.status },
+        }),
+      );
+    }
+    cursor = ctx.parentOf.get(cursor) ?? null;
   }
-  return { progress, status };
+  if (writes.length > 0) await prisma.$transaction(writes);
+  return ctx.rollups.get(okrId) ?? null;
 }
 
 // ---------------------------------------------------------------------------

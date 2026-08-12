@@ -19,7 +19,7 @@ import {
   inferKeyResultDirection,
   keyResultProgress,
   KR_KPI_SELECT,
-  persistOkrRollup,
+  persistGoalRollupChain,
   resolveKpiLink,
 } from "@/lib/alignment";
 
@@ -104,7 +104,7 @@ export async function PATCH(
   });
 
   const [keyResult] = await enrichKeyResults([updated], { userId: kr.okr.ownerId });
-  const rollup = await persistOkrRollup(okrId);
+  const rollup = await persistGoalRollupChain(okrId);
 
   return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup });
 }
@@ -126,7 +126,7 @@ export async function DELETE(
   }
 
   await prisma.keyResult.delete({ where: { id: kr.id } });
-  const rollup = await persistOkrRollup(okrId);
+  const rollup = await persistGoalRollupChain(okrId);
 
   return jsonSuccess({ message: "Deleted", okr: rollup });
 }

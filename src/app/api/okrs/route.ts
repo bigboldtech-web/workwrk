@@ -3,7 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
-import { enrichKeyResultGroups, enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import {
+  computeGoalRollups,
+  enrichKeyResultGroups,
+  enrichKeyResults,
+  goalRollupFor,
+  KR_KPI_SELECT,
+  persistGoalRollupChain,
+} from "@/lib/alignment";
 import {
   addGoalAssignees,
   memberVisibilityOr,
@@ -94,23 +101,34 @@ export async function GET(req: NextRequest) {
 
   // Derivation is read-side: a KR linked to a KPI reports the gauge's latest
   // reading, not the hand-typed number still sitting on its row. Objective
-  // progress then rolls up from those live KR numbers (an OKR with no key
-  // results keeps whatever progress was set on it directly).
-  const [groups, audiences] = await Promise.all([
+  // progress/status then roll up through the org-wide goal graph — a leaf
+  // from its live KRs, a parent from its KRs + measured children — via
+  // computeGoalRollups, the ONE rollup implementation, so this list shows
+  // exactly the number the detail page / dashboard / profile hero show.
+  const [groups, audiences, rollupCtx] = await Promise.all([
     enrichKeyResultGroups(
       okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
     ),
     // Resolved assignee summaries — avatars + overflow count, never raw
     // join rows. Resolution happens here, at read time.
     summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
+    computeGoalRollups(orgId),
   ]);
   const enriched = okrs.map((okr, i) => {
     const keyResults = groups[i];
-    const rolled = rollUpOkrProgress(keyResults);
+    const rollup = goalRollupFor(rollupCtx, okr);
     return {
       ...okr,
       keyResults,
-      progress: rolled ?? okr.progress,
+      progress: rollup.progress,
+      status: rollup.status,
+      // "NONE" = nothing measurable and nothing hand-set — clients show
+      // an honest "—" instead of a fake 0% that reads as "behind".
+      progressSource: rollup.source,
+      children: okr.children.map((c) => {
+        const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
+        return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
+      }),
       audience: audiences.get(okr.id) ?? { members: [], totalMembers: 0, assigneeCount: 0 },
     };
   });
@@ -230,6 +248,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // Roll the new goal up (and its parent chain, when nested) so the
+  // stored summary is honest from the first read.
+  const rollup = await persistGoalRollupChain(okr.id);
+
   const created = await prisma.oKR.findUnique({
     where: { id: okr.id },
     include: { keyResults: { include: { kpi: { select: KR_KPI_SELECT } } } },
@@ -238,6 +260,7 @@ export async function POST(req: NextRequest) {
     ? {
         ...created,
         keyResults: await enrichKeyResults(created.keyResults, { userId: created.ownerId }),
+        progressSource: rollup?.source ?? "NONE",
         audience: (await summarizeGoalAudiences(orgId, [{ id: created.id, ownerId: created.ownerId }])).get(created.id),
       }
     : created;
@@ -381,9 +404,21 @@ export async function PATCH(req: NextRequest) {
     await syncGoalAssignees(id, audience);
   }
 
+  // Re-derive stored progress/status for this goal and its ancestors —
+  // a PATCH can move the goal (parentId), hand-set progress, or change
+  // the owner whose KPI readings drive linked KRs. If the goal LEFT a
+  // parent, that old chain shrinks too and must be recomputed.
+  const rollup = await persistGoalRollupChain(id);
+  if (existing.parentId && existing.parentId !== updated.parentId) {
+    await persistGoalRollupChain(existing.parentId);
+  }
+
   return jsonSuccess({
     ...updated,
     keyResults: await enrichKeyResults(updated.keyResults, { userId: updated.ownerId }),
+    progress: rollup?.progress ?? updated.progress,
+    status: rollup?.status ?? updated.status,
+    progressSource: rollup?.source ?? "NONE",
     audience: (await summarizeGoalAudiences(orgId, [{ id: updated.id, ownerId: updated.ownerId }])).get(updated.id),
   });
 }

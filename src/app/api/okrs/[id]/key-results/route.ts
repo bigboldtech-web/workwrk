@@ -16,7 +16,7 @@ import {
   inferKeyResultDirection,
   keyResultProgress,
   KR_KPI_SELECT,
-  persistOkrRollup,
+  persistGoalRollupChain,
   resolveKpiLink,
 } from "@/lib/alignment";
 
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const [keyResult] = await enrichKeyResults([created], { userId: okr.ownerId });
   // Keep the objective's stored summary in step with its live KR numbers.
-  const rollup = await persistOkrRollup(okrId);
+  const rollup = await persistGoalRollupChain(okrId);
 
   return jsonSuccess({ keyResult, currentValueIgnored, okr: rollup }, 201);
 }

@@ -25,6 +25,8 @@ interface OKR {
   level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   status: string;
   progress: number;
+  /** NONE = nothing measurable yet — render "—", not a fake 0%. */
+  progressSource?: "ROLLUP" | "MANUAL" | "NONE";
   parentId: string | null;
   ownerId: string | null;
   quarter: string | null;
@@ -171,8 +173,10 @@ function CascadeNode({
               )}
             </div>
             <div className="shrink-0 flex items-center gap-2 w-32">
-              <Progress value={node.progress} className="h-1 flex-1" indicatorClassName={progressColor(node.progress)} />
-              <span className="text-xs font-mono tabular-nums w-9 text-right">{node.progress}%</span>
+              <Progress value={node.progressSource === "NONE" ? 0 : node.progress} className="h-1 flex-1" indicatorClassName={progressColor(node.progress)} />
+              <span className="text-xs font-mono tabular-nums w-9 text-right" title={node.progressSource === "NONE" ? "No key results yet" : undefined}>
+                {node.progressSource === "NONE" ? "—" : `${node.progress}%`}
+              </span>
             </div>
           </div>
         </CardContent>

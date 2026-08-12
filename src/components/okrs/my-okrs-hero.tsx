@@ -39,6 +39,8 @@ interface OKR {
   quarter: string;
   status: "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED" | "DRAFT";
   progress: number;
+  /** NONE = nothing measurable yet — render "—", not a fake 0%. */
+  progressSource?: "ROLLUP" | "MANUAL" | "NONE";
   isOwnedByMe: boolean;
   keyResults: KeyResult[];
   owner: { firstName: string; lastName: string } | null;
@@ -270,8 +272,10 @@ function OkrOwnedCard({
             )}
           </div>
           <div className="text-right shrink-0">
-            <div className="text-2xl font-bold tabular-nums">{okr.progress}%</div>
-            <Progress value={okr.progress} className="h-1 w-20" indicatorClassName={progressColor(okr.progress)} />
+            <div className="text-2xl font-bold tabular-nums" title={okr.progressSource === "NONE" ? "No key results yet" : undefined}>
+              {okr.progressSource === "NONE" ? "—" : `${okr.progress}%`}
+            </div>
+            <Progress value={okr.progressSource === "NONE" ? 0 : okr.progress} className="h-1 w-20" indicatorClassName={progressColor(okr.progress)} />
           </div>
         </div>
 
@@ -366,8 +370,10 @@ function OkrContextCard({ okr }: { okr: OKR }) {
         </div>
         <div className="text-sm font-semibold leading-tight">{okr.title}</div>
         <div className="flex items-center gap-2 mt-2">
-          <Progress value={okr.progress} className="h-1 flex-1" indicatorClassName={progressColor(okr.progress)} />
-          <span className="text-xs font-mono tabular-nums">{okr.progress}%</span>
+          <Progress value={okr.progressSource === "NONE" ? 0 : okr.progress} className="h-1 flex-1" indicatorClassName={progressColor(okr.progress)} />
+          <span className="text-xs font-mono tabular-nums" title={okr.progressSource === "NONE" ? "No key results yet" : undefined}>
+            {okr.progressSource === "NONE" ? "—" : `${okr.progress}%`}
+          </span>
         </div>
       </CardContent>
     </Card>

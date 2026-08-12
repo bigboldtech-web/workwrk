@@ -181,6 +181,8 @@ interface AlignOkr {
   title: string;
   status: string;
   progress: number;
+  /** NONE = nothing measurable yet — render "—", not a fake 0%. */
+  progressSource?: "ROLLUP" | "MANUAL" | "NONE";
   quarter: string | null;
   level: string;
   keyResults: AlignKr[];
@@ -444,7 +446,9 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
                   </p>
                   <StatusChip color={meta.color} label={meta.label} />
                   <div className="flex-1" />
-                  <span className="text-[12px] font-semibold tabular-nums text-zinc-800">{okr.progress}%</span>
+                  <span className="text-[12px] font-semibold tabular-nums text-zinc-800" title={okr.progressSource === "NONE" ? "No key results yet" : undefined}>
+                    {okr.progressSource === "NONE" ? "—" : `${okr.progress}%`}
+                  </span>
                   <ChevronRight size={14} className="text-zinc-300 group-hover:text-zinc-500" />
                 </Link>
                 <div className="px-4 pb-1">

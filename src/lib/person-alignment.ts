@@ -20,13 +20,14 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import {
+  computeGoalRollups,
   enrichKeyResultGroups,
+  goalRollupFor,
   kpiDirection,
   kpiHealth,
   KPI_ORDER,
   KR_KPI_SELECT,
   latestKpiValues,
-  rollUpOkrProgress,
 } from "@/lib/alignment";
 
 export function currentQuarterLabel(): string {
@@ -148,13 +149,26 @@ export async function buildPersonAlignment(
     }),
   }));
 
-  // KPI-linked KRs report the gauge's latest reading (read-side derivation).
-  const groups = await enrichKeyResultGroups(
-    okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
-  );
+  // KPI-linked KRs report the gauge's latest reading (read-side
+  // derivation). Goal progress/status come from the shared org-wide
+  // rollup (live KRs + measured children) — the same computeGoalRollups
+  // number the goals list / detail / dashboard show, never a second math.
+  const [groups, rollupCtx] = await Promise.all([
+    enrichKeyResultGroups(
+      okrs.map((o) => ({ userId: o.ownerId, keyResults: o.keyResults })),
+    ),
+    computeGoalRollups(orgId),
+  ]);
   const enrichedOkrs = okrs.map((o, i) => {
     const keyResults = groups[i];
-    return { ...o, keyResults, progress: rollUpOkrProgress(keyResults) ?? o.progress };
+    const rollup = goalRollupFor(rollupCtx, o);
+    return {
+      ...o,
+      keyResults,
+      progress: rollup.progress,
+      status: rollup.status,
+      progressSource: rollup.source,
+    };
   });
 
   return { quarter, currentPeriod, kras, okrs: enrichedOkrs };

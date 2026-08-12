@@ -5,11 +5,9 @@ import { canEditOkrOwner } from "@/lib/alignment-scope";
 import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import {
-  enrichKeyResults,
   keyResultProgress,
   KR_KPI_SELECT,
-  okrStatusFor,
-  rollUpOkrProgress,
+  persistGoalRollupChain,
 } from "@/lib/alignment";
 
 // POST: Check in on a key result (update progress)
@@ -67,29 +65,12 @@ export async function POST(
     data: { currentValue: Number(value), progress },
   });
 
-  // Update OKR overall progress (average of all key results). KPI-linked KRs
-  // contribute their DERIVED progress — their stored column is not the truth.
-  const okrRow = await prisma.oKR.findUnique({
-    where: { id: okrId },
-    select: {
-      ownerId: true,
-      keyResults: {
-        select: {
-          id: true, startValue: true, targetValue: true, currentValue: true,
-          progress: true, kpiId: true, kpi: { select: KR_KPI_SELECT },
-        },
-      },
-    },
-  });
-  const allKRs = await enrichKeyResults(okrRow?.keyResults ?? [], { userId: okrRow?.ownerId });
-  const avgProgress = rollUpOkrProgress(allKRs) ?? 0;
-
-  const status = okrStatusFor(avgProgress);
-
-  await prisma.oKR.update({
-    where: { id: okrId },
-    data: { progress: avgProgress, status },
-  });
+  // Roll the objective up from its key results' LIVE numbers (KPI-linked
+  // KRs contribute their derived progress) and persist the whole ancestor
+  // chain — a check-in on a child must move its parent goal too.
+  const rollup = await persistGoalRollupChain(okrId);
+  const avgProgress = rollup?.progress ?? progress;
+  const status = rollup?.status ?? "ON_TRACK";
 
   // Log activity and trigger recalculation
   const orgId = getOrgId(session);

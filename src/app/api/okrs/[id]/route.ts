@@ -3,7 +3,13 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isOrgAdminLevel } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
-import { enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgress } from "@/lib/alignment";
+import {
+  computeGoalRollups,
+  enrichKeyResults,
+  goalRollupFor,
+  KR_KPI_SELECT,
+  persistGoalRollupChain,
+} from "@/lib/alignment";
 import { canSeeGoal, summarizeGoalAudiences } from "@/lib/goal-audience";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -27,15 +33,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   // is, or COMPANY level — see src/lib/goal-audience.ts.
   if (!(await canSeeGoal(session, okr))) return jsonError("Not found", 404);
 
-  // KRs linked to a KPI read the gauge's latest number (read-side derivation);
-  // objective progress rolls up from those live values.
+  // KRs linked to a KPI read the gauge's latest number (read-side
+  // derivation); the goal's progress/status roll up through the shared
+  // org-wide goal graph (live KRs + measured children) — the same
+  // computeGoalRollups every other surface reads, so this endpoint can
+  // never disagree with the list, the dashboard, or the profile hero.
   const orgId = getOrgId(session);
-  const [keyResults, audiences] = await Promise.all([
+  const [keyResults, audiences, rollupCtx] = await Promise.all([
     enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
     summarizeGoalAudiences(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
+    computeGoalRollups(orgId),
   ]);
-  const rolled = rollUpOkrProgress(keyResults);
-  return jsonSuccess({ ...okr, keyResults, progress: rolled ?? okr.progress, audience: audiences.get(okr.id) });
+  const rollup = goalRollupFor(rollupCtx, okr);
+  return jsonSuccess({
+    ...okr,
+    keyResults,
+    progress: rollup.progress,
+    status: rollup.status,
+    progressSource: rollup.source,
+    children: okr.children.map((c) => {
+      const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
+      return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
+    }),
+    audience: audiences.get(okr.id),
+  });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -59,5 +80,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   }
 
   await prisma.oKR.delete({ where: { id } });
+  // The parent (and its ancestors) just lost a contributor — re-derive
+  // their stored progress so no surface keeps quoting the old number.
+  if (okr.parentId) {
+    await persistGoalRollupChain(okr.parentId);
+  }
   return jsonSuccess({ message: "Deleted" });
 }

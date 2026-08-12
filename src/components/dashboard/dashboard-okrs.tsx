@@ -11,6 +11,8 @@ interface OKR {
   title: string;
   level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   progress: number;
+  /** NONE = nothing measurable yet — render "—", not a fake 0%. */
+  progressSource?: "ROLLUP" | "MANUAL" | "NONE";
   quarter: string;
   owner?: { firstName: string; lastName: string };
   department?: { name: string; color?: string };
@@ -102,9 +104,13 @@ export function DashboardOkrs() {
                     <p className="text-[10px] text-muted mt-0.5">{okr.keyResults.length} Key Result{okr.keyResults.length !== 1 ? "s" : ""}</p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-lg font-bold font-mono" style={{ color: okr.progress >= 80 ? "#d4ff2e" : okr.progress >= 50 ? "#4a9eff" : okr.progress >= 25 ? "#ff9933" : "#ff3d8a" }}>
-                      {okr.progress}%
-                    </p>
+                    {okr.progressSource === "NONE" ? (
+                      <p className="text-lg font-bold font-mono text-muted" title="No key results yet">—</p>
+                    ) : (
+                      <p className="text-lg font-bold font-mono" style={{ color: okr.progress >= 80 ? "#d4ff2e" : okr.progress >= 50 ? "#4a9eff" : okr.progress >= 25 ? "#ff9933" : "#ff3d8a" }}>
+                        {okr.progress}%
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="mt-2 h-1 rounded-full bg-surface-2 overflow-hidden">

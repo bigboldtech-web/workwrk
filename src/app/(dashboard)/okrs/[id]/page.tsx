@@ -9,11 +9,11 @@
  */
 
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { canSeeGoal, listGoalAssigneeEntries, resolveGoalMembersBatch } from "@/lib/goal-audience";
+import { isManagerLevel, requireGoalPage } from "@/lib/page-gates";
+import { listGoalAssigneeEntries, resolveGoalMembersBatch } from "@/lib/goal-audience";
+import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
   ArrowLeft, AlertTriangle, Target, Calendar, Clock, Sparkles,
   ChevronRight, Building2, Users, User as UserIcon, Activity,
@@ -22,10 +22,6 @@ import { OkrCheckInForm } from "./okr-checkin-form";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
-
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
-]);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -89,10 +85,12 @@ export default async function OkrDetailPage(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
-  const sessionUser = session.user as { id: string; organizationId: string; accessLevel?: string };
-  const orgId = sessionUser.organizationId;
+  // Three-door gate, server-side, BEFORE any data renders: notFound()
+  // unless canSeeGoal says yes (COMPANY → everyone; own/audience → you;
+  // report tree → managers; org-wide levels → all). A guessed URL to
+  // another team's goal 404s here.
+  const viewer = await requireGoalPage(id);
+  const orgId = viewer.organizationId;
 
   const okr = await prisma.oKR.findFirst({
     where: { id, organizationId: orgId },
@@ -104,6 +102,7 @@ export default async function OkrDetailPage(
             orderBy: { createdAt: "desc" },
             take: 10,
           },
+          kpi: { select: KR_KPI_SELECT },
         },
       },
       children: { select: { id: true, title: true, progress: true, level: true, status: true } },
@@ -111,12 +110,16 @@ export default async function OkrDetailPage(
   });
   if (!okr) notFound();
 
-  // Visibility, same rule as GET /api/okrs/[id] (src/lib/goal-audience.ts):
-  // COMPANY → everyone; own goal → always; resolved audience member →
-  // always (dept/role assignments resolve to people at read time);
-  // manager tiers → report tree (owner or member) + unowned; org-wide
-  // alignment levels → all. Out of scope reads as not-found, not a peek.
-  if (!(await canSeeGoal(session, okr))) notFound();
+  // The same derived numbers every other surface shows: KPI-linked KRs
+  // report the gauge's latest reading, and the goal's progress/status
+  // roll up from live KRs + measured children (org-wide context, so a
+  // parent is right even when the viewer can't see every child).
+  const [keyResults, rollupCtx] = await Promise.all([
+    enrichKeyResults(okr.keyResults, { userId: okr.ownerId }),
+    computeGoalRollups(orgId),
+  ]);
+  const rollup = goalRollupFor(rollupCtx, okr);
+  const measured = rollup.source !== "NONE";
 
   const checkinUserIds = Array.from(
     new Set(okr.keyResults.flatMap((kr) => kr.checkIns.map((c) => c.userId))),
@@ -162,10 +165,12 @@ export default async function OkrDetailPage(
   );
 
   const canEditLinks =
-    okr.ownerId === sessionUser.id || MANAGER_LEVELS.has(sessionUser.accessLevel ?? "");
+    okr.ownerId === viewer.id || isManagerLevel(viewer.accessLevel);
   const ownerName = owner ? `${owner.firstName} ${owner.lastName}`.trim() : "Unassigned";
-  const statusColor = STATUS_COLOR[okr.status] ?? "var(--os-c-indigo)";
-  const statusLabel = STATUS_LABEL[okr.status] ?? okr.status;
+  // Status follows the rollup: derived thresholds while the goal is
+  // measured, the stored value otherwise — same rule as the APIs.
+  const statusColor = STATUS_COLOR[rollup.status] ?? "var(--os-c-blue)";
+  const statusLabel = STATUS_LABEL[rollup.status] ?? rollup.status;
   const level = LEVEL_ICON[okr.level] ?? LEVEL_ICON.INDIVIDUAL;
 
   type FlatCheckIn = {
@@ -231,9 +236,11 @@ export default async function OkrDetailPage(
         </div>
         <div className="okrd__progress">
           <div className="okrd__progress-ring">
-            <ProgressRing value={okr.progress} color={statusColor} />
+            <ProgressRing value={rollup.progress} color={statusColor} measured={measured} />
           </div>
-          <div className="okrd__progress-label">overall progress</div>
+          <div className="okrd__progress-label">
+            {measured ? "overall progress" : "no key results yet"}
+          </div>
         </div>
       </header>
 
@@ -258,12 +265,12 @@ export default async function OkrDetailPage(
         {/* Left: KRs + custom fields */}
         <main className="okrd__main">
           <section className="okrd-card">
-            <header><h2><Sparkles /> Key results</h2><span>{okr.keyResults.length}</span></header>
-            {okr.keyResults.length === 0 ? (
+            <header><h2><Sparkles /> Key results</h2><span>{keyResults.length}</span></header>
+            {keyResults.length === 0 ? (
               <div className="okrd-card__empty">No key results defined. Add KRs to track measurable progress.</div>
             ) : (
               <ol className="okrd-krs">
-                {okr.keyResults.map((kr, i) => {
+                {keyResults.map((kr, i) => {
                   const last = kr.checkIns[0];
                   return (
                     <li key={kr.id} className="okrd-kr">
@@ -340,20 +347,25 @@ export default async function OkrDetailPage(
                 <span className="okrd-side-card__count">{okr.children.length}</span>
               </header>
               <ul className="okrd-children">
-                {okr.children.map((c) => (
-                  <li key={c.id}>
-                    <Link href={`/okrs/${c.id}`}>
-                      <span className="okrd-child__level">{c.level}</span>
-                      <span className="okrd-child__title">{c.title}</span>
-                      <div className="okrd-child__bar">
-                        <div className="okrd-child__bar-track">
-                          <div className="okrd-child__bar-fill" style={{ width: `${c.progress}%`, background: STATUS_COLOR[c.status] ?? "var(--os-c-indigo)" }} />
+                {okr.children.map((c) => {
+                  // Children show their ROLLED-UP number — the same one
+                  // their own detail page shows, never the stale column.
+                  const childRoll = goalRollupFor(rollupCtx, c);
+                  return (
+                    <li key={c.id}>
+                      <Link href={`/okrs/${c.id}`}>
+                        <span className="okrd-child__level">{c.level}</span>
+                        <span className="okrd-child__title">{c.title}</span>
+                        <div className="okrd-child__bar">
+                          <div className="okrd-child__bar-track">
+                            <div className="okrd-child__bar-fill" style={{ width: `${childRoll.progress}%`, background: STATUS_COLOR[childRoll.status] ?? "var(--os-c-blue)" }} />
+                          </div>
+                          <span>{childRoll.source === "NONE" ? "—" : `${childRoll.progress}%`}</span>
                         </div>
-                        <span>{c.progress}%</span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           )}
@@ -390,8 +402,10 @@ export default async function OkrDetailPage(
 }
 
 /* SVG ring (no extra deps). 36px wide, the percentage fills the
- * stroke-dasharray. Color comes from prop. */
-function ProgressRing({ value, color }: { value: number; color: string }) {
+ * stroke-dasharray. Color comes from prop. An unmeasured goal (no KRs,
+ * no children, nothing hand-set) shows an honest "—", not a 0% that
+ * reads as "behind". */
+function ProgressRing({ value, color, measured = true }: { value: number; color: string; measured?: boolean }) {
   const pct = Math.max(0, Math.min(100, value));
   const r = 26;
   const C = 2 * Math.PI * r;
@@ -399,18 +413,22 @@ function ProgressRing({ value, color }: { value: number; color: string }) {
   return (
     <svg width="64" height="64" viewBox="0 0 64 64">
       <circle cx="32" cy="32" r={r} fill="none" stroke="var(--os-line)" strokeWidth="6" />
-      <circle
-        cx="32" cy="32" r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="6"
-        strokeLinecap="round"
-        strokeDasharray={C}
-        strokeDashoffset={offset}
-        transform="rotate(-90 32 32)"
-        style={{ transition: "stroke-dashoffset 600ms ease" }}
-      />
-      <text x="32" y="38" textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--os-ink)">{pct}%</text>
+      {measured && (
+        <circle
+          cx="32" cy="32" r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="6"
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={offset}
+          transform="rotate(-90 32 32)"
+          style={{ transition: "stroke-dashoffset 600ms ease" }}
+        />
+      )}
+      <text x="32" y="38" textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--os-ink)">
+        {measured ? `${pct}%` : "—"}
+      </text>
     </svg>
   );
 }

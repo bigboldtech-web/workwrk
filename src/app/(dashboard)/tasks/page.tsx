@@ -44,6 +44,8 @@ interface ApiMyOkr {
   title: string;
   level: "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
   progress: number;
+  /** NONE = nothing measurable yet — render "—", not a fake 0%. */
+  progressSource?: "ROLLUP" | "MANUAL" | "NONE";
 }
 
 interface ApiMyKra {
@@ -644,12 +646,14 @@ function OkrsGoalsCard({ okrs }: { okrs: ApiMyOkr[] | null }) {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[12.5px] font-medium text-zinc-900 truncate">{o.title}</span>
-                    <span className="text-[11px] font-medium text-zinc-500 shrink-0">{o.progress}%</span>
+                    <span className="text-[11px] font-medium text-zinc-500 shrink-0" title={o.progressSource === "NONE" ? "No key results yet" : undefined}>
+                      {o.progressSource === "NONE" ? "—" : `${o.progress}%`}
+                    </span>
                   </div>
                   <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-[var(--os-brand-rail)] rounded-full transition-all"
-                      style={{ width: `${Math.max(2, o.progress)}%` }}
+                      style={{ width: `${o.progressSource === "NONE" ? 0 : Math.max(2, o.progress)}%` }}
                     />
                   </div>
                 </Link>

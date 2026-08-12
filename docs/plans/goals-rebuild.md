@@ -176,7 +176,7 @@ then-unused `"GoalStatus"` enum type.
 
 ---
 
-## Phase 4 — visibility and rollup
+## Phase 4 — visibility and rollup  ✅ SHIPPED
 
 Reuse `src/lib/alignment-scope.ts` and `getTeamUserIds`. A goal is visible
 when you own it, are a resolved member, or manage someone who is. COMPANY
@@ -186,6 +186,32 @@ three-door model (employee / manager / admin) holds for goals too.
 Rollup: a parent goal's progress derives from its children; a leaf goal's
 progress derives from its Key Results, which already derive from KPIs where
 `KeyResult.kpiId` is set.
+
+Shipped:
+
+- **Pages gated server-side.** `requireGoalPage(okrId)` in
+  `src/lib/page-gates.ts` guards `/okrs/[id]` through the ONE visibility
+  implementation, `canSeeGoal` (`src/lib/goal-audience.ts`) — out-of-scope
+  reads as `notFound()`, never a peek. `requireGoalsPage` gates `/okrs`
+  (rows arrive three-door-filtered from `GET /api/okrs`, same as before).
+- **One rollup implementation.** `computeGoalRollups(orgId)` in
+  `src/lib/alignment.ts` derives every goal's effective progress in one
+  pass: leaf = mean of live KR progress (KPI-linked KRs read the gauge),
+  parent = mean of own KRs + measured children, recursively, cycle-safe.
+  Every read surface — `GET /api/okrs`, `GET /api/okrs/[id]`, `my-okrs`,
+  `buildPersonAlignment` (people profile/hero), and the server-rendered
+  `/okrs/[id]` page — quotes this same number, so one goal can never show
+  two different figures on two screens.
+- **Persisted on change.** `persistGoalRollupChain(okrId)` recomputes and
+  stores progress/status for the goal AND its ancestor chain on check-in,
+  KR create/update/delete, goal create/PATCH (including re-parenting: the
+  old parent's chain is recomputed too) and delete.
+- **Honest empty state.** `progressSource: "ROLLUP" | "MANUAL" | "NONE"`
+  ships with every read. `NONE` (no KRs, no measured children, nothing
+  hand-set) renders as "—" with a "no key results yet" hint — never a
+  fake 0% that reads as "behind". Unmeasured goals are also excluded from
+  the /okrs average-progress stat, and unmeasured children contribute
+  nothing to a parent's mean.
 
 ---
 
