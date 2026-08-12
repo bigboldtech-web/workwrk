@@ -18,7 +18,7 @@ async function canSeeOkr(
   const callerId = getUserId(session);
   if (okr.level === "COMPANY") return true;
   if (okr.ownerId === callerId) return true;
-  if (okr.level === "TEAM" && okr.departmentId) {
+  if (okr.level === "DEPARTMENT" && okr.departmentId) {
     const me = await prisma.user.findUnique({
       where: { id: callerId },
       select: { departmentId: true },

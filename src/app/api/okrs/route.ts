@@ -7,7 +7,15 @@ import { enrichKeyResultGroups, enrichKeyResults, KR_KPI_SELECT, rollUpOkrProgre
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
-import type { Prisma } from "@/generated/prisma";
+import type { GoalLevel, Prisma } from "@/generated/prisma";
+
+// OKR.level is the GoalLevel enum since the goals rebuild. Legacy
+// clients may still send "TEAM" — map it to DEPARTMENT, mirroring the
+// goal_audience_kra_weight migration; anything unrecognised is null.
+function normalizeGoalLevel(v: unknown): GoalLevel | null {
+  if (v === "TEAM") return "DEPARTMENT";
+  return v === "COMPANY" || v === "DEPARTMENT" || v === "INDIVIDUAL" ? v : null;
+}
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -21,7 +29,8 @@ export async function GET(req: NextRequest) {
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
-  if (level) where.level = level;
+  const levelFilter = normalizeGoalLevel(level);
+  if (levelFilter) where.level = levelFilter;
   if (quarter) {
     and.push({ OR: [{ quarter }, { quarter: null }, { quarter: "" }] });
   }
@@ -42,7 +51,7 @@ export async function GET(req: NextRequest) {
       where: { id: callerId },
       select: { departmentId: true },
     });
-    if (me?.departmentId) visible.push({ level: "TEAM", departmentId: me.departmentId });
+    if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
     if (isManager(session)) {
       const teamIds = await getTeamUserIds(orgId, callerId);
       visible.push({ ownerId: { in: teamIds } });
@@ -145,7 +154,7 @@ export async function POST(req: NextRequest) {
     data: {
       title: title.trim(),
       description: description || null,
-      level: level || "INDIVIDUAL",
+      level: normalizeGoalLevel(level) ?? "INDIVIDUAL",
       quarter: quarter || null,
       startDate: startDate ? new Date(startDate) : null,
       endDate: endDate ? new Date(endDate) : null,
@@ -276,6 +285,12 @@ export async function PATCH(req: NextRequest) {
   if (!isManager(session)) {
     delete updates.ownerId;
     delete updates.level;
+  }
+  // level is an enum now — drop anything that doesn't normalize.
+  if ("level" in updates) {
+    const lvl = normalizeGoalLevel(updates.level);
+    if (lvl) updates.level = lvl;
+    else delete updates.level;
   }
   if (typeof updates.ownerId === "string" && updates.ownerId !== existing.ownerId) {
     const owner = await prisma.user.findFirst({

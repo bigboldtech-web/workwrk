@@ -948,6 +948,14 @@ const searchMeetings: ToolDefinition = {
 // OKRs (read)
 // ─────────────────────────────────────────────────────────
 
+// OKR.level is the GoalLevel enum since the goals rebuild. The model
+// may still emit legacy "TEAM" — map it to DEPARTMENT and anything
+// unrecognised to INDIVIDUAL, mirroring the migration's mapping.
+function toGoalLevel(v: unknown): "COMPANY" | "DEPARTMENT" | "INDIVIDUAL" {
+  if (v === "TEAM") return "DEPARTMENT";
+  return v === "COMPANY" || v === "DEPARTMENT" || v === "INDIVIDUAL" ? v : "INDIVIDUAL";
+}
+
 const searchOkrs: ToolDefinition = {
   name: "search_okrs",
   description:
@@ -955,7 +963,7 @@ const searchOkrs: ToolDefinition = {
   input_schema: {
     type: "object",
     properties: {
-      level: { type: "string", enum: ["COMPANY", "TEAM", "INDIVIDUAL"] },
+      level: { type: "string", enum: ["COMPANY", "DEPARTMENT", "INDIVIDUAL"] },
       status: { type: "string", enum: ["ON_TRACK", "AT_RISK", "BEHIND", "COMPLETED"] },
       quarter: { type: "string", description: "e.g. 'Q2 2026'" },
       ownedByMe: { type: "boolean", description: "Only OKRs owned by the caller" },
@@ -968,7 +976,7 @@ const searchOkrs: ToolDefinition = {
     const okrs = await prisma.oKR.findMany({
       where: {
         organizationId: ctx.orgId,
-        ...(input.level ? { level: input.level as string } : {}),
+        ...(input.level ? { level: toGoalLevel(input.level) } : {}),
         ...(input.status ? { status: input.status as string } : {}),
         ...(input.quarter ? { quarter: input.quarter as string } : {}),
         ...(input.ownedByMe ? { ownerId: ctx.userId } : {}),
@@ -1137,7 +1145,7 @@ const createOkr: ToolDefinition = {
     properties: {
       title: { type: "string", description: "Objective title — what the team is trying to achieve" },
       description: { type: "string" },
-      level: { type: "string", enum: ["COMPANY", "TEAM", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
+      level: { type: "string", enum: ["COMPANY", "DEPARTMENT", "INDIVIDUAL"], description: "Defaults to INDIVIDUAL" },
       quarter: { type: "string", description: "e.g. 'Q2 2026'" },
       ownerEmail: { type: "string", description: "Email of the OKR owner. Defaults to the caller." },
       startIsoDate: { type: "string" },
@@ -1177,7 +1185,7 @@ const createOkr: ToolDefinition = {
         organizationId: ctx.orgId,
         title: input.title as string,
         description: (input.description as string) ?? null,
-        level: (input.level as string) ?? "INDIVIDUAL",
+        level: toGoalLevel(input.level ?? "INDIVIDUAL"),
         quarter: (input.quarter as string) ?? null,
         startDate: input.startIsoDate ? new Date(input.startIsoDate as string) : null,
         endDate: input.endIsoDate ? new Date(input.endIsoDate as string) : null,

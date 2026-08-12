@@ -39,7 +39,7 @@ export async function GET(req: Request) {
     { ownerId: userId },
   ];
   if (me?.departmentId) {
-    or.push({ level: "TEAM", departmentId: me.departmentId });
+    or.push({ level: "DEPARTMENT", departmentId: me.departmentId });
   }
   const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
 

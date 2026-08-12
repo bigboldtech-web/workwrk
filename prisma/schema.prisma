@@ -529,6 +529,8 @@ model User {
   weeklyReviewsAsManager WeeklyReview[]   @relation("WeeklyReviewManager")
   // 🆕 Operating core — role instances (Role × Scope) this person holds
   roleInstances          RoleInstance[]   @relation("UserRoleInstances")
+  // 🆕 Goals rebuild — goals this person is directly assigned to
+  goalAssignments        GoalAssignee[]
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -823,6 +825,10 @@ model Department {
   members        User[]           @relation("DepartmentMembers")
   roles          Role[]
   goals          DepartmentGoal[]
+  // 🆕 Goals rebuild — OKRs anchored to this department (real FK), and
+  // audience rows targeting every member of the department.
+  okrs            OKR[]
+  goalAssignments GoalAssignee[]
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
@@ -868,6 +874,8 @@ model Role {
   ownedAreas     OwnershipArea[] @relation("AreaOwnerRole")
   boundaries     RoleBoundary[]
   thresholds     Threshold[]
+  // 🆕 Goals rebuild — audience rows targeting every holder of this role.
+  goalAssignments GoalAssignee[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -1051,6 +1059,10 @@ model KRA {
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   roleId         String?
   role           Role?           @relation(fields: [roleId], references: [id])
+  // 🆕 Role-level default weightage (0-100). Inherited by every holder of
+  // the role when KRAs are seeded; KRAAssignment.weightage remains the
+  // per-person override.
+  weight         Float           @default(0)
   assignments    KRAAssignment[]
   kpis           KPI[]
   tasks          Task[]
@@ -2544,11 +2556,20 @@ model TrashItem {
 // OKR (OBJECTIVES & KEY RESULTS)
 // ==========================================
 
+// Goal altitude. Legacy loose strings were mapped in the migration:
+// TEAM -> DEPARTMENT (a team IS a department here), anything
+// unrecognised -> INDIVIDUAL.
+enum GoalLevel {
+  COMPANY
+  DEPARTMENT
+  INDIVIDUAL
+}
+
 model OKR {
   id             String       @id @default(cuid())
   title          String
   description    String?
-  level          String       @default("INDIVIDUAL") // COMPANY, TEAM, INDIVIDUAL
+  level          GoalLevel    @default(INDIVIDUAL)
   status         String       @default("ON_TRACK") // ON_TRACK, AT_RISK, BEHIND, COMPLETED
   progress       Int          @default(0) // 0-100
   startDate      DateTime?
@@ -2558,12 +2579,20 @@ model OKR {
   // the personal hero. Defaults to weekly because that's what most
   // teams settle on.
   checkInCadence String       @default("WEEKLY") // WEEKLY, BIWEEKLY, MONTHLY
+  // The single accountable owner (DRI). Assignees below are the
+  // contributors — one neck, many hands.
   ownerId        String?
   departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
   parentId       String?
   parent         OKR?         @relation("OKRChildren", fields: [parentId], references: [id])
   children       OKR[]        @relation("OKRChildren")
   keyResults     KeyResult[]
+  // 🆕 Goals rebuild — the goal's audience. ONE goal record, MANY
+  // assignees, one shared scoreboard. Department/role rows resolve to
+  // people at READ time (see src/lib/goal-audience.ts), so new hires
+  // inherit and leavers drop out automatically.
+  assignees      GoalAssignee[]
   // Manual sort within (organizationId, ownerId, quarter). Lower =
   // higher on the owner's OKR list. Defaults to 0 so legacy rows
   // appear at the top until explicitly reordered.
@@ -2578,7 +2607,32 @@ model OKR {
   @@index([parentId])
   @@index([level])
   @@index([quarter])
+  @@index([departmentId])
   @@index([organizationId, ownerId, position])
+}
+
+// One row = one audience member of a goal: a person, a department, OR a
+// role — exactly one, enforced by a raw-SQL CHECK
+// (num_nonnulls(userId, departmentId, roleId) = 1) plus three partial
+// unique indexes per subject (Postgres treats NULLs as distinct, so a
+// plain @@unique could not stop duplicate rows). See the
+// goal_audience_kra_weight migration.
+model GoalAssignee {
+  id           String      @id @default(cuid())
+  okrId        String
+  okr          OKR         @relation(fields: [okrId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  roleId       String?
+  role         Role?       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+
+  @@index([okrId])
+  @@index([userId])
+  @@index([departmentId])
+  @@index([roleId])
 }
 
 model KeyResult {

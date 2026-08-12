@@ -229,7 +229,7 @@ async function main() {
     data: {
       title: "Engineering ships 2 major features",
       description: "Ship the assignment-rules engine and the new dashboard widgets.",
-      level: "TEAM", status: "ON_TRACK", progress: 70, quarter,
+      level: "DEPARTMENT", status: "ON_TRACK", progress: 70, quarter,
       ownerId: engMgr.id, organizationId: org.id, parentId: companyOkr.id,
       departmentId: engDept.id, checkInCadence: "WEEKLY",
       keyResults: {

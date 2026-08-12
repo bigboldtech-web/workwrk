@@ -69,6 +69,19 @@ function relDays(d: Date): string {
   if (days < 30) return `${Math.floor(days / 7)}w ago`;
   return fmtShort(d);
 }
+// Staleness math lives here (not in the component body) so the impure
+// Date.now() stays out of render — this is a server page, so
+// per-request "now" is the correct reference point.
+function checkinRecency(lastCheckIn: Date | null, cadenceDays: number, completed: boolean) {
+  const now = Date.now();
+  return {
+    isStale:
+      !completed && (!lastCheckIn || now - lastCheckIn.getTime() > cadenceDays * DAY_MS),
+    daysSinceLastCheckin: lastCheckIn
+      ? Math.floor((now - lastCheckIn.getTime()) / DAY_MS)
+      : null,
+  };
+}
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +120,7 @@ export default async function OkrDetailPage(
     ORG_WIDE_ALIGNMENT_LEVELS.has(viewerLevel) ||
     okr.level === "COMPANY" ||
     okr.ownerId === sessionUser.id;
-  if (!visible && okr.level === "TEAM" && okr.departmentId) {
+  if (!visible && okr.level === "DEPARTMENT" && okr.departmentId) {
     const meRow = await prisma.user.findUnique({
       where: { id: sessionUser.id },
       select: { departmentId: true },
@@ -150,12 +163,11 @@ export default async function OkrDetailPage(
     .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
   const cadenceDays = CADENCE_DAYS[okr.checkInCadence] ?? 7;
-  const isStale =
-    okr.status !== "COMPLETED" &&
-    (!lastCheckIn || Date.now() - lastCheckIn.getTime() > cadenceDays * DAY_MS);
-  const daysSinceLastCheckin = lastCheckIn
-    ? Math.floor((Date.now() - lastCheckIn.getTime()) / DAY_MS)
-    : null;
+  const { isStale, daysSinceLastCheckin } = checkinRecency(
+    lastCheckIn,
+    cadenceDays,
+    okr.status === "COMPLETED",
+  );
 
   const canEditLinks =
     okr.ownerId === sessionUser.id || MANAGER_LEVELS.has(sessionUser.accessLevel ?? "");
