@@ -82,6 +82,19 @@ interface BoardTableViewProps {
   /** Called after a header-menu field mutation (delete / move) so the parent
    *  re-fetches Board.schema.fields into its field state. */
   onFieldsChanged?: () => void;
+  /** Item-state ownership contract (2026-08-12): the table keeps an optimistic
+   *  local copy of `initialItems`, and re-syncs from the parent whenever that
+   *  prop's identity changes. Any parent that re-renders items (BoardCanvas
+   *  does on every drawer edit) MUST wire these four callbacks so its copy
+   *  learns about every table-side mutation — otherwise its next re-render
+   *  would clobber the local copy (created rows vanish, archived rows
+   *  resurrect, edits revert). */
+  onItemCreated?: (item: BoardItemRow) => void;
+  onItemPatched?: (id: string, patch: Partial<BoardItemRow>) => void;
+  onItemRemoved?: (id: string) => void;
+  /** Failure-path refetches hand the fresh server list to the parent instead
+   *  of trapping it locally (where the next parent resync would regress it). */
+  onItemsRefreshed?: (items: BoardItemRow[]) => void;
   /** Time Tracking module — hides the row menu's "Start timer" when false. */
   timeTrackingEnabled?: boolean;
   /** "list" = ClickUp pills (default). "table" = Monday-style grid with
@@ -207,7 +220,7 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // Custom-field columns, ordered by their saved `position` (matches the Fields
@@ -248,6 +261,34 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // busy state, so we only need the setter here).
   const [, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Item-state ownership (2026-08-12) ────────────────────────────────────
+  // Rows created/removed locally while the parent has NOT wired the matching
+  // callback are tracked here so the initialItems resync effect can re-apply
+  // them over a stale parent snapshot instead of silently dropping created
+  // rows / resurrecting removed ones. Entries settle (stop being tracked)
+  // once an incoming snapshot reflects them.
+  const unreportedAddsRef = useRef<Map<string, BoardItemRow>>(new Map());
+  const unreportedRemovesRef = useRef<Set<string>>(new Set());
+  /** Report a server-confirmed create to the parent (or track it if unwired). */
+  const reportCreated = useCallback((item: BoardItemRow) => {
+    if (onItemCreated) onItemCreated(item);
+    else unreportedAddsRef.current.set(item.id, item);
+  }, [onItemCreated]);
+  /** Report an archive/hard-delete to the parent (or track it if unwired). */
+  const reportRemoved = useCallback((id: string) => {
+    unreportedAddsRef.current.delete(id);
+    if (onItemRemoved) onItemRemoved(id);
+    else unreportedRemovesRef.current.add(id);
+  }, [onItemRemoved]);
+  /** Failure-path refetch landed fresh server truth: give it to the parent
+   *  (its resync flows back down); only keep it locally when unwired. */
+  const reportRefreshed = useCallback((fresh: BoardItemRow[]) => {
+    unreportedAddsRef.current.clear();
+    unreportedRemovesRef.current.clear();
+    if (onItemsRefreshed) onItemsRefreshed(fresh);
+    else setItems(fresh);
+  }, [onItemsRefreshed]);
 
   // Column widths (resizable) — one fixed px per column keyed by column id
   // ("name", "status", "owner", "due", …). The Name column is the flexible
@@ -480,11 +521,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         return;
       }
       const data = await res.json();
-      if (data?.item) setItems((prev) => [...prev, data.item]);
+      if (data?.item) {
+        setItems((prev) => [...prev, data.item]);
+        reportCreated(data.item as BoardItemRow);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to duplicate");
     }
-  }, [boardId, canEdit, firstStatus]);
+  }, [boardId, canEdit, firstStatus, reportCreated]);
 
   // Type-first: the inline subtask row passes the title the user typed — no
   // "New subtask" placeholder to rename afterward. Returns {ok,error} so the
@@ -517,6 +561,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       }
       if (data?.item) {
         setItems((prev) => [...prev, data.item]);
+        reportCreated(data.item as BoardItemRow);
         setExpandedParents((prev) => new Set(prev).add(parentId));
       }
       return { ok: true };
@@ -527,14 +572,31 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit, firstStatus]);
+  }, [boardId, canEdit, firstStatus, reportCreated]);
 
   // Which parent's inline subtask input should grab focus next (set by the
   // hover "Add subtask" button, which also expands the parent).
   const [autoFocusSubtaskFor, setAutoFocusSubtaskFor] = useState<string | null>(null);
 
-  // Re-sync if the parent ever passes a refreshed initial set.
-  useEffect(() => { setItems(initialItems); }, [initialItems]);
+  // Re-sync if the parent ever passes a refreshed initial set — but
+  // NON-destructively: the parent snapshot wins, then any local creates /
+  // removals it has not heard about (unwired callbacks) are re-applied on
+  // top. A row the parent knowingly filtered out stays filtered out; a row
+  // it merely never learned of can no longer be dropped from the screen.
+  useEffect(() => {
+    setItems(() => {
+      const adds = unreportedAddsRef.current;
+      const removes = unreportedRemovesRef.current;
+      if (adds.size === 0 && removes.size === 0) return initialItems;
+      const incoming = new Set(initialItems.map((r) => r.id));
+      for (const id of Array.from(adds.keys())) if (incoming.has(id)) adds.delete(id);
+      for (const id of Array.from(removes)) if (!incoming.has(id)) removes.delete(id);
+      let next = initialItems;
+      if (removes.size > 0) next = next.filter((r) => !removes.has(r.id));
+      if (adds.size > 0) next = [...next, ...adds.values()];
+      return next;
+    });
+  }, [initialItems]);
 
   // Group axes the user can pick: built-in Status/Owner + any SELECT custom field.
   const groupOptions = useMemo(() => {
@@ -712,9 +774,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (failed > 0) setError(`${failed} failed to archive — refreshing`);
     // Optimistic: drop archived from local state
     setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    for (const id of ids) reportRemoved(id);
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected, confirm]);
+  }, [selected, confirm, reportRemoved]);
 
   // Drag-to-reorder. Computes fractional midpoint position so we never
   // renumber the whole list — Linear/Folder pattern. Optimistic local
@@ -743,6 +806,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       [...prev.map((r) => (r.id === draggedId ? { ...r, position: newPos } : r))]
         .sort((a, b) => a.position - b.position),
     );
+    onItemPatched?.(draggedId, { position: newPos });
     try {
       await fetch(`/api/items/${draggedId}`, {
         method: "PATCH",
@@ -752,9 +816,9 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } catch {
       // Revert by refetching the board on failure.
       const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-      if (fresh?.items) setItems(fresh.items);
+      if (fresh?.items) reportRefreshed(fresh.items);
     }
-  }, [items, boardId]);
+  }, [items, boardId, onItemPatched, reportRefreshed]);
 
   const bulkStatus = useCallback(async (status: string) => {
     if (selected.size === 0) return;
@@ -770,9 +834,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       ),
     );
     setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, status } : r)));
+    for (const id of ids) onItemPatched?.(id, { status });
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, onItemPatched]);
 
   const bulkOwner = useCallback(async (ownerId: string | null) => {
     if (selected.size === 0) return;
@@ -788,9 +853,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       ),
     );
     setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, ownerId } : r)));
+    for (const id of ids) onItemPatched?.(id, { ownerId });
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, onItemPatched]);
 
   const bulkDueAt = useCallback(async (iso: string | null) => {
     if (selected.size === 0) return;
@@ -806,9 +872,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       ),
     );
     setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, dueAt: iso } : r)));
+    for (const id of ids) onItemPatched?.(id, { dueAt: iso });
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, onItemPatched]);
 
   const bulkPriority = useCallback(async (priority: string | null) => {
     if (selected.size === 0) return;
@@ -824,9 +891,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       ),
     );
     setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, priority } : r)));
+    for (const id of ids) onItemPatched?.(id, { priority });
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, onItemPatched]);
 
   const bulkTrash = useCallback(async () => {
     if (selected.size === 0) return;
@@ -839,9 +907,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     const failed = results.filter((r) => r.status === "rejected").length;
     if (failed > 0) setError(`${failed} failed to delete`);
     setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    for (const id of ids) reportRemoved(id);
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected, confirm]);
+  }, [selected, confirm, reportRemoved]);
 
   // ClickUp-style rich add: create a task WITH the quick-set fields (assignee /
   // due / priority / tags) chosen inline before saving.
@@ -873,6 +942,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       }
       const row = data.item as BoardItemRow;
       setItems((prev) => [...prev, row]);
+      reportCreated(row);
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to add item";
@@ -881,13 +951,14 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     } finally {
       setAdding(false);
     }
-  }, [boardId, canEdit, firstStatus]);
+  }, [boardId, canEdit, firstStatus, reportCreated]);
 
   const handleUpdate = useCallback(async (id: string, patch: RowPatch) => {
     if (!canEdit) return;
     // Optimistic (zod on the API strips unknown keys like `owner`,
     // which only exists for the local optimistic row).
     setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    onItemPatched?.(id, patch);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
@@ -899,32 +970,36 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         setError(data?.error ?? "Failed to save change");
         // Refetch on failure to revert optimistic state.
         const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-        if (fresh?.items) setItems(fresh.items);
+        if (fresh?.items) reportRefreshed(fresh.items);
         return;
       }
       // Recurring task completed → apply the server's rolled-forward row.
       const data = await res.json().catch(() => null);
-      if (data?.recurred && data.item) setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.item } : r)));
+      if (data?.recurred && data.item) {
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...data.item } : r)));
+        onItemPatched?.(id, data.item as Partial<BoardItemRow>);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save change");
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, onItemPatched, reportRefreshed]);
 
   const handleArchive = useCallback(async (id: string) => {
     if (!canEdit) return;
     if (!(await confirm({ title: "Archive row", description: "Archive this row? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     setItems((prev) => prev.filter((r) => r.id !== id));
+    reportRemoved(id);
     try {
       const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
       if (!res.ok) {
         setError("Failed to archive — refreshing");
         const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-        if (fresh?.items) setItems(fresh.items);
+        if (fresh?.items) reportRefreshed(fresh.items);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to archive");
     }
-  }, [boardId, canEdit, confirm]);
+  }, [boardId, canEdit, confirm, reportRemoved, reportRefreshed]);
 
   // select + name + actions (3 fixed) + optional status/owner/priority/type/
   // tags/created + custom fields.
@@ -1132,7 +1207,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onToggleSelect={toggleRow}
         onUpdate={handleUpdate}
         onArchive={handleArchive}
-        onDeleted={(id) => setItems((prev) => prev.filter((r) => r.id !== id))}
+        onDeleted={(id) => { setItems((prev) => prev.filter((r) => r.id !== id)); reportRemoved(id); }}
         timeTrackingEnabled={timeTrackingEnabled}
         titleSuffix={renderTitleSuffix?.(row)}
         onOpen={onOpenItem ? () => onOpenItem(row.id) : undefined}

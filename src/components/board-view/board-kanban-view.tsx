@@ -33,13 +33,23 @@ interface BoardKanbanViewProps {
   statuses: StatusOption[];
   canEdit: boolean;
   onOpenItem?: (itemId: string) => void;
+  /** Item-state ownership contract (2026-08-12) — same as BoardTableView:
+   *  the board keeps an optimistic local copy of `initialItems` and re-syncs
+   *  whenever the prop changes identity, so a parent that re-renders items
+   *  (BoardCanvas does on every drawer edit) MUST wire these so its copy
+   *  learns about every card mutation — otherwise its next re-render clobbers
+   *  the local copy (new cards vanish, archived cards resurrect). */
+  onItemCreated?: (item: BoardItemRow) => void;
+  onItemPatched?: (id: string, patch: Partial<BoardItemRow>) => void;
+  onItemRemoved?: (id: string) => void;
+  onItemsRefreshed?: (items: BoardItemRow[]) => void;
   /** Space-module gating — hides the card's Priority / Tags / Start-timer when off. */
   priorityEnabled?: boolean;
   tagsEnabled?: boolean;
   timeTrackingEnabled?: boolean;
 }
 
-export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true }: BoardKanbanViewProps) {
+export function BoardKanbanView({ boardId, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, priorityEnabled = true, tagsEnabled = true, timeTrackingEnabled = true }: BoardKanbanViewProps) {
   const confirm = useConfirm();
   // Show all choice-type custom fields as chips on cards (capped so a card with
   // many fields doesn't sprawl) — so switching List → Board keeps custom data
@@ -57,7 +67,39 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
   const [bulkBusy, setBulkBusy] = useState(false);
   const lastSelectedRef = useRef<string | null>(null);
 
-  useEffect(() => { setItems(initialItems); }, [initialItems]);
+  // ── Item-state ownership (2026-08-12) ────────────────────────────────────
+  // Cards created/removed locally while the parent has NOT wired the matching
+  // callback are tracked so the resync effect can re-apply them over a stale
+  // parent snapshot instead of dropping/resurrecting them. Entries settle
+  // once an incoming snapshot reflects them.
+  const unreportedAddsRef = useRef<Map<string, BoardItemRow>>(new Map());
+  const unreportedRemovesRef = useRef<Set<string>>(new Set());
+  const reportCreated = useCallback((item: BoardItemRow) => {
+    if (onItemCreated) onItemCreated(item);
+    else unreportedAddsRef.current.set(item.id, item);
+  }, [onItemCreated]);
+  const reportRemoved = useCallback((id: string) => {
+    unreportedAddsRef.current.delete(id);
+    if (onItemRemoved) onItemRemoved(id);
+    else unreportedRemovesRef.current.add(id);
+  }, [onItemRemoved]);
+
+  // Re-sync when the parent passes a refreshed set — non-destructively (the
+  // parent snapshot wins, then unreported local creates/removals re-apply).
+  useEffect(() => {
+    setItems(() => {
+      const adds = unreportedAddsRef.current;
+      const removes = unreportedRemovesRef.current;
+      if (adds.size === 0 && removes.size === 0) return initialItems;
+      const incoming = new Set(initialItems.map((r) => r.id));
+      for (const id of Array.from(adds.keys())) if (incoming.has(id)) adds.delete(id);
+      for (const id of Array.from(removes)) if (!incoming.has(id)) removes.delete(id);
+      let next = initialItems;
+      if (removes.size > 0) next = next.filter((r) => !removes.has(r.id));
+      if (adds.size > 0) next = [...next, ...adds.values()];
+      return next;
+    });
+  }, [initialItems]);
 
   const statusOrder = useMemo(() => statuses.map((o) => o.value), [statuses]);
   const firstStatus = statusOrder[0] ?? "TO_DO";
@@ -108,9 +150,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     const ids = Array.from(selected);
     await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })));
     setItems((prev) => prev.map((r) => (selected.has(r.id) ? { ...r, ...local } : r)));
+    for (const id of ids) onItemPatched?.(id, local);
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected]);
+  }, [selected, onItemPatched]);
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Archive cards", description: `Archive ${selected.size} card${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
@@ -118,9 +161,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     const ids = Array.from(selected);
     await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}`, { method: "DELETE" })));
     setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    for (const id of ids) reportRemoved(id);
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected, confirm]);
+  }, [selected, confirm, reportRemoved]);
   const bulkTrash = useCallback(async () => {
     if (selected.size === 0) return;
     if (!(await confirm({ title: "Delete cards", description: `Delete ${selected.size} card${selected.size === 1 ? "" : "s"}? They move to Trash and can be restored for 60 days.`, destructive: true, confirmLabel: "Delete" }))) return;
@@ -128,9 +172,10 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
     const ids = Array.from(selected);
     await Promise.allSettled(ids.map((id) => fetch(`/api/items/${id}?hard=1`, { method: "DELETE" })));
     setItems((prev) => prev.filter((r) => !selected.has(r.id)));
+    for (const id of ids) reportRemoved(id);
     setSelected(new Set());
     setBulkBusy(false);
-  }, [selected, confirm]);
+  }, [selected, confirm, reportRemoved]);
 
   // Subtask counts per parent — shown on each card (ClickUp "N subtasks").
   const subtaskCountByParent = useMemo(() => {
@@ -146,15 +191,24 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
-      if (data?.items) setItems(data.items);
+      if (data?.items) {
+        // Fresh server truth supersedes tracked local mutations; hand it to
+        // the parent when wired (its resync flows back down) so a later
+        // parent re-render can't regress below what we just fetched.
+        unreportedAddsRef.current.clear();
+        unreportedRemovesRef.current.clear();
+        if (onItemsRefreshed) onItemsRefreshed(data.items);
+        else setItems(data.items);
+      }
     } catch {}
-  }, [boardId]);
+  }, [boardId, onItemsRefreshed]);
 
   // Optimistic PATCH — merges a display patch locally, sends the API body, and
   // refetches on failure. Backs assignee / due / priority / tags / status edits.
   const patchCard = useCallback(async (id: string, apiBody: Record<string, unknown>, localPatch: Partial<BoardItemRow>) => {
     if (!canEdit) return;
     setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...localPatch } : r)));
+    onItemPatched?.(id, localPatch);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
@@ -165,9 +219,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       // Recurring task completed → server rolled it forward (reset status +
       // advanced dates). Apply the returned row so the card visibly recurs.
       const d = await res.json().catch(() => null);
-      if (d?.recurred && d.item) setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...d.item } : r)));
+      if (d?.recurred && d.item) {
+        setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...d.item } : r)));
+        onItemPatched?.(id, d.item as Partial<BoardItemRow>);
+      }
     } catch (e) { setError(e instanceof Error ? e.message : "Update failed"); await refetch(); }
-  }, [canEdit, refetch]);
+  }, [canEdit, refetch, onItemPatched]);
 
   const moveTo = useCallback((id: string, newStatus: string) => {
     void patchCard(id, { status: newStatus }, { status: newStatus });
@@ -194,11 +251,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       const data = await res.json();
       if (!res.ok) { setError(data?.error ?? "Failed to add card"); return; }
       setItems((prev) => [...prev, data.item as BoardItemRow]);
+      if (data?.item) reportCreated(data.item as BoardItemRow);
       if (data?.item?.id) setAutoEditId(data.item.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add card");
     }
-  }, [boardId, canEdit]);
+  }, [boardId, canEdit, reportCreated]);
 
   const addSubtask = useCallback(async (parentId: string, status: string | null) => {
     if (!canEdit) return;
@@ -210,11 +268,11 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       });
       const data = await res.json();
       if (!res.ok) { setError(data?.error ?? "Failed to add subtask"); return; }
-      if (data?.item) { setItems((prev) => [...prev, data.item as BoardItemRow]); setAutoEditId(data.item.id); }
+      if (data?.item) { setItems((prev) => [...prev, data.item as BoardItemRow]); reportCreated(data.item as BoardItemRow); setAutoEditId(data.item.id); }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add subtask");
     }
-  }, [boardId, canEdit, firstStatus]);
+  }, [boardId, canEdit, firstStatus, reportCreated]);
 
   const duplicateCard = useCallback(async (card: BoardItemRow) => {
     if (!canEdit) return;
@@ -225,18 +283,22 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         body: JSON.stringify({ title: `${card.title} (copy)`, status: card.status ?? firstStatus, ownerId: card.ownerId, metadata: card.metadata }),
       });
       const data = await res.json();
-      if (res.ok && data?.item) setItems((prev) => [...prev, data.item as BoardItemRow]);
+      if (res.ok && data?.item) { setItems((prev) => [...prev, data.item as BoardItemRow]); reportCreated(data.item as BoardItemRow); }
     } catch {}
-  }, [boardId, canEdit, firstStatus]);
+  }, [boardId, canEdit, firstStatus, reportCreated]);
 
-  const removeLocal = useCallback((id: string) => setItems((prev) => prev.filter((r) => r.id !== id)), []);
+  const removeLocal = useCallback((id: string) => {
+    setItems((prev) => prev.filter((r) => r.id !== id));
+    reportRemoved(id);
+  }, [reportRemoved]);
 
   const archiveCard = useCallback(async (id: string) => {
     if (!canEdit) return;
     if (!(await confirm({ title: "Archive card", description: "Archive this card? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     setItems((prev) => prev.filter((r) => r.id !== id));
+    reportRemoved(id);
     try { const res = await fetch(`/api/items/${id}`, { method: "DELETE" }); if (!res.ok) await refetch(); } catch { await refetch(); }
-  }, [canEdit, confirm, refetch]);
+  }, [canEdit, confirm, refetch, reportRemoved]);
 
   return (
     <div className="space-y-2">

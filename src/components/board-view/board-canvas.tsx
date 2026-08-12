@@ -254,6 +254,25 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     setItems((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
   }, []);
 
+  // Item-state ownership (2026-08-12): the table/kanban renderers keep their
+  // own optimistic copy of the list and re-seed it from `filteredItems`
+  // whenever the canvas re-renders (drawer edit, filter change, …). These
+  // four callbacks mirror every renderer-side mutation into the canvas list
+  // FIRST, so that re-seed can never clobber a row the canvas hasn't heard
+  // about (the "created task disappears after a drawer edit" bug).
+  const handleItemCreated = useCallback((item: BoardItemRow) => {
+    setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
+  }, []);
+  const handleItemPatched = useCallback((id: string, patch: Partial<BoardItemRow>) => {
+    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }, []);
+  const handleItemRemoved = useCallback((id: string) => {
+    setItems((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+  const handleItemsRefreshed = useCallback((fresh: BoardItemRow[]) => {
+    setItems(fresh);
+  }, []);
+
   const handleItemArchived = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
     setOpenItemId(null);
@@ -324,6 +343,10 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           extraColumns={extraColumns}
           onHideField={viewId ? toggleColumn : undefined}
           onFieldsChanged={refetchFields}
+          onItemCreated={handleItemCreated}
+          onItemPatched={handleItemPatched}
+          onItemRemoved={handleItemRemoved}
+          onItemsRefreshed={handleItemsRefreshed}
           timeTrackingEnabled={timeTrackingOn}
           gridStyle={viewConfig?.grid === "monday" ? "table" : "list"}
         />
@@ -335,6 +358,10 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onItemCreated={handleItemCreated}
+          onItemPatched={handleItemPatched}
+          onItemRemoved={handleItemRemoved}
+          onItemsRefreshed={handleItemsRefreshed}
           priorityEnabled={priorityOn}
           tagsEnabled={tagsOn}
           timeTrackingEnabled={timeTrackingOn}
