@@ -126,6 +126,20 @@ export async function DELETE(
   }
 
   await prisma.keyResult.delete({ where: { id: kr.id } });
+
+  // If that was the goal's LAST key result, it is no longer measured by
+  // KRs. Clear the stored rollup number so the goal reads as "no measure
+  // yet" instead of freezing at the last derived score — a goal that was
+  // at 80% must not keep showing 80% with nothing left to back it. (A goal
+  // whose progress was hand-set never had KRs, so this path never touches
+  // it.) persistGoalRollupChain then propagates the empty state to ancestors.
+  const remaining = await prisma.keyResult.count({ where: { okrId } });
+  if (remaining === 0) {
+    await prisma.oKR.update({
+      where: { id: okrId },
+      data: { progress: 0, status: "BEHIND" },
+    });
+  }
   const rollup = await persistGoalRollupChain(okrId);
 
   return jsonSuccess({ message: "Deleted", okr: rollup });

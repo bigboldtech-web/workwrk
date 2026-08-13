@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { getCurrentPeriod, getLastPeriod } from "@/lib/kpi-utils";
+import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -93,12 +94,21 @@ export async function GET() {
 
   const todayCompleted = todayTasks.filter((t) => t.status === "COMPLETED").length;
 
+  // Show the SAME progress the goals page and DashboardOkrs widget show:
+  // derive it from the org-wide rollup rather than the stored OKR.progress
+  // column, which drifts stale whenever a linked KPI's reading changes.
+  const okrRollupCtx = await computeGoalRollups(orgId);
+  const derivedOkrs = myOkrs.map((o) => {
+    const roll = goalRollupFor(okrRollupCtx, o);
+    return { ...o, progress: roll.progress, status: roll.status, progressSource: roll.source };
+  });
+
   return jsonSuccess({
     kraAssignments,
     kpiRecords,
     sopAssignments,
     reviews,
-    myOkrs,
+    myOkrs: derivedOkrs,
     todayTasks,
     stats: {
       compositeScore: performanceScore?.score ?? null,

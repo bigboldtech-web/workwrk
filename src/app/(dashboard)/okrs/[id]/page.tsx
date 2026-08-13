@@ -12,7 +12,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { isManagerLevel, requireGoalPage } from "@/lib/page-gates";
-import { listGoalAssigneeEntries, resolveGoalMembersBatch } from "@/lib/goal-audience";
+import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
   ArrowLeft, AlertTriangle, Target, Calendar, Clock, Sparkles,
@@ -136,7 +136,7 @@ export default async function OkrDetailPage(
     okr.parentId
       ? prisma.oKR.findUnique({
           where: { id: okr.parentId },
-          select: { id: true, title: true, level: true },
+          select: { id: true, title: true, level: true, ownerId: true, departmentId: true },
         })
       : Promise.resolve(null),
     okr.ownerId
@@ -152,6 +152,14 @@ export default async function OkrDetailPage(
     resolveGoalMembersBatch(orgId, [{ id: okr.id, ownerId: okr.ownerId }]),
   ]);
   const audienceMembers = membersByOkr.get(okr.id) ?? [];
+
+  // The cascade crumb links up to the parent goal — but only show it if the
+  // viewer is actually allowed to see that parent. Otherwise a private goal
+  // nested above one you can see would leak its title through the crumb.
+  const sessionLike = {
+    user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel },
+  };
+  const parentCrumb = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
 
   const lastCheckIn = okr.keyResults
     .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
@@ -328,12 +336,12 @@ export default async function OkrDetailPage(
         {/* Right: cascade + activity */}
         <aside className="okrd__side">
           {/* Parent */}
-          {parent && (
+          {parentCrumb && (
             <section className="okrd-side-card">
               <header><h3>Cascades from</h3></header>
-              <Link href={`/okrs/${parent.id}`} className="okrd-parent">
-                <span className="okrd-parent__level">{parent.level}</span>
-                <span className="okrd-parent__title">{parent.title}</span>
+              <Link href={`/okrs/${parentCrumb.id}`} className="okrd-parent">
+                <span className="okrd-parent__level">{parentCrumb.level}</span>
+                <span className="okrd-parent__title">{parentCrumb.title}</span>
                 <ChevronRight />
               </Link>
             </section>

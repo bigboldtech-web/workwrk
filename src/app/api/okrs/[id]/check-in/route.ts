@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/activity";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 import {
   keyResultProgress,
+  inferKeyResultDirection,
   KR_KPI_SELECT,
   persistGoalRollupChain,
 } from "@/lib/alignment";
@@ -57,8 +58,17 @@ export async function POST(
     data: { keyResultId, value: Number(value), note: note || null, userId },
   });
 
-  // Update key result current value and progress
-  const progress = keyResultProgress(kr.startValue, kr.targetValue, Number(value));
+  // Update key result current value and progress. Honour the KR's
+  // direction: a reduce-it KR (target below start) makes progress RISE as
+  // the value FALLS, so a check-in that meets the target reads as ~100%,
+  // not 0%. The create/update routes already infer this; the check-in path
+  // must agree or the same numbers score differently depending on entry point.
+  const progress = keyResultProgress(
+    kr.startValue,
+    kr.targetValue,
+    Number(value),
+    inferKeyResultDirection(kr),
+  );
 
   await prisma.keyResult.update({
     where: { id: keyResultId },

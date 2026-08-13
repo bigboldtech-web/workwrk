@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
+import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 
 interface ScoreWeights {
   kpi: number;
@@ -156,10 +157,15 @@ async function calcSopCompliance(userId: string): Promise<number | null> {
 async function calcOkrScore(userId: string): Promise<number | null> {
   const okrs = await prisma.oKR.findMany({
     where: { ownerId: userId },
-    select: { progress: true },
+    select: { id: true, organizationId: true, progress: true, status: true },
   });
   if (okrs.length === 0) return null;
-  const avg = okrs.reduce((sum, o) => sum + o.progress, 0) / okrs.length;
+  // Score off the live rollup (KPI-linked KRs + measured children), the
+  // same number every goal surface shows, not the stored OKR.progress
+  // column which drifts stale between KPI readings.
+  const ctx = await computeGoalRollups(okrs[0].organizationId);
+  const avg =
+    okrs.reduce((sum, o) => sum + goalRollupFor(ctx, o).progress, 0) / okrs.length;
   return Math.min(Math.round(avg), 100);
 }
 

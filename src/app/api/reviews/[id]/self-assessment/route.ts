@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
 
 // GET: Get current user's review for self-assessment (with auto-populated metrics)
 export async function GET(
@@ -87,9 +88,19 @@ export async function GET(
     },
     orderBy: { createdAt: "desc" },
   });
-  const okrAvgProgress = myOkrs.length === 0
+  // Derive each goal's progress from the same org-wide rollup every other
+  // surface uses (live KRs + measured children), instead of reading the
+  // stored OKR.progress column — that column goes stale whenever a linked
+  // KPI's reading changes, so a raw read here would disagree with the
+  // dashboard and the goals page for the same goal.
+  const rollupCtx = await computeGoalRollups(orgId);
+  const derivedOkrs = myOkrs.map((o) => {
+    const roll = goalRollupFor(rollupCtx, o);
+    return { ...o, progress: roll.progress, status: roll.status, progressSource: roll.source };
+  });
+  const okrAvgProgress = derivedOkrs.length === 0
     ? null
-    : Math.round(myOkrs.reduce((s, o) => s + (o.progress || 0), 0) / myOkrs.length);
+    : Math.round(derivedOkrs.reduce((s, o) => s + (o.progress || 0), 0) / derivedOkrs.length);
 
   return jsonSuccess({
     review,
@@ -97,7 +108,7 @@ export async function GET(
       kpiRecords,
       avgKpiScore,
       avgSopScore,
-      okrs: myOkrs,
+      okrs: derivedOkrs,
       okrAvgProgress,
     },
     kraAssignments,
@@ -162,7 +173,7 @@ export async function PATCH(
     await prisma.notification.create({
       data: {
         title: "Self-Assessment Submitted",
-        message: `${(session as any).user.name || "An employee"} has submitted their self-assessment. Please complete the manager review.`,
+        message: `${(session.user as { name?: string | null } | undefined)?.name || "An employee"} has submitted their self-assessment. Please complete the manager review.`,
         type: "REVIEW",
         link: `/reviews/${cycleId}`,
         userId: review.reviewerId,
