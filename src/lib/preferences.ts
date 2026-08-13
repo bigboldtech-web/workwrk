@@ -102,7 +102,11 @@ export const DEFAULT_HOME: HomePref = {
 
 export const DEFAULT_THEME: ThemePref = {
   appearance: "LIGHT",
-  accent: "purple",
+  // "workwrk" = the brand blue #0073EA (the base --os-brand tokens, no CSS
+  // override). The old default was "purple", which painted every
+  // var(--os-brand) surface #7C3AED for anyone who never opened the theme
+  // picker — clashing with the design system and the hardcoded-blue chrome.
+  accent: "workwrk",
 };
 
 export const DEFAULT_DENSITY: DensityPref = "cozy";

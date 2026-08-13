@@ -72,7 +72,7 @@ export function ThemeApplier() {
   useEffect(() => {
     if (!prefs) return;
     const root = document.documentElement;
-    root.setAttribute("data-accent", prefs.theme.accent || "mint");
+    root.setAttribute("data-accent", prefs.theme.accent || "workwrk");
     root.setAttribute("data-density", prefs.density || "cozy");
   }, [prefs]);
 

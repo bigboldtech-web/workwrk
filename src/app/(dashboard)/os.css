@@ -156,6 +156,22 @@
   .workwrk-os ul, .workwrk-os ol { list-style: none; padding: 0; margin: 0; }
   .workwrk-os a { color: inherit; text-decoration: none; }
 }
+
+/* ── Focus treatment ──────────────────────────────────────────────────
+   One ring everywhere. The browser's default is a harsh black double
+   outline, and Next's router leaves the clicked link focused after every
+   navigation — so tabs and nav links sat there wearing the ugly UA ring
+   ("that border of selection"). Replace it: a soft brand ring for
+   keyboard focus (:focus-visible — accessibility kept, and now on-brand),
+   nothing for pointer focus (:focus without :focus-visible). Outline
+   follows border-radius in all modern engines. */
+.workwrk-os :is(a, button, [role="button"], [role="tab"], summary):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--os-brand) 45%, transparent);
+  outline-offset: 1px;
+}
+.workwrk-os :is(a, button, [role="button"], [role="tab"], summary):focus:not(:focus-visible) {
+  outline: none;
+}
 .workwrk-os svg { display: block; }
 .workwrk-os ::-webkit-scrollbar { width: 8px; height: 8px; }
 .workwrk-os ::-webkit-scrollbar-track { background: transparent; }
