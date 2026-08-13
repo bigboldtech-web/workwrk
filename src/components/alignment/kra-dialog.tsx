@@ -175,7 +175,9 @@ export function KraDialog({
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
                 placeholder="0"
-                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] text-right tabular-nums focus:outline-none focus:border-[#0073EA]"
+                // [appearance:textfield] + the webkit pseudo rules hide the
+                // native number-spinner arrows — type it, don't click it.
+                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] text-right tabular-nums focus:outline-none focus:border-[#0073EA] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
               <span className="text-[11.5px] text-zinc-400">Every holder inherits this as their starting weightage.</span>
             </div>

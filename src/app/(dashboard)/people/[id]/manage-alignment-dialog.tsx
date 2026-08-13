@@ -68,7 +68,7 @@ function WeightCell({ value, disabled, onSave }: {
           if (e.key === "Escape") { setDraft(String(value)); }
         }}
         aria-label="Weightage %"
-        className="w-12 h-6 px-1 rounded border border-zinc-200 text-[11px] text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50"
+        className="w-12 h-6 px-1 rounded border border-zinc-200 text-[11px] text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
       <span className="text-[11px] text-zinc-400">%</span>
     </span>
@@ -267,7 +267,7 @@ export function ManageAlignmentDialog({
                 </select>
                 <Input type="number" min={1} max={100} value={newKraWeight}
                   onChange={(e) => setNewKraWeight(Number(e.target.value))}
-                  className="w-16 h-8 text-[12.5px]" aria-label="Weightage %" />
+                  className="w-16 h-8 text-[12.5px] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
                 <Button size="sm" onClick={() => void addKra()} disabled={!newKraId || busy !== null}>
                   {busy === "add-kra" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 </Button>
