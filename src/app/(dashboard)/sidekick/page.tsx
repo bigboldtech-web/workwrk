@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles, Plus, Search, Trash2, Paperclip, ArrowUp,
   Wrench, Pin, MessageSquare,
@@ -68,8 +68,13 @@ function groupByDay(sessions: Session[]) {
 export default function SidekickPage() {
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const router = useRouter();
   const urlParams = useSearchParams();
-  const newHandled = useRef(false);
+  // Armed latch for ?new=1: disarms when it fires, re-arms when the param
+  // leaves the URL. Stripping must go through the ROUTER — a plain
+  // history.replaceState leaves Next's searchParams stale, so the next
+  // "+" push looked like a no-op and the button went dead after one use.
+  const newArmed = useRef(true);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -136,16 +141,17 @@ export default function SidekickPage() {
     }
   }
 
-  // The AI app's sidebar "+" routes here with ?new=1 → start a fresh chat
-  // once, then clean the param so refresh/back doesn't re-trigger it.
+  // The AI app's sidebar "+" routes here with ?new=1 → start a fresh chat,
+  // strip the param via the router (re-arming the latch), so EVERY "+"
+  // click starts a chat — not just the first.
   useEffect(() => {
-    if (urlParams?.get("new") === "1" && !newHandled.current) {
-      newHandled.current = true;
-      window.history.replaceState(null, "", "/sidekick");
-      void newChat();
-    }
+    if (urlParams?.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    router.replace("/sidekick", { scroll: false });
+    void newChat();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlParams]);
+  }, [urlParams, router]);
 
   async function deleteSession(id: string, e: React.MouseEvent) {
     e.stopPropagation();

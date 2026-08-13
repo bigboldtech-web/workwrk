@@ -44,10 +44,27 @@ export default function DashboardsPage() {
   const { toast } = useOsToast();
   const mine = searchParams.get("mine") === "1";
   const [dashboards, setDashboards] = useState<ApiDashboard[] | null>(null);
-  const [creating, setCreating] = useState(searchParams.get("new") === "1");
+  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
+
+  // The Dashboards "+" routes here with ?new=1 → open the create card and
+  // strip the param via the router. useState only seeds the FIRST render,
+  // so the old seed-once version left the "+" dead whenever this page was
+  // already mounted. Armed latch: disarms on fire, re-arms when the param
+  // leaves the URL, so every "+" click opens the card.
+  const newArmed = useRef(true);
+  useEffect(() => {
+    if (searchParams.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    setCreating(true);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("new");
+    const qs = params.toString();
+    router.replace(qs ? `/dashboards?${qs}` : "/dashboards", { scroll: false });
+  }, [searchParams, router]);
 
   const load = useCallback(async () => {
     try {

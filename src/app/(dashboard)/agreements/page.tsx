@@ -47,7 +47,10 @@ export default function AgreementsPage() {
   const [edit, setEdit] = useState<{ row: Row; mode: "rename" | "folder"; value: string } | null>(null);
   const [folderEdit, setFolderEdit] = useState<{ items: Row[]; value: string } | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const newHandled = useRef(false);
+  // Armed latch for ?new=1 — disarms on fire, re-arms once router.replace
+  // strips the param (the old version never stripped it, so a refresh
+  // re-opened the dialog and repeat "+" clicks were dead).
+  const newArmed = useRef(true);
 
   const qs = view === "templates" ? "?view=templates" : "";
 
@@ -102,8 +105,12 @@ export default function AgreementsPage() {
   function newTemplate() { void createWith({ isTemplate: true }); }
 
   useEffect(() => {
-    if (search?.get("new") === "1" && !newHandled.current) { newHandled.current = true; openNew(); }
-  }, [search]);
+    if (search?.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    router.replace("/agreements", { scroll: false });
+    openNew();
+  }, [search, router]);
 
   // ── Row actions ──
   async function patchRow(id: string, body: Record<string, unknown>, ok: string) {

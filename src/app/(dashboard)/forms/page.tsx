@@ -25,7 +25,10 @@ type ApiForm = {
 export default function FormsPage() {
   const router = useRouter();
   const search = useSearchParams();
-  const newHandled = useRef(false);
+  // Armed latch for ?new=1 — disarms on fire, re-arms when the param
+  // leaves the URL (via router.replace, which a plain history.replaceState
+  // cannot do since Next's searchParams never sees it).
+  const newArmed = useRef(true);
   const [forms, setForms] = useState<ApiForm[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
@@ -61,16 +64,17 @@ export default function FormsPage() {
     } catch { toast("Couldn't create form"); }
   }
 
-  // The Forms app's sidebar "+" routes here with ?new=1 → open quick-add
-  // once, then clean the param so refresh/back doesn't re-trigger it.
+  // The Forms app's sidebar "+" routes here with ?new=1 → open quick-add and
+  // strip the param via the router, re-arming the latch — so the "+" works
+  // every time, including after the user cancels the name prompt.
   useEffect(() => {
-    if (search?.get("new") === "1" && !newHandled.current) {
-      newHandled.current = true;
-      window.history.replaceState(null, "", "/forms");
-      void quickAdd();
-    }
+    if (search?.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    router.replace("/forms", { scroll: false });
+    void quickAdd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, router]);
 
   const [generating, setGenerating] = useState(false);
   async function aiGenerate() {
