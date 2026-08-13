@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
+import { MenuList, MenuItem } from "@/components/ui/menu";
+import { MorePortal } from "@/components/layout/os/more-portal";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
@@ -119,6 +121,25 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Column drag-reorder + resize.
   const [dragColId, setDragColId] = useState<string | null>(null);
   const resizeRef = useRef<{ colId: string; startX: number; startW: number } | null>(null);
+  // Row right-click menu — the same action set as the row's hover icons
+  // (open / delete), opened at the cursor via the shared MorePortal.
+  const [rowMenu, setRowMenu] = useState<{ rowId: string; x: number; y: number } | null>(null);
+  const rowMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
+  const rowMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!rowMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (rowMenuPanelRef.current?.contains(e.target as Node)) return;
+      setRowMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRowMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [rowMenu]);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -739,7 +760,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             {filteredRows.length === 0 ? (
               <tr><td colSpan={table.columns.length + 3} className="dtbl__empty">{rows.length === 0 ? "No rows yet. Add one below." : "No rows match the current search/filter."}</td></tr>
             ) : filteredRows.map((r) => (
-              <tr key={r.id}>
+              <tr
+                key={r.id}
+                onContextMenu={(e) => {
+                  // Let inputs / editable cells keep their native menu (same
+                  // guard as the board table rows).
+                  if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
+                  e.preventDefault();
+                  setRowMenu({ rowId: r.id, x: e.clientX, y: e.clientY });
+                }}
+              >
                 <td className="dtbl__rowhandle">
                   <button type="button" onClick={() => deleteRow(r.id)} title="Delete row"><Trash2 /></button>
                 </td>
@@ -772,6 +802,31 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
       <button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>
       </>)}
+
+      {rowMenu ? (
+        <MorePortal
+          anchorRef={rowMenuAnchorRef}
+          panelRef={rowMenuPanelRef}
+          width={180}
+          open
+          placement="below"
+          point={{ x: rowMenu.x, y: rowMenu.y }}
+        >
+          <MenuList className="min-w-[180px]">
+            <MenuItem
+              icon={ChevronRight}
+              label="Open row"
+              onClick={() => { setActiveRowId(rowMenu.rowId); setRowMenu(null); }}
+            />
+            <MenuItem
+              icon={Trash2}
+              label="Delete row"
+              destructive
+              onClick={() => { setRowMenu(null); void deleteRow(rowMenu.rowId); }}
+            />
+          </MenuList>
+        </MorePortal>
+      ) : null}
 
       {activeRow && (
         <RowDetailModal

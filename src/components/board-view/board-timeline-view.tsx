@@ -12,14 +12,22 @@ import {
   type BoardItemRow,
   type StatusOption,
 } from "@/lib/board-items-shared";
+import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 
 const WEEK_COUNT = 12;
 const MS_PER_DAY = 86_400_000;
 
 interface BoardTimelineViewProps {
+  boardId?: string;
   initialItems: BoardItemRow[];
   statuses: StatusOption[];
+  canEdit?: boolean;
   onOpenItem?: (itemId: string) => void;
+  /** Canvas sync after the context menu duplicates an item. */
+  onItemCreated?: (item: BoardItemRow) => void;
+  /** Canvas sync after the context menu archives/deletes an item. */
+  onItemRemoved?: (id: string) => void;
+  timeTrackingEnabled?: boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -34,7 +42,9 @@ function toDate(v: Date | string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function BoardTimelineView({ initialItems, statuses, onOpenItem }: BoardTimelineViewProps) {
+export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardTimelineViewProps) {
+  // Right-click on any bar / unscheduled chip opens the shared item menu.
+  const menu = useItemContextMenu();
   // Window: 2 weeks back from this week's Sunday, 10 forward.
   const windowStart = useMemo(() => {
     const s = startOfWeek(new Date());
@@ -140,7 +150,7 @@ export function BoardTimelineView({ initialItems, statuses, onOpenItem }: BoardT
               <div
                 key={i}
                 className={`px-1.5 py-2 text-[10.5px] tabular-nums border-l border-zinc-100 ${
-                  w.isCurrent ? "bg-violet-50/50 font-semibold text-violet-700" : "text-zinc-400"
+                  w.isCurrent ? "bg-[var(--os-brand)]/[0.06] font-semibold text-[var(--os-brand)]" : "text-zinc-400"
                 }`}
               >
                 {w.label}
@@ -184,6 +194,7 @@ export function BoardTimelineView({ initialItems, statuses, onOpenItem }: BoardT
                       key={r.item.id}
                       type="button"
                       onClick={() => onOpenItem?.(r.item.id)}
+                      onContextMenu={(e) => menu.openItemMenu(e, r.item)}
                       className="absolute rounded text-left text-[10.5px] font-medium text-white px-1.5 truncate hover:brightness-95"
                       style={{
                         left: `calc(${(r.startCol / totalDays) * 100}% + 2px)`,
@@ -215,6 +226,7 @@ export function BoardTimelineView({ initialItems, statuses, onOpenItem }: BoardT
               key={it.id}
               type="button"
               onClick={() => onOpenItem?.(it.id)}
+              onContextMenu={(e) => menu.openItemMenu(e, it)}
               className="inline-flex items-center h-6 px-2 rounded-md border border-zinc-200 text-[11.5px] text-zinc-600 hover:bg-zinc-50 max-w-[200px] truncate"
               title={it.title}
             >
@@ -226,6 +238,15 @@ export function BoardTimelineView({ initialItems, statuses, onOpenItem }: BoardT
           ) : null}
         </div>
       ) : null}
+      <ItemContextMenuHost
+        menu={menu}
+        boardId={boardId}
+        canEdit={canEdit}
+        timeTrackingEnabled={timeTrackingEnabled}
+        onOpenItem={onOpenItem}
+        onItemCreated={onItemCreated}
+        onItemRemoved={onItemRemoved}
+      />
     </div>
   );
 }

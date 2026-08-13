@@ -384,8 +384,10 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           statuses={statuses}
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
-          onItemCreated={(item) => setItems((prev) => [...prev, item])}
+          onItemCreated={handleItemCreated}
           onItemChanged={handleItemChanged}
+          onItemRemoved={handleItemRemoved}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "GANTT" ? (
         <BoardGanttView
@@ -398,7 +400,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
           onItemChanged={handleItemChanged}
-          onItemCreated={(item) => setItems((prev) => [...prev, item])}
+          onItemCreated={handleItemCreated}
+          onItemRemoved={handleItemRemoved}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "CHART" ? (
         <BoardChartView
@@ -431,9 +435,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "TIMELINE" ? (
         <BoardTimelineView
+          boardId={boardId}
           initialItems={filteredItems}
           statuses={statuses}
+          canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onItemCreated={handleItemCreated}
+          onItemRemoved={handleItemRemoved}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "MAP" ? (
         <BoardMapView
@@ -447,9 +456,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardWhiteboardView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
       ) : viewType === "HIERARCHY" ? (
         <BoardHierarchyView
+          boardId={boardId}
           initialItems={filteredItems}
           statuses={statuses}
+          canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onItemCreated={handleItemCreated}
+          onItemRemoved={handleItemRemoved}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "PIVOT" ? (
         <BoardPivotView
@@ -463,9 +477,14 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         />
       ) : viewType === "CARDS" ? (
         <BoardCardsView
+          boardId={boardId}
           initialItems={filteredItems}
           statuses={statuses}
+          canEdit={canEdit}
           onOpenItem={(id) => setOpenItemId(id)}
+          onItemCreated={handleItemCreated}
+          onItemRemoved={handleItemRemoved}
+          timeTrackingEnabled={timeTrackingOn}
         />
       ) : viewType === "ACTIVITY" ? (
         <BoardActivityView

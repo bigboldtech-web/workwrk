@@ -10,15 +10,25 @@ import { useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, ListTree } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { PersonAvatar } from "./assignee-picker";
+import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 
 interface BoardHierarchyViewProps {
+  boardId?: string;
   initialItems: BoardItemRow[];
   statuses: StatusOption[];
+  canEdit?: boolean;
   onOpenItem?: (itemId: string) => void;
+  /** Canvas sync after the context menu duplicates a node's item. */
+  onItemCreated?: (item: BoardItemRow) => void;
+  /** Canvas sync after the context menu archives/deletes a node's item. */
+  onItemRemoved?: (id: string) => void;
+  timeTrackingEnabled?: boolean;
 }
 
-export function BoardHierarchyView({ initialItems, statuses, onOpenItem }: BoardHierarchyViewProps) {
+export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardHierarchyViewProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Right-click on any tree row opens the shared item menu.
+  const menu = useItemContextMenu();
 
   const { roots, childrenByParent } = useMemo(() => {
     const byParent = new Map<string, BoardItemRow[]>();
@@ -66,6 +76,7 @@ export function BoardHierarchyView({ initialItems, statuses, onOpenItem }: Board
         <div
           className="flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-50 group"
           style={{ paddingLeft: 12 + depth * 22 }}
+          onContextMenu={(e) => menu.openItemMenu(e, row)}
         >
           {children.length > 0 ? (
             <button
@@ -108,8 +119,19 @@ export function BoardHierarchyView({ initialItems, statuses, onOpenItem }: Board
   };
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white py-1.5 divide-y divide-zinc-50">
-      {roots.map((r) => renderNode(r, 0))}
-    </div>
+    <>
+      <div className="rounded-lg border border-zinc-200 bg-white py-1.5 divide-y divide-zinc-50">
+        {roots.map((r) => renderNode(r, 0))}
+      </div>
+      <ItemContextMenuHost
+        menu={menu}
+        boardId={boardId}
+        canEdit={canEdit}
+        timeTrackingEnabled={timeTrackingEnabled}
+        onOpenItem={onOpenItem}
+        onItemCreated={onItemCreated}
+        onItemRemoved={onItemRemoved}
+      />
+    </>
   );
 }

@@ -13,6 +13,7 @@ import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
 import { makeStatusLookup, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import type { FieldDef } from "@/lib/field-catalog";
+import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 
 interface BoardCalendarViewProps {
   boardId: string;
@@ -31,15 +32,21 @@ interface BoardCalendarViewProps {
   /** Called after a drag-reschedule PATCH succeeds so the parent canvas
    *  syncs shared item state (same contract as the drawer). */
   onItemChanged?: (item: BoardItemRow) => void;
+  /** Called after the context menu archives/deletes a chip's item. */
+  onItemRemoved?: (id: string) => void;
+  /** Time Tracking module gate — hides "Start timer" in the context menu. */
+  timeTrackingEnabled?: boolean;
 }
 
 function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged }: BoardCalendarViewProps) {
+export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled }: BoardCalendarViewProps) {
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
+  // Right-click on any day chip opens the shared item menu.
+  const menu = useItemContextMenu();
   const [month, setMonth] = useState<{ y: number; m: number }>({ y: now.getFullYear(), m: now.getMonth() });
   const [error, setError] = useState<string | null>(null);
   const [busyDay, setBusyDay] = useState<string | null>(null);
@@ -325,6 +332,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           }}
                           onDragEnd={() => { setDragId(null); setDragOverDay(null); }}
                           onClick={() => onOpenItem?.(it.id)}
+                          onContextMenu={(e) => menu.openItemMenu(e, it)}
                           className={`flex w-full items-center gap-1.5 rounded-[4px] border-l-2 px-1.5 py-[3px] text-left text-[11px] font-medium leading-4 text-zinc-700 transition-[filter] hover:brightness-[0.96] ${
                             canEdit ? "cursor-grab active:cursor-grabbing" : ""
                           } ${dragId === it.id ? "opacity-40" : ""}`}
@@ -353,6 +361,15 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
           })}
         </div>
       </div>
+      <ItemContextMenuHost
+        menu={menu}
+        boardId={boardId}
+        canEdit={canEdit}
+        timeTrackingEnabled={timeTrackingEnabled}
+        onOpenItem={onOpenItem}
+        onItemCreated={onItemCreated}
+        onItemRemoved={onItemRemoved}
+      />
     </section>
   );
 }

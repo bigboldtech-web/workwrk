@@ -11,14 +11,26 @@ import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-
 import { PersonAvatar } from "./assignee-picker";
 import { PriorityFlag } from "./priority-picker";
 import { TagChip } from "./tag-picker";
+import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 
 interface BoardCardsViewProps {
+  boardId?: string;
   initialItems: BoardItemRow[];
   statuses: StatusOption[];
+  canEdit?: boolean;
   onOpenItem?: (itemId: string) => void;
+  /** Canvas sync after the context menu duplicates a card. */
+  onItemCreated?: (item: BoardItemRow) => void;
+  /** Canvas sync after the context menu archives/deletes a card. */
+  onItemRemoved?: (id: string) => void;
+  timeTrackingEnabled?: boolean;
 }
 
-export function BoardCardsView({ initialItems, statuses, onOpenItem }: BoardCardsViewProps) {
+export function BoardCardsView({ boardId, initialItems, statuses, canEdit = false, onOpenItem, onItemCreated, onItemRemoved, timeTrackingEnabled }: BoardCardsViewProps) {
+  // Right-click on any card opens the shared item menu (one hidden host,
+  // re-targeted per card).
+  const menu = useItemContextMenu();
+
   if (initialItems.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
@@ -29,6 +41,7 @@ export function BoardCardsView({ initialItems, statuses, onOpenItem }: BoardCard
   }
 
   return (
+    <>
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
       {initialItems.map((it) => {
         const opt = it.status ? statuses.find((o) => o.value === it.status) : null;
@@ -41,6 +54,7 @@ export function BoardCardsView({ initialItems, statuses, onOpenItem }: BoardCard
             key={it.id}
             type="button"
             onClick={() => onOpenItem?.(it.id)}
+            onContextMenu={(e) => menu.openItemMenu(e, it)}
             className="flex flex-col text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition-all"
             style={opt ? { borderTop: `3px solid ${opt.color}` } : undefined}
           >
@@ -82,5 +96,15 @@ export function BoardCardsView({ initialItems, statuses, onOpenItem }: BoardCard
         );
       })}
     </div>
+    <ItemContextMenuHost
+      menu={menu}
+      boardId={boardId}
+      canEdit={canEdit}
+      timeTrackingEnabled={timeTrackingEnabled}
+      onOpenItem={onOpenItem}
+      onItemCreated={onItemCreated}
+      onItemRemoved={onItemRemoved}
+    />
+    </>
   );
 }

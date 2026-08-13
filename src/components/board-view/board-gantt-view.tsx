@@ -27,6 +27,7 @@ import { isDoneStatus, makeStatusLookup, type BoardItemRow, type StatusOption } 
 import type { FieldDef } from "@/lib/field-catalog";
 import { StatusGlyph } from "./status-glyph";
 import { GanttBacklogPanel } from "./gantt-backlog-panel";
+import { ItemContextMenuHost, useItemContextMenu } from "./item-context-menu";
 
 // Zoom steps for the visible window (fewer weeks = zoomed in). ClickUp
 // exposes this as the floating +/− stack on the canvas. 4 weeks is the
@@ -65,6 +66,10 @@ interface BoardGanttViewProps {
   onItemChanged?: (item: BoardItemRow) => void;
   /** Called after the bottom add-row creates a task so the canvas appends it. */
   onItemCreated?: (item: BoardItemRow) => void;
+  /** Called after the context menu archives/deletes a task. */
+  onItemRemoved?: (id: string) => void;
+  /** Time Tracking module gate — hides "Start timer" in the context menu. */
+  timeTrackingEnabled?: boolean;
 }
 
 function startOfWeek(d: Date): Date {
@@ -104,8 +109,12 @@ export function BoardGanttView({
   onOpenItem,
   onItemChanged,
   onItemCreated,
+  onItemRemoved,
+  timeTrackingEnabled,
 }: BoardGanttViewProps) {
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
+  // Right-click on a name row / bar / marker opens the shared item menu.
+  const menu = useItemContextMenu();
   const firstStatus = statuses[0]?.value ?? "TO_DO";
   const today = new Date();
   // Window anchor — start 2 weeks back from this week so "now" sits about a
@@ -321,6 +330,8 @@ export function BoardGanttView({
 
   const beginDrag = (e: React.PointerEvent, id: string, mode: DragMode) => {
     if (!canEdit) return;
+    // Primary button only — right-click opens the context menu, not a drag.
+    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     const state: DragState = { id, mode, startX: e.clientX, dayDelta: 0 };
@@ -502,7 +513,12 @@ export function BoardGanttView({
               {rows.map(({ item, start, end }) => {
                 const current = item.status ? statusLookup[item.status] ?? null : null;
                 return (
-                  <div key={item.id} className="flex items-center gap-2 px-3 border-b border-zinc-100 hover:bg-zinc-50" style={{ height: ROW_H }}>
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-2 px-3 border-b border-zinc-100 hover:bg-zinc-50"
+                    style={{ height: ROW_H }}
+                    onContextMenu={(e) => menu.openItemMenu(e, item)}
+                  >
                     <StatusGlyph current={current} statuses={statuses} />
                     <button
                       type="button"
@@ -689,6 +705,7 @@ export function BoardGanttView({
                           if (justDraggedRef.current) { justDraggedRef.current = false; return; }
                           onOpenItem?.(item.id);
                         }}
+                        onContextMenu={(e) => menu.openItemMenu(e, item)}
                         title={`${item.title} — unscheduled${canEdit ? " · drag to schedule" : ""}`}
                         className={`absolute rounded-full border border-dashed border-zinc-400 bg-white ${
                           canEdit ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
@@ -728,6 +745,7 @@ export function BoardGanttView({
                           w.setDate(w.getDate() - 7);
                           setAnchor(w);
                         }}
+                        onContextMenu={(e) => menu.openItemMenu(e, item)}
                         className={`absolute z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-zinc-200 bg-white text-zinc-400 shadow-sm hover:bg-zinc-50 hover:text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-white/10 ${
                           isLeft ? "left-1" : "right-1"
                         }`}
@@ -778,6 +796,7 @@ export function BoardGanttView({
                       key={item.id}
                       className={`group absolute ${d ? "opacity-90 ring-2 ring-[var(--os-brand)] rounded-[6px]" : ""}`}
                       style={{ left: `calc(${leftPct}% + 2px)`, width: `calc(${widthPct}% - 4px)`, top, height: 24 }}
+                      onContextMenu={(e) => menu.openItemMenu(e, item)}
                     >
                       {tipStart && tipEnd ? (
                         <span className="absolute -top-[22px] left-0 z-30 whitespace-nowrap rounded-[5px] bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white pointer-events-none dark:bg-zinc-100 dark:text-zinc-900">
@@ -859,6 +878,15 @@ export function BoardGanttView({
           ) : null}
         </div>
       )}
+      <ItemContextMenuHost
+        menu={menu}
+        boardId={boardId}
+        canEdit={canEdit}
+        timeTrackingEnabled={timeTrackingEnabled}
+        onOpenItem={onOpenItem}
+        onItemCreated={onItemCreated}
+        onItemRemoved={onItemRemoved}
+      />
     </section>
   );
 }
