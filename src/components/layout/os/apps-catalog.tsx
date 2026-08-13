@@ -334,6 +334,11 @@ interface SpaceRow {
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
 const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
+// Label for the user's personal profile entry at the top of the Home
+// sidebar. Kept as a single constant so the wording changes in one place.
+// TODO(rename): user-chosen label pending
+const PROFILE_NAV_LABEL = "My Profile";
+
 function FavSubLabel({ children }: { children: React.ReactNode }) {
   return (
     <li
@@ -384,6 +389,12 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
 function HomeSidebar() {
   const pathname = usePathname() || "";
   const router = useRouter();
+  const { data: session } = useSession();
+  // /people/me redirects to /people/<myId>, so the active check must match
+  // the resolved id, not the literal "me" alias (which never survives nav).
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const profileActive =
+    pathname === "/people/me" || (meId !== null && pathname === `/people/${meId}`);
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -770,10 +781,10 @@ function HomeSidebar() {
   return (
     <>
       <ul>
+        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={profileActive} />
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
-        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname === "/people/me"} />
         <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
         <MoreNavItem />
       </ul>
