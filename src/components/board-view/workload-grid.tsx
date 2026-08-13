@@ -14,7 +14,7 @@
 // per-person "unscheduled" backlog pill instead of day cells.
 //
 // Date scaffolding (startOfWeek / MS_PER_DAY / sticky name column /
-// two-tier month+day header / rose today marker / weekend shading) is
+// two-tier month+day header / brand-red today marker / weekend shading) is
 // copied from board-gantt-view.tsx — those helpers are module-private
 // there, so they're re-declared here (Monday-anchored, per ClickUp).
 

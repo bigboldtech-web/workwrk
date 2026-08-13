@@ -11,8 +11,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getBoardForReader } from "@/lib/board";
-
-const DONE_STATUSES = new Set(["done", "complete", "completed", "closed", "resolved"]);
+import { isDoneStatusName } from "@/lib/board-items-shared";
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
@@ -45,8 +44,8 @@ export async function GET(req: Request) {
 
   const filteredByStatus = raw.filter((it) => {
     if (statusFilter === "all") return true;
-    const s = (it.status ?? "").toLowerCase();
-    const done = DONE_STATUSES.has(s);
+    // Shared cross-board done rule — same helper /team/workload uses.
+    const done = isDoneStatusName(it.status);
     return statusFilter === "done" ? done : !done;
   });
 

@@ -71,13 +71,35 @@ export function makeStatusLookup(statuses: readonly StatusOption[]): Record<stri
   return Object.fromEntries(statuses.map((o) => [o.value, o]));
 }
 
+// ── The ONE cross-surface done rule ────────────────────────────────
+//
+// Cross-board surfaces (/api/me/items, /team/workload) can't consult a
+// single board's status set, so they fall back to this name heuristic.
+// Board-scoped callers resolve through the status group first; the
+// heuristic only decides values missing from the set. One definition,
+// every caller — a task can't read "done" on /today and "open" on the
+// workload grid.
+const DONE_STATUS_NAMES: ReadonlySet<string> = new Set([
+  "done", "complete", "completed", "closed", "resolved",
+]);
+
+/** Cross-board done check by status NAME alone (no status set in scope).
+ *  Shared by /api/me/items and isDoneStatus's unknown-value fallback. */
+export function isDoneStatusName(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return DONE_STATUS_NAMES.has(value.trim().toLowerCase());
+}
+
 /** Completion check driven by the status group — replaces hardcoded
- *  `status === "DONE"` comparisons. Unknown/unset statuses count as
- *  open so stale rows never silently drop out of overdue logic. */
+ *  `status === "DONE"` comparisons. Values missing from the set fall
+ *  back to the shared cross-board name heuristic: a custom board's
+ *  "COMPLETED" row evaluated against the default trio still counts as
+ *  done, while genuinely unknown statuses stay open so stale rows never
+ *  silently drop out of overdue logic. */
 export function isDoneStatus(statuses: readonly StatusOption[], value: string | null | undefined): boolean {
   if (!value) return false;
   const opt = statuses.find((o) => o.value === value);
-  return opt ? opt.group !== "ACTIVE" : false;
+  return opt ? opt.group !== "ACTIVE" : isDoneStatusName(value);
 }
 
 // Task-system phase 2 — first-class priority. Order matters: it's the

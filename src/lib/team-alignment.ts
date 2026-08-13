@@ -6,13 +6,16 @@
 //
 // Three slices:
 //   - KRAs per report (active KRAAssignments)
-//   - KPI compliance: for each report, % of their current-period KPIs
-//     that are SUBMITTED or APPROVED.
+//   - KPI compliance: for each report, % of their CURRENT-PERIOD KPI
+//     records (currentPeriodKey, "YYYY-MM" — the same canonical period
+//     /people/me measures) that are SUBMITTED or APPROVED. All-history
+//     counting would let one great quarter mask a silent one.
 //   - SOP read-rate: for each report, % of their SOPAssignments that
 //     are COMPLETED.
 
 import { prisma } from "@/lib/prisma";
 import { getEffectiveReportTree } from "@/lib/reporting-line";
+import { currentPeriodKey } from "@/lib/person-alignment";
 import { weekStartFor } from "@/lib/weekly-review";
 
 export interface TeamMember {
@@ -105,7 +108,9 @@ export async function getTeamAlignment(args: {
       include: { kra: { select: { id: true, name: true } } },
     }),
     prisma.kPIRecord.findMany({
-      where: { userId: { in: validIds } },
+      // Current canonical period only, org-scoped — compliance is "are
+      // this month's gauges filed", not a lifetime average.
+      where: { userId: { in: validIds }, period: currentPeriodKey(), kpi: { organizationId } },
       select: { userId: true, status: true },
     }),
     prisma.sOPAssignment.findMany({

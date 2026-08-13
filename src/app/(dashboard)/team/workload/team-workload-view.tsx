@@ -1,13 +1,13 @@
 "use client";
 
 // TeamWorkloadView — thin client wrapper around the SAME WorkloadGrid
-// the board WORKLOAD view renders (no parallel renderer). Cross-board
-// rows can't share one board's custom status set, so completion checks
-// run against DEFAULT_STATUS_OPTIONS: isDoneStatus treats unknown
-// values as open (safe side — boards with custom done-statuses inflate
-// load slightly rather than hiding work). Settings persist migration-
-// free in localStorage; read in an effect (not the initializer) so the
-// SSR pass and the first client render agree.
+// the board WORKLOAD view renders (no parallel renderer). The server
+// page already excluded done/closed rows against each board's OWN
+// status set; the grid's re-check runs against DEFAULT_STATUS_OPTIONS
+// where isDoneStatus falls back to the shared cross-board name rule
+// (the /api/me/items rule), so both layers agree. Settings persist
+// migration-free in localStorage; read in an effect (not the
+// initializer) so the SSR pass and the first client render agree.
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";

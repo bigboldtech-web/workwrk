@@ -126,6 +126,11 @@ function MemberCard({
   onActed: (userId: string, o: ReviewOverride) => void;
 }) {
   const initials = `${m.firstName?.[0] ?? ""}${m.lastName?.[0] ?? ""}`.toUpperCase() || "?";
+  // KRA weightage — surfaced so the board agrees with /people/me. A
+  // person's active assignments should total 100%; anything else means
+  // their scorecard is over- or under-weighted and gets flagged below.
+  const weightTotal = Math.round(m.activeKras.reduce((acc, k) => acc + (k.weightage || 0), 0));
+  const weightsOff = m.activeKras.length > 0 && weightTotal !== 100;
   return (
     <article className="rounded-lg border border-zinc-200 bg-white">
       <header className="flex items-center gap-3 px-4 py-3 border-b border-zinc-200">
@@ -144,7 +149,9 @@ function MemberCard({
 
       <div className="px-4 py-3 grid grid-cols-2 gap-3">
         <Metric Icon={Target} label="KRAs" value={m.activeKras.length}
-          sub={m.activeKras.length > 0 ? m.activeKras.slice(0, 2).map((k) => k.name).join(" · ") : "None assigned"} />
+          sub={m.activeKras.length > 0
+            ? m.activeKras.slice(0, 2).map((k) => `${k.name} ${Math.round(k.weightage || 0)}%`).join(" · ")
+            : "None assigned"} />
         <Metric Icon={ChartLine} label="KPI compliance" value={m.kpis.compliancePct == null ? "—" : `${m.kpis.compliancePct}%`}
           sub={m.kpis.total > 0 ? `${m.kpis.submitted + m.kpis.approved}/${m.kpis.total} on time` : "No KPIs yet"}
           tone={complianceTone(m.kpis.compliancePct)} />
@@ -156,6 +163,16 @@ function MemberCard({
 
       {review.status === "SUBMITTED" && review.id ? (
         <ReviewActions userId={m.id} reviewId={review.id} onActed={onActed} />
+      ) : null}
+
+      {weightsOff ? (
+        <div
+          className="px-4 py-2 border-t border-zinc-200 text-xs text-amber-700 bg-amber-500/5 flex items-center gap-2"
+          title={m.activeKras.map((k) => `${k.name}: ${Math.round(k.weightage || 0)}%`).join(" · ")}
+        >
+          <AlertCircle className="w-3 h-3" />
+          KRA weights total {weightTotal}%, not 100%
+        </div>
       ) : null}
 
       {m.sops.mandatoryPending > 0 ? (

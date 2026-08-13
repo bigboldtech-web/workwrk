@@ -13,7 +13,8 @@
 // Top-line totals roll up across every IC in the entire tree.
 
 import { prisma } from "@/lib/prisma";
-import { getEffectiveReportTree, getAllDirectReports } from "@/lib/reporting-line";
+import { getAllDirectReports } from "@/lib/reporting-line";
+import { currentPeriodKey } from "@/lib/person-alignment";
 import { weekStartFor } from "@/lib/weekly-review";
 
 export interface SubManager {
@@ -109,7 +110,9 @@ async function aggregateForUserIds(userIds: string[], organizationId: string): P
       _count: { userId: true },
     }),
     prisma.kPIRecord.findMany({
-      where: { userId: { in: userIds }, kpi: { organizationId } },
+      // Current canonical period only — the same window /team/alignment
+      // and /people/me measure, so the two surfaces agree per person.
+      where: { userId: { in: userIds }, period: currentPeriodKey(), kpi: { organizationId } },
       select: { userId: true, status: true },
     }),
     prisma.sOPAssignment.findMany({

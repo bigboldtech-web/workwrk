@@ -679,7 +679,7 @@ export function BoardGanttView({
                 {rows.map((_, i) => (
                   <span key={`sep-${i}`} aria-hidden className="absolute left-0 right-0 h-px bg-zinc-100" style={{ top: (i + 1) * ROW_H }} />
                 ))}
-                {/* Today line — rose, centered in the day column, dot on top. */}
+                {/* Today line — brand red, centered in the day column, dot on top. */}
                 {todayInWindow ? (
                   <>
                     <span aria-hidden className="absolute top-0 bottom-0 w-px bg-[#E2445C]" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />

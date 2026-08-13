@@ -93,7 +93,9 @@ export default async function TeamRollupPage() {
 
             {data.subTeams.length > 0 ? (
               <section>
-                <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">Sub-teams</h2>
+                <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
+                  Sub-teams <span className="normal-case tracking-normal text-zinc-400">· metrics cover each manager&rsquo;s direct reports only</span>
+                </h2>
                 <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {data.subTeams.map((t) => (
                     <li key={t.manager.id}><SubTeamCard t={t} /></li>
@@ -129,7 +131,11 @@ function SubTeamCard({ t }: { t: SubTeam }) {
         </span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{t.manager.firstName} {t.manager.lastName}</div>
-          <div className="text-xs text-zinc-500 truncate">{t.metrics.reportCount} report{t.metrics.reportCount === 1 ? "" : "s"}</div>
+          {/* Truthful scope: sub-team metrics cover this manager's DIRECT
+              reports only — deeper levels are not walked here. */}
+          <div className="text-xs text-zinc-500 truncate" title="Metrics cover this manager's direct reports only">
+            {t.metrics.reportCount} direct report{t.metrics.reportCount === 1 ? "" : "s"}
+          </div>
         </div>
         <OwnReviewBadge own={t.manager.ownReview} />
         {t.manager.via === "dotted" ? (

@@ -24,7 +24,6 @@ import {
   Award, AlertTriangle, Gauge, Star,
 } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -47,6 +46,9 @@ type ApiKra = {
   description?: string | null;
   roleId?: string | null;
   role?: { id: string; title: string } | null;
+  /** Role-level default weightage (0-100) — the share of the job title
+   *  this area carries. Summed per role for the "weight N%" chip. */
+  weight?: number;
   kpis?: { id: string; name: string; unit?: string | null; isNorthStar?: boolean }[];
 };
 
@@ -159,6 +161,24 @@ export default function KraKpiPage() {
     return rows.slice(0, 12);
   }, [kras, q]);
 
+  // Per-role KRA weight sums for the "weight N%" chip — the picker
+  // shows at a glance which job titles actually sum to 100%. The chip
+  // only renders when the loaded KRA list covers the role's FULL
+  // template set (team-scoped /api/kras can return a partial slice for
+  // managers; a partial sum would be a lie, so it renders nothing).
+  const weightByRole = useMemo(() => {
+    const m = new Map<string, { sum: number; count: number }>();
+    for (const k of kras) {
+      const rid = k.roleId ?? k.role?.id;
+      if (!rid) continue;
+      const cur = m.get(rid) ?? { sum: 0, count: 0 };
+      cur.sum += typeof k.weight === "number" && Number.isFinite(k.weight) ? k.weight : 0;
+      cur.count += 1;
+      m.set(rid, cur);
+    }
+    return m;
+  }, [kras]);
+
   const stats = useMemo(() => {
     const list = roles ?? [];
     const roleKras = list.reduce((acc, r) => acc + (r._count?.kraTemplates ?? 0), 0);
@@ -267,7 +287,7 @@ export default function KraKpiPage() {
 
         {/* Job titles */}
         {loadError ? (
-          <OsEmptyView Icon={Target} iconGradient={GRAD.redPink} title="Couldn't load job titles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load job titles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : roles === null ? (
           <div className="py-16 text-center text-[13px] text-zinc-400">Loading…</div>
         ) : roles.length === 0 ? (
@@ -286,7 +306,7 @@ export default function KraKpiPage() {
             <section key={g.name}>
               <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{g.name}</h2>
               <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100">
-                {g.items.map((r) => <RoleRow key={r.id} role={r} />)}
+                {g.items.map((r) => <RoleRow key={r.id} role={r} weight={weightByRole.get(r.id)} />)}
               </div>
             </section>
           ))
@@ -333,10 +353,12 @@ export default function KraKpiPage() {
   );
 }
 
-function RoleRow({ role: r }: { role: ApiRole }) {
+function RoleRow({ role: r, weight }: { role: ApiRole; weight?: { sum: number; count: number } }) {
   const kraCount = r._count?.kraTemplates ?? 0;
   const kpiCount = r.kpiCount ?? 0;
   const people = r._count?.users ?? 0;
+  // Only claim a weight total when the loaded KRAs cover the whole role.
+  const weightSum = weight && kraCount > 0 && weight.count === kraCount ? Math.round(weight.sum) : null;
   return (
     <Link href={`/people/roles/${r.id}`} className="flex items-center gap-3 px-3 py-2.5 hover:bg-zinc-50">
       <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[#0073EA]/10 shrink-0">
@@ -367,6 +389,23 @@ function RoleRow({ role: r }: { role: ApiRole }) {
           {kraCount} KRA{kraCount === 1 ? "" : "s"} · {kpiCount} KPI{kpiCount === 1 ? "" : "s"}
         </span>
       )}
+      {weightSum != null ? (
+        weightSum === 100 ? (
+          <span
+            className="inline-flex items-center rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10.5px] font-medium text-zinc-600 tabular-nums shrink-0"
+            title="KRA weights total 100%"
+          >
+            weight 100%
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600 tabular-nums shrink-0"
+            title={`KRA weights total ${weightSum}%, should be 100%`}
+          >
+            <AlertTriangle className="w-3 h-3" /> weight {weightSum}%
+          </span>
+        )
+      ) : null}
       <ChevronRight className="w-4 h-4 text-zinc-300 shrink-0" />
     </Link>
   );
