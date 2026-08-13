@@ -80,8 +80,8 @@ export default async function TeamRollupPage() {
               <TeamStatTile icon={GitBranchPlus} label="Sub-teams" value={data.totals.subTeamCount} accent="#F59E0B" />
               <TeamStatTile icon={UsersIcon} label="People in tree" value={data.totals.aggregateReportCount} accent="#0073EA"
                 sub={`${data.totals.directIcCount} direct · ${data.totals.aggregateReportCount - data.totals.directIcCount} via sub-teams`} />
-              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
-              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
+              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={data.totals.avgKpiCompliancePct == null ? "—" : `${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
+              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={data.totals.avgSopReadRatePct == null ? "—" : `${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -143,8 +143,8 @@ function SubTeamCard({ t }: { t: SubTeam }) {
       </header>
       <div className="px-4 py-3 grid grid-cols-2 gap-3">
         <SubMetric Icon={Target} label="KRAs" value={t.metrics.activeKras} />
-        <SubMetric Icon={ChartLine} label="KPI compliance" value={`${t.metrics.avgKpiCompliancePct}%`} tone={tone(t.metrics.avgKpiCompliancePct)} />
-        <SubMetric Icon={BookOpenCheck} label="SOP read-rate" value={`${t.metrics.avgSopReadRatePct}%`} tone={tone(t.metrics.avgSopReadRatePct)} />
+        <SubMetric Icon={ChartLine} label="KPI compliance" value={t.metrics.avgKpiCompliancePct == null ? "—" : `${t.metrics.avgKpiCompliancePct}%`} tone={tone(t.metrics.avgKpiCompliancePct)} />
+        <SubMetric Icon={BookOpenCheck} label="SOP read-rate" value={t.metrics.avgSopReadRatePct == null ? "—" : `${t.metrics.avgSopReadRatePct}%`} tone={tone(t.metrics.avgSopReadRatePct)} />
         <SubMetric Icon={ClipboardCheck} label="Reviews submitted" value={`${t.metrics.weeklyReviewSubmittedPct}%`} tone={tone(t.metrics.weeklyReviewSubmittedPct)} />
       </div>
     </article>
@@ -157,7 +157,8 @@ function SubMetric({
   Icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string | number;
-  tone?: "good" | "warn" | "bad";
+  /** "none" = unmeasured — renders neutral. */
+  tone?: "good" | "warn" | "bad" | "none";
 }) {
   const valueColor =
     tone === "bad" ? "text-red-600" :
@@ -208,8 +209,8 @@ function DirectIcRow({ ic }: { ic: DirectIcSummary }) {
         <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Dotted</span>
       ) : null}
       <ReviewChip review={ic.weeklyReview} />
-      <span className={`text-xs ${toneClass(tone(ic.kpiCompliancePct))}`}>KPI {ic.kpiCompliancePct}%</span>
-      <span className={`text-xs ${toneClass(tone(ic.sopReadRatePct))}`}>SOP {ic.sopReadRatePct}%</span>
+      <span className={`text-xs ${toneClass(tone(ic.kpiCompliancePct))}`}>KPI {ic.kpiCompliancePct == null ? "—" : `${ic.kpiCompliancePct}%`}</span>
+      <span className={`text-xs ${toneClass(tone(ic.sopReadRatePct))}`}>SOP {ic.sopReadRatePct == null ? "—" : `${ic.sopReadRatePct}%`}</span>
       <Link href={`/people/${ic.id}`} className="text-zinc-500 hover:text-zinc-900">
         <ChevronRight className="w-4 h-4" />
       </Link>
@@ -233,12 +234,14 @@ function ReviewChip({ review }: { review: DirectIcSummary["weeklyReview"] }) {
   }`}>{approved ? "Approved" : "Changes"}</span>;
 }
 
-function tone(pct: number): "good" | "warn" | "bad" {
+function tone(pct: number | null): "good" | "warn" | "bad" | "none" {
+  if (pct == null) return "none"; // unmeasured — neutral, not a health signal
   if (pct >= 80) return "good";
   if (pct >= 50) return "warn";
   return "bad";
 }
 
-function toneClass(t: "good" | "warn" | "bad"): string {
+function toneClass(t: "good" | "warn" | "bad" | "none"): string {
+  if (t === "none") return "text-zinc-400";
   return t === "good" ? "text-emerald-700" : t === "warn" ? "text-amber-700" : "text-red-700";
 }

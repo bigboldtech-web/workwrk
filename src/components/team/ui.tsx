@@ -8,7 +8,8 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function pctColor(pct: number): string {
+export function pctColor(pct: number | null): string {
+  if (pct == null) return "#9CA3AF"; // unmeasured — neutral, not a health signal
   if (pct >= 90) return "#16a34a";
   if (pct >= 70) return "#0073EA";
   if (pct >= 50) return "#f59e0b";

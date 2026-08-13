@@ -80,8 +80,8 @@ export default async function TeamAlignmentPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <TeamStatTile icon={UsersIcon} label="Reports" value={data.totals.reportCount} accent="#0073EA" sub="direct + dotted" />
               <TeamStatTile icon={Target} label="Active KRAs" value={data.totals.activeKras} accent={TAUPE.soft} sub="across your team" />
-              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={`${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
-              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={`${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
+              <TeamStatTile icon={ChartLine} label="Avg KPI compliance" value={data.totals.avgKpiCompliancePct == null ? "—" : `${data.totals.avgKpiCompliancePct}%`} accent={pctColor(data.totals.avgKpiCompliancePct)} />
+              <TeamStatTile icon={BookOpenCheck} label="Avg SOP read-rate" value={data.totals.avgSopReadRatePct == null ? "—" : `${data.totals.avgSopReadRatePct}%`} accent={pctColor(data.totals.avgSopReadRatePct)} />
             </div>
 
             <TeamAlignmentBoard members={data.members} />

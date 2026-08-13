@@ -34,8 +34,9 @@ export interface SubManager {
 export interface SubTeamMetrics {
   reportCount: number;
   activeKras: number;
-  avgKpiCompliancePct: number;
-  avgSopReadRatePct: number;
+  /** null = no measured members. */
+  avgKpiCompliancePct: number | null;
+  avgSopReadRatePct: number | null;
   /** % of reports who have a SUBMITTED-or-ACKNOWLEDGED weekly review for this week. */
   weeklyReviewSubmittedPct: number;
   /** % of reports whose this-week review has managerStatus=APPROVED. */
@@ -54,8 +55,9 @@ export interface DirectIcSummary {
   email: string;
   avatar: string | null;
   via: "solid" | "dotted";
-  kpiCompliancePct: number;
-  sopReadRatePct: number;
+  /** null = no records to measure — renders as "—", never a fake 100%. */
+  kpiCompliancePct: number | null;
+  sopReadRatePct: number | null;
   weeklyReview: { status: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED" | null; managerStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED" | null };
 }
 
@@ -68,8 +70,9 @@ export interface DirectorRollup {
     subTeamCount: number;
     directIcCount: number;
     aggregateReportCount: number;
-    avgKpiCompliancePct: number;
-    avgSopReadRatePct: number;
+    /** null = no measured members. */
+    avgKpiCompliancePct: number | null;
+    avgSopReadRatePct: number | null;
     weeklyReviewSubmittedPct: number;
     weeklyReviewApprovedPct: number;
   };
@@ -77,21 +80,22 @@ export interface DirectorRollup {
 
 interface PerUserAggregates {
   activeKras: number;
-  kpiCompliancePct: number;
-  sopReadRatePct: number;
+  /** null = no records to measure — renders as "—", never a fake 100%. */
+  kpiCompliancePct: number | null;
+  sopReadRatePct: number | null;
   weeklyReview: {
     status: "DRAFT" | "SUBMITTED" | "ACKNOWLEDGED" | null;
     managerStatus: "PENDING" | "APPROVED" | "CHANGES_REQUESTED" | null;
   };
 }
 
-async function aggregateForUserIds(userIds: string[]): Promise<Map<string, PerUserAggregates>> {
+async function aggregateForUserIds(userIds: string[], organizationId: string): Promise<Map<string, PerUserAggregates>> {
   const out = new Map<string, PerUserAggregates>();
   for (const id of userIds) {
     out.set(id, {
       activeKras: 0,
-      kpiCompliancePct: 100,
-      sopReadRatePct: 100,
+      kpiCompliancePct: null,
+      sopReadRatePct: null,
       weeklyReview: { status: null, managerStatus: null },
     });
   }
@@ -101,15 +105,15 @@ async function aggregateForUserIds(userIds: string[]): Promise<Map<string, PerUs
   const [kras, kpis, sops, reviews] = await Promise.all([
     prisma.kRAAssignment.groupBy({
       by: ["userId"],
-      where: { userId: { in: userIds }, status: "ACTIVE" },
+      where: { userId: { in: userIds }, status: "ACTIVE", kra: { organizationId } },
       _count: { userId: true },
     }),
     prisma.kPIRecord.findMany({
-      where: { userId: { in: userIds } },
+      where: { userId: { in: userIds }, kpi: { organizationId } },
       select: { userId: true, status: true },
     }),
     prisma.sOPAssignment.findMany({
-      where: { userId: { in: userIds } },
+      where: { userId: { in: userIds }, sop: { organizationId } },
       select: { userId: true, status: true },
     }),
     prisma.weeklyReview.findMany({
@@ -132,7 +136,7 @@ async function aggregateForUserIds(userIds: string[]): Promise<Map<string, PerUs
   }
   for (const [uid, b] of kpiBuckets) {
     const cur = out.get(uid)!;
-    cur.kpiCompliancePct = b.total > 0 ? Math.round((b.ok / b.total) * 100) : 100;
+    cur.kpiCompliancePct = b.total > 0 ? Math.round((b.ok / b.total) * 100) : null;
   }
 
   const sopBuckets = new Map<string, { total: number; done: number }>();
@@ -144,7 +148,7 @@ async function aggregateForUserIds(userIds: string[]): Promise<Map<string, PerUs
   }
   for (const [uid, b] of sopBuckets) {
     const cur = out.get(uid)!;
-    cur.sopReadRatePct = b.total > 0 ? Math.round((b.done / b.total) * 100) : 100;
+    cur.sopReadRatePct = b.total > 0 ? Math.round((b.done / b.total) * 100) : null;
   }
 
   for (const r of reviews) {
@@ -173,8 +177,8 @@ export async function getDirectorRollup(args: {
         subTeamCount: 0,
         directIcCount: 0,
         aggregateReportCount: 0,
-        avgKpiCompliancePct: 0,
-        avgSopReadRatePct: 0,
+        avgKpiCompliancePct: null,
+        avgSopReadRatePct: null,
         weeklyReviewSubmittedPct: 0,
         weeklyReviewApprovedPct: 0,
       },
@@ -228,7 +232,7 @@ export async function getDirectorRollup(args: {
     ...subManagerIds,
     ...Array.from(reportsBySubManager.values()).flat(),
   ]));
-  const agg = await aggregateForUserIds(allReportIds);
+  const agg = await aggregateForUserIds(allReportIds, organizationId);
 
   // 6. Build sub-team rollups.
   const subTeams: SubTeam[] = subManagerIds.map((subId) => {
@@ -236,12 +240,13 @@ export async function getDirectorRollup(args: {
     const reports = reportsBySubManager.get(subId) ?? [];
 
     let kras = 0;
-    let kpiSum = 0, sopSum = 0, reviewedCount = 0, approvedCount = 0;
+    // Sum only MEASURED members — null (no data) must not count as perfect.
+    let kpiSum = 0, kpiN = 0, sopSum = 0, sopN = 0, reviewedCount = 0, approvedCount = 0;
     for (const rid of reports) {
       const a = agg.get(rid)!;
       kras += a.activeKras;
-      kpiSum += a.kpiCompliancePct;
-      sopSum += a.sopReadRatePct;
+      if (a.kpiCompliancePct != null) { kpiSum += a.kpiCompliancePct; kpiN += 1; }
+      if (a.sopReadRatePct != null) { sopSum += a.sopReadRatePct; sopN += 1; }
       if (a.weeklyReview.status === "SUBMITTED" || a.weeklyReview.status === "ACKNOWLEDGED") reviewedCount += 1;
       if (a.weeklyReview.managerStatus === "APPROVED") approvedCount += 1;
     }
@@ -260,8 +265,8 @@ export async function getDirectorRollup(args: {
       metrics: {
         reportCount: n,
         activeKras: kras,
-        avgKpiCompliancePct: n > 0 ? Math.round(kpiSum / n) : 0,
-        avgSopReadRatePct: n > 0 ? Math.round(sopSum / n) : 0,
+        avgKpiCompliancePct: kpiN > 0 ? Math.round(kpiSum / kpiN) : null,
+        avgSopReadRatePct: sopN > 0 ? Math.round(sopSum / sopN) : null,
         weeklyReviewSubmittedPct: n > 0 ? Math.round((reviewedCount / n) * 100) : 0,
         weeklyReviewApprovedPct: n > 0 ? Math.round((approvedCount / n) * 100) : 0,
       },
@@ -290,11 +295,11 @@ export async function getDirectorRollup(args: {
     ...directIcIds,
     ...Array.from(reportsBySubManager.values()).flat(),
   ];
-  let aggregateKpi = 0, aggregateSop = 0, aggregateReviewed = 0, aggregateApproved = 0;
+  let aggregateKpi = 0, aggregateKpiN = 0, aggregateSop = 0, aggregateSopN = 0, aggregateReviewed = 0, aggregateApproved = 0;
   for (const id of allIcIds) {
     const a = agg.get(id)!;
-    aggregateKpi += a.kpiCompliancePct;
-    aggregateSop += a.sopReadRatePct;
+    if (a.kpiCompliancePct != null) { aggregateKpi += a.kpiCompliancePct; aggregateKpiN += 1; }
+    if (a.sopReadRatePct != null) { aggregateSop += a.sopReadRatePct; aggregateSopN += 1; }
     if (a.weeklyReview.status === "SUBMITTED" || a.weeklyReview.status === "ACKNOWLEDGED") aggregateReviewed += 1;
     if (a.weeklyReview.managerStatus === "APPROVED") aggregateApproved += 1;
   }
@@ -308,8 +313,8 @@ export async function getDirectorRollup(args: {
       subTeamCount: subTeams.length,
       directIcCount: directIcs.length,
       aggregateReportCount: totalIcs,
-      avgKpiCompliancePct: totalIcs > 0 ? Math.round(aggregateKpi / totalIcs) : 0,
-      avgSopReadRatePct: totalIcs > 0 ? Math.round(aggregateSop / totalIcs) : 0,
+      avgKpiCompliancePct: aggregateKpiN > 0 ? Math.round(aggregateKpi / aggregateKpiN) : null,
+      avgSopReadRatePct: aggregateSopN > 0 ? Math.round(aggregateSop / aggregateSopN) : null,
       weeklyReviewSubmittedPct: totalIcs > 0 ? Math.round((aggregateReviewed / totalIcs) * 100) : 0,
       weeklyReviewApprovedPct: totalIcs > 0 ? Math.round((aggregateApproved / totalIcs) * 100) : 0,
     },

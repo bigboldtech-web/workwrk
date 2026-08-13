@@ -580,7 +580,7 @@ export function BoardGanttView({
                         >
                           <span className="text-zinc-400">{"SMTWTFS"[d.getDay()]}</span>
                           {i === todayCol ? (
-                            <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-rose-500 text-white text-[9.5px] font-semibold">
+                            <span className="inline-flex items-center justify-center w-[16px] h-[16px] rounded-full bg-[#E2445C] text-white text-[9.5px] font-semibold">
                               {d.getDate()}
                             </span>
                           ) : (
@@ -600,7 +600,7 @@ export function BoardGanttView({
                       return (
                         <div key={i} className="border-l first:border-l-0 border-zinc-100 px-2 flex items-center text-[10.5px]">
                           {isThisWeek ? (
-                            <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-rose-500 text-white text-[10px] font-semibold">
+                            <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#E2445C] text-white text-[10px] font-semibold">
                               {w.getDate()}
                             </span>
                           ) : (
@@ -682,8 +682,8 @@ export function BoardGanttView({
                 {/* Today line — rose, centered in the day column, dot on top. */}
                 {todayInWindow ? (
                   <>
-                    <span aria-hidden className="absolute top-0 bottom-0 w-px bg-rose-500" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />
-                    <span aria-hidden className="absolute w-[5px] h-[5px] rounded-full bg-rose-500 -translate-x-1/2" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%`, top: -2 }} />
+                    <span aria-hidden className="absolute top-0 bottom-0 w-px bg-[#E2445C]" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%` }} />
+                    <span aria-hidden className="absolute w-[5px] h-[5px] rounded-full bg-[#E2445C] -translate-x-1/2" style={{ left: `${((todayCol + 0.5) / totalDays) * 100}%`, top: -2 }} />
                   </>
                 ) : null}
 

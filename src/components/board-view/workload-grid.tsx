@@ -592,7 +592,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                       >
                         <span className="text-zinc-300 font-medium">{WEEKDAY_INITIALS[d.getDay()]}</span>
                         {isToday ? (
-                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-rose-500 text-white text-[10px] font-semibold">
+                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#E2445C] text-white text-[10px] font-semibold">
                             {d.getDate()}
                           </span>
                         ) : (

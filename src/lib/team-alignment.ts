@@ -30,15 +30,17 @@ export interface TeamMember {
     approved: number;
     pending: number;
     rejected: number;
-    /** Compliance % = (submitted + approved) / total. 100 if total=0. */
-    compliancePct: number;
+    /** Compliance % = (submitted + approved) / total. null when the person
+     *  has NO records — an unmeasured person must read "—", not a perfect
+     *  100% (the least-instrumented team looked the healthiest). */
+    compliancePct: number | null;
   };
   sops: {
     total: number;
     completed: number;
     mandatoryPending: number;
-    /** Read-rate % = completed / total. 100 if total=0. */
-    readRatePct: number;
+    /** Read-rate % = completed / total. null when nothing is assigned. */
+    readRatePct: number | null;
   };
   weeklyReview: {
     /** This week's review for the member (Phase 5b). null = no row yet. */
@@ -55,8 +57,9 @@ export interface TeamAlignment {
   totals: {
     reportCount: number;
     activeKras: number;
-    avgKpiCompliancePct: number;
-    avgSopReadRatePct: number;
+    /** null = nobody on the team has any records to measure. */
+    avgKpiCompliancePct: number | null;
+    avgSopReadRatePct: number | null;
   };
 }
 
@@ -75,7 +78,7 @@ export async function getTeamAlignment(args: {
       managerId,
       generatedAt: new Date().toISOString(),
       members: [],
-      totals: { reportCount: 0, activeKras: 0, avgKpiCompliancePct: 0, avgSopReadRatePct: 0 },
+      totals: { reportCount: 0, activeKras: 0, avgKpiCompliancePct: null, avgSopReadRatePct: null },
     };
   }
 
@@ -150,12 +153,12 @@ export async function getTeamAlignment(args: {
     const kpis = kpisByUser.get(u.id) ?? { total: 0, submitted: 0, approved: 0, pending: 0, rejected: 0, compliancePct: 0 };
     kpis.compliancePct = kpis.total > 0
       ? Math.round(((kpis.submitted + kpis.approved) / kpis.total) * 100)
-      : 100;
+      : null;
 
     const sops = sopsByUser.get(u.id) ?? { total: 0, completed: 0, mandatoryPending: 0, readRatePct: 0 };
     sops.readRatePct = sops.total > 0
       ? Math.round((sops.completed / sops.total) * 100)
-      : 100;
+      : null;
 
     const wr = reviewByUser.get(u.id);
     return {
@@ -177,12 +180,16 @@ export async function getTeamAlignment(args: {
   });
 
   const totalKras = members.reduce((acc, m) => acc + m.activeKras.length, 0);
-  const avgKpiCompliancePct = members.length > 0
-    ? Math.round(members.reduce((acc, m) => acc + m.kpis.compliancePct, 0) / members.length)
-    : 0;
-  const avgSopReadRatePct = members.length > 0
-    ? Math.round(members.reduce((acc, m) => acc + m.sops.readRatePct, 0) / members.length)
-    : 0;
+  // Averages over MEASURED members only — a null (no data) neither lifts
+  // nor sinks the team number, and an entirely-unmeasured team reads null.
+  const kpiMeasured = members.filter((m) => m.kpis.compliancePct != null);
+  const avgKpiCompliancePct = kpiMeasured.length > 0
+    ? Math.round(kpiMeasured.reduce((acc, m) => acc + (m.kpis.compliancePct ?? 0), 0) / kpiMeasured.length)
+    : null;
+  const sopMeasured = members.filter((m) => m.sops.readRatePct != null);
+  const avgSopReadRatePct = sopMeasured.length > 0
+    ? Math.round(sopMeasured.reduce((acc, m) => acc + (m.sops.readRatePct ?? 0), 0) / sopMeasured.length)
+    : null;
 
   return {
     managerId,

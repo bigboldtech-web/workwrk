@@ -200,7 +200,7 @@
 :root[data-accent="mint"], :root[data-accent="mint"] .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-soft: #E0F2EE; --os-brand-deep: #2E9080; --os-brand-rail: #18352F; }
 :root[data-accent="black"], :root[data-accent="black"] .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; --os-brand-rail: #1F2024; }
 :root[data-accent="purple"], :root[data-accent="purple"] .workwrk-os { --os-brand: #7C3AED; --os-brand-hover: #6328C8; --os-brand-soft: #EFE7FC; --os-brand-deep: #6328C8; --os-brand-rail: #2A1A47; }
-:root[data-accent="blue"], :root[data-accent="blue"] .workwrk-os { --os-brand: #3B82F6; --os-brand-hover: #2563EB; --os-brand-soft: #E2EBFD; --os-brand-deep: #2563EB; --os-brand-rail: #1A2C4A; }
+:root[data-accent="blue"], :root[data-accent="blue"] .workwrk-os { --os-brand: #0073EA; --os-brand-hover: #0060B9; --os-brand-soft: #E6F1FB; --os-brand-deep: #1F76C2; --os-brand-rail: #1A2C4A; }
 :root[data-accent="pink"], :root[data-accent="pink"] .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-soft: #FCE2EF; --os-brand-deep: #D63584; --os-brand-rail: #3F1A2C; }
 :root[data-accent="violet"], :root[data-accent="violet"] .workwrk-os { --os-brand: #A855F7; --os-brand-hover: #8B3FDB; --os-brand-soft: #F1E4FD; --os-brand-deep: #8B3FDB; --os-brand-rail: #2E1A47; }
 :root[data-accent="indigo"], :root[data-accent="indigo"] .workwrk-os { --os-brand: #6366F1; --os-brand-hover: #4F52D8; --os-brand-soft: #E5E6FB; --os-brand-deep: #4F52D8; --os-brand-rail: #1F1F4A; }

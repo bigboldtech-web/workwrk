@@ -57,8 +57,9 @@ export function TeamAlignmentBoard({ members }: { members: TeamMember[] }) {
 
     list.sort((a, b) => {
       if (sort === "name") return `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
-      if (sort === "kpi") return b.kpis.compliancePct - a.kpis.compliancePct;
-      if (sort === "sop") return b.sops.readRatePct - a.sops.readRatePct;
+      // Unmeasured (null) sorts LAST — it is not a zero score.
+      if (sort === "kpi") return (b.kpis.compliancePct ?? -1) - (a.kpis.compliancePct ?? -1);
+      if (sort === "sop") return (b.sops.readRatePct ?? -1) - (a.sops.readRatePct ?? -1);
       // review status urgency
       const ra = REVIEW_RANK[effectiveReview(a).status ?? ""] ?? 2;
       const rb = REVIEW_RANK[effectiveReview(b).status ?? ""] ?? 2;
@@ -144,10 +145,10 @@ function MemberCard({
       <div className="px-4 py-3 grid grid-cols-2 gap-3">
         <Metric Icon={Target} label="KRAs" value={m.activeKras.length}
           sub={m.activeKras.length > 0 ? m.activeKras.slice(0, 2).map((k) => k.name).join(" · ") : "None assigned"} />
-        <Metric Icon={ChartLine} label="KPI compliance" value={`${m.kpis.compliancePct}%`}
+        <Metric Icon={ChartLine} label="KPI compliance" value={m.kpis.compliancePct == null ? "—" : `${m.kpis.compliancePct}%`}
           sub={m.kpis.total > 0 ? `${m.kpis.submitted + m.kpis.approved}/${m.kpis.total} on time` : "No KPIs yet"}
           tone={complianceTone(m.kpis.compliancePct)} />
-        <Metric Icon={BookOpenCheck} label="SOP read-rate" value={`${m.sops.readRatePct}%`}
+        <Metric Icon={BookOpenCheck} label="SOP read-rate" value={m.sops.readRatePct == null ? "—" : `${m.sops.readRatePct}%`}
           sub={m.sops.total > 0 ? `${m.sops.completed}/${m.sops.total} acknowledged` : "No SOPs assigned"}
           tone={complianceTone(m.sops.readRatePct)} />
         <WeeklyReviewMetric review={review} />
@@ -247,7 +248,8 @@ function Metric({
   );
 }
 
-function complianceTone(pct: number): "good" | "warn" | "bad" {
+function complianceTone(pct: number | null): "good" | "warn" | "bad" | undefined {
+  if (pct == null) return undefined; // unmeasured — no tone
   if (pct >= 80) return "good";
   if (pct >= 50) return "warn";
   return "bad";
