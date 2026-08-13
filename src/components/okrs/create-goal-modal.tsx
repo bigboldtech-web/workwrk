@@ -201,7 +201,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                 onChange={(p) => { setOwner(p); setOwnerTouched(true); }}
                 initialOpen={focusOwner}
               />
-              <p className="mt-1 text-[11px] text-[#0073EA]">
+              {/* Helper, not a link — gray like every other field hint (blue
+                  made it read as clickable). */}
+              <p className="mt-1 text-[11px] text-zinc-400">
                 Who is responsible for this Goal?
               </p>
             </div>
@@ -211,7 +213,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
             <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
               Level
             </label>
-            <div className="flex gap-1.5">
+            {/* flex-wrap: three labels + translations must never clip out of a
+                narrow modal — wrap to a second line instead. */}
+            <div className="flex flex-wrap gap-1.5">
               {LEVEL_OPTIONS.map((o) => {
                 const locked = !isManagerViewer && o.value !== "INDIVIDUAL";
                 return (
@@ -270,7 +274,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          {/* Quarter is a short input but the cadence group is three buttons —
+              side-by-side they overflow a narrow modal (the "Monthly clips out
+              of the box" bug), so the pair stacks below the sm breakpoint.
+              min-w-0 lets the cadence cell actually shrink inside the grid. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
             <div>
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                 Quarter
@@ -282,11 +290,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                 className="h-8 text-[13px]"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
                 Check-in cadence
               </label>
-              <div className="flex gap-1.5">
+              <div className="flex flex-wrap gap-1.5">
                 {CADENCE_OPTIONS.map((o) => (
                   <button
                     key={o.value}
