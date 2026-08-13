@@ -7,7 +7,7 @@
 // past ~30 lines of UI should move to apps/<key>-sidebar.tsx.
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock, CircleUser,
@@ -15,7 +15,7 @@ import {
   Plus, ChevronDown, ChevronRight, Pin, Star, X,
   Megaphone, Briefcase, Wrench, Building2,
   UserCheck, Award, ThumbsUp, FileSpreadsheet,
-  HardDrive, Boxes, Layers,
+  HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   Activity, LayoutTemplate, Plug,
@@ -41,6 +41,39 @@ import { MorePortal } from "./more-portal";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
+/** Access tiers reused by app entries and per-action gates. */
+export type AccessTier = "manager" | "hr-admin" | "org-admin";
+
+/**
+ * Shell helpers handed to a CreateAction's `onSelect` so catalog-level
+ * actions can navigate, toast, prompt, or open shell modals without
+ * hand-rolling hooks per app.
+ */
+export interface CreateActionContext {
+  push: (href: string) => void;
+  toast: (message: string) => void;
+  prompt: (opts?: { title?: string; description?: string; defaultValue?: string; placeholder?: string }) => Promise<string | null>;
+  openCreateTask: () => void;
+  bumpRowVersion: (moduleId: string) => void;
+}
+
+/**
+ * One row of an app's "+" offering. Exactly one of `onSelect` (wins),
+ * `href`, or `event` (dispatches `workwrk:os:new:<event>`) should be set.
+ * `requiredAccess` hides the row below that tier — hide, never 403.
+ */
+export interface CreateAction {
+  label: string;
+  icon?: LucideIcon;
+  description?: string;
+  /** Icon-tile tint in the menu; defaults to brand blue #0073EA. */
+  iconColor?: string;
+  href?: string;
+  event?: string;
+  onSelect?: (ctx: CreateActionContext) => void | Promise<void>;
+  requiredAccess?: AccessTier;
+}
+
 export interface AppEntry {
   key: string;
   label: string;
@@ -61,11 +94,20 @@ export interface AppEntry {
   /** Hidden in the More-popover catalog (e.g. the "More" tile itself). */
   hideFromCatalog?: boolean;
   /**
-   * What the sidebar header's "+" button does for this app. Either a
-   * route (href) or a custom-event name the app's Sidebar component
-   * listens for. Absent → button hidden.
+   * Feeds the global CreateMenu's "Space" row (Home only, today).
+   * Either a route (href) or a custom-event name the app's Sidebar
+   * component listens for.
    */
   newAction?: { label: string; href?: string; event?: string };
+  /**
+   * The sidebar header "+" contract:
+   *   "global"        → the OS-wide CreateMenu (Home's catch-all)
+   *   CreateAction[]  → one visible action fires directly on click;
+   *                     two or more open the generic SidebarCreateMenu
+   *   [] or absent    → (and no custom CreateMenu) the "+" is hidden —
+   *                     this app has nothing the viewer can create
+   */
+  createActions?: CreateAction[] | "global";
   /**
    * Optional per-app "+" create menu. When set, it REPLACES the global
    * CreateMenu for this app so the "+" offers app-relevant creates (e.g.
@@ -89,7 +131,7 @@ export interface AppEntry {
    * same tier server-side (src/lib/page-gates.ts). ICs keep their own
    * door: "My Profile" (/people/me) carries their KRAs/KPIs/goals.
    */
-  requiredAccess?: "manager" | "hr-admin" | "org-admin";
+  requiredAccess?: AccessTier;
 }
 
 const MANAGER_LEVELS = new Set([
@@ -103,17 +145,78 @@ const ORG_ADMIN_LEVELS = new Set([
   "SUPER_ADMIN", "COMPANY_ADMIN",
 ]);
 
-export function canAccessApp(app: AppEntry, accessLevel: string | null | undefined): boolean {
-  if (!app.requiredAccess) return true;
+/** Tier check shared by app-level and per-CreateAction access gates. */
+export function canAccessTier(tier: AccessTier | undefined, accessLevel: string | null | undefined): boolean {
+  if (!tier) return true;
   if (!accessLevel) return false;
-  if (app.requiredAccess === "manager") return MANAGER_LEVELS.has(accessLevel);
-  if (app.requiredAccess === "hr-admin") return HR_ADMIN_LEVELS.has(accessLevel);
-  if (app.requiredAccess === "org-admin") return ORG_ADMIN_LEVELS.has(accessLevel);
-  return true;
+  if (tier === "manager") return MANAGER_LEVELS.has(accessLevel);
+  if (tier === "hr-admin") return HR_ADMIN_LEVELS.has(accessLevel);
+  return ORG_ADMIN_LEVELS.has(accessLevel);
+}
+
+export function canAccessApp(app: AppEntry, accessLevel: string | null | undefined): boolean {
+  return canAccessTier(app.requiredAccess, accessLevel);
 }
 
 /** Window event name format for per-app "new" actions. */
 export const NEW_EVENT_PREFIX = "workwrk:os:new:";
+
+/* ── "+" onSelect helpers — mirror the create flows the pages themselves
+ *    run, so the sidebar "+" is never a dead link. ─────────────────── */
+
+/** Library → New note. Same POST the Library Notes tab's button makes. */
+async function createLibraryNote(ctx: CreateActionContext) {
+  try {
+    const res = await fetch("/api/docs", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "New doc" }),
+    });
+    const data = await res.json().catch(() => null);
+    const id: string | undefined = data?.doc?.id;
+    if (!res.ok || !id) throw new Error();
+    ctx.push(`/docs/${id}`);
+  } catch {
+    ctx.toast("Couldn't create note");
+  }
+}
+
+/** Library → New whiteboard. Same prompt + POST as the Whiteboards tab. */
+async function createLibraryWhiteboard(ctx: CreateActionContext) {
+  const name = (await ctx.prompt({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
+  if (!name) return;
+  try {
+    const res = await fetch("/api/whiteboards", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json().catch(() => null);
+    const id: string | undefined = data?.whiteboard?.id;
+    if (!res.ok || !id) throw new Error();
+    ctx.push(`/whiteboards/${id}`);
+  } catch {
+    ctx.toast("Couldn't create whiteboard");
+  }
+}
+
+/** Timesheets → Start this week. POST /api/timesheets is an idempotent
+ *  upsert for the current week (same call as the page's own button). */
+async function startTimesheetWeek(ctx: CreateActionContext) {
+  try {
+    const res = await fetch("/api/timesheets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) throw new Error();
+    ctx.toast("This week's timesheet is open");
+    ctx.bumpRowVersion("timesheets");
+    ctx.push("/timesheets");
+  } catch {
+    ctx.toast("Couldn't start this week's timesheet");
+  }
+}
 
 /** Helper: build a sidebar component from a static link list. */
 function linksSidebar(
@@ -1046,13 +1149,17 @@ export const APPS: AppEntry[] = [
   { key: "home", label: "Home", Icon: Home, defaultHref: "/today",
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
-    newAction: { label: "New Space", event: "home-new-space" } },
+    newAction: { label: "New Space", event: "home-new-space" },
+    // Home is the OS-wide catch-all — it keeps the global create menu.
+    createActions: "global" },
   { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
     matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
-    category: "Core", defaultPinned: true },
+    category: "Core", defaultPinned: true,
+    createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
   { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
-    category: "Core", defaultPinned: true },
+    category: "Core", defaultPinned: true,
+    createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
@@ -1060,30 +1167,36 @@ export const APPS: AppEntry[] = [
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
-    newAction: { label: "New doc", href: "/docs?new=1" } },
+    // DocsSidebar listens for this event and runs its "New page" flow.
+    createActions: [{ label: "New doc", icon: FileText, event: "docs-new-page" }] },
   { key: "dashboards", label: "Dashboard", Icon: BarChart3, defaultHref: "/dashboards",
     matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "New Dashboard", href: "/dashboards?new=1" } },
+    createActions: [{ label: "New Dashboard", icon: BarChart3, href: "/dashboards?new=1" }] },
   { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
     matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "New Note", href: "/library?tab=notes&new=1" } },
+    createActions: [
+      { label: "New note", icon: FileText, description: "A standalone note in the Library", onSelect: createLibraryNote },
+      { label: "New whiteboard", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
+      { label: "Upload file", icon: Upload, description: "Drop a file into the Library", href: "/library?tab=files" },
+    ] },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms",
     matchPaths: ["/forms"], Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
-    newAction: { label: "New Form", href: "/forms?new=1" } },
+    createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
+  // Clips has no separate creatable object — /notetaker IS the composer,
+  // so the sidebar "+" stays hidden for it.
   { key: "clips", label: "Clips", Icon: Video, defaultHref: "/notetaker",
     matchPaths: ["/notetaker", "/clips"], Sidebar: ClipsSidebar,
-    category: "Core", defaultPinned: true,
-    newAction: { label: "Record clip", href: "/notetaker?new=1" } },
+    category: "Core", defaultPinned: true },
   { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs",
     matchPaths: ["/okrs", "/goals"], Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "New Goal", href: "/okrs?new=1" } },
+    createActions: [{ label: "New Goal", icon: Trophy, href: "/okrs?new=1" }] },
   { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets",
     matchPaths: ["/timesheets"], Sidebar: TimesheetsSidebar,
     category: "Core", defaultPinned: true,
-    newAction: { label: "Log time", href: "/timesheets?new=1" } },
+    createActions: [{ label: "Start this week", icon: Clock, onSelect: startTimesheetWeek }] },
 
   // ── PPMS scope (2026-06-03): CRM / Marketing / Helpdesk / ITSM
   // intentionally not pinned. WorkwrK is a People + Project Management
@@ -1127,7 +1240,7 @@ export const APPS: AppEntry[] = [
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
     matchPaths: ["/sops"], category: "Knowledge", defaultPinned: true,
-    newAction: { label: "New SOP", href: "/sops/new" },
+    createActions: [{ label: "New SOP", icon: ScrollText, href: "/sops/new" }],
     Sidebar: linksSidebar([
       { href: "/sops",               label: "All SOPs",             Icon: ScrollText },
       { href: "/sops/new/checklist", label: "New step-by-step SOP", Icon: Workflow },
@@ -1143,7 +1256,7 @@ export const APPS: AppEntry[] = [
     ]) },
   { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements",
     matchPaths: ["/agreements"], category: "Knowledge", requiredAccess: "hr-admin",
-    newAction: { label: "New contract", href: "/agreements?new=1" },
+    createActions: [{ label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" }],
     Sidebar: linksSidebar([
       { href: "/agreements", label: "All contracts", Icon: FileSignature },
       { href: "/agreements?view=templates", label: "Templates", Icon: Folder },

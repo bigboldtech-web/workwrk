@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Sparkles, Plus, Search, Trash2, Paperclip, ArrowUp,
   Wrench, Pin, MessageSquare,
@@ -67,6 +68,8 @@ function groupByDay(sessions: Session[]) {
 export default function SidekickPage() {
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const urlParams = useSearchParams();
+  const newHandled = useRef(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -132,6 +135,17 @@ export default function SidekickPage() {
       toast("Couldn't start a new chat");
     }
   }
+
+  // The AI app's sidebar "+" routes here with ?new=1 → start a fresh chat
+  // once, then clean the param so refresh/back doesn't re-trigger it.
+  useEffect(() => {
+    if (urlParams?.get("new") === "1" && !newHandled.current) {
+      newHandled.current = true;
+      window.history.replaceState(null, "", "/sidekick");
+      void newChat();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlParams]);
 
   async function deleteSession(id: string, e: React.MouseEvent) {
     e.stopPropagation();

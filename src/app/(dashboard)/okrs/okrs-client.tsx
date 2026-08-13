@@ -98,6 +98,17 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
   // ?new=1 opened the modal — closing it cleans the param off the URL so a
   // refresh doesn't resurrect the modal the user just dismissed.
   const [fromQuery, setFromQuery] = useState(initialNew);
+  // The Goals "+" pushes ?new=1 while this page may already be mounted —
+  // useState only seeds the FIRST render, so track the prop across renders
+  // and open the modal when it flips true (React's prev-render pattern).
+  const [seenInitialNew, setSeenInitialNew] = useState(initialNew);
+  if (initialNew !== seenInitialNew) {
+    setSeenInitialNew(initialNew);
+    if (initialNew) {
+      setCreating((cur) => cur ?? "INDIVIDUAL");
+      setFromQuery(true);
+    }
+  }
   // Edit mode of the SAME modal (ClickUp reuses one surface; so do we).
   // focusOwner lands the user straight in the Owner picker ("Assign owner").
   const [editing, setEditing] = useState<{ goal: ApiOkr; focusOwner?: boolean } | null>(null);

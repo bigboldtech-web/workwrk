@@ -17,11 +17,13 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
+import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
-import { APPS, findAppForPath, getApp, NEW_EVENT_PREFIX } from "./apps-catalog";
+import { APPS, canAccessTier, findAppForPath, getApp, NEW_EVENT_PREFIX, type CreateAction } from "./apps-catalog";
 import { usePathname } from "next/navigation";
 import { SidebarSearchProvider, useSidebarSearch } from "./sidebar-search-context";
 import { CreateMenu } from "./create-menu";
+import { SidebarCreateMenu, runCreateAction, useCreateActionContext } from "./sidebar-create-menu";
 
 const SIDEBAR_WIDTH_KEY = "workwrk:os:sidebar-width";
 const DEFAULT_SIDEBAR_WIDTH = 244;
@@ -49,7 +51,9 @@ function ClickSidebarBody() {
   const router = useRouter();
   const { query, setQuery } = useSidebarSearch();
   const [searching, setSearching] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
+  // Which app's "+" menu is open — keyed by app so a hover-preview swap
+  // never leaks one app's open menu into another.
+  const [createOpenFor, setCreateOpenFor] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [resizing, setResizing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -86,6 +90,28 @@ function ClickSidebarBody() {
   }, [previewAppKey, activeAppKey, pathname]);
 
   const title = app.label.replace(/\.\.$/, "");
+
+  // ── Per-app "+" contract ──────────────────────────────────────────
+  // "global" → the OS-wide CreateMenu (Home). A CreateAction[] filters
+  // to what THIS viewer may create (admin-gated rows hide, never 403):
+  // one action fires directly on click, two+ open SidebarCreateMenu,
+  // zero (and no custom CreateMenu) hides the "+" entirely.
+  const { data: session } = useSession();
+  const accessLevel =
+    (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? null;
+  const createCtx = useCreateActionContext();
+  const createActions = useMemo<CreateAction[]>(() => {
+    if (!Array.isArray(app.createActions)) return [];
+    return app.createActions.filter((a) => canAccessTier(a.requiredAccess, accessLevel));
+  }, [app, accessLevel]);
+  const createMode: "custom" | "global" | "menu" | "single" | "none" =
+    app.CreateMenu ? "custom"
+    : app.createActions === "global" ? "global"
+    : createActions.length > 1 ? "menu"
+    : createActions.length === 1 ? "single"
+    : "none";
+  const createOpen = createOpenFor === app.key;
+
   const runAppNewAction = () => {
     const newAction = app.newAction;
     if (!newAction) {
@@ -99,7 +125,7 @@ function ClickSidebarBody() {
     }
   };
 
-  const closeCreateMenu = () => setCreateOpen(false);
+  const closeCreateMenu = () => setCreateOpenFor(null);
 
   const openSearch = () => {
     setSearching(true);
@@ -219,30 +245,42 @@ function ClickSidebarBody() {
               >
                 <ChevronsLeft className="w-3.5 h-3.5" />
               </button>
-              <button
-                ref={createButtonRef}
-                type="button"
-                onClick={() => setCreateOpen((v) => !v)}
-                // Inline bg/border/padding — the OS shell's global
-                // `.workwrk-os button { background:none; border:none; padding:0 }`
-                // outranks Tailwind utilities, which is why the card, border,
-                // and side padding were all missing. Squarer radius + a visible
-                // border + side padding so the icons don't hug the edges.
-                style={{
-                  backgroundColor: "#ffffff",
-                  border: "1px solid #d1d1d6",
-                  borderRadius: "8px",
-                  padding: "0 9px",
-                  marginLeft: "2px",
-                }}
-                className="h-[30px] shrink-0 inline-flex items-center gap-1.5 text-zinc-900 shadow-sm hover:shadow transition-shadow"
-                aria-label="Create"
-                aria-haspopup="menu"
-                aria-expanded={createOpen}
-              >
-                <Plus className="w-[17px] h-[17px] text-zinc-800" strokeWidth={2.5} />
-                <ChevronDown className="w-3.5 h-3.5 text-zinc-500" strokeWidth={2.5} />
-              </button>
+              {createMode !== "none" ? (
+                <button
+                  ref={createButtonRef}
+                  type="button"
+                  onClick={() => {
+                    if (createMode === "single") {
+                      // One create action → fire it directly, no menu.
+                      runCreateAction(createActions[0], createCtx);
+                    } else {
+                      setCreateOpenFor((v) => (v === app.key ? null : app.key));
+                    }
+                  }}
+                  // Inline bg/border/padding — the OS shell's global
+                  // `.workwrk-os button { background:none; border:none; padding:0 }`
+                  // outranks Tailwind utilities, which is why the card, border,
+                  // and side padding were all missing. Squarer radius + a visible
+                  // border + side padding so the icons don't hug the edges.
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: "1px solid #d1d1d6",
+                    borderRadius: "8px",
+                    padding: "0 9px",
+                    marginLeft: "2px",
+                  }}
+                  className="h-[30px] shrink-0 inline-flex items-center gap-1.5 text-zinc-900 shadow-sm hover:shadow transition-shadow"
+                  aria-label="Create"
+                  title={createMode === "single" ? createActions[0].label : undefined}
+                  aria-haspopup={createMode === "single" ? undefined : "menu"}
+                  aria-expanded={createMode === "single" ? undefined : createOpen}
+                >
+                  <Plus className="w-[17px] h-[17px] text-zinc-800" strokeWidth={2.5} />
+                  {createMode !== "single" ? (
+                    <ChevronDown className="w-3.5 h-3.5 text-zinc-500" strokeWidth={2.5} />
+                  ) : null}
+                </button>
+              ) : null}
             </div>
           )}
         </div>
@@ -268,22 +306,31 @@ function ClickSidebarBody() {
         </div>
       </div>
 
-      {/* Per-app "+" menu when the app declares one (e.g. Teams); else the
-          global create menu. */}
-      {app.CreateMenu ? (
+      {/* Per-app "+" menu: a custom CreateMenu (Teams), Home's global
+          catch-all, or the generic SidebarCreateMenu over the app's
+          declared actions. Single-action apps fire directly (no menu);
+          no-create apps never rendered the "+" at all. */}
+      {createMode === "custom" && app.CreateMenu ? (
         <app.CreateMenu
           anchorRef={createButtonRef}
           open={createOpen}
           onClose={closeCreateMenu}
         />
-      ) : (
+      ) : createMode === "global" ? (
         <CreateMenu
           anchorRef={createButtonRef}
           open={createOpen}
           onClose={closeCreateMenu}
           onCreateSpace={runAppNewAction}
         />
-      )}
+      ) : createMode === "menu" ? (
+        <SidebarCreateMenu
+          anchorRef={createButtonRef}
+          open={createOpen}
+          onClose={closeCreateMenu}
+          actions={createActions}
+        />
+      ) : null}
 
       <div
         role="separator"

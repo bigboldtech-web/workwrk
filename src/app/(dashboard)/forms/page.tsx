@@ -7,8 +7,8 @@
  * Quick-add via prompt creates a blank form, routes to the builder.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { FormInput, Plus, Globe, Lock, Inbox, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -24,6 +24,8 @@ type ApiForm = {
 
 export default function FormsPage() {
   const router = useRouter();
+  const search = useSearchParams();
+  const newHandled = useRef(false);
   const [forms, setForms] = useState<ApiForm[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
@@ -58,6 +60,17 @@ export default function FormsPage() {
       router.push(`/forms/${f.id}`);
     } catch { toast("Couldn't create form"); }
   }
+
+  // The Forms app's sidebar "+" routes here with ?new=1 → open quick-add
+  // once, then clean the param so refresh/back doesn't re-trigger it.
+  useEffect(() => {
+    if (search?.get("new") === "1" && !newHandled.current) {
+      newHandled.current = true;
+      window.history.replaceState(null, "", "/forms");
+      void quickAdd();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const [generating, setGenerating] = useState(false);
   async function aiGenerate() {

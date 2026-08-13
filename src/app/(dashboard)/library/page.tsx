@@ -20,7 +20,6 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { DocFavoriteButton } from "@/components/docs/doc-favorite-button";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
-import { FileFavoriteButton } from "@/components/board-view/file-favorite-button";
 
 type Tab = "notes" | "whiteboards" | "files" | "tables";
 
@@ -68,6 +67,13 @@ export default function LibraryPage() {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [query, setQuery] = useState("");
   const [spaces, setSpaces] = useState<SpaceChip[]>([]);
+
+  // Keep the tab in sync when navigation changes ?tab= while this page is
+  // already mounted (sidebar links, the Library "+" Upload file action) —
+  // Next preserves component state across same-route pushes.
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
 
   useEffect(() => {
     let active = true;

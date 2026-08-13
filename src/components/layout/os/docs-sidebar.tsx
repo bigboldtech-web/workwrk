@@ -80,6 +80,21 @@ export function DocsSidebar() {
     };
   }, [load]);
 
+  // The Docs app's sidebar-header "+" dispatches this event — create a
+  // fresh top-level page and jump into it, exactly like the Pages tree's
+  // own "New page" row (?new=1 focuses the title in the editor).
+  useEffect(() => {
+    const onNew = () => {
+      void (async () => {
+        const id = await createChildPage(null);
+        if (id) router.push(`/docs/${id}?new=1`);
+        void load();
+      })();
+    };
+    window.addEventListener("workwrk:os:new:docs-new-page", onNew);
+    return () => window.removeEventListener("workwrk:os:new:docs-new-page", onNew);
+  }, [router, load]);
+
   const activeView: ViewKey | null = pathname === "/docs" ? ((params.get("view") as ViewKey) || "all") : null;
 
   const { myCount, sharedCount } = useMemo(() => {
