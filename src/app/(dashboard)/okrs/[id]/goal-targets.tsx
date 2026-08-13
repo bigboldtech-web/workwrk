@@ -4,10 +4,10 @@
 // (Key Results = Targets). Header carries "+ Add"; each target is a row:
 // owner avatar, title, right-aligned thin progress bar with a caption +
 // current/target fraction, and a "…" menu (Check in / Delete target).
-// Clicking a row expands it inline to the Start / Current / Target caption
-// and the existing check-in form (okr-checkin-form — mechanics untouched,
-// direction-aware math stays server-side). KPI-linked targets are measured
-// BY their gauge, so they show the link instead of a check-in form.
+// Clicking a row (or "Check in") opens the ClickUp-style check-in MODAL
+// (okr-checkin-modal — mechanics untouched, direction-aware math stays
+// server-side). KPI-linked targets are measured BY their gauge; the modal
+// shows the "record the KPI reading instead" notice for them.
 //
 // Empty state is honest ClickUp copy + "Create a Target" — no fake numbers.
 // The composer POSTs /api/okrs/[id]/key-results; row delete goes through
@@ -25,7 +25,7 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
-import { OkrCheckInForm } from "./okr-checkin-form";
+import { OkrCheckInModal } from "./okr-checkin-modal";
 
 export interface TargetRowData {
   id: string;
@@ -104,7 +104,7 @@ function TargetRow({ okrId, target: t, owner, canEdit }: {
   const router = useRouter();
   const { toast } = useOsToast();
   const confirm = useConfirm();
-  const [expanded, setExpanded] = useState(false);
+  const [checkinOpen, setCheckinOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -159,8 +159,8 @@ function TargetRow({ okrId, target: t, owner, canEdit }: {
       <button
         type="button"
         className="okrd-target__row"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
+        onClick={() => setCheckinOpen(true)}
+        aria-haspopup="dialog"
       >
         {owner ? (
           <PersonAvatar person={owner} size={24} />
@@ -203,8 +203,8 @@ function TargetRow({ okrId, target: t, owner, canEdit }: {
           <MenuList className="min-w-[190px]" onClick={(e) => e.stopPropagation()}>
             <MenuItem
               icon={Pencil}
-              label={expanded ? "Hide check-in" : "Check in"}
-              onClick={() => { setMenuOpen(false); setExpanded((v) => !v); }}
+              label={canEdit && !t.isDerived ? "Check in" : "View target"}
+              onClick={() => { setMenuOpen(false); setCheckinOpen(true); }}
             />
             {canEdit && (
               <>
@@ -216,27 +216,13 @@ function TargetRow({ okrId, target: t, owner, canEdit }: {
         </MorePortal>
       </span>
 
-      {expanded && (
-        <div className="okrd-target__detail">
-          {t.isDerived ? (
-            <p className="okrd-target__derived">
-              This target is measured by the KPI <strong>{t.kpiName ?? "linked KPI"}</strong> — record the KPI reading and the number lands here automatically.
-            </p>
-          ) : canEdit ? (
-            <OkrCheckInForm
-              okrId={okrId}
-              keyResultId={t.id}
-              unit={t.unit ?? ""}
-              current={t.currentValue}
-              start={t.startValue}
-              target={t.targetValue}
-            />
-          ) : (
-            <p className="okrd-target__readonly">
-              Start {fmtNum(t.startValue)}{t.unit ?? ""} · Current {fmtNum(t.currentValue)}{t.unit ?? ""} · Target {fmtNum(t.targetValue)}{t.unit ?? ""}
-            </p>
-          )}
-        </div>
+      {checkinOpen && (
+        <OkrCheckInModal
+          okrId={okrId}
+          target={t}
+          canEdit={canEdit}
+          onClose={() => setCheckinOpen(false)}
+        />
       )}
     </li>
   );
