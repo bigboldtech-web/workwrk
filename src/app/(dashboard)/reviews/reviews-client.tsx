@@ -1,10 +1,14 @@
 "use client";
 
-/* Reviews — performance review cycles hero list.
+/* Review cycles — performance review cycle administration hero list.
+ * (Named "Review cycles" in all copy so it stops colliding with the
+ * Teams weekly "Reviews" queue.)
  *
  *  GET   /api/reviews
  *  POST  /api/reviews             { name, type, startDate, endDate }
- *  PATCH /api/reviews             { id, status?, ... }
+ *  PATCH /api/reviews             { id, status?, ... }   — never DRAFT→ACTIVE
+ *  POST  /api/reviews/[id]/launch — the ONLY door out of DRAFT: creates a
+ *        Review row per active employee, then flips the cycle ACTIVE.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -13,7 +17,7 @@ import Link from "next/link";
 import {
   Award, Plus, Search, Calendar as CalendarIcon, CheckCircle2,
   Loader2, Play, ChevronRight, ArrowRight, Sparkles, Target,
-  Activity, Users, TrendingUp,
+  Activity, Users, TrendingUp, Rocket,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -40,7 +44,7 @@ const STATUS_LABELS: Record<CycleStatus, string> = {
   COMPLETED: "Completed", CANCELLED: "Cancelled",
 };
 const STATUS_COLORS: Record<CycleStatus, string> = {
-  DRAFT: C.indigo, ACTIVE: C.orange, IN_CALIBRATION: C.purple,
+  DRAFT: C.blue, ACTIVE: C.orange, IN_CALIBRATION: C.teal,
   COMPLETED: C.green, CANCELLED: C.gray,
 };
 
@@ -52,15 +56,12 @@ const TYPE_LABELS: Record<string, string> = {
   PIP_REVIEW: "PIP",
 };
 const TYPE_COLORS: Record<string, string> = {
-  MONTHLY_PULSE: C.teal, QUARTERLY: C.blue, ANNUAL: C.purple,
+  MONTHLY_PULSE: C.teal, QUARTERLY: C.blue, ANNUAL: C.brown,
   PROBATION: C.orange, PIP_REVIEW: C.red,
 };
 
 const FLOW: CycleStatus[] = ["DRAFT", "ACTIVE", "IN_CALIBRATION", "COMPLETED"];
 
-function fmtShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-}
 function fmtPeriod(start: string, end: string): string {
   const s = new Date(start); const e = new Date(end);
   const sameYear = s.getFullYear() === e.getFullYear();
@@ -120,9 +121,31 @@ export default function ReviewsPage() {
       });
       if (!res.ok) {
         if (res.status === 403) toast("Only HR can move review cycles");
-        else toast("Couldn't update");
+        else {
+          const data = await res.json().catch(() => null);
+          toast(data?.error || "Couldn't update");
+        }
         return false;
       }
+      void load();
+      return true;
+    } catch { return false; }
+  }
+
+  // The only door out of DRAFT: POST /launch generates a Review row for
+  // every active employee (reviewer = their manager), notifies + emails
+  // them, and flips the cycle ACTIVE. A raw DRAFT→ACTIVE status PATCH is
+  // rejected server-side when the cycle has no reviews.
+  async function launch(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/reviews/${id}/launch`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        if (res.status === 403) toast("Only managers/HR can launch review cycles");
+        else toast(data?.error || "Couldn't launch the cycle");
+        return false;
+      }
+      toast(data?.message || "Cycle launched");
       void load();
       return true;
     } catch { return false; }
@@ -162,16 +185,16 @@ export default function ReviewsPage() {
 
   function toggleStatus(s: CycleStatus) {
     const next = new Set(statusFilter);
-    next.has(s) ? next.delete(s) : next.add(s);
+    if (next.has(s)) next.delete(s); else next.add(s);
     setStatusFilter(next);
   }
 
   return (
     <>
       <OsTitleBar
-        title="Performance reviews"
+        title="Review cycles"
         Icon={Award}
-        iconGradient={GRAD.purpleIndigo}
+        iconGradient={GRAD.yellowOrange}
         description={cycles === null ? "Loading cycles…" : `${stats.total} cycle${stats.total === 1 ? "" : "s"} · ${stats.activeCount} active · ${stats.completedReviews}/${stats.totalReviews} reviews done`}
         people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.pr]}
         morePeople={5}
@@ -188,13 +211,13 @@ export default function ReviewsPage() {
 
       <div className="rvw">
         {loadError ? (
-          <OsEmptyView Icon={Award} iconGradient={GRAD.redPink} title="Couldn't load cycles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView Icon={Award} iconGradient="linear-gradient(135deg, var(--os-c-red), var(--os-c-orange))" title="Couldn't load cycles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : cycles === null ? (
           <div className="rvw__loading">Loading cycles…</div>
         ) : !featured ? (
           <OsEmptyView
             Icon={Award}
-            iconGradient={GRAD.purpleIndigo}
+            iconGradient={GRAD.yellowOrange}
             title="No review cycles yet"
             subtitle="Plan your first review cycle. Pick monthly pulse, quarterly, annual, probation, or PIP."
             chips={["Monthly pulse", "Quarterly", "Annual", "Probation", "PIP"]}
@@ -203,13 +226,13 @@ export default function ReviewsPage() {
           />
         ) : (
           <>
-            <FeaturedCycle cycle={featured} onAdvance={patch} />
+            <FeaturedCycle cycle={featured} onAdvance={patch} onLaunch={launch} />
 
             <div className="rvw__kpis">
               <KpiTile accent="var(--os-c-orange)" Icon={Loader2}      label="Active"     value={`${stats.activeCount}`}                                  sub={`${stats.byStatus.IN_CALIBRATION} in calibration`} />
-              <KpiTile accent="var(--os-c-indigo)" Icon={Play}         label="Draft"      value={`${stats.byStatus.DRAFT}`}                              sub="planning stage" />
+              <KpiTile accent="var(--os-c-blue)"   Icon={Play}         label="Draft"      value={`${stats.byStatus.DRAFT}`}                              sub="planning stage" />
               <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Completed"  value={`${stats.byStatus.COMPLETED}`}                          sub="historical" />
-              <KpiTile accent="var(--os-c-purple)" Icon={Activity}     label="Progress"   value={`${stats.progress}%`}                                    sub={`${stats.completedReviews}/${stats.totalReviews} reviews`} progress={stats.progress} />
+              <KpiTile accent="var(--os-c-teal)"   Icon={Activity}     label="Progress"   value={`${stats.progress}%`}                                    sub={`${stats.completedReviews}/${stats.totalReviews} reviews`} progress={stats.progress} />
             </div>
 
             <div className="rvw__toolbar">
@@ -235,7 +258,7 @@ export default function ReviewsPage() {
               </div>
             ) : (
               <div className="rvw__list">
-                {filtered.map((c) => <CycleRow key={c.id} cycle={c} />)}
+                {filtered.map((c) => <CycleRow key={c.id} cycle={c} onLaunch={launch} />)}
               </div>
             )}
           </>
@@ -252,11 +275,18 @@ export default function ReviewsPage() {
   );
 }
 
-function FeaturedCycle({ cycle: c, onAdvance }: { cycle: ApiCycle; onAdvance: (id: string, body: Record<string, unknown>) => Promise<boolean> }) {
+function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
+  cycle: ApiCycle;
+  onAdvance: (id: string, body: Record<string, unknown>) => Promise<boolean>;
+  onLaunch: (id: string) => Promise<boolean>;
+}) {
+  const [launching, setLaunching] = useState(false);
   const statusColor = STATUS_COLORS[c.status];
-  const typeColor = TYPE_COLORS[c.type] ?? C.indigo;
+  const typeColor = TYPE_COLORS[c.type] ?? C.gray;
   const currentIdx = FLOW.indexOf(c.status);
-  const next = c.status === "DRAFT" ? "ACTIVE" : c.status === "ACTIVE" ? "IN_CALIBRATION" : c.status === "IN_CALIBRATION" ? "COMPLETED" : null;
+  // DRAFT never advances via a status PATCH — it launches (which creates
+  // the per-person Review rows and flips the status server-side).
+  const next = c.status === "ACTIVE" ? "IN_CALIBRATION" : c.status === "IN_CALIBRATION" ? "COMPLETED" : null;
   const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Loader2 : Play;
   const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
   const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
@@ -297,6 +327,19 @@ function FeaturedCycle({ cycle: c, onAdvance }: { cycle: ApiCycle; onAdvance: (i
         </div>
 
         <div className="rvw__hero-actions">
+          {c.status === "DRAFT" && (
+            <button
+              type="button"
+              className="rvw__hero-advance"
+              disabled={launching}
+              onClick={async () => {
+                setLaunching(true);
+                try { await onLaunch(c.id); } finally { setLaunching(false); }
+              }}
+            >
+              <Rocket /> {launching ? "Launching…" : "Launch cycle"}
+            </button>
+          )}
           {next && (
             <button type="button" className="rvw__hero-advance" onClick={() => onAdvance(c.id, { status: next })}>
               <ChevronRight /> Move to {STATUS_LABELS[next]}
@@ -336,9 +379,10 @@ function FeaturedCycle({ cycle: c, onAdvance }: { cycle: ApiCycle; onAdvance: (i
   );
 }
 
-function CycleRow({ cycle: c }: { cycle: ApiCycle }) {
+function CycleRow({ cycle: c, onLaunch }: { cycle: ApiCycle; onLaunch: (id: string) => Promise<boolean> }) {
+  const [launching, setLaunching] = useState(false);
   const statusColor = STATUS_COLORS[c.status];
-  const typeColor = TYPE_COLORS[c.type] ?? C.indigo;
+  const typeColor = TYPE_COLORS[c.type] ?? C.gray;
   const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
   const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
   const progress = totalReviews > 0 ? Math.round((doneReviews / totalReviews) * 100) : 0;
@@ -367,6 +411,21 @@ function CycleRow({ cycle: c }: { cycle: ApiCycle }) {
           <div className="rvw__row-bar-fill" style={{ width: `${progress}%`, background: statusColor }} />
         </div>
       </div>
+      {c.status === "DRAFT" && (
+        <button
+          type="button"
+          className="rvw__hero-advance"
+          disabled={launching}
+          onClick={async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setLaunching(true);
+            try { await onLaunch(c.id); } finally { setLaunching(false); }
+          }}
+        >
+          <Rocket /> {launching ? "Launching…" : "Launch"}
+        </button>
+      )}
       <ArrowRight className="rvw__row-arrow" />
     </Link>
   );

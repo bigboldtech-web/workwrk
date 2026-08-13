@@ -134,7 +134,10 @@ export async function actOnKpiRecord(
         args.action === "approve"
           ? `Your "${updated.kpi.name}" KPI for ${updated.period} was approved.`
           : `Your "${updated.kpi.name}" KPI for ${updated.period} needs changes.${args.notes ? ` Note: ${args.notes}` : ""}`,
-      link: "/today",
+      // The IC's scoring surface: their own profile hosts the KPI
+      // recorder ("Record my numbers") + KPI history, where a REJECTED
+      // record re-surfaces for resubmission. "/today" had neither.
+      link: `/people/${updated.userId}`,
     },
   });
 }

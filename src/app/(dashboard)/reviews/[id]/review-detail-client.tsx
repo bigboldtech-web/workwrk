@@ -5,7 +5,6 @@ import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -16,22 +15,126 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  ArrowLeft, Star, Users, CheckCircle, Clock, BarChart3, Send, AlertTriangle,
-  UserPlus, TrendingUp, Shield, Cloud, CloudOff,
+  ArrowLeft, Star, Users, CheckCircle, BarChart3, Send, AlertTriangle,
+  UserPlus, TrendingUp, Shield, Cloud, CloudOff, Rocket,
 } from "lucide-react";
 import { useAutosave } from "@/hooks/use-autosave";
+
+/* ── API payload shapes (the fields this page actually touches) ────
+ * The routes mirror deep Prisma include trees; we type the slices the
+ * UI reads instead of round-tripping the whole schema. */
+
+type Person = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role?: { title?: string | null } | null;
+  department?: { name?: string | null } | null;
+};
+
+type Reflection = { wentWell?: string; couldImprove?: string; goals?: string };
+type SelfKraRating = { kraId: string; kraName?: string; rating: number; achievements?: string };
+type MgrKraRating = { kraId: string; kraName?: string; rating: number; comments?: string };
+
+type PeerFeedbackRow = {
+  id: string;
+  status?: string;
+  anonymous?: boolean;
+  giver?: Person | null;
+  receiver: Person;
+  strengths?: string | null;
+  improvements?: string | null;
+  collaborationRating?: number | null;
+  review?: { cycle?: { name?: string | null } | null } | null;
+};
+
+type ReviewRow = {
+  id: string;
+  status: string;
+  subject: Person;
+  outcome?: string | null;
+  overallScore?: number | null;
+  kpiScore?: number | null;
+  sopComplianceScore?: number | null;
+  managerComments?: string | null;
+  selfRatings?: { kraRatings?: SelfKraRating[]; reflection?: Reflection | null } | null;
+  managerAssessment?: {
+    kraRatings?: MgrKraRating[];
+    behavioral?: Record<string, number>;
+    overallComments?: string;
+    recommendation?: string;
+  } | null;
+  peerFeedback?: PeerFeedbackRow[];
+};
+
+type CycleStats = { total: number; selfDone: number; managerDone: number; calibrated: number; completed: number };
+
+type CycleData = {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  startDate: string;
+  endDate: string;
+  stats?: CycleStats;
+  reviews?: ReviewRow[];
+};
+
+type OkrKeyResult = {
+  id: string;
+  title: string;
+  unit?: string | null;
+  currentValue?: number | null;
+  targetValue?: number | null;
+  checkIns?: { id: string }[];
+};
+type OkrRow = {
+  id: string;
+  title: string;
+  level?: string | null;
+  quarter?: string | null;
+  progress: number;
+  keyResults?: OkrKeyResult[];
+};
+
+type KraAssignment = { weightage?: number | null; kra: { id: string; name: string; category?: string | null } };
+
+type SelfData = {
+  review: ReviewRow;
+  metrics: {
+    avgKpiScore: number | null;
+    avgSopScore: number | null;
+    okrAvgProgress: number | null;
+    okrs?: OkrRow[];
+  };
+  kraAssignments?: KraAssignment[];
+};
+
+type CalibRow = {
+  reviewId: string;
+  subject: Person;
+  kpiScore: number;
+  selfRating: number;
+  managerRating: number;
+  peerRating: number;
+  compositeScore: number;
+  calibratedScore?: number | null;
+  calibrationNotes?: string | null;
+  outcome?: string | null;
+};
+type CalibrationPayload = {
+  warning?: string | null;
+  distribution: { bottom: number; low: number; mid: number; high: number; top: number };
+  calibrationData: CalibRow[];
+};
+
+type UserOpt = { id: string; firstName: string; lastName: string };
 
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
   if (score >= 70) return "text-[color:var(--accent-strong)]";
   if (score >= 50) return "text-orange-400";
   return "text-red-400";
-}
-
-function getProgressColor(pct: number) {
-  if (pct >= 90) return "bg-green-500";
-  if (pct >= 70) return "bg-yellow-500";
-  return "bg-red-500";
 }
 
 function getStatusBadge(status: string) {
@@ -68,20 +171,20 @@ export default function ReviewCycleDetailPage() {
   const { id: cycleId } = useParams();
   const router = useRouter();
 
-  const [cycle, setCycle] = useState<any>(null);
+  const [cycle, setCycle] = useState<CycleData | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Self-assessment state
-  const [selfData, setSelfData] = useState<any>(null);
+  const [selfData, setSelfData] = useState<SelfData | null>(null);
   const [loadingSelf, setLoadingSelf] = useState(false);
   const [kraRatings, setKraRatings] = useState<Record<string, { rating: number; achievements: string }>>({});
   const [reflection, setReflection] = useState({ wentWell: "", couldImprove: "", goals: "" });
   const [savingSelf, setSavingSelf] = useState(false);
 
   // Manager review state
-  const [teamReviews, setTeamReviews] = useState<any[]>([]);
+  const [teamReviews, setTeamReviews] = useState<ReviewRow[]>([]);
   const [loadingTeam, setLoadingTeam] = useState(false);
-  const [selectedReview, setSelectedReview] = useState<any>(null);
+  const [selectedReview, setSelectedReview] = useState<ReviewRow | null>(null);
   const [mgrKraRatings, setMgrKraRatings] = useState<Record<string, { rating: number; comments: string }>>({});
   const [behavioral, setBehavioral] = useState<Record<string, number>>({});
   const [mgrComments, setMgrComments] = useState("");
@@ -89,9 +192,9 @@ export default function ReviewCycleDetailPage() {
   const [savingMgr, setSavingMgr] = useState(false);
 
   // Peer feedback state
-  const [peerRequests, setPeerRequests] = useState<any[]>([]);
+  const [peerRequests, setPeerRequests] = useState<PeerFeedbackRow[]>([]);
   const [loadingPeer, setLoadingPeer] = useState(false);
-  const [showPeerDialog, setShowPeerDialog] = useState<any>(null);
+  const [showPeerDialog, setShowPeerDialog] = useState<PeerFeedbackRow | null>(null);
   const [peerStrengths, setPeerStrengths] = useState("");
   const [peerImprovements, setPeerImprovements] = useState("");
   const [peerCollabRating, setPeerCollabRating] = useState(0);
@@ -99,19 +202,24 @@ export default function ReviewCycleDetailPage() {
   const [savingPeer, setSavingPeer] = useState(false);
 
   // Peer request dialog (manager assigning peers)
-  const [showAssignPeersDialog, setShowAssignPeersDialog] = useState<any>(null);
+  const [showAssignPeersDialog, setShowAssignPeersDialog] = useState<ReviewRow | null>(null);
   const [peerUserIds, setPeerUserIds] = useState<string[]>([]);
-  const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [allUsers, setAllUsers] = useState<UserOpt[]>([]);
   const [savingPeerReq, setSavingPeerReq] = useState(false);
 
   // Calibration state
-  const [calibrationData, setCalibrationData] = useState<any>(null);
+  const [calibrationData, setCalibrationData] = useState<CalibrationPayload | null>(null);
   const [loadingCalib, setLoadingCalib] = useState(false);
   const [editingCalib, setEditingCalib] = useState<{ reviewId: string; score: string; notes: string } | null>(null);
   const [savingCalib, setSavingCalib] = useState(false);
 
   // Finalize state
   const [savingFinalize, setSavingFinalize] = useState(false);
+
+  // Launch state (DRAFT cycles — the cron notification lands here, so
+  // this page must carry the launch control, not just the list).
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
 
   const fetchCycle = useCallback(async () => {
     try {
@@ -135,7 +243,7 @@ export default function ReviewCycleDetailPage() {
         if (data.review?.selfRatings) {
           const sr = data.review.selfRatings;
           const ratings: Record<string, { rating: number; achievements: string }> = {};
-          (sr.kraRatings || []).forEach((r: any) => { ratings[r.kraId] = { rating: r.rating, achievements: r.achievements || "" }; });
+          (sr.kraRatings || []).forEach((r: SelfKraRating) => { ratings[r.kraId] = { rating: r.rating, achievements: r.achievements || "" }; });
           setKraRatings(ratings);
           if (sr.reflection) setReflection(sr.reflection);
         }
@@ -194,7 +302,7 @@ export default function ReviewCycleDetailPage() {
       const selfRatings = {
         kraRatings: Object.entries(kraRatings).map(([kraId, data]) => ({
           kraId,
-          kraName: selfData?.kraAssignments?.find((a: any) => a.kra.id === kraId)?.kra.name || "",
+          kraName: selfData?.kraAssignments?.find((a) => a.kra.id === kraId)?.kra.name || "",
           rating: data.rating,
           achievements: data.achievements,
         })),
@@ -229,7 +337,7 @@ export default function ReviewCycleDetailPage() {
       const selfRatings = {
         kraRatings: Object.entries(kraRatings).map(([kraId, data]) => ({
           kraId,
-          kraName: selfData?.kraAssignments?.find((a: any) => a.kra.id === kraId)?.kra.name || "",
+          kraName: selfData?.kraAssignments?.find((a) => a.kra.id === kraId)?.kra.name || "",
           rating: data.rating,
           achievements: data.achievements,
         })),
@@ -348,13 +456,39 @@ export default function ReviewCycleDetailPage() {
     } catch {} finally { setSavingCalib(false); }
   };
 
+  // Launch a DRAFT cycle: POST /launch creates a Review row for every
+  // active employee (reviewer = their manager) and flips the cycle
+  // ACTIVE server-side. This is the only door out of DRAFT — a raw
+  // status PATCH is rejected while the cycle has zero reviews.
+  const handleLaunch = async () => {
+    setLaunching(true);
+    setLaunchError(null);
+    try {
+      const res = await fetch(`/api/reviews/${cycleId}/launch`, { method: "POST" });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setLaunchError(
+          res.status === 403
+            ? "Only managers/HR can launch review cycles."
+            : data?.error || "Couldn't launch the cycle.",
+        );
+        return;
+      }
+      await Promise.all([fetchCycle(), fetchSelfAssessment(), fetchTeamReviews()]);
+    } catch {
+      setLaunchError("Couldn't launch the cycle.");
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   const handleFinalize = async () => {
     if (!calibrationData?.calibrationData) return;
     setSavingFinalize(true);
     try {
       const outcomes = calibrationData.calibrationData
-        .filter((d: any) => d.outcome)
-        .map((d: any) => ({
+        .filter((d) => d.outcome)
+        .map((d) => ({
           reviewId: d.reviewId,
           outcome: d.outcome,
           overallScore: d.calibratedScore ?? d.compositeScore,
@@ -385,26 +519,26 @@ export default function ReviewCycleDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-64">
         <p className="text-zinc-500">Review cycle not found</p>
-        <Button variant="ghost" className="mt-2" onClick={() => router.push("/reviews")}>Back to Reviews</Button>
+        <Button variant="ghost" className="mt-2" onClick={() => router.push("/reviews")}>Back to review cycles</Button>
       </div>
     );
   }
 
-  const stats = cycle.stats || {};
+  const stats: CycleStats = cycle.stats ?? { total: 0, selfDone: 0, managerDone: 0, calibrated: 0, completed: 0 };
   const myReview = selfData?.review;
   const canSelfAssess = myReview && (myReview.status === "PENDING" || myReview.status === "SELF_ASSESSMENT");
 
   const cycleStatusColor = cycle.status === "ACTIVE" ? "var(--os-c-orange)"
-                         : cycle.status === "IN_CALIBRATION" ? "var(--os-c-purple)"
+                         : cycle.status === "IN_CALIBRATION" ? "var(--os-c-teal)"
                          : cycle.status === "COMPLETED" ? "var(--os-c-green)"
-                         : "var(--os-c-indigo)";
+                         : "var(--os-c-blue)";
   const cycleProgress = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0;
   return (
     <div className="space-y-3 animate-fade-in">
       <section className="rvwd__hero" style={{ ["--hero-c" as unknown as string]: cycleStatusColor }}>
         <span className="rvwd__hero-accent" aria-hidden="true" />
         <button type="button" className="rvwd__hero-back" onClick={() => router.push("/reviews")}>
-          <ArrowLeft size={12} /> Reviews
+          <ArrowLeft size={12} /> Review cycles
         </button>
         <div className="rvwd__hero-meta">
           <span className="rvwd__hero-status">{cycle.status.replace(/_/g, " ")}</span>
@@ -427,6 +561,26 @@ export default function ReviewCycleDetailPage() {
           <div className="rvwd__hero-stat--cal"><span>Calibrated</span><strong>{stats.calibrated ?? 0}</strong></div>
           <div className="rvwd__hero-stat--done"><span>Completed</span><strong>{stats.completed ?? 0}</strong></div>
         </div>
+
+        {/* DRAFT cycles haven't generated any per-person reviews yet —
+            launching is what creates them (one per active employee,
+            reviewer = their manager) and moves the cycle to Active. */}
+        {cycle.status === "DRAFT" && (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3">
+            <div className="flex-1 min-w-[220px]">
+              <p className="text-sm font-medium">This cycle hasn&apos;t been launched yet</p>
+              <p className="text-xs text-zinc-500">
+                Launching creates a review for every active employee and notifies them to
+                start their self-assessment.
+              </p>
+              {launchError && <p className="text-xs text-[#E2445C] mt-1">{launchError}</p>}
+            </div>
+            <Button onClick={handleLaunch} disabled={launching} className="gap-2">
+              <Rocket size={14} />
+              {launching ? "Launching..." : "Launch cycle"}
+            </Button>
+          </div>
+        )}
       </section>
 
       {/* Tabs */}
@@ -443,7 +597,7 @@ export default function ReviewCycleDetailPage() {
         <TabsContent value="self-assessment" className="mt-4 space-y-4">
           {loadingSelf ? (
             <Card><CardContent className="p-8 text-center text-zinc-500">Loading...</CardContent></Card>
-          ) : !selfData ? (
+          ) : !selfData || !myReview ? (
             <Card><CardContent className="p-8 text-center text-zinc-500">No review found for you in this cycle.</CardContent></Card>
           ) : (
             <>
@@ -502,11 +656,11 @@ export default function ReviewCycleDetailPage() {
               {/* OKRs you owned this period — pre-populated from your
                   check-ins so you barely have to re-write what you
                   shipped. */}
-              {selfData.metrics.okrs?.length > 0 && (
+              {(selfData.metrics.okrs?.length ?? 0) > 0 && (
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Your OKRs this period</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
-                    {selfData.metrics.okrs.map((okr: any) => (
+                    {selfData.metrics.okrs?.map((okr) => (
                       <div key={okr.id} className="rounded-lg border border-zinc-200 bg-white p-3">
                         <div className="flex items-center justify-between gap-3 mb-2">
                           <div className="min-w-0">
@@ -517,7 +671,7 @@ export default function ReviewCycleDetailPage() {
                             {okr.progress}%
                           </span>
                         </div>
-                        {okr.keyResults?.map((kr: any) => (
+                        {okr.keyResults?.map((kr) => (
                           <div key={kr.id} className="mt-1.5 text-[11px] flex items-center gap-2">
                             <span className="text-zinc-500 truncate flex-1">{kr.title}</span>
                             <span className="font-mono tabular-nums">
@@ -539,11 +693,11 @@ export default function ReviewCycleDetailPage() {
               )}
 
               {/* KRA Self-Ratings */}
-              {selfData.kraAssignments?.length > 0 && (
+              {(selfData.kraAssignments?.length ?? 0) > 0 && (
                 <Card>
                   <CardHeader className="pb-2"><CardTitle className="text-sm">Rate Your KRA Performance</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
-                    {selfData.kraAssignments.map((a: any) => (
+                    {selfData.kraAssignments?.map((a) => (
                       <div key={a.kra.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div>
@@ -655,7 +809,7 @@ export default function ReviewCycleDetailPage() {
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm">Your Team&apos;s Reviews</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {teamReviews.map((review: any) => (
+                {teamReviews.map((review) => (
                   <div
                     key={review.id}
                     className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3 hover:bg-zinc-50/50 cursor-pointer transition-colors"
@@ -665,7 +819,7 @@ export default function ReviewCycleDetailPage() {
                       if (review.managerAssessment) {
                         const ma = review.managerAssessment;
                         const ratings: Record<string, { rating: number; comments: string }> = {};
-                        (ma.kraRatings || []).forEach((r: any) => { ratings[r.kraId] = { rating: r.rating, comments: r.comments || "" }; });
+                        (ma.kraRatings || []).forEach((r) => { ratings[r.kraId] = { rating: r.rating, comments: r.comments || "" }; });
                         setMgrKraRatings(ratings);
                         setBehavioral(ma.behavioral || {});
                         setMgrComments(ma.overallComments || review.managerComments || "");
@@ -723,7 +877,7 @@ export default function ReviewCycleDetailPage() {
                   {selectedReview.selfRatings && (
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
                       <p className="text-xs font-medium text-zinc-500 mb-2">Employee&apos;s Self-Assessment</p>
-                      {(selectedReview.selfRatings.kraRatings || []).map((r: any) => (
+                      {(selectedReview.selfRatings.kraRatings || []).map((r) => (
                         <div key={r.kraId} className="mb-2">
                           <div className="flex items-center gap-2">
                             <span className="text-xs">{r.kraName}</span>
@@ -742,12 +896,12 @@ export default function ReviewCycleDetailPage() {
                   )}
 
                   {/* Peer feedback preview */}
-                  {selectedReview.peerFeedback?.length > 0 && (
+                  {(selectedReview.peerFeedback?.length ?? 0) > 0 && (
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
-                      <p className="text-xs font-medium text-zinc-500 mb-2">Peer Feedback ({selectedReview.peerFeedback.length})</p>
-                      {selectedReview.peerFeedback.map((pf: any, i: number) => (
+                      <p className="text-xs font-medium text-zinc-500 mb-2">Peer Feedback ({selectedReview.peerFeedback?.length ?? 0})</p>
+                      {selectedReview.peerFeedback?.map((pf, i: number) => (
                         <div key={i} className="mb-2 text-[10px]">
-                          {!pf.anonymous && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
+                          {!pf.anonymous && pf.giver && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
                           {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
                           {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
                           {pf.collaborationRating && <span className="text-zinc-500">Collaboration: {pf.collaborationRating}/5</span>}
@@ -844,7 +998,7 @@ export default function ReviewCycleDetailPage() {
             <Card>
               <CardHeader className="pb-2"><CardTitle className="text-sm">Peer Feedback Requests</CardTitle></CardHeader>
               <CardContent className="space-y-2">
-                {peerRequests.map((pf: any) => (
+                {peerRequests.map((pf) => (
                   <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3">
                     <Avatar className="h-9 w-9">
                       <AvatarFallback className="text-xs">{pf.receiver.firstName[0]}{pf.receiver.lastName[0]}</AvatarFallback>
@@ -924,7 +1078,7 @@ export default function ReviewCycleDetailPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {calibrationData.calibrationData.map((d: any) => (
+                      {calibrationData.calibrationData.map((d) => (
                         <tr key={d.reviewId} className="border-b border-zinc-200/50 hover:bg-zinc-50/50">
                           <td className="p-3">
                             <p className="text-sm font-medium">{d.subject.firstName} {d.subject.lastName}</p>
@@ -1000,10 +1154,10 @@ export default function ReviewCycleDetailPage() {
           <Card>
             <CardHeader className="pb-2"><CardTitle className="text-sm">Pending Actions</CardTitle></CardHeader>
             <CardContent className="space-y-2">
-              {cycle.reviews?.filter((r: any) => r.status === "PENDING").length === 0 ? (
+              {cycle.reviews?.filter((r) => r.status === "PENDING").length === 0 ? (
                 <p className="text-sm text-zinc-500 text-center py-4">Everyone has started their reviews!</p>
               ) : (
-                cycle.reviews?.filter((r: any) => r.status === "PENDING").map((r: any) => (
+                cycle.reviews?.filter((r) => r.status === "PENDING").map((r) => (
                   <div key={r.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-2">
                     <Avatar className="h-7 w-7">
                       <AvatarFallback className="text-[10px]">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
@@ -1060,7 +1214,7 @@ export default function ReviewCycleDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowPeerDialog(null)}>Cancel</Button>
-            <Button onClick={() => handlePeerSubmit(showPeerDialog.id)} disabled={savingPeer || !peerStrengths.trim()}>
+            <Button onClick={() => { if (showPeerDialog) void handlePeerSubmit(showPeerDialog.id); }} disabled={savingPeer || !peerStrengths.trim()}>
               {savingPeer ? "Submitting..." : "Submit Feedback"}
             </Button>
           </DialogFooter>
@@ -1077,8 +1231,8 @@ export default function ReviewCycleDetailPage() {
             <p className="text-xs text-zinc-500">Select 2-3 peers to provide feedback. They will be notified.</p>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {allUsers
-                .filter((u: any) => u.id !== showAssignPeersDialog?.subject?.id)
-                .map((u: any) => (
+                .filter((u) => u.id !== showAssignPeersDialog?.subject?.id)
+                .map((u) => (
                   <label key={u.id} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2 cursor-pointer hover:bg-zinc-50/50">
                     <input
                       type="checkbox"
@@ -1096,7 +1250,7 @@ export default function ReviewCycleDetailPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowAssignPeersDialog(null)}>Cancel</Button>
-            <Button onClick={() => handleAssignPeers(showAssignPeersDialog.id)} disabled={savingPeerReq || peerUserIds.length === 0}>
+            <Button onClick={() => { if (showAssignPeersDialog) void handleAssignPeers(showAssignPeersDialog.id); }} disabled={savingPeerReq || peerUserIds.length === 0}>
               {savingPeerReq ? "Assigning..." : `Assign ${peerUserIds.length} Peers`}
             </Button>
           </DialogFooter>

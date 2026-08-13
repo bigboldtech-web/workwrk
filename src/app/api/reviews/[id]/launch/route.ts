@@ -21,6 +21,13 @@ export async function POST(
   });
   if (!cycle) return jsonError("Review cycle not found", 404);
 
+  // Launchable states: DRAFT (the normal path) and ACTIVE-with-no-reviews
+  // (heals legacy cycles whose status was flipped before this route had a
+  // UI caller). Never a cycle that's calibrating, finished or cancelled.
+  if (["IN_CALIBRATION", "COMPLETED", "CANCELLED"].includes(cycle.status)) {
+    return jsonError(`Cannot launch a ${cycle.status.replace(/_/g, " ").toLowerCase()} cycle`);
+  }
+
   if (cycle.reviews.length > 0) {
     return jsonError("Reviews already generated for this cycle. Delete existing reviews first.");
   }

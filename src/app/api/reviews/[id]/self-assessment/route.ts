@@ -128,6 +128,7 @@ export async function PATCH(
 
   const review = await prisma.review.findFirst({
     where: { cycleId, subjectId: userId },
+    include: { cycle: { select: { startDate: true, endDate: true } } },
   });
 
   if (!review) return jsonError("No review found for you in this cycle", 404);
@@ -139,19 +140,23 @@ export async function PATCH(
   const { selfRatings, submit } = body;
   // selfRatings: { kraRatings: [{kraId, kraName, rating, achievements}], reflection: {wentWell, couldImprove, goals} }
 
-  // Calculate task completion rate for storage
-  const orgId = getOrgId(session);
-  const tasks = await prisma.task.findMany({
-    where: { assigneeId: userId, organizationId: orgId },
-    select: { status: true },
-  });
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter((t) => t.status === "COMPLETED").length;
-  const taskCompletionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : null;
+  // NOTE: the old "task completion rate" metric is gone, honestly. It
+  // read the legacy (always-empty) prisma.task table, then wrote a
+  // `taskCompletionRate` column that does not exist on Review — so
+  // EVERY self-assessment save crashed with a Prisma validation error.
+  // Review has no column to store it and nothing consumes it; bringing
+  // it back (from the live Item model) needs a schema migration first.
 
-  // Calculate KPI score
+  // KPI score — only records made inside this cycle's window. Averaging
+  // the user's entire KPI history would score this period with last
+  // year's numbers.
+  const orgId = getOrgId(session);
   const kpiRecords = await prisma.kPIRecord.findMany({
-    where: { userId, kpi: { organizationId: orgId } },
+    where: {
+      userId,
+      kpi: { organizationId: orgId },
+      createdAt: { gte: review.cycle.startDate, lte: review.cycle.endDate },
+    },
     select: { score: true },
   });
   const kpiScores = kpiRecords.filter((r) => r.score != null).map((r) => r.score!);
@@ -162,7 +167,6 @@ export async function PATCH(
     data: {
       selfRatings: selfRatings ?? undefined,
       kpiScore: avgKpiScore,
-      taskCompletionRate,
       status: submit ? "SELF_ASSESSMENT" : "PENDING",
       ...(submit && { submittedAt: new Date() }),
     },

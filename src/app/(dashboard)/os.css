@@ -31042,7 +31042,7 @@ table.os-tbl {
 .rvw__btn-primary {
   display: inline-flex; align-items: center; gap: 6px;
   height: 30px; padding: 0 13px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--os-c-purple), var(--os-c-indigo));
+  background: var(--os-brand);
   color: white; border: 1px solid transparent;
   font-size: 12px; font-weight: 700; cursor: pointer; margin-left: 4px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.16);
@@ -31068,7 +31068,7 @@ table.os-tbl {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 10px; font-weight: 700; padding: 3px 10px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--os-c-purple), var(--os-c-pink));
+  background: linear-gradient(135deg, var(--os-c-yellow), var(--os-c-orange));
   color: white; text-transform: uppercase; letter-spacing: 0.06em;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
 }
@@ -31114,7 +31114,7 @@ table.os-tbl {
 .rvw__hero-advance {
   display: inline-flex; align-items: center; gap: 5px;
   height: 36px; padding: 0 16px;
-  background: linear-gradient(135deg, var(--hero-c), color-mix(in srgb, var(--hero-c) 70%, var(--os-c-purple)));
+  background: linear-gradient(135deg, var(--hero-c), color-mix(in srgb, var(--hero-c) 70%, var(--os-c-blue)));
   color: white; border: none; border-radius: 8px;
   font-family: var(--os-font); font-size: 12.5px; font-weight: 700; cursor: pointer;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
@@ -31253,14 +31253,14 @@ table.os-tbl {
 .rvwd__hero-name { font-size: 24px; font-weight: 700; color: var(--os-ink); letter-spacing: -0.02em; margin: 0; line-height: 1.2; }
 .rvwd__hero-progress { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .rvwd__hero-bar { flex: 1; height: 8px; background: var(--os-surface-1); border-radius: 999px; overflow: hidden; }
-.rvwd__hero-bar-fill { height: 100%; background: linear-gradient(90deg, var(--hero-c), color-mix(in srgb, var(--hero-c) 70%, var(--os-c-pink))); border-radius: 999px; transition: width 240ms ease; }
+.rvwd__hero-bar-fill { height: 100%; background: linear-gradient(90deg, var(--hero-c), color-mix(in srgb, var(--hero-c) 70%, var(--os-c-blue))); border-radius: 999px; transition: width 240ms ease; }
 .rvwd__hero-pct { font-size: 14px; font-weight: 700; color: var(--hero-c); font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
 .rvwd__hero-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 12px; }
 .rvwd__hero-stats > div { background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px; padding: 8px 10px; }
 .rvwd__hero-stats span { font-size: 9.5px; font-weight: 700; color: var(--os-ink-3); text-transform: uppercase; letter-spacing: 0.05em; display: block; }
 .rvwd__hero-stats strong { font-size: 18px; font-weight: 700; color: var(--os-ink); font-variant-numeric: tabular-nums; display: block; margin-top: 2px; }
 .rvwd__hero-stat--self strong { color: var(--os-c-blue); }
-.rvwd__hero-stat--mgr strong { color: var(--os-c-purple); }
+.rvwd__hero-stat--mgr strong { color: var(--os-c-teal); }
 .rvwd__hero-stat--cal strong { color: var(--os-c-orange); }
 .rvwd__hero-stat--done strong { color: var(--os-c-green); }
 

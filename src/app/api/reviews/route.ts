@@ -111,6 +111,27 @@ export async function PATCH(req: NextRequest) {
   });
   if (!existing) return jsonError("Review cycle not found", 404);
 
+  // A cycle only leaves DRAFT through POST /api/reviews/[id]/launch — the
+  // sole creator of per-person Review rows. Flipping status directly used
+  // to produce ACTIVE cycles with zero reviews: nobody had anything to
+  // fill in, so the whole flow looked alive while doing nothing. Block
+  // the raw transition (CANCELLED stays allowed — killing an unlaunched
+  // draft is legitimate).
+  if (
+    status !== undefined &&
+    existing.status === "DRAFT" &&
+    status !== "DRAFT" &&
+    status !== "CANCELLED"
+  ) {
+    const reviewCount = await prisma.review.count({ where: { cycleId: id } });
+    if (reviewCount === 0) {
+      return jsonError(
+        "This cycle has no reviews yet. Launch it first to generate a review for every employee.",
+        409,
+      );
+    }
+  }
+
   const cycle = await prisma.reviewCycle.update({
     where: { id },
     data: {
