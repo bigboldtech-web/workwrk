@@ -12,9 +12,10 @@ import Link from "next/link";
 import {
   LayoutDashboard, GitBranch, Plus, Trash2, X, Check, ShieldCheck, HandHelping, Ban,
   Target, FileText, Gauge, Users as UsersIcon, Loader2, Sparkles,
-  MoreHorizontal, Star, TrendingUp, TrendingDown, MoveRight, Pencil, Unlink,
+  MoreHorizontal, Star, TrendingUp, TrendingDown, MoveRight, Pencil, Unlink, ChevronDown,
   type LucideIcon,
 } from "lucide-react";
+import { ACCESS_LEVELS, labelForAccessLevel } from "@/lib/access-levels";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { KraPicker } from "@/components/ui/kra-picker";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -154,8 +155,20 @@ function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
             <span className="text-[13px] text-zinc-700">{mission || <span className="text-zinc-400">Not set</span>}</span>
           )}
         </Field>
-        <Field label="Function"><span className="text-[13px] text-zinc-700">{bundle.role.department?.name ?? <span className="text-zinc-400">Unassigned</span>}</span></Field>
-        <Field label="Level"><span className="text-[12px] font-medium text-zinc-600 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{bundle.role.level}</span></Field>
+        <Field label="Function">
+          {canEdit ? (
+            <FunctionPicker roleId={bundle.role.id} current={bundle.role.department} />
+          ) : (
+            <span className="text-[13px] text-zinc-700">{bundle.role.department?.name ?? <span className="text-zinc-400">Unassigned</span>}</span>
+          )}
+        </Field>
+        <Field label="Level">
+          {canEdit ? (
+            <LevelSelect roleId={bundle.role.id} current={bundle.role.level} />
+          ) : (
+            <span className="text-[12px] font-medium text-zinc-600 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{bundle.role.level}</span>
+          )}
+        </Field>
         <Field label="People"><span className="text-[13px] text-zinc-700">{bundle.people.length} in this role</span></Field>
       </div>
     </Card>
@@ -167,6 +180,129 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="flex items-baseline gap-3">
       <span className="text-xs text-zinc-500 w-[88px] shrink-0">{label}</span>
       <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
+}
+
+// Inline picker assigning the role to a Function (Department). Same source
+// the rest of the app uses (GET /api/departments), fetched lazily on first
+// open. PUT { departmentId } on select; optimistic + router.refresh().
+type DeptOption = { id: string; name: string };
+
+function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOption | null }) {
+  const { call, busy } = useApi();
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [dept, setDept] = useState<DeptOption | null>(current);
+  const [depts, setDepts] = useState<DeptOption[] | null>(null); // null = not loaded yet
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && (depts === null || loadFailed)) {
+      setLoadFailed(false);
+      setDepts(null);
+      fetch("/api/departments")
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load failed"))))
+        .then((d: DeptOption[]) => setDepts(Array.isArray(d) ? d.map((x) => ({ id: x.id, name: x.name })) : []))
+        .catch(() => { setDepts([]); setLoadFailed(true); });
+    }
+  };
+
+  const pick = async (next: DeptOption | null) => {
+    setOpen(false);
+    if ((next?.id ?? null) === (dept?.id ?? null)) return;
+    const prev = dept;
+    setDept(next); // optimistic; refresh re-pulls the server bundle
+    const ok = await call(`/api/roles/${roleId}`, "PUT", { departmentId: next?.id ?? null });
+    if (!ok) setDept(prev);
+  };
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        disabled={busy}
+        onClick={toggle}
+        title="Assign this job title to a function (department)"
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-[13px] hover:bg-zinc-50 disabled:opacity-50"
+      >
+        <span className={dept ? "text-zinc-700" : "text-zinc-400"}>{dept?.name ?? "Unassigned"}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} aria-hidden />
+          <MorePortal anchorRef={anchorRef} width={230} open={open} placement="below">
+            <MenuList>
+              {depts === null ? (
+                <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              ) : loadFailed ? (
+                <div className="px-3 py-2 text-[12px] text-zinc-500">Couldn&rsquo;t load departments. Reopen to retry.</div>
+              ) : depts.length === 0 ? (
+                <div className="px-3 py-2 text-[12px] leading-relaxed text-zinc-500">
+                  No departments yet. Create one in{" "}
+                  <Link href="/people/departments" className="text-[var(--os-brand)] hover:underline" onClick={() => setOpen(false)}>
+                    People → Departments
+                  </Link>
+                  , then assign it here.
+                </div>
+              ) : (
+                <>
+                  <MenuItem label={<span className="text-zinc-500">No function</span>} selected={!dept} onClick={() => void pick(null)} />
+                  <MenuSeparator />
+                  {depts.map((d) => (
+                    <MenuItem key={d.id} label={d.name} selected={dept?.id === d.id} onClick={() => void pick(d)} />
+                  ))}
+                </>
+              )}
+            </MenuList>
+          </MorePortal>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+// Level select over the canonical Role.level catalog (lib/access-levels).
+// AGENT is excluded: the roles index groups only its nine LEVEL_ORDER tiers,
+// so an AGENT-level role would vanish from that page. Admin tiers stay out
+// by design (see access-levels.ts). PUT { level } on change; the refresh
+// also re-renders the server header, so the title chip updates in place.
+const ROLE_LEVEL_OPTIONS = ACCESS_LEVELS.filter((o) => o.value !== "AGENT");
+
+function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
+  const { call, busy } = useApi();
+  const [level, setLevel] = useState(current);
+  const known = ROLE_LEVEL_OPTIONS.some((o) => o.value === level);
+
+  const pick = async (next: string) => {
+    if (next === level) return;
+    const prev = level;
+    setLevel(next); // optimistic; refresh re-pulls bundle + header chip
+    const ok = await call(`/api/roles/${roleId}`, "PUT", { level: next });
+    if (!ok) setLevel(prev);
+  };
+
+  return (
+    <div>
+      <select
+        value={level}
+        disabled={busy}
+        onChange={(e) => void pick(e.target.value)}
+        aria-label="Access level"
+        className="h-7 text-[12.5px] rounded-md border border-zinc-200 bg-white px-1.5 text-zinc-700 outline-none focus:border-[var(--os-brand)] disabled:opacity-50"
+      >
+        {!known ? <option value={level}>{labelForAccessLevel(level)}</option> : null}
+        {ROLE_LEVEL_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}{o.hint ? ` (${o.hint})` : ""}</option>
+        ))}
+      </select>
+      <p className="text-[11px] text-zinc-400 mt-1">
+        Access tier: decides what holders of this title can see, from their own work up to team and org-wide surfaces.
+      </p>
     </div>
   );
 }
