@@ -5,17 +5,45 @@ chose to **wait for ClickUp reference** before any goals UI is built —
 Mobbin was disconnected this session, so no live ClickUp screens could be
 pulled. This doc is the spec; execute it once reference is in hand.
 
-## BLOCKED ON (need one of these before building)
+## UNBLOCKED 2026-08-13 — Mobbin reconnected, reference captured
 
-- The **Mobbin connector reconnected** (claude.ai connector settings), so I
-  can pull ClickUp's New/Edit Goal modal, goal-row `...` menu, and goal
-  detail header, OR
-- **Screenshots** from the user of: ClickUp Goals list, a goal's detail
-  page, and the New/Edit Goal modal.
+ClickUp Goals reference (verified live from Mobbin, ClickUp web):
 
-Until then: do NOT build or restyle any goals surface. (Goal delete + the
-"Me" sidebar item already shipped separately — commits e1da02b / 82e6259 /
-58e531e — and are not part of this hold.)
+- **Goal detail** — https://mobbin.com/screens/a9e061e2-07f3-4a80-a367-d4502cb0ea51
+  (also fa913a4c…, 16d28e5f…): neutral hero band across the top; LARGE
+  progress ring left with % centered; title + inline `…` menu; description
+  in a white card under the title; right side of hero: due date,
+  "Sharing & Permissions" button, owner avatar(s). Below the hero, white
+  cards: **Targets** (header + "+ Add"), each row = owner avatar cluster,
+  title, "N task" link, `…`, right-aligned thin progress bar with `0/1`
+  fraction; **Timeline** card = activity entries ("Created Key Result",
+  "Today, by <name>").
+- **Create goal flow** (11 screens) —
+  https://mobbin.com/flows/e0cd95bd-dbfc-453b-b2d7-5b79da7faaef :
+  slide-over panel, sequential fields each with helper text + OK/press
+  ENTER: Goal name → **Owner ("Who is responsible for this Goal?" —
+  avatar picker, first-class field)** → access (Workspace / Private
+  cards) → optional end date → optional description.
+- **Create target flow** —
+  https://mobbin.com/flows/d0c11e46-0967-4d3b-8747-bdb9f88beb54 : Owner
+  row, then "Type of Target" radio cards (Number / True-False / Currency /
+  Tasks), Start + Target inputs with "+ Add unit"; Tasks type requires
+  linked tasks/lists.
+- **Check-in modal** —
+  https://mobbin.com/screens/662c87bf-64aa-4e1f-9a9c-d1f96eaddf26 :
+  target title, progress bar, Start / Current / Target row, Decrease |
+  Increase toggle, value input, "Save update", optional note (max 2000).
+- **Empty state**: illustration + "Targets are specific and measurable
+  pieces that must be accomplished in order to reach your Goal." +
+  "Create a Target" button.
+
+Translation rules: ClickUp's purple accent → brand blue `#0073EA`
+everywhere; our Contributors (GoalAudiencePicker) maps to ClickUp's
+sharing/access concept and stays a separate field from the single Owner;
+Key Results = Targets; check-ins keep our direction-aware math.
+
+(Goal delete + the "Me" sidebar item already shipped separately —
+commits e1da02b / 82e6259 / 58e531e.)
 
 ## The headline gap: "assign to a person" only half-works today
 
