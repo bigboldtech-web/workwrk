@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { isOrgAdminLevel } from "@/lib/alignment-scope";
-import { getTeamUserIds } from "@/lib/team";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canDeleteGoal } from "@/lib/alignment-scope";
 import {
   computeGoalRollups,
   enrichKeyResults,
@@ -51,6 +50,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     progress: rollup.progress,
     status: rollup.status,
     progressSource: rollup.source,
+    // Whether THIS viewer may delete the goal — same predicate the DELETE
+    // handler enforces, surfaced so the client can show/hide its affordance.
+    canDelete: await canDeleteGoal(session, okr.ownerId),
     children: okr.children.map((c) => {
       const childRoll = goalRollupFor(rollupCtx, { ...c, status: "" });
       return { ...c, progress: childRoll.progress, progressSource: childRoll.source };
@@ -67,18 +69,20 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!okr) return jsonError("Not found", 404);
 
   // Deleting a goal is owner / tree-manager / org-admin territory —
-  // a peer can never remove someone else's objective.
-  const callerId = getUserId(session);
-  let canDelete = isOrgAdminLevel(session) || okr.ownerId === callerId;
-  if (!canDelete && isManager(session)) {
-    canDelete = okr.ownerId
-      ? (await getTeamUserIds(getOrgId(session), callerId)).includes(okr.ownerId)
-      : true;
-  }
-  if (!canDelete) {
+  // a peer can never remove someone else's objective. Same predicate the
+  // list/detail Delete affordance gates on, so the UI never offers a
+  // Delete the API then refuses.
+  if (!(await canDeleteGoal(session, okr.ownerId))) {
     return jsonError("You can only delete your own goals or your reports' goals.", 403);
   }
 
+  // Key results, their check-ins, and the goal's audience rows all cascade
+  // at the DB FK (KeyResult/KRCheckIn/GoalAssignee → onDelete: Cascade).
+  // Any CHILD goals are re-homed to the top level automatically —
+  // OKR.parentId is onDelete: SET NULL, so a parent delete never blocks on
+  // its children and never leaves a dangling FK; the children survive as
+  // roots. Their own numbers are unchanged (a child rolls up from its own
+  // KRs/children, not its parent), so no child chain needs recomputing.
   await prisma.oKR.delete({ where: { id } });
   // The parent (and its ancestors) just lost a contributor — re-derive
   // their stored progress so no surface keeps quoting the old number.

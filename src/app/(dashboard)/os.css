@@ -18267,6 +18267,7 @@ table.os-tbl {
 
 /* Objective card */
 .okr-card {
+  position: relative;
   background: var(--os-canvas);
   border: 1px solid var(--os-line);
   border-left: 4px solid var(--okr-color);
@@ -18276,6 +18277,26 @@ table.os-tbl {
 }
 .okr-card:hover { border-color: color-mix(in srgb, var(--okr-color) 35%, var(--os-line)); border-left-color: var(--okr-color); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
 .okr-card.is-open { box-shadow: 0 6px 20px rgba(0,0,0,0.06); }
+
+/* "…" overflow / right-click menu trigger — revealed on card hover (or held
+   visible while its menu is open). The dropdown itself is portaled out via
+   MorePortal, so the card's overflow:hidden never clips it. */
+.okr-card__menu {
+  position: absolute; top: 9px; right: 8px; z-index: 6;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.okr-card:hover .okr-card__menu,
+.okr-card__menu[data-open="true"] { opacity: 1; }
+.okr-card__menu-btn {
+  width: 26px; height: 26px;
+  display: inline-grid; place-items: center;
+  border-radius: 6px;
+  color: var(--os-ink-3);
+  transition: background 120ms, color 120ms;
+}
+.okr-card__menu-btn:hover { background: var(--os-surface-1); color: var(--os-ink); }
+.okr-card__menu-btn svg { width: 15px; height: 15px; }
 
 .okr-card__main {
   display: flex; align-items: flex-start; gap: 10px;
@@ -18299,7 +18320,7 @@ table.os-tbl {
 .okr-card.is-open .okr-card__expand { color: var(--okr-color); }
 .okr-card__expand svg { width: 14px; height: 14px; }
 .okr-card__body { flex: 1; min-width: 0; }
-.okr-card__head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+.okr-card__head { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 8px; padding-right: 22px; }
 .okr-card__head h3 { margin: 0; font-size: 14.5px; font-weight: 600; color: var(--os-ink); line-height: 1.4; flex: 1; }
 .okr-card__status {
   font-size: 10px; font-weight: 700;
@@ -18394,6 +18415,19 @@ table.os-tbl {
 .okrd__back:hover { background: var(--os-canvas); color: var(--os-ink); border-color: var(--okrd-color); }
 .okrd__back svg { width: 16px; height: 16px; }
 .okrd__head-main { flex: 1; min-width: 0; }
+/* "…" overflow / right-click Delete affordance in the detail header. */
+.okrd__menu { flex-shrink: 0; margin-top: 2px; }
+.okrd__menu-btn {
+  width: 30px; height: 30px;
+  display: inline-grid; place-items: center;
+  border-radius: 8px;
+  background: var(--os-surface-1);
+  border: 1px solid var(--os-line);
+  color: var(--os-ink-2);
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.okrd__menu-btn:hover { background: var(--os-canvas); color: var(--os-ink); border-color: var(--okrd-color); }
+.okrd__menu-btn svg { width: 16px; height: 16px; }
 .okrd__head-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .okrd__level {
   display: inline-flex; align-items: center; gap: 5px;

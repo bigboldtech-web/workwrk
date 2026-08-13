@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { isOrgWideAlignment } from "@/lib/alignment-scope";
+import { isOrgAdminLevel, isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import {
   computeGoalRollups,
@@ -114,12 +114,33 @@ export async function GET(req: NextRequest) {
     summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
     computeGoalRollups(orgId),
   ]);
+
+  // Per-goal Delete gate, resolved ONCE for the whole list (not N tree
+  // walks): org admins delete anything; a manager deletes their report
+  // tree's goals plus unowned ones; everyone else only their own. This is
+  // the exact rule DELETE /api/okrs/[id] enforces (canDeleteGoal), so the
+  // row's "…"/right-click Delete only appears when the API will honor it.
+  const deleteCallerId = getUserId(session);
+  const deleteOrgAdmin = isOrgAdminLevel(session);
+  const deleteTeamIds =
+    !deleteOrgAdmin && isManager(session)
+      ? new Set(await getTeamUserIds(orgId, deleteCallerId))
+      : null;
+  const canDeleteOkr = (ownerId: string | null): boolean => {
+    if (deleteOrgAdmin) return true;
+    if (ownerId === deleteCallerId) return true;
+    if (deleteTeamIds === null) return false; // not a manager
+    if (!ownerId) return true; // unowned objectives are manager-owned
+    return deleteTeamIds.has(ownerId);
+  };
+
   const enriched = okrs.map((okr, i) => {
     const keyResults = groups[i];
     const rollup = goalRollupFor(rollupCtx, okr);
     return {
       ...okr,
       keyResults,
+      canDelete: canDeleteOkr(okr.ownerId),
       progress: rollup.progress,
       status: rollup.status,
       // "NONE" = nothing measurable and nothing hand-set — clients show

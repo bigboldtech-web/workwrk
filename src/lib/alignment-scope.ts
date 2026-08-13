@@ -82,6 +82,29 @@ export async function canEditOkrOwner(
 }
 
 /**
+ * May the caller DELETE an objective owned by `ownerId`? Deleting is a
+ * heavier action than editing, so the org-wide door is narrowed to true
+ * org admins (SUPER_ADMIN / COMPANY_ADMIN) — a Director can edit a goal
+ * but not wipe it. The owner may always; a manager may delete a report's
+ * goal (and unowned objectives, which managers create). This is the ONE
+ * predicate DELETE /api/okrs/[id] enforces AND the list/detail surfaces
+ * gate their Delete affordance on, so the UI can never show a Delete that
+ * the API then 403s.
+ */
+export async function canDeleteGoal(
+  session: unknown,
+  ownerId: string | null,
+): Promise<boolean> {
+  const callerId = getUserId(session);
+  if (isOrgAdminLevel(session)) return true;
+  if (ownerId === callerId) return true;
+  if (!isManager(session)) return false;
+  if (!ownerId) return true;
+  const teamIds = await getTeamUserIds(getOrgId(session), callerId);
+  return teamIds.includes(ownerId);
+}
+
+/**
  * The set of userIds whose alignment data the caller may see, or `null`
  * for "unrestricted" (door 3). Employees get `[self]`, managers their
  * recursive tree (which includes self).

@@ -12,6 +12,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { isManagerLevel, requireGoalPage } from "@/lib/page-gates";
+import { canDeleteGoal } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 import { OkrCheckInForm } from "./okr-checkin-form";
 import { OkrLinkedWork } from "./okr-linked-work";
+import { GoalDetailMenu } from "./goal-detail-menu";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
@@ -160,6 +162,9 @@ export default async function OkrDetailPage(
     user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel },
   };
   const parentCrumb = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
+  // Same predicate DELETE /api/okrs/[id] enforces — gates the header's
+  // "…"/right-click Delete so it only shows when the API will honor it.
+  const canDelete = await canDeleteGoal(sessionLike, okr.ownerId);
 
   const lastCheckIn = okr.keyResults
     .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
@@ -242,6 +247,7 @@ export default async function OkrDetailPage(
             />
           </div>
         </div>
+        <GoalDetailMenu goalId={okr.id} title={okr.title} canDelete={canDelete} />
         <div className="okrd__progress">
           <div className="okrd__progress-ring">
             <ProgressRing value={rollup.progress} color={statusColor} measured={measured} />
