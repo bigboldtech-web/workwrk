@@ -1208,6 +1208,9 @@ export const APPS: AppEntry[] = [
   // ── People ──────────────────────────────────────────────────
   { key: "reviews", label: "Reviews", Icon: ClipboardCheck, defaultHref: "/reviews",
     matchPaths: ["/reviews"], category: "People", requiredAccess: "hr-admin",
+    // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
+    // reviews-client.tsx, so repeat "+" clicks re-open it).
+    createActions: [{ label: "Start review cycle", icon: ClipboardCheck, href: "/reviews?new=1", requiredAccess: "manager" }],
     Sidebar: linksSidebar([
       { href: "/reviews", label: "Reviews", Icon: ClipboardCheck },
       { href: "/talent",  label: "Talent (9-box)", Icon: Award },

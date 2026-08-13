@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Award, Plus, Search, Calendar as CalendarIcon, CheckCircle2,
@@ -79,15 +79,20 @@ export default function ReviewsPage() {
   const [statusFilter, setStatusFilter] = useState<Set<CycleStatus>>(new Set());
   const [newOpen, setNewOpen] = useState(false);
   const [now] = useState(() => new Date());
-  // The Teams "+" → Start review cycle routes here with ?new=1.
+  // The Reviews/Teams "+" → Start review cycle routes here with ?new=1.
+  // Armed latch — disarms on fire, re-arms once router.replace strips the
+  // param (a one-shot ref left repeat "+" clicks dead and a refresh with
+  // the param still in the URL re-opened the dialog).
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const didAutoOpen = useRef(false);
+  const newArmed = useRef(true);
   useEffect(() => {
-    if (!didAutoOpen.current && searchParams.get("new") === "1") {
-      didAutoOpen.current = true;
-      setNewOpen(true);
-    }
-  }, [searchParams]);
+    if (searchParams.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    router.replace("/reviews", { scroll: false });
+    setNewOpen(true);
+  }, [searchParams, router]);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
