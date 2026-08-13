@@ -28,7 +28,7 @@ export function GoalDetailMenu({ goal, canDelete, canEdit }: {
   const [editing, setEditing] = useState<{ focusOwner?: boolean } | null>(null);
 
   useEffect(() => {
-    const head = rootRef.current?.closest(".okrd__head") as HTMLElement | null;
+    const head = rootRef.current?.closest(".okrd__hero") as HTMLElement | null;
     if (!head) return;
     const onCtx = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest("a, button, input, textarea, [contenteditable=true]")) return;

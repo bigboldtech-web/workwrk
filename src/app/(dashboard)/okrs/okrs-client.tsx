@@ -1,38 +1,48 @@
 "use client";
 
-/* OKRs — objectives + key results, organized by level. Client body of
+/* Goals — objectives + key results, organized by level. Client body of
  * /okrs; the server gate lives in page.tsx (requireGoalsPage), and the
  * rows themselves arrive three-door-filtered from GET /api/okrs.
  *
- *  GET   /api/okrs              list with keyResults
- *  POST  /api/okrs              { title, level }
- *  PATCH /api/okrs              { id, status, title, progress, ... }
+ *  GET   /api/okrs              list with keyResults (+ ?mine=1 narrowing)
+ *  POST  /api/okrs              via CreateGoalModal
+ *  PATCH /api/okrs              via CreateGoalModal (edit mode)
  *
- * Layout
- *   - Stats hero (4 tiles: total, on-track %, at-risk count, this-quarter wins)
- *   - 3 level sections: Company → Team → Individual (cascade)
- *   - Each objective is a rich card showing health bar, owner, KRs
- *     (expandable inline)
+ * Layout — ClickUp Goals translated to the house design system (brand
+ * blue #0073EA, flat Monday-clean, zinc neutrals):
+ *   - Stats strip (avg progress, on track, needs attention, completed)
+ *   - One white card per level (Company → Department → Individual);
+ *     each goal is a compact ROW linking to /okrs/[id]: name, level chip,
+ *     quarter/due date, contributors stack, owner avatar, thin blue
+ *     progress bar + % ("—" when nothing is measured), hover "…" menu
+ *     + right-click (GoalRowMoreMenu).
+ *   - ?new=1 auto-opens the create modal; ?mine=1 shows only goals the
+ *     viewer carries (owner or resolved member — filtered server-side).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
-  Target, Plus, ChevronRight, ChevronDown, TrendingUp, AlertTriangle,
-  CheckCircle2, Trophy, Sparkles, Building2, Users, User as UserIcon,
+  Target, Plus, TrendingUp, AlertTriangle, CheckCircle2, Trophy,
+  Building2, Users, User as UserIcon, X,
   type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { CreateGoalModal } from "@/components/okrs/create-goal-modal";
 import { MemberAvatarStack, type AudienceMember } from "@/components/okrs/goal-audience-picker";
 import { GoalRowMoreMenu } from "@/components/okrs/goal-row-more-menu";
+import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
 
 type OkrStatus = "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED";
 type OkrLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
+
+/** Brand blue — the ONE accent; ClickUp's purple translates to this. */
+const BRAND = "#0073EA";
 
 type ApiOkr = {
   id: string;
@@ -62,69 +72,64 @@ type ApiOkr = {
   canEdit?: boolean;
 };
 
-const STATUS_LABELS: Record<OkrStatus, string> = {
-  ON_TRACK: "On track", AT_RISK: "At risk", BEHIND: "Behind", COMPLETED: "Completed",
-};
-const STATUS_COLOR: Record<OkrStatus, string> = {
-  ON_TRACK: C.green, AT_RISK: C.yellow, BEHIND: C.red, COMPLETED: C.teal,
-};
-
-const LEVEL_META: Record<OkrLevel, { label: string; sub: string; Icon: LucideIcon; color: string }> = {
-  COMPANY:    { label: "Company OKRs",    sub: "What the whole company is pushing toward",       Icon: Building2, color: C.blue },
-  DEPARTMENT: { label: "Department OKRs", sub: "How each department supports the company goals", Icon: Users,     color: C.blue },
-  INDIVIDUAL: { label: "Individual OKRs", sub: "What each person commits to this cycle",         Icon: UserIcon,  color: C.teal },
+const LEVEL_META: Record<OkrLevel, { label: string; chip: string; sub: string; Icon: LucideIcon }> = {
+  COMPANY:    { label: "Company Goals",    chip: "Company",    sub: "What the whole company is pushing toward",       Icon: Building2 },
+  DEPARTMENT: { label: "Department Goals", chip: "Department", sub: "How each department supports the company goals", Icon: Users },
+  INDIVIDUAL: { label: "Individual Goals", chip: "Individual", sub: "What each person commits to this cycle",         Icon: UserIcon },
 };
 
 const LEVEL_ORDER: OkrLevel[] = ["COMPANY", "DEPARTMENT", "INDIVIDUAL"];
-
-const AV_PALETTE = [C.purple, C.green, C.orange, C.pink, C.teal, C.indigo, C.blue, C.red];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initialsFor(f?: string | null, l?: string | null) {
-  return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
-}
 
 function fmtDate(iso?: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export default function OkrsClient() {
+export default function OkrsClient({ initialNew = false, mine = false }: {
+  /** ?new=1 — open the create modal on load (profile hero / sidebar link). */
+  initialNew?: boolean;
+  /** ?mine=1 — only goals the viewer carries (owner or resolved member). */
+  mine?: boolean;
+}) {
+  const router = useRouter();
   const [okrs, setOkrs] = useState<ApiOkr[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [creating, setCreating] = useState<OkrLevel | null>(null);
+  const [creating, setCreating] = useState<OkrLevel | null>(initialNew ? "INDIVIDUAL" : null);
+  // ?new=1 opened the modal — closing it cleans the param off the URL so a
+  // refresh doesn't resurrect the modal the user just dismissed.
+  const [fromQuery, setFromQuery] = useState(initialNew);
   // Edit mode of the SAME modal (ClickUp reuses one surface; so do we).
   // focusOwner lands the user straight in the Owner picker ("Assign owner").
   const [editing, setEditing] = useState<{ goal: ApiOkr; focusOwner?: boolean } | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/okrs");
+      const res = await fetch(`/api/okrs${mine ? "?mine=1" : ""}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setOkrs(data.data ?? (Array.isArray(data) ? data : []));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, []);
+  }, [mine]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("okrs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  // Opens the create-goal modal (title + level + audience picker) —
-  // creation itself happens inside CreateGoalModal via POST /api/okrs.
-  function newObjective(level: OkrLevel) {
+  // Opens the create-goal modal preset to the section's level — creation
+  // itself happens inside CreateGoalModal via POST /api/okrs.
+  function newGoal(level: OkrLevel) {
     setCreating(level);
   }
 
-  function toggleExpand(id: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  function closeCreate() {
+    setCreating(null);
+    if (fromQuery) {
+      setFromQuery(false);
+      router.replace(mine ? "/okrs?mine=1" : "/okrs", { scroll: false });
+    }
   }
 
   // Drop the deleted goal from the list in place — the DELETE already
@@ -132,12 +137,6 @@ export default function OkrsClient() {
   // or briefly flash the row back while it round-trips). No reload.
   const handleDeleted = useCallback((id: string) => {
     setOkrs((prev) => (prev ? prev.filter((o) => o.id !== id) : prev));
-    setExpanded((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
   }, []);
 
   // ── Stats ────────────────────────────────────────────────
@@ -167,33 +166,44 @@ export default function OkrsClient() {
   return (
     <>
       <OsTitleBar
-        title="OKRs"
+        title="Goals"
         Icon={Target}
-        iconGradient={GRAD.indigoBlue}
-        description={okrs === null ? "Loading…" : `${stats.total} objective${stats.total === 1 ? "" : "s"} · ${stats.active} active · ${stats.completed} completed`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.pr]}
-        morePeople={5}
+        iconGradient=""
+        description={okrs === null ? "Loading…" : `${stats.total} goal${stats.total === 1 ? "" : "s"} · ${stats.active} active · ${stats.completed} completed`}
         actions={
-          <button type="button" className="okrs__new" onClick={() => newObjective("INDIVIDUAL")} disabled={creating !== null}>
-            <Plus /> New objective
+          <button type="button" className="okrs__new" onClick={() => newGoal("INDIVIDUAL")} disabled={creating !== null}>
+            <Plus /> New goal
           </button>
         }
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Target} iconGradient={GRAD.redPink} title="Couldn't load OKRs" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load goals" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => { setLoadError(null); void load(); }} />
       ) : okrs === null ? (
-        <div className="okrs__loading">Loading objectives…</div>
+        <div className="okrs__loading">Loading goals…</div>
       ) : stats.total === 0 ? (
-        <OsEmptyView Icon={Target} iconGradient={GRAD.indigoBlue} title="No OKRs yet" subtitle="Set your first objective. Pick Company / Department / Individual to anchor it on the cascade." chips={["Company", "Department", "Individual"]} cta="New objective" />
+        mine ? (
+          <OsEmptyView Icon={Trophy} iconGradient={BRAND} title="No goals assigned to you" subtitle="Goals you own or contribute to show up here. Create one, or clear the filter to browse the whole org." cta="New goal" onCta={() => newGoal("INDIVIDUAL")} />
+        ) : (
+          <OsEmptyView Icon={Target} iconGradient={BRAND} title="No goals yet" subtitle="Set your first goal. Pick Company / Department / Individual to anchor it on the cascade." chips={["Company", "Department", "Individual"]} cta="New goal" onCta={() => newGoal("INDIVIDUAL")} />
+        )
       ) : (
         <div className="okrs">
-          {/* Stats hero */}
+          {mine && (
+            <div className="okrs__filter">
+              <span className="okrs__filter-chip">
+                <Trophy /> My Goals — owner or member
+                <Link href="/okrs" aria-label="Show all goals" title="Show all goals"><X /></Link>
+              </span>
+            </div>
+          )}
+
+          {/* Stats strip */}
           <section className="okrs__stats">
             <StatTile
               label="Average progress"
               value={stats.measured > 0 ? `${stats.avgProgress}%` : "—"}
-              accent={C.indigo}
+              accent={BRAND}
               Icon={TrendingUp}
               hint={stats.measured > 0 ? `across ${stats.measured} measured` : "nothing measured yet"}
               bar={stats.measured > 0 ? stats.avgProgress : undefined}
@@ -201,57 +211,57 @@ export default function OkrsClient() {
             <StatTile
               label="On track"
               value={`${stats.onTrack}`}
-              accent={C.green}
+              accent="#16a34a"
               Icon={CheckCircle2}
               hint={stats.active > 0 ? `${Math.round((stats.onTrack / stats.active) * 100)}% of active` : "no active"}
             />
             <StatTile
               label="Need attention"
               value={`${stats.atRisk}`}
-              accent={C.orange}
+              accent="#f59e0b"
               Icon={AlertTriangle}
               hint={stats.atRisk > 0 ? "at risk or behind" : "all clear"}
             />
             <StatTile
               label="Completed"
               value={`${stats.completed}`}
-              accent={C.teal}
+              accent={BRAND}
               Icon={Trophy}
               hint="wins this cycle"
             />
           </section>
 
-          {/* Cascade */}
+          {/* One card per level */}
           {LEVEL_ORDER.map((level) => {
             const meta = LEVEL_META[level];
             const items = grouped.get(level) ?? [];
+            // In "mine" view a level you carry nothing in is noise — hide it.
+            if (mine && items.length === 0) return null;
             return (
-              <section key={level} className="okrs__level" style={{ ["--lvl-color" as string]: meta.color }}>
-                <header className="okrs__level-head">
-                  <div className="okrs__level-icon"><meta.Icon /></div>
-                  <div className="okrs__level-text">
-                    <h2>{meta.label}</h2>
-                    <p>{meta.sub}</p>
-                  </div>
+              <section key={level} className="okrs__level">
+                <header className="okrs__level-head" title={meta.sub}>
+                  <meta.Icon />
+                  <h2>{meta.label}</h2>
                   <span className="okrs__level-count">{items.length}</span>
-                  <button type="button" className="okrs__level-add" onClick={() => newObjective(level)} disabled={creating !== null}>
-                    <Plus />
-                    Add
+                  <span className="okrs__level-spacer" />
+                  {/* Preset to THIS section's level — never hardcoded. */}
+                  <button type="button" className="okrs__level-add" onClick={() => newGoal(level)} disabled={creating !== null}>
+                    <Plus /> New goal
                   </button>
                 </header>
 
                 {items.length === 0 ? (
-                  <div className="okrs__level-empty">
-                    No {meta.label.replace(" OKRs", "").toLowerCase()} objectives yet. <button type="button" onClick={() => newObjective(level)}>Add one →</button>
+                  <div className="okrs__group okrs__group--empty">
+                    No {meta.chip.toLowerCase()} goals yet.{" "}
+                    <button type="button" onClick={() => newGoal(level)}>Add one →</button>
                   </div>
                 ) : (
-                  <div className="okrs__cards">
+                  <div className="okrs__group">
                     {items.map((o) => (
-                      <ObjectiveCard
+                      <GoalRow
                         key={o.id}
                         okr={o}
-                        expanded={expanded.has(o.id)}
-                        onToggle={() => toggleExpand(o.id)}
+                        showLevelChip={mine}
                         onDeleted={() => handleDeleted(o.id)}
                         onEdit={(opts) => setEditing({ goal: o, focusOwner: opts?.focusOwner })}
                       />
@@ -269,10 +279,10 @@ export default function OkrsClient() {
           key={creating}
           open
           level={creating}
-          onClose={() => setCreating(null)}
+          onClose={closeCreate}
           onSaved={() => {
-            setCreating(null);
-            toast("Objective created");
+            closeCreate();
+            toast("Goal created");
             void load();
           }}
         />
@@ -334,106 +344,79 @@ function StatTile({ label, value, accent, Icon, hint, bar }: { label: string; va
   );
 }
 
-function ObjectiveCard({ okr, expanded, onToggle, onDeleted, onEdit }: { okr: ApiOkr; expanded: boolean; onToggle: () => void; onDeleted: () => void; onEdit: (opts?: { focusOwner?: boolean }) => void }) {
-  const color = STATUS_COLOR[okr.status];
+/* One goal as a compact ClickUp-style row. The whole row links to the
+ * detail page; the "…" + right-click menu floats on top (Open / Edit /
+ * Assign owner / Copy link / Delete, gated per-row by API flags). */
+function GoalRow({ okr, showLevelChip, onDeleted, onEdit }: {
+  okr: ApiOkr;
+  /** In the mixed "mine" view the level chip disambiguates; grouped
+   *  sections already say it in the header. */
+  showLevelChip: boolean;
+  onDeleted: () => void;
+  onEdit: (opts?: { focusOwner?: boolean }) => void;
+}) {
   const pct = Math.max(0, Math.min(100, okr.progress));
   const unmeasured = okr.progressSource === "NONE";
-  const krs = okr.keyResults ?? [];
-  const ownerInitials = okr.owner ? initialsFor(okr.owner.firstName, okr.owner.lastName) : okr.ownerId?.slice(0, 2).toUpperCase() ?? "?";
-  const ownerColor = okr.ownerId ? avColor(okr.ownerId) : C.gray;
-  const canDelete = okr.canDelete ?? false;
-  const canEdit = okr.canEdit ?? false;
   const moreRef = useRef<ContextMenuHandle>(null);
+  const owner = okr.owner?.id
+    ? {
+        id: okr.owner.id,
+        firstName: okr.owner.firstName ?? null,
+        lastName: okr.owner.lastName ?? null,
+        avatar: okr.owner.avatar ?? null,
+        email: okr.owner.email ?? null,
+      }
+    : null;
+  const ownerName = owner ? `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() : "";
+  const due = okr.endDate ? `Ends ${fmtDate(okr.endDate)}` : okr.quarter || null;
 
   return (
-    <article
-      className={`okr-card ${expanded ? "is-open" : ""}`}
-      style={{ ["--okr-color" as string]: color }}
+    <div
+      className="okr-row"
       onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
     >
+      <Link href={`/okrs/${okr.id}`} className="okr-row__main">
+        <Trophy className="okr-row__icon" />
+        <span className="okr-row__name">{okr.title}</span>
+        <span className="okr-row__spacer" />
+        {showLevelChip && <span className="okr-row__chip">{LEVEL_META[okr.level].chip}</span>}
+        {due && <span className="okr-row__date">{due}</span>}
+        {/* Resolved audience — one shared goal, many contributors. */}
+        {okr.audience && okr.audience.assigneeCount > 0 && okr.audience.totalMembers > 0 && (
+          <MemberAvatarStack members={okr.audience.members} total={okr.audience.totalMembers} size={20} />
+        )}
+        {owner ? (
+          <span className="okr-row__owner" title={`Owner: ${ownerName || "—"}`}>
+            <PersonAvatar person={owner} size={22} />
+          </span>
+        ) : (
+          <span className="okr-row__owner okr-row__owner--none" title="No owner yet">
+            <UserIcon />
+          </span>
+        )}
+        <span className="okr-row__prog">
+          <span className="okr-row__track">
+            {/* Unmeasured goals get a NEUTRAL empty track — no colored
+                fill under a "—" pretending something was measured. */}
+            {!unmeasured && <span className="okr-row__fill" style={{ width: `${pct}%` }} />}
+          </span>
+          <span className="okr-row__pct" title={unmeasured ? "No targets yet — add one to start measuring" : undefined}>
+            {unmeasured ? "—" : `${pct}%`}
+          </span>
+        </span>
+      </Link>
       {/* Open + Copy link are viewer actions, so the menu always renders;
           Edit / Assign owner / Delete stay gated per-row by the API flags. */}
       <GoalRowMoreMenu
         ref={moreRef}
         goal={{ id: okr.id, title: okr.title }}
-        canDelete={canDelete}
-        canEdit={canEdit}
+        canDelete={okr.canDelete ?? false}
+        canEdit={okr.canEdit ?? false}
         onEdit={onEdit}
         onDeleted={onDeleted}
-        wrapperClassName="okr-card__menu"
-        triggerClassName="okr-card__menu-btn"
+        wrapperClassName="okr-row__menu"
+        triggerClassName="okr-row__menu-btn"
       />
-      <button type="button" className="okr-card__main" onClick={onToggle} aria-expanded={expanded}>
-        <span className="okr-card__expand">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
-
-        <div className="okr-card__body">
-          <header className="okr-card__head">
-            <h3>{okr.title}</h3>
-            <span className="okr-card__status">{STATUS_LABELS[okr.status]}</span>
-          </header>
-
-          {okr.description && !expanded && <p className="okr-card__desc">{okr.description}</p>}
-
-          <div className="okr-card__bar">
-            <div className="okr-card__bar-track">
-              <div className="okr-card__bar-fill" style={{ width: `${pct}%` }} />
-            </div>
-            {/* Unmeasured (no KRs, no children, nothing hand-set) shows an
-                honest "—", never a fake 0% that reads as "behind". */}
-            <span className="okr-card__bar-pct" title={unmeasured ? "No key results yet — add one to start measuring" : undefined}>
-              {unmeasured ? "—" : `${pct}%`}
-            </span>
-          </div>
-
-          <div className="okr-card__meta">
-            <span className="okr-card__owner">
-              <span className="okr-card__avatar" style={{ background: ownerColor }}>{ownerInitials}</span>
-              {okr.owner ? `${okr.owner.firstName ?? ""} ${okr.owner.lastName ?? ""}`.trim() || "Owner" : "Unassigned"}
-            </span>
-            {/* Resolved audience — one shared goal, many contributors. */}
-            {okr.audience && okr.audience.assigneeCount > 0 && okr.audience.totalMembers > 0 && (
-              <MemberAvatarStack members={okr.audience.members} total={okr.audience.totalMembers} size={20} />
-            )}
-            {okr.quarter && <span className="okr-card__chip">{okr.quarter}</span>}
-            {okr.endDate && <span className="okr-card__chip">Ends {fmtDate(okr.endDate)}</span>}
-            <span className="okr-card__chip okr-card__chip--krs"><Sparkles /> {krs.length} key result{krs.length === 1 ? "" : "s"}</span>
-          </div>
-        </div>
-      </button>
-
-      {expanded && (
-        <div className="okr-card__details">
-          {okr.description && <p className="okr-card__details-desc">{okr.description}</p>}
-          {krs.length === 0 ? (
-            <div className="okr-card__details-empty">No key results yet. Add KRs to track progress against this objective.</div>
-          ) : (
-            <ol className="okr-card__krs">
-              {krs.map((kr) => {
-                const krPct = kr.progress != null ? Math.max(0, Math.min(100, kr.progress))
-                  : (kr.targetValue && kr.currentValue != null
-                      ? Math.round(Math.min(100, (kr.currentValue / Math.max(1, kr.targetValue)) * 100))
-                      : 0);
-                return (
-                  <li key={kr.id} className="okr-kr">
-                    <div className="okr-kr__title">{kr.title}</div>
-                    <div className="okr-kr__bar">
-                      <div className="okr-kr__bar-track">
-                        <div className="okr-kr__bar-fill" style={{ width: `${krPct}%` }} />
-                      </div>
-                      <span>{krPct}%</span>
-                    </div>
-                    {kr.targetValue != null && (
-                      <div className="okr-kr__values">
-                        {kr.currentValue ?? 0} / {kr.targetValue}
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </div>
-      )}
-    </article>
+    </div>
   );
 }

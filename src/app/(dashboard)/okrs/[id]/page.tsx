@@ -1,11 +1,14 @@
-/* OKR detail — server-rendered for fast first paint.
+/* Goal detail — server-rendered for fast first paint, mirroring ClickUp's
+ * goal page translated to the house design system (brand blue #0073EA,
+ * flat Monday-clean, zinc neutrals — no purple):
  *
- * Layout
- *   Header band: back link + title + status chip + progress hero (big %).
- *   Stale warning callout (if no recent check-in).
- *   2-col body:
- *     left  (2/3): KR list with inline check-in forms + custom fields.
- *     right (1/3): cascade context (parent + children) + recent activity feed.
+ *   Neutral hero band: "All Goals" crumb, LARGE progress ring left (the
+ *   one rollup number, "—" when nothing is measured), title + inline "…"
+ *   menu, description, meta chips; hero right: due date, owner,
+ *   contributors stack.
+ *   Below, white cards: Targets (key results as rows + "+ Add", inline
+ *   check-ins — GoalTargets), Timeline (check-in history), cascade
+ *   context (parent / children), linked work, custom fields.
  */
 
 import Link from "next/link";
@@ -16,16 +19,20 @@ import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
-  ArrowLeft, AlertTriangle, Target, Calendar, Clock, Sparkles,
-  ChevronRight, Building2, Users, User as UserIcon, Activity,
+  ArrowLeft, AlertTriangle, Calendar, Clock,
+  ChevronRight, Building2, Users, User as UserIcon,
 } from "lucide-react";
-import { OkrCheckInForm } from "./okr-checkin-form";
+import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu } from "./goal-detail-menu";
+import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Brand blue — the ONE accent; ClickUp's purple translates to this. */
+const BRAND = "#0073EA";
 
 const CADENCE_DAYS: Record<string, number> = {
   WEEKLY: 7,
@@ -33,23 +40,17 @@ const CADENCE_DAYS: Record<string, number> = {
   MONTHLY: 31,
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  ON_TRACK: "var(--os-c-green)",
-  AT_RISK: "var(--os-c-yellow)",
-  BEHIND: "var(--os-c-red)",
-  COMPLETED: "var(--os-c-teal)",
-};
-const STATUS_LABEL: Record<string, string> = {
-  ON_TRACK: "On track",
-  AT_RISK: "At risk",
-  BEHIND: "Behind",
-  COMPLETED: "Completed",
+const STATUS_META: Record<string, { color: string; label: string }> = {
+  ON_TRACK: { color: "#16a34a", label: "On track" },
+  AT_RISK: { color: "#f59e0b", label: "At risk" },
+  BEHIND: { color: "#E2445C", label: "Behind" },
+  COMPLETED: { color: BRAND, label: "Completed" },
 };
 
-const LEVEL_ICON: Record<string, { Icon: typeof Building2; color: string; label: string }> = {
-  COMPANY:    { Icon: Building2, color: "var(--os-c-blue)", label: "Company" },
-  DEPARTMENT: { Icon: Users,     color: "var(--os-c-blue)", label: "Department" },
-  INDIVIDUAL: { Icon: UserIcon,  color: "var(--os-c-teal)", label: "Individual" },
+const LEVEL_ICON: Record<string, { Icon: typeof Building2; label: string }> = {
+  COMPANY:    { Icon: Building2, label: "Company" },
+  DEPARTMENT: { Icon: Users,     label: "Department" },
+  INDIVIDUAL: { Icon: UserIcon,  label: "Individual" },
 };
 
 function fmtDate(d: Date | null | undefined): string {
@@ -164,7 +165,9 @@ export default async function OkrDetailPage(
   const parentCrumb = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
   // Same predicates the APIs enforce — the header's "…"/right-click menu
   // only shows Delete when DELETE /api/okrs/[id] will honor it, and
-  // Edit / Assign owner when PATCH /api/okrs will.
+  // Edit / Assign owner when PATCH /api/okrs will. canEditGoal also gates
+  // Targets writes (add / delete / check-in — the key-results routes'
+  // exact rule).
   const [canDelete, canEditGoal] = await Promise.all([
     canDeleteGoal(sessionLike, okr.ownerId),
     canEditOkrOwner(sessionLike, okr.ownerId),
@@ -186,9 +189,23 @@ export default async function OkrDetailPage(
   const ownerName = owner ? `${owner.firstName} ${owner.lastName}`.trim() : "Unassigned";
   // Status follows the rollup: derived thresholds while the goal is
   // measured, the stored value otherwise — same rule as the APIs.
-  const statusColor = STATUS_COLOR[rollup.status] ?? "var(--os-c-blue)";
-  const statusLabel = STATUS_LABEL[rollup.status] ?? rollup.status;
+  const status = STATUS_META[rollup.status] ?? { color: BRAND, label: rollup.status };
   const level = LEVEL_ICON[okr.level] ?? LEVEL_ICON.INDIVIDUAL;
+
+  // Targets card rows — everything serializable, relative times formatted
+  // on the server clock so the client island never disagrees with SSR.
+  const targetRows: TargetRowData[] = keyResults.map((kr) => ({
+    id: kr.id,
+    title: kr.title,
+    unit: kr.unit,
+    startValue: kr.startValue,
+    targetValue: kr.targetValue,
+    currentValue: kr.currentValue,
+    progress: kr.progress,
+    isDerived: Boolean(kr.isDerived),
+    kpiName: kr.kpi?.name ?? null,
+    lastCheckIn: kr.checkIns[0] ? relDays(kr.checkIns[0].createdAt) : null,
+  }));
 
   type FlatCheckIn = {
     id: string;
@@ -220,280 +237,236 @@ export default async function OkrDetailPage(
     .slice(0, 12);
 
   return (
-    <div className="okrd" style={{ ["--okrd-color" as string]: statusColor }}>
-      {/* Header */}
-      <header className="okrd__head">
-        <Link href="/okrs" className="okrd__back" aria-label="Back to OKRs">
-          <ArrowLeft />
-        </Link>
-        <div className="okrd__head-main">
-          <div className="okrd__head-meta">
-            <span className="okrd__level" style={{ color: level.color, background: `color-mix(in srgb, ${level.color} 12%, transparent)` }}>
-              <level.Icon /> {level.label}
-            </span>
-            <span className="okrd__status">{statusLabel}</span>
-            {okr.quarter && <span className="okrd__chip">{okr.quarter}</span>}
-            <span className="okrd__chip"><Calendar /> {fmtDate(okr.startDate)} → {fmtDate(okr.endDate)}</span>
-            <span className="okrd__chip"><Clock /> {okr.checkInCadence.toLowerCase()} check-ins</span>
-            <span className="okrd__chip">Owner: <strong>{ownerName}</strong></span>
+    <div className="okrd">
+      {/* Neutral hero band */}
+      <header className="okrd__hero">
+        <div className="okrd__hero-in">
+          <div className="okrd__crumbs">
+            <Link href="/okrs" className="okrd__back">
+              <ArrowLeft /> All Goals
+            </Link>
           </div>
-          <h1 className="okrd__title"><Target /> {okr.title}</h1>
-          {okr.description && <p className="okrd__desc">{okr.description}</p>}
-          {/* One shared goal, many contributors — resolved avatar stack +
-              (for editors) the mixed people/departments/roles picker. */}
-          <div className="mt-2">
-            <OkrAudience
-              okrId={okr.id}
-              canEdit={canEditLinks}
-              initialEntries={audienceEntries}
-              initialMembers={audienceMembers.slice(0, 5)}
-              initialTotal={audienceMembers.length}
-            />
-          </div>
-        </div>
-        <GoalDetailMenu
-          goal={{
-            id: okr.id,
-            title: okr.title,
-            description: okr.description,
-            level: okr.level,
-            ownerId: okr.ownerId,
-            owner: owner
-              ? { id: owner.id, firstName: owner.firstName, lastName: owner.lastName, avatar: owner.avatar, email: owner.email }
-              : null,
-            quarter: okr.quarter,
-            startDate: okr.startDate?.toISOString() ?? null,
-            endDate: okr.endDate?.toISOString() ?? null,
-            checkInCadence: okr.checkInCadence,
-          }}
-          canDelete={canDelete}
-          canEdit={canEditGoal}
-        />
-        <div className="okrd__progress">
-          <div className="okrd__progress-ring">
-            <ProgressRing value={rollup.progress} color={statusColor} measured={measured} />
-          </div>
-          <div className="okrd__progress-label">
-            {measured ? "overall progress" : "no key results yet"}
+          <div className="okrd__hero-grid">
+            <div className="okrd__ring">
+              <ProgressRing value={rollup.progress} measured={measured} />
+            </div>
+            <div className="okrd__hero-main">
+              <div className="okrd__title-row">
+                <h1 className="okrd__title">{okr.title}</h1>
+                <GoalDetailMenu
+                  goal={{
+                    id: okr.id,
+                    title: okr.title,
+                    description: okr.description,
+                    level: okr.level,
+                    ownerId: okr.ownerId,
+                    owner: owner
+                      ? { id: owner.id, firstName: owner.firstName, lastName: owner.lastName, avatar: owner.avatar, email: owner.email }
+                      : null,
+                    quarter: okr.quarter,
+                    startDate: okr.startDate?.toISOString() ?? null,
+                    endDate: okr.endDate?.toISOString() ?? null,
+                    checkInCadence: okr.checkInCadence,
+                  }}
+                  canDelete={canDelete}
+                  canEdit={canEditGoal}
+                />
+              </div>
+              {okr.description && <p className="okrd__desc">{okr.description}</p>}
+              <div className="okrd__meta">
+                <span className="okrd__chip"><level.Icon /> {level.label}</span>
+                <span
+                  className="okrd__chip okrd__chip--status"
+                  style={{ color: status.color, background: `color-mix(in srgb, ${status.color} 12%, transparent)` }}
+                >
+                  {status.label}
+                </span>
+                {okr.quarter && <span className="okrd__chip">{okr.quarter}</span>}
+                <span className="okrd__chip"><Calendar /> {fmtDate(okr.startDate)} → {fmtDate(okr.endDate)}</span>
+                <span className="okrd__chip"><Clock /> {okr.checkInCadence.toLowerCase()} check-ins</span>
+              </div>
+            </div>
+            <div className="okrd__hero-side">
+              <div className="okrd__side-block">
+                <span className="okrd__side-label">Due date</span>
+                <span className="okrd__due">{okr.endDate ? fmtShort(okr.endDate) : "—"}</span>
+              </div>
+              <div className="okrd__side-block">
+                <span className="okrd__side-label">Owner</span>
+                {owner ? (
+                  <span className="okrd__owner">
+                    <PersonAvatar person={owner} size={24} /> {ownerName}
+                  </span>
+                ) : (
+                  <span className="okrd__owner okrd__owner--none">Unassigned</span>
+                )}
+              </div>
+              <div className="okrd__side-block">
+                <span className="okrd__side-label">Contributors</span>
+                {/* One shared goal, many contributors — resolved avatar
+                    stack + (for editors) the mixed people/departments/
+                    roles picker. */}
+                <OkrAudience
+                  okrId={okr.id}
+                  canEdit={canEditLinks}
+                  initialEntries={audienceEntries}
+                  initialMembers={audienceMembers.slice(0, 5)}
+                  initialTotal={audienceMembers.length}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Stale warning */}
-      {isStale && (
-        <div className="okrd__stale">
-          <AlertTriangle />
-          <div>
-            <strong>Check-in overdue.</strong>{" "}
-            <span>
-              {daysSinceLastCheckin === null
-                ? "No check-ins yet."
-                : `Last check-in was ${daysSinceLastCheckin} day${daysSinceLastCheckin === 1 ? "" : "s"} ago.`}
-              {" "}Cadence is {okr.checkInCadence.toLowerCase()}.
-            </span>
+      <div className="okrd__cards">
+        {/* Stale warning */}
+        {isStale && (
+          <div className="okrd__stale">
+            <AlertTriangle />
+            <div>
+              <strong>Check-in overdue.</strong>{" "}
+              <span>
+                {daysSinceLastCheckin === null
+                  ? "No check-ins yet."
+                  : `Last check-in was ${daysSinceLastCheckin} day${daysSinceLastCheckin === 1 ? "" : "s"} ago.`}
+                {" "}Cadence is {okr.checkInCadence.toLowerCase()}.
+              </span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Body 2-col */}
-      <div className="okrd__body">
-        {/* Left: KRs + custom fields */}
-        <main className="okrd__main">
-          <section className="okrd-card">
-            <header><h2><Sparkles /> Key results</h2><span>{keyResults.length}</span></header>
-            {keyResults.length === 0 ? (
-              <div className="okrd-card__empty">No key results defined. Add KRs to track measurable progress.</div>
-            ) : (
-              <ol className="okrd-krs">
-                {keyResults.map((kr, i) => {
-                  const last = kr.checkIns[0];
-                  return (
-                    <li key={kr.id} className="okrd-kr">
-                      <div className="okrd-kr__head">
-                        <span className="okrd-kr__num">KR{i + 1}</span>
-                        <div className="okrd-kr__title">
-                          <p>{kr.title}</p>
-                          <span className="okrd-kr__values">
-                            {kr.currentValue}{kr.unit ?? ""} of {kr.targetValue}{kr.unit ?? ""}
-                            <em> · from {kr.startValue}{kr.unit ?? ""}</em>
-                          </span>
-                        </div>
-                        <div className="okrd-kr__pct">
-                          <strong>{kr.progress}%</strong>
-                          {last && <span>last {relDays(last.createdAt)}</span>}
-                        </div>
-                      </div>
-                      <div className="okrd-kr__bar">
-                        <div className="okrd-kr__bar-track">
-                          <div className="okrd-kr__bar-fill" style={{ width: `${Math.max(0, Math.min(100, kr.progress))}%` }} />
-                        </div>
-                      </div>
-                      {/* Mini sparkline of check-ins */}
-                      {kr.checkIns.length > 1 && (
-                        <CheckinSparkline points={kr.checkIns.slice().reverse().map((c) => c.value)} color={statusColor} />
-                      )}
-                      <OkrCheckInForm
-                        okrId={okr.id}
-                        keyResultId={kr.id}
-                        unit={kr.unit ?? ""}
-                        current={kr.currentValue}
-                        start={kr.startValue}
-                        target={kr.targetValue}
-                      />
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
+        {/* Targets (key results) */}
+        <GoalTargets
+          okrId={okr.id}
+          canEdit={canEditGoal}
+          owner={owner}
+          targets={targetRows}
+        />
 
-          <section className="okrd-card">
-            <header><h2>Linked work</h2></header>
-            <div className="okrd-card__cf">
-              <OkrLinkedWork okrId={okr.id} canEdit={canEditLinks} />
-            </div>
-          </section>
-
-          <section className="okrd-card">
-            <header><h2>Custom fields</h2></header>
-            <div className="okrd-card__cf">
-              <CustomFieldsPanel entityType="OKR" entityId={okr.id} showEmptyState />
-            </div>
-          </section>
-        </main>
-
-        {/* Right: cascade + activity */}
-        <aside className="okrd__side">
-          {/* Parent */}
-          {parentCrumb && (
-            <section className="okrd-side-card">
-              <header><h3>Cascades from</h3></header>
-              <Link href={`/okrs/${parentCrumb.id}`} className="okrd-parent">
-                <span className="okrd-parent__level">{parentCrumb.level}</span>
-                <span className="okrd-parent__title">{parentCrumb.title}</span>
-                <ChevronRight />
-              </Link>
-            </section>
-          )}
-
-          {/* Children */}
-          {okr.children.length > 0 && (
-            <section className="okrd-side-card">
-              <header>
-                <h3>Cascades to</h3>
-                <span className="okrd-side-card__count">{okr.children.length}</span>
-              </header>
-              <ul className="okrd-children">
-                {okr.children.map((c) => {
-                  // Children show their ROLLED-UP number — the same one
-                  // their own detail page shows, never the stale column.
-                  const childRoll = goalRollupFor(rollupCtx, c);
-                  return (
-                    <li key={c.id}>
-                      <Link href={`/okrs/${c.id}`}>
-                        <span className="okrd-child__level">{c.level}</span>
-                        <span className="okrd-child__title">{c.title}</span>
-                        <div className="okrd-child__bar">
-                          <div className="okrd-child__bar-track">
-                            <div className="okrd-child__bar-fill" style={{ width: `${childRoll.progress}%`, background: STATUS_COLOR[childRoll.status] ?? "var(--os-c-blue)" }} />
-                          </div>
-                          <span>{childRoll.source === "NONE" ? "—" : `${childRoll.progress}%`}</span>
-                        </div>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          )}
-
-          {/* Activity */}
-          <section className="okrd-side-card">
-            <header>
-              <h3><Activity /> Recent check-ins</h3>
-              {allCheckIns.length > 0 && <span className="okrd-side-card__count">{allCheckIns.length}</span>}
-            </header>
-            {allCheckIns.length === 0 ? (
-              <div className="okrd-card__empty okrd-card__empty--small">No check-ins yet.</div>
-            ) : (
-              <ol className="okrd-activity">
-                {allCheckIns.map((c) => (
-                  <li key={c.id}>
-                    <span className="okrd-activity__dot" style={{ background: statusColor }} />
-                    <div className="okrd-activity__body">
-                      <div className="okrd-activity__line">
-                        <strong>{c.userName}</strong> updated <em>{c.krTitle}</em> to <code>{c.value}{c.unit ?? ""}</code>
-                      </div>
-                      {c.note && <p className="okrd-activity__note">&ldquo;{c.note}&rdquo;</p>}
-                      <span className="okrd-activity__time">{relDays(c.createdAt)}</span>
+        {/* Timeline — the goal's check-in history, newest first */}
+        <section className="okrd-card">
+          <header>
+            <h2>Timeline</h2>
+            {allCheckIns.length > 0 && <span className="okrd-card__count">{allCheckIns.length}</span>}
+          </header>
+          {allCheckIns.length === 0 ? (
+            <div className="okrd-card__empty">No activity yet — target check-ins land here.</div>
+          ) : (
+            <ol className="okrd-tl">
+              {allCheckIns.map((c) => (
+                <li key={c.id}>
+                  <div className="okrd-tl__main">
+                    <div className="okrd-tl__line">
+                      <span className="okrd-tl__title">{c.krTitle}</span>
+                      <span className="okrd-tl__value">→ {c.value}{c.unit ?? ""}</span>
                     </div>
-                  </li>
-                ))}
-              </ol>
-            )}
+                    {c.note && (
+                      <p className="okrd-tl__note"><span>Note</span>{c.note}</p>
+                    )}
+                  </div>
+                  <span className="okrd-tl__when">{relDays(c.createdAt)}, by {c.userName}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+
+        {/* Cascade context */}
+        {parentCrumb && (
+          <section className="okrd-card">
+            <header><h2>Cascades from</h2></header>
+            <Link href={`/okrs/${parentCrumb.id}`} className="okrd-parent">
+              <span className="okrd-parent__level">{parentCrumb.level}</span>
+              <span className="okrd-parent__title">{parentCrumb.title}</span>
+              <ChevronRight />
+            </Link>
           </section>
-        </aside>
+        )}
+
+        {okr.children.length > 0 && (
+          <section className="okrd-card">
+            <header>
+              <h2>Cascades to</h2>
+              <span className="okrd-card__count">{okr.children.length}</span>
+            </header>
+            <ul className="okrd-children">
+              {okr.children.map((c) => {
+                // Children show their ROLLED-UP number — the same one
+                // their own detail page shows, never the stale column.
+                const childRoll = goalRollupFor(rollupCtx, c);
+                const childMeasured = childRoll.source !== "NONE";
+                return (
+                  <li key={c.id}>
+                    <Link href={`/okrs/${c.id}`}>
+                      <span className="okrd-child__level">{c.level}</span>
+                      <span className="okrd-child__title">{c.title}</span>
+                      <div className="okrd-child__bar">
+                        <div className="okrd-child__bar-track">
+                          {/* Neutral empty track when nothing is measured. */}
+                          {childMeasured && (
+                            <div className="okrd-child__bar-fill" style={{ width: `${childRoll.progress}%` }} />
+                          )}
+                        </div>
+                        <span>{childMeasured ? `${childRoll.progress}%` : "—"}</span>
+                      </div>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        {/* Linked work */}
+        <section className="okrd-card">
+          <header><h2>Linked work</h2></header>
+          <div className="okrd-card__cf">
+            <OkrLinkedWork okrId={okr.id} canEdit={canEditLinks} />
+          </div>
+        </section>
+
+        {/* Custom fields */}
+        <section className="okrd-card">
+          <header><h2>Custom fields</h2></header>
+          <div className="okrd-card__cf">
+            <CustomFieldsPanel entityType="OKR" entityId={okr.id} showEmptyState />
+          </div>
+        </section>
       </div>
     </div>
   );
 }
 
-/* SVG ring (no extra deps). 36px wide, the percentage fills the
- * stroke-dasharray. Color comes from prop. An unmeasured goal (no KRs,
- * no children, nothing hand-set) shows an honest "—", not a 0% that
- * reads as "behind". */
-function ProgressRing({ value, color, measured = true }: { value: number; color: string; measured?: boolean }) {
+/* SVG ring (no extra deps) — the LARGE hero ring, ClickUp-style, in brand
+ * blue. An unmeasured goal (no KRs, no children, nothing hand-set) shows
+ * an honest "—" over a neutral track, never a 0% that reads as "behind". */
+function ProgressRing({ value, measured = true }: { value: number; measured?: boolean }) {
   const pct = Math.max(0, Math.min(100, value));
-  const r = 26;
+  const size = 108;
+  const half = size / 2;
+  const r = 46;
   const C = 2 * Math.PI * r;
   const offset = C * (1 - pct / 100);
   return (
-    <svg width="64" height="64" viewBox="0 0 64 64">
-      <circle cx="32" cy="32" r={r} fill="none" stroke="var(--os-line)" strokeWidth="6" />
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={measured ? `${pct}% complete` : "Not measured yet"}>
+      <circle cx={half} cy={half} r={r} fill="var(--os-canvas)" stroke="var(--os-line)" strokeWidth="7" />
       {measured && (
         <circle
-          cx="32" cy="32" r={r}
+          cx={half} cy={half} r={r}
           fill="none"
-          stroke={color}
-          strokeWidth="6"
+          stroke={BRAND}
+          strokeWidth="7"
           strokeLinecap="round"
           strokeDasharray={C}
           strokeDashoffset={offset}
-          transform="rotate(-90 32 32)"
+          transform={`rotate(-90 ${half} ${half})`}
           style={{ transition: "stroke-dashoffset 600ms ease" }}
         />
       )}
-      <text x="32" y="38" textAnchor="middle" fontSize="14" fontWeight="700" fill="var(--os-ink)">
+      <text x={half} y={half + 8} textAnchor="middle" fontSize="23" fontWeight="700" fill="var(--os-ink)">
         {measured ? `${pct}%` : "—"}
       </text>
-    </svg>
-  );
-}
-
-/* Sparkline of KR check-in values. Inline SVG, scales to container. */
-function CheckinSparkline({ points, color }: { points: number[]; color: string }) {
-  if (points.length < 2) return null;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const range = max - min || 1;
-  const w = 220;
-  const h = 28;
-  const stepX = w / (points.length - 1);
-  const path = points
-    .map((v, i) => {
-      const x = i * stepX;
-      const y = h - ((v - min) / range) * (h - 4) - 2;
-      return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="okrd-kr__spark" preserveAspectRatio="none">
-      <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      {points.map((v, i) => {
-        const x = i * stepX;
-        const y = h - ((v - min) / range) * (h - 4) - 2;
-        return <circle key={i} cx={x} cy={y} r="2" fill={color} />;
-      })}
     </svg>
   );
 }

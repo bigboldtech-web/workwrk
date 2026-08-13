@@ -42,6 +42,11 @@ export async function GET(req: NextRequest) {
   const level = url.searchParams.get("level");
   const quarter = url.searchParams.get("quarter");
   const ownerId = url.searchParams.get("ownerId");
+  // ?mine=1 — only goals the CALLER personally carries: owned by them, or
+  // where they are a resolved audience member (their user row, their
+  // department, their role). A filter WITHIN visibility, not a new door —
+  // org-wide viewers get the same narrowing. Backs /okrs?mine=1.
+  const mineOnly = url.searchParams.get("mine") === "1";
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
@@ -52,6 +57,17 @@ export async function GET(req: NextRequest) {
   }
   if (ownerId) where.ownerId = ownerId;
 
+  const callerId = getUserId(session);
+  const orgWide = isOrgWideAlignment(session);
+  // departmentId + roleId feed audience resolution for the three-door
+  // filter AND ?mine=1 — fetched once when either needs it.
+  const me = !orgWide || mineOnly
+    ? await prisma.user.findUnique({
+        where: { id: callerId },
+        select: { departmentId: true, roleId: true },
+      })
+    : null;
+
   // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
   // is not org-public: everyone sees COMPANY objectives and their own
   // department's TEAM objectives; a person always sees their own — owned
@@ -60,16 +76,11 @@ export async function GET(req: NextRequest) {
   // and leavers drop out); a manager additionally sees their report
   // tree's (owned or audience-covered, plus unowned objectives, which
   // managers create); admin / exec / HR see the org.
-  if (!isOrgWideAlignment(session)) {
-    const callerId = getUserId(session);
+  if (!orgWide) {
     const visible: Prisma.OKRWhereInput[] = [
       { level: "COMPANY" },
       { ownerId: callerId },
     ];
-    const me = await prisma.user.findUnique({
-      where: { id: callerId },
-      select: { departmentId: true, roleId: true },
-    });
     if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
     visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId }));
     if (isManager(session)) {
@@ -79,6 +90,14 @@ export async function GET(req: NextRequest) {
       visible.push(...(await teamAudienceVisibilityOr(teamIds)));
     }
     and.push({ OR: visible });
+  }
+  if (mineOnly) {
+    and.push({
+      OR: [
+        { ownerId: callerId },
+        ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId }),
+      ],
+    });
   }
   if (and.length > 0) where.AND = and;
 
