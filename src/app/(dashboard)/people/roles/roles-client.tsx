@@ -14,50 +14,62 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Briefcase, Plus, Users, Search, Building2, UserX,
   Layers, GraduationCap,
 } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 
-type Level = "EMPLOYEE" | "TEAM_LEAD" | "MANAGER" | "DIRECTOR" | "VP" | "C_LEVEL" | "HR" | "COMPANY_ADMIN" | "SUPER_ADMIN";
+// Every AccessLevel the schema knows today, plus "OTHER" — a safe bucket
+// for levels a future migration adds before this page learns about them.
+// A role must NEVER silently vanish from the library because of its level.
+type Level = "EMPLOYEE" | "AGENT" | "TEAM_LEAD" | "MANAGER" | "DIRECTOR" | "VP" | "C_LEVEL" | "HR" | "COMPANY_ADMIN" | "SUPER_ADMIN" | "OTHER";
 
 type ApiRole = {
   id: string;
   title: string;
   description?: string | null;
-  level: Level;
+  level?: string | null;
   department?: { id: string; name: string } | null;
   _count?: { users?: number };
 };
 
-const LEVEL_ORDER: Level[] = ["C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "HR", "COMPANY_ADMIN", "SUPER_ADMIN"];
+const LEVEL_ORDER: Level[] = ["C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "EMPLOYEE", "AGENT", "HR", "COMPANY_ADMIN", "SUPER_ADMIN", "OTHER"];
 const LEVEL_LABELS: Record<Level, string> = {
   C_LEVEL: "C-Suite", VP: "VPs", DIRECTOR: "Directors", MANAGER: "Managers",
-  TEAM_LEAD: "Team leads", EMPLOYEE: "Individual contributors",
-  HR: "HR", COMPANY_ADMIN: "Company admin", SUPER_ADMIN: "Super admin",
+  TEAM_LEAD: "Team leads", EMPLOYEE: "Individual contributors", AGENT: "Agents",
+  HR: "HR", COMPANY_ADMIN: "Company admin", SUPER_ADMIN: "Super admin", OTHER: "Other levels",
 };
 const LEVEL_SHORT: Record<Level, string> = {
   C_LEVEL: "C-Suite", VP: "VP", DIRECTOR: "Director", MANAGER: "Manager",
-  TEAM_LEAD: "Team lead", EMPLOYEE: "IC", HR: "HR", COMPANY_ADMIN: "Admin", SUPER_ADMIN: "Super",
+  TEAM_LEAD: "Team lead", EMPLOYEE: "IC", AGENT: "Agent", HR: "HR",
+  COMPANY_ADMIN: "Admin", SUPER_ADMIN: "Super", OTHER: "Other",
 };
 const LEVEL_COLORS: Record<Level, string> = {
-  C_LEVEL: C.red, VP: C.pink, DIRECTOR: C.orange, MANAGER: C.blue,
-  TEAM_LEAD: C.teal, EMPLOYEE: C.sage, HR: C.yellow, COMPANY_ADMIN: C.gray, SUPER_ADMIN: C.gray,
+  C_LEVEL: C.red, VP: C.brown, DIRECTOR: C.orange, MANAGER: C.blue,
+  TEAM_LEAD: C.teal, EMPLOYEE: C.sage, AGENT: C.lime, HR: C.yellow,
+  COMPANY_ADMIN: C.gray, SUPER_ADMIN: C.gray, OTHER: C.gray,
 };
 const LEVEL_RANK: Record<Level, number> = {
-  C_LEVEL: 7, VP: 6, DIRECTOR: 5, MANAGER: 4, TEAM_LEAD: 3,
-  EMPLOYEE: 1, HR: 2, COMPANY_ADMIN: 0, SUPER_ADMIN: 0,
+  C_LEVEL: 8, VP: 7, DIRECTOR: 6, MANAGER: 5, TEAM_LEAD: 4,
+  HR: 3, EMPLOYEE: 2, AGENT: 1, COMPANY_ADMIN: 0, SUPER_ADMIN: 0, OTHER: 0,
 };
 
-const DEPT_PALETTE = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
+/** Null/undefined keeps the old EMPLOYEE default; unknown strings bucket
+ *  into OTHER instead of dropping the role from every group and chip. */
+function normalizeLevel(level?: string | null): Level {
+  if (!level) return "EMPLOYEE";
+  return (LEVEL_ORDER as string[]).includes(level) ? (level as Level) : "OTHER";
+}
+
+const DEPT_PALETTE = [C.blue, C.green, C.orange, C.sage, C.teal, C.yellow, C.brown, C.red];
 function deptColor(name: string): string {
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
@@ -73,6 +85,7 @@ export default function RolesPage() {
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   const promptDialog = usePrompt();
+  const router = useRouter();
 
   const load = useCallback(async () => {
     try {
@@ -98,7 +111,16 @@ export default function RolesPage() {
         body: JSON.stringify({ title, level: "EMPLOYEE" }),
       });
       if (!res.ok) throw new Error(`POST ${res.status}`);
+      const data = await res.json().catch(() => null);
+      const created = data?.data ?? data;
       toast("Role created");
+      // Quick-add only asks for a title — land on the role page where
+      // level / department / description are edited, instead of leaving
+      // a default-EMPLOYEE role buried in the list.
+      if (created?.id) {
+        router.push(`/people/roles/${created.id}`);
+        return;
+      }
       void load();
     } catch { toast("Couldn't create role"); }
   }
@@ -117,7 +139,7 @@ export default function RolesPage() {
   // ─── Filter + group ──────────────────────────────────────
   const filtered = useMemo(() => {
     let list = roles ?? [];
-    if (levelFilter) list = list.filter((r) => (r.level ?? "EMPLOYEE") === levelFilter);
+    if (levelFilter) list = list.filter((r) => normalizeLevel(r.level) === levelFilter);
     if (showUnfilledOnly) list = list.filter((r) => (r._count?.users ?? 0) === 0);
     const q = search.trim().toLowerCase();
     if (q) {
@@ -132,7 +154,7 @@ export default function RolesPage() {
   const grouped = useMemo(() => {
     const m = new Map<Level, ApiRole[]>();
     for (const r of filtered) {
-      const k: Level = r.level ?? "EMPLOYEE";
+      const k = normalizeLevel(r.level);
       if (!m.has(k)) m.set(k, []);
       m.get(k)!.push(r);
     }
@@ -149,7 +171,7 @@ export default function RolesPage() {
     const list = roles ?? [];
     const totalHeadcount = list.reduce((acc, r) => acc + (r._count?.users ?? 0), 0);
     const unfilled = list.filter((r) => (r._count?.users ?? 0) === 0).length;
-    const levelCount = new Set(list.map((r) => r.level ?? "EMPLOYEE")).size;
+    const levelCount = new Set(list.map((r) => normalizeLevel(r.level))).size;
     return { total: list.length, totalHeadcount, unfilled, levelCount };
   }, [roles]);
 
@@ -157,7 +179,7 @@ export default function RolesPage() {
     const list = roles ?? [];
     const m = new Map<Level, number>();
     for (const r of list) {
-      const k: Level = r.level ?? "EMPLOYEE";
+      const k = normalizeLevel(r.level);
       m.set(k, (m.get(k) ?? 0) + 1);
     }
     return m;
@@ -253,7 +275,7 @@ export default function RolesPage() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={Briefcase} iconGradient={GRAD.redPink} title="Couldn't load roles" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView Icon={Briefcase} iconGradient={C.red} title="Couldn't load roles" subtitle={`API error: ${loadError}.`} cta="Retry" />
         ) : roles === null ? (
           <div className="rls__loading">Loading roles…</div>
         ) : stats.total === 0 ? (
@@ -300,7 +322,8 @@ export default function RolesPage() {
 function RoleCard({ role: r }: { role: ApiRole }) {
   const count = r._count?.users ?? 0;
   const isUnfilled = count === 0;
-  const levelColor = LEVEL_COLORS[r.level ?? "EMPLOYEE"];
+  const level = normalizeLevel(r.level);
+  const levelColor = LEVEL_COLORS[level];
   return (
     <Link href={`/people/roles/${r.id}`} className={`rls__card${isUnfilled ? " is-unfilled" : ""}`} style={{ ["--card-c" as unknown as string]: levelColor, cursor: "pointer" }}>
       <header className="rls__card-head">
@@ -311,7 +334,7 @@ function RoleCard({ role: r }: { role: ApiRole }) {
       </header>
 
       <div className="rls__card-tags">
-        <span className="rls__card-level">{LEVEL_SHORT[r.level ?? "EMPLOYEE"]}</span>
+        <span className="rls__card-level">{LEVEL_SHORT[level]}</span>
         {r.department?.name && (
           <span className="rls__card-dept" style={{ ["--dept-c" as unknown as string]: deptColor(r.department.name) }}>
             <Building2 /> {r.department.name}

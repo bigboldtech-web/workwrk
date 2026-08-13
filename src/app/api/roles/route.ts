@@ -16,7 +16,15 @@ export async function GET() {
       where: { organizationId: orgId },
       include: {
         department: { select: { id: true, name: true } },
-        _count: { select: { users: true, kraTemplates: true } },
+        _count: {
+          select: {
+            // Headcount uses the ONE person predicate (not soft-deleted;
+            // UserStatus has no TERMINATED value, offboarding IS the soft
+            // delete) so role cards agree with the Directory.
+            users: { where: { deletedAt: null } },
+            kraTemplates: true,
+          },
+        },
       },
       orderBy: { title: "asc" },
     }),

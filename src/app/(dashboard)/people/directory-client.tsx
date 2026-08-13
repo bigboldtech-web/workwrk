@@ -45,7 +45,8 @@ function fullName(u: ApiUser): string {
   return [u.firstName, u.lastName].filter(Boolean).join(" ") || u.email || "Unknown";
 }
 
-const CAT_COLORS = [C.blue, C.green, C.orange, C.pink, C.teal, C.yellow, C.brown, C.red];
+// Brand-safe department palette — no pink/purple in product chrome.
+const CAT_COLORS = [C.blue, C.green, C.orange, C.sage, C.teal, C.yellow, C.brown, C.red];
 function deptColor(seed: string): string {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;

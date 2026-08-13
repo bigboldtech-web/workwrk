@@ -1,8 +1,16 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
+
+/** Own photo always; someone else's only via the alignment ladder
+ *  (org-wide levels, or a manager whose tree contains the target). */
+async function canWriteAvatar(session: unknown, targetId: string): Promise<boolean> {
+  if (targetId === getUserId(session)) return true;
+  return canTouchUserAlignment(session, targetId);
+}
 
 export async function POST(
   req: NextRequest,
@@ -13,6 +21,8 @@ export async function POST(
 
   const { id } = await params;
   const orgId = getOrgId(session);
+
+  if (!(await canWriteAvatar(session, id))) return jsonError("Forbidden", 403);
 
   const user = await prisma.user.findFirst({
     where: { id, organizationId: orgId },
@@ -56,10 +66,15 @@ export async function DELETE(
   const { id } = await params;
   const orgId = getOrgId(session);
 
-  await prisma.user.update({
-    where: { id },
+  if (!(await canWriteAvatar(session, id))) return jsonError("Forbidden", 403);
+
+  // updateMany carries the org scope in the WHERE — a raw-id update would
+  // let a valid session clear avatars across org boundaries.
+  const result = await prisma.user.updateMany({
+    where: { id, organizationId: orgId },
     data: { avatar: null },
   });
+  if (result.count === 0) return jsonError("User not found", 404);
 
   return jsonSuccess({ avatar: null });
 }

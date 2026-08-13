@@ -948,10 +948,15 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
         <div className="flex items-start gap-4">
           <div className="relative shrink-0">
             <TeamAvatar name={fullName} avatar={user.avatar} size={72} />
-            <label className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-zinc-200 shadow-sm inline-flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-800" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
-              {uploadingAvatar ? <span className="text-[9px]">…</span> : <Edit3 size={12} />}
-              <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} className="hidden" />
-            </label>
+            {/* Write affordance mirrors POST /api/users/[id]/avatar: own
+                photo, or manage-mode viewers (org-wide / manager tree).
+                Removed people can't get new photos. */}
+            {(my || mode === "manage") && !user.deletedAt ? (
+              <label className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-zinc-200 shadow-sm inline-flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-800" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
+                {uploadingAvatar ? <span className="text-[9px]">…</span> : <Edit3 size={12} />}
+                <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} className="hidden" />
+              </label>
+            ) : null}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start gap-2">
@@ -1069,6 +1074,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                 <Select value={editAccessLevel} onValueChange={setEditAccessLevel} disabled={!isAdmin}>
                   <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="AGENT">Agent</SelectItem>
                     <SelectItem value="EMPLOYEE">Employee</SelectItem>
                     <SelectItem value="TEAM_LEAD">Team Lead</SelectItem>
                     <SelectItem value="MANAGER">Manager</SelectItem>
@@ -1076,6 +1082,12 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                     <SelectItem value="VP">VP</SelectItem>
                     <SelectItem value="C_LEVEL">C-Level</SelectItem>
                     <SelectItem value="HR">HR</SelectItem>
+                    {/* Granting admin is admin-only; keep the option
+                        visible when the person already holds it so the
+                        select doesn't render blank. */}
+                    {isAdmin || editAccessLevel === "COMPANY_ADMIN" ? (
+                      <SelectItem value="COMPANY_ADMIN">Company Admin</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </div>

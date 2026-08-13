@@ -6,7 +6,9 @@ import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { getTeamUserIds } from "@/lib/team";
+import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
+import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -18,26 +20,29 @@ export async function GET(req: NextRequest) {
   const accessLevel = searchParams.get("accessLevel");
   // scope:
   //   "team" — only the caller's reports + themselves
-  //   "all"  — every active user in the org (admins only)
-  // Default: admins get "all", everyone else gets "team".
+  //   "all"  — every active user in the org (org-wide levels only)
+  // Default: org-wide levels get "all", everyone else gets "team".
+  // The door is ORG_WIDE_ALIGNMENT_LEVELS — the same ladder the rest of
+  // Teams uses — so a Director/VP/HR sees the same org here as elsewhere.
   const requestedScope = searchParams.get("scope");
   const pagination = parsePaginationParams(req);
 
   const orgId = getOrgId(session);
   const callerId = getUserId(session);
-  const callerLevel = (session.user as any).accessLevel as string;
-  const isAdmin = callerLevel === "COMPANY_ADMIN" || callerLevel === "SUPER_ADMIN";
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
+  const orgWide = ORG_WIDE_ALIGNMENT_LEVELS.has(callerLevel);
 
   const includeDeleted = searchParams.get("includeDeleted") === "true";
-  const where: any = { organizationId: orgId };
+  const where: Prisma.UserWhereInput = { organizationId: orgId };
   if (!includeDeleted) where.deletedAt = null;
   if (departmentId) where.departmentId = departmentId;
-  if (status) where.status = status;
-  if (accessLevel) where.accessLevel = accessLevel;
+  if (status) where.status = status as UserStatus;
+  if (accessLevel) where.accessLevel = accessLevel as AccessLevel;
 
-  // Enforce scope. Non-admins can never escape team scope, regardless
-  // of what they pass. Stops a line manager from seeing org-wide data.
-  const effectiveScope = isAdmin ? (requestedScope || "all") : "team";
+  // Enforce scope. Non-org-wide callers can never escape team scope,
+  // regardless of what they pass. Stops a line manager from seeing
+  // org-wide data.
+  const effectiveScope = orgWide ? (requestedScope || "all") : "team";
   if (effectiveScope === "team") {
     const teamIds = await getTeamUserIds(orgId, callerId);
     where.id = teamIds.length > 0 ? { in: teamIds } : callerId;
@@ -50,8 +55,8 @@ export async function GET(req: NextRequest) {
     ];
   }
 
-  const orderBy: any = pagination.sortBy
-    ? { [pagination.sortBy]: pagination.sortOrder }
+  const orderBy: Prisma.UserOrderByWithRelationInput = pagination.sortBy
+    ? ({ [pagination.sortBy]: pagination.sortOrder } as Prisma.UserOrderByWithRelationInput)
     : { firstName: "asc" };
 
   const [users, total] = await Promise.all([
@@ -72,7 +77,8 @@ export async function GET(req: NextRequest) {
         department: { select: { id: true, name: true } },
         role: { select: { id: true, title: true } },
         manager: { select: { id: true, firstName: true, lastName: true } },
-        _count: { select: { directReports: true, kraAssignments: true } },
+        // Filtered count — soft-deleted reports don't inflate "N reports".
+        _count: { select: { directReports: { where: { deletedAt: null } }, kraAssignments: true } },
       },
       orderBy,
       ...skipTake(pagination),

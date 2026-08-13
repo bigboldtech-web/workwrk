@@ -18,6 +18,8 @@ import { TAUPE } from "@/components/ui/accent";
 import { requireManagerPage } from "@/lib/page-gates";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
+import { isDirectorOrAbove } from "@/lib/access";
+import { listKpiReviewsForManager } from "@/lib/kpi-record";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +31,18 @@ export default async function TeamOverviewPage() {
   // Door 3 sees the org; door 2 sees their recursive report tree.
   const orgWide = ORG_WIDE_ALIGNMENT_LEVELS.has(u.accessLevel);
   const teamIds = orgWide ? null : await getTeamUserIds(orgId, me);
-  const peopleWhere = teamIds
-    ? { organizationId: orgId, status: "ACTIVE" as const, id: { in: teamIds } }
-    : { organizationId: orgId, status: "ACTIVE" as const };
+  // ONE person predicate, shared with the Directory: not soft-deleted.
+  // (UserStatus has no TERMINATED value — offboarding IS the soft delete —
+  // so "deletedAt null" is the whole predicate.) Anything narrower, like
+  // the old "status ACTIVE only", makes this tile disagree with the
+  // Directory headcount.
+  const peopleWhere = {
+    organizationId: orgId,
+    deletedAt: null,
+    ...(teamIds ? { id: { in: teamIds } } : {}),
+  };
 
-  const [people, roles, kras, kpis, reviewsToApprove, kpiToApprove, missingKras] = await Promise.all([
+  const [people, roles, kras, kpis, reviewsToApprove, kpiReviewQueue, missingKras] = await Promise.all([
     prisma.user.count({ where: peopleWhere }),
     prisma.role.count({ where: { organizationId: orgId } }),
     teamIds
@@ -43,9 +52,16 @@ export default async function TeamOverviewPage() {
       ? prisma.kPI.count({ where: { organizationId: orgId, kra: { assignments: { some: { userId: { in: teamIds }, status: "ACTIVE" } } } } })
       : prisma.kPI.count({ where: { organizationId: orgId } }),
     prisma.weeklyReview.count({ where: { organizationId: orgId, managerId: me, status: "SUBMITTED" } }),
-    prisma.kPIRecord.count({ where: { status: "SUBMITTED", user: { managerId: me, organizationId: orgId } } }),
+    // Same source as /team/kpi-reviews (recursive effective tree), so the
+    // badge always matches the queue it links to.
+    listKpiReviewsForManager(me, orgId, { status: "SUBMITTED", take: 50 }),
     prisma.user.count({ where: { ...peopleWhere, kraAssignments: { none: {} } } }),
   ]);
+  const kpiToApprove = kpiReviewQueue.length;
+
+  // Rollup is director-gated (same set the sidebar + /team/rollup use);
+  // don't render a shortcut whose page bounces the viewer.
+  const canRollup = isDirectorOrAbove({ userId: me, organizationId: orgId, accessLevel: u.accessLevel });
 
   const queue = [
     { n: reviewsToApprove, label: "weekly review", plural: "weekly reviews", verb: "awaiting your approval", href: "/team/reviews", icon: ClipboardCheck, accent: "#dc2626" },
@@ -69,7 +85,7 @@ export default async function TeamOverviewPage() {
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6 max-w-[1280px]">
         {/* Headline stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <TeamStatTile icon={Users} label="People" value={people} sub="active in org" accent="#0073EA" href="/people" />
+          <TeamStatTile icon={Users} label="People" value={people} sub={orgWide ? "in the org" : "in your reporting tree"} accent="#0073EA" href="/people" />
           <TeamStatTile icon={Briefcase} label="Roles" value={roles} sub="definitions" accent="#F59E0B" href="/people/roles" />
           <TeamStatTile icon={Star} label="KRAs" value={kras} sub="result areas" accent={TAUPE.soft} href="/kra-kpi" />
           <TeamStatTile icon={Gauge} label="KPIs" value={kpis} sub="metrics" accent="#16a34a" href="/kra-kpi" />
@@ -119,7 +135,7 @@ export default async function TeamOverviewPage() {
           <ShortcutCard title="Performance" links={[
             { label: "Reviews", href: "/team/reviews", icon: ClipboardCheck },
             { label: "KPI approvals", href: "/team/kpi-reviews", icon: Award },
-            { label: "Rollup", href: "/team/rollup", icon: BarChart3 },
+            ...(canRollup ? [{ label: "Rollup", href: "/team/rollup", icon: BarChart3 }] : []),
           ]} />
         </div>
       </div>
