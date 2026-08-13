@@ -214,7 +214,7 @@ export default function KraKpiPage() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1100px]">
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 max-w-[1100px] mx-auto w-full">
         {/* Stat strip */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           <TeamStatTile icon={Briefcase} label="Job titles" value={stats.jobTitles} accent="#0073EA" sub="each owns its template" />

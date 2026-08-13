@@ -206,7 +206,7 @@ export default async function FolderPage(props: {
             </div>
           )
         ) : (
-          <div className="space-y-6 max-w-5xl">
+          <div className="space-y-6 max-w-5xl mx-auto">
             {/* Child folders */}
             {visibleChildFolders.length > 0 ? (
               <Card title="Folders" action={canEdit ? <FolderCardCreate spaceId={space.id} parentFolderId={folder.id} /> : undefined}>

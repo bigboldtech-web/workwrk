@@ -860,7 +860,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
 
   if (loading) {
     return (
-      <div className="px-6 py-4 space-y-4 max-w-[1100px] animate-fade-in">
+      <div className="px-6 py-4 space-y-4 max-w-[1100px] mx-auto animate-fade-in">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-28 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -906,7 +906,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   /* ── peer: minimal directory card, nothing performance-shaped ──── */
   if (mode === "peer") {
     return (
-      <div className="px-6 py-4 max-w-[720px]">
+      <div className="px-6 py-4 max-w-[720px] mx-auto">
         <div className="rounded-xl border border-zinc-200 bg-white p-5">
           <div className="flex items-start gap-4">
             <TeamAvatar name={fullName} avatar={user.avatar} size={64} />
@@ -929,7 +929,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
   const directReports = user.directReports ?? [];
 
   return (
-    <div className="px-6 py-4 space-y-5 max-w-[1100px]">
+    <div className="px-6 py-4 space-y-5 max-w-[1100px] mx-auto">
       {/* ── identity header ──────────────────────────────────────── */}
       <div className="rounded-xl border border-zinc-200 bg-white p-5">
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-3">

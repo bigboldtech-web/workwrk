@@ -69,7 +69,7 @@ export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; c
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {view === "overview" ? (
-          <div className="max-w-5xl space-y-4">
+          <div className="max-w-5xl mx-auto space-y-4">
             <IdentityCard bundle={bundle} canEdit={canEdit} />
             <AlignmentCard bundle={bundle} canEdit={canEdit} />
             <BoundaryCard bundle={bundle} canEdit={canEdit} />
@@ -79,7 +79,7 @@ export function RoleWorkspace({ bundle, canEdit, view }: { bundle: RoleBundle; c
             </div>
           </div>
         ) : (
-          <div className="max-w-5xl">
+          <div className="max-w-5xl mx-auto">
             <InstancesPanel bundle={bundle} canEdit={canEdit} />
           </div>
         )}
