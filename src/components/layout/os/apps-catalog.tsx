@@ -337,7 +337,7 @@ const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 // Label for the user's personal profile entry at the top of the Home
 // sidebar. Kept as a single constant so the wording changes in one place.
 // TODO(rename): user-chosen label pending
-const PROFILE_NAV_LABEL = "My Profile";
+const PROFILE_NAV_LABEL = "Me";
 
 function FavSubLabel({ children }: { children: React.ReactNode }) {
   return (
