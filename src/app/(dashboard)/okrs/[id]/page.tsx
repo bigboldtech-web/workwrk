@@ -12,7 +12,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { isManagerLevel, requireGoalPage } from "@/lib/page-gates";
-import { canDeleteGoal } from "@/lib/alignment-scope";
+import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
@@ -144,7 +144,7 @@ export default async function OkrDetailPage(
     okr.ownerId
       ? prisma.user.findUnique({
           where: { id: okr.ownerId },
-          select: { id: true, firstName: true, lastName: true },
+          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
         })
       : Promise.resolve(null),
     // Audience: labeled entries feed the edit picker; resolved members
@@ -162,9 +162,13 @@ export default async function OkrDetailPage(
     user: { id: viewer.id, organizationId: viewer.organizationId, accessLevel: viewer.accessLevel },
   };
   const parentCrumb = parent && (await canSeeGoal(sessionLike, parent)) ? parent : null;
-  // Same predicate DELETE /api/okrs/[id] enforces — gates the header's
-  // "…"/right-click Delete so it only shows when the API will honor it.
-  const canDelete = await canDeleteGoal(sessionLike, okr.ownerId);
+  // Same predicates the APIs enforce — the header's "…"/right-click menu
+  // only shows Delete when DELETE /api/okrs/[id] will honor it, and
+  // Edit / Assign owner when PATCH /api/okrs will.
+  const [canDelete, canEditGoal] = await Promise.all([
+    canDeleteGoal(sessionLike, okr.ownerId),
+    canEditOkrOwner(sessionLike, okr.ownerId),
+  ]);
 
   const lastCheckIn = okr.keyResults
     .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
@@ -247,7 +251,24 @@ export default async function OkrDetailPage(
             />
           </div>
         </div>
-        <GoalDetailMenu goalId={okr.id} title={okr.title} canDelete={canDelete} />
+        <GoalDetailMenu
+          goal={{
+            id: okr.id,
+            title: okr.title,
+            description: okr.description,
+            level: okr.level,
+            ownerId: okr.ownerId,
+            owner: owner
+              ? { id: owner.id, firstName: owner.firstName, lastName: owner.lastName, avatar: owner.avatar, email: owner.email }
+              : null,
+            quarter: okr.quarter,
+            startDate: okr.startDate?.toISOString() ?? null,
+            endDate: okr.endDate?.toISOString() ?? null,
+            checkInCadence: okr.checkInCadence,
+          }}
+          canDelete={canDelete}
+          canEdit={canEditGoal}
+        />
         <div className="okrd__progress">
           <div className="okrd__progress-ring">
             <ProgressRing value={rollup.progress} color={statusColor} measured={measured} />
@@ -316,6 +337,8 @@ export default async function OkrDetailPage(
                         keyResultId={kr.id}
                         unit={kr.unit ?? ""}
                         current={kr.currentValue}
+                        start={kr.startValue}
+                        target={kr.targetValue}
                       />
                     </li>
                   );

@@ -1,7 +1,10 @@
 "use client";
 
-// Inline check-in form per Key Result. Server-rendered shell on the
-// detail page; this client island handles the POST + refresh. After a
+// Inline check-in form per Key Result, labeled to ClickUp's check-in
+// shape: a Start / Current / Target row above the value input, optional
+// note, "Save update" in brand blue. Server-rendered shell on the detail
+// page; this client island handles the POST + refresh (mechanics
+// unchanged — direction-aware progress math stays server-side). After a
 // successful check-in we router.refresh() so the recent-activity feed
 // and progress bars re-render with the new value.
 
@@ -15,11 +18,15 @@ export function OkrCheckInForm({
   keyResultId,
   unit,
   current,
+  start,
+  target,
 }: {
   okrId: string;
   keyResultId: string;
   unit: string;
   current: number;
+  start?: number;
+  target?: number;
 }) {
   const router = useRouter();
   const [value, setValue] = useState<string>(String(current));
@@ -55,25 +62,37 @@ export function OkrCheckInForm({
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-center gap-2 pt-1">
-      <Input
-        type="number"
-        step="any"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        className="h-8 text-sm w-24"
-        placeholder={`Value${unit ? ` (${unit})` : ""}`}
-      />
-      <Input
-        value={note}
-        onChange={(e) => setNote(e.target.value)}
-        className="h-8 text-sm flex-1 min-w-32"
-        placeholder="Optional note"
-      />
-      <Button type="submit" size="sm" disabled={saving} className="h-8">
-        {saving ? "Saving…" : "Log check-in"}
-      </Button>
-      {error && <span className="text-xs text-red-400 w-full">{error}</span>}
+    <form onSubmit={submit} className="pt-1">
+      {/* ClickUp check-in shape: Start / Current / Target framing the value. */}
+      {(start != null || target != null) && (
+        <div className="mb-1 flex items-center gap-3 text-[11px] text-zinc-400">
+          {start != null && <span>Start: <strong className="font-medium text-zinc-500">{start}{unit}</strong></span>}
+          <span>Current: <strong className="font-medium text-zinc-500">{current}{unit}</strong></span>
+          {target != null && <span>Target: <strong className="font-medium text-zinc-500">{target}{unit}</strong></span>}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          type="number"
+          step="any"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="h-8 text-sm w-24"
+          placeholder={`Current${unit ? ` (${unit})` : ""}`}
+          aria-label="Current value"
+        />
+        <Input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="h-8 text-sm flex-1 min-w-32"
+          placeholder="Add a note (optional)"
+          aria-label="Check-in note"
+        />
+        <Button type="submit" size="sm" disabled={saving} className="h-8">
+          {saving ? "Saving…" : "Save update"}
+        </Button>
+        {error && <span className="text-xs text-red-400 w-full">{error}</span>}
+      </div>
     </form>
   );
 }

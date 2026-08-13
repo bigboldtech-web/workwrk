@@ -44,8 +44,9 @@ type ApiOkr = {
   startDate?: string | null;
   endDate?: string | null;
   quarter?: string | null;
+  checkInCadence?: string | null;
   ownerId?: string | null;
-  owner?: { firstName?: string | null; lastName?: string | null } | null;
+  owner?: { id?: string; firstName?: string | null; lastName?: string | null; avatar?: string | null; email?: string | null } | null;
   keyResults?: { id: string; title: string; progress?: number; targetValue?: number; currentValue?: number }[];
   /** Where the number came from: ROLLUP (KRs/children), MANUAL (hand-set),
    *  NONE (nothing measurable — render an honest "—", not a fake 0%). */
@@ -56,6 +57,9 @@ type ApiOkr = {
    *  admin). Set server-side by GET /api/okrs; gates the "…"/right-click
    *  Delete so it only appears when DELETE /api/okrs/[id] will honor it. */
   canDelete?: boolean;
+  /** Whether THIS viewer may edit (owner / tree-manager / org-wide) —
+   *  the exact PATCH /api/okrs gate; drives Edit + Assign owner. */
+  canEdit?: boolean;
 };
 
 const STATUS_LABELS: Record<OkrStatus, string> = {
@@ -88,6 +92,9 @@ export default function OkrsClient() {
   const [okrs, setOkrs] = useState<ApiOkr[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState<OkrLevel | null>(null);
+  // Edit mode of the SAME modal (ClickUp reuses one surface; so do we).
+  // focusOwner lands the user straight in the Owner picker ("Assign owner").
+  const [editing, setEditing] = useState<{ goal: ApiOkr; focusOwner?: boolean } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
@@ -246,6 +253,7 @@ export default function OkrsClient() {
                         expanded={expanded.has(o.id)}
                         onToggle={() => toggleExpand(o.id)}
                         onDeleted={() => handleDeleted(o.id)}
+                        onEdit={(opts) => setEditing({ goal: o, focusOwner: opts?.focusOwner })}
                       />
                     ))}
                   </div>
@@ -262,9 +270,44 @@ export default function OkrsClient() {
           open
           level={creating}
           onClose={() => setCreating(null)}
-          onCreated={() => {
+          onSaved={() => {
             setCreating(null);
             toast("Objective created");
+            void load();
+          }}
+        />
+      )}
+
+      {editing !== null && (
+        <CreateGoalModal
+          key={editing.goal.id}
+          open
+          level={editing.goal.level}
+          focusOwner={editing.focusOwner}
+          goal={{
+            id: editing.goal.id,
+            title: editing.goal.title,
+            description: editing.goal.description,
+            level: editing.goal.level,
+            ownerId: editing.goal.ownerId,
+            owner: editing.goal.owner?.id
+              ? {
+                  id: editing.goal.owner.id,
+                  firstName: editing.goal.owner.firstName ?? null,
+                  lastName: editing.goal.owner.lastName ?? null,
+                  avatar: editing.goal.owner.avatar ?? null,
+                  email: editing.goal.owner.email ?? null,
+                }
+              : null,
+            quarter: editing.goal.quarter,
+            startDate: editing.goal.startDate,
+            endDate: editing.goal.endDate,
+            checkInCadence: editing.goal.checkInCadence,
+          }}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            toast("Goal updated");
             void load();
           }}
         />
@@ -291,7 +334,7 @@ function StatTile({ label, value, accent, Icon, hint, bar }: { label: string; va
   );
 }
 
-function ObjectiveCard({ okr, expanded, onToggle, onDeleted }: { okr: ApiOkr; expanded: boolean; onToggle: () => void; onDeleted: () => void }) {
+function ObjectiveCard({ okr, expanded, onToggle, onDeleted, onEdit }: { okr: ApiOkr; expanded: boolean; onToggle: () => void; onDeleted: () => void; onEdit: (opts?: { focusOwner?: boolean }) => void }) {
   const color = STATUS_COLOR[okr.status];
   const pct = Math.max(0, Math.min(100, okr.progress));
   const unmeasured = okr.progressSource === "NONE";
@@ -299,24 +342,27 @@ function ObjectiveCard({ okr, expanded, onToggle, onDeleted }: { okr: ApiOkr; ex
   const ownerInitials = okr.owner ? initialsFor(okr.owner.firstName, okr.owner.lastName) : okr.ownerId?.slice(0, 2).toUpperCase() ?? "?";
   const ownerColor = okr.ownerId ? avColor(okr.ownerId) : C.gray;
   const canDelete = okr.canDelete ?? false;
+  const canEdit = okr.canEdit ?? false;
   const moreRef = useRef<ContextMenuHandle>(null);
 
   return (
     <article
       className={`okr-card ${expanded ? "is-open" : ""}`}
       style={{ ["--okr-color" as string]: color }}
-      onContextMenu={canDelete ? (e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); } : undefined}
+      onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
     >
-      {canDelete && (
-        <GoalRowMoreMenu
-          ref={moreRef}
-          goal={{ id: okr.id, title: okr.title }}
-          canDelete={canDelete}
-          onDeleted={onDeleted}
-          wrapperClassName="okr-card__menu"
-          triggerClassName="okr-card__menu-btn"
-        />
-      )}
+      {/* Open + Copy link are viewer actions, so the menu always renders;
+          Edit / Assign owner / Delete stay gated per-row by the API flags. */}
+      <GoalRowMoreMenu
+        ref={moreRef}
+        goal={{ id: okr.id, title: okr.title }}
+        canDelete={canDelete}
+        canEdit={canEdit}
+        onEdit={onEdit}
+        onDeleted={onDeleted}
+        wrapperClassName="okr-card__menu"
+        triggerClassName="okr-card__menu-btn"
+      />
       <button type="button" className="okr-card__main" onClick={onToggle} aria-expanded={expanded}>
         <span className="okr-card__expand">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
 

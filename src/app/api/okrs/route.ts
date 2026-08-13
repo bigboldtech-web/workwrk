@@ -105,7 +105,13 @@ export async function GET(req: NextRequest) {
   // from its live KRs, a parent from its KRs + measured children — via
   // computeGoalRollups, the ONE rollup implementation, so this list shows
   // exactly the number the detail page / dashboard / profile hero show.
-  const [groups, audiences, rollupCtx] = await Promise.all([
+  // ownerId is a bare column (no Prisma relation), so resolve the single
+  // accountable owner per goal in ONE batch query — the list card renders
+  // the real person (avatar + name), never a bare id or "Unassigned".
+  const ownerIds = Array.from(
+    new Set(okrs.map((o) => o.ownerId).filter((v): v is string => Boolean(v))),
+  );
+  const [groups, audiences, rollupCtx, owners] = await Promise.all([
     enrichKeyResultGroups(
       okrs.map((okr) => ({ userId: okr.ownerId, keyResults: okr.keyResults })),
     ),
@@ -113,7 +119,14 @@ export async function GET(req: NextRequest) {
     // join rows. Resolution happens here, at read time.
     summarizeGoalAudiences(orgId, okrs.map((o) => ({ id: o.id, ownerId: o.ownerId }))),
     computeGoalRollups(orgId),
+    ownerIds.length > 0
+      ? prisma.user.findMany({
+          where: { id: { in: ownerIds } },
+          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+        })
+      : Promise.resolve([]),
   ]);
+  const ownerById = new Map(owners.map((u) => [u.id, u]));
 
   // Per-goal Delete gate, resolved ONCE for the whole list (not N tree
   // walks): org admins delete anything; a manager deletes their report
@@ -133,6 +146,20 @@ export async function GET(req: NextRequest) {
     if (!ownerId) return true; // unowned objectives are manager-owned
     return deleteTeamIds.has(ownerId);
   };
+  // Per-goal Edit gate — the exact rule PATCH /api/okrs enforces (owner /
+  // tree-manager / org-wide alignment levels, canEditOkrOwner's ladder),
+  // so the row's Edit affordance only appears when the API will honor it.
+  // Edit is deliberately broader than Delete: DIRECTOR/VP/C_LEVEL/HR may
+  // edit any goal but not wipe it. deleteTeamIds is reusable here — it is
+  // null only for org admins (orgWideEdit covers them) or non-managers.
+  const orgWideEdit = isOrgWideAlignment(session);
+  const canEditOkr = (ownerId: string | null): boolean => {
+    if (orgWideEdit) return true;
+    if (ownerId === deleteCallerId) return true;
+    if (deleteTeamIds === null) return false; // not a manager
+    if (!ownerId) return true; // unowned objectives are manager-editable
+    return deleteTeamIds.has(ownerId);
+  };
 
   const enriched = okrs.map((okr, i) => {
     const keyResults = groups[i];
@@ -140,7 +167,9 @@ export async function GET(req: NextRequest) {
     return {
       ...okr,
       keyResults,
+      owner: okr.ownerId ? ownerById.get(okr.ownerId) ?? null : null,
       canDelete: canDeleteOkr(okr.ownerId),
+      canEdit: canEditOkr(okr.ownerId),
       progress: rollup.progress,
       status: rollup.status,
       // "NONE" = nothing measurable and nothing hand-set — clients show
@@ -183,13 +212,14 @@ export async function POST(req: NextRequest) {
 
   // Door 1: an employee's objective is their OWN — they can't file goals
   // under someone else's name. Managers may assign anyone in the org.
+  // A cross-org or unknown ownerId is a bad request body → 400.
   const effectiveOwnerId = isManager(session) ? (ownerId || null) : getUserId(session);
   if (effectiveOwnerId) {
     const owner = await prisma.user.findFirst({
       where: { id: effectiveOwnerId, organizationId: orgId },
       select: { id: true },
     });
-    if (!owner) return jsonError("Owner not found in this organization", 404);
+    if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
 
   // departmentId is a real FK since the goals rebuild — a cross-org or
@@ -199,7 +229,17 @@ export async function POST(req: NextRequest) {
       where: { id: departmentId, organizationId: orgId },
       select: { id: true },
     });
-    if (!dept) return jsonError("Department not found in this organization", 404);
+    if (!dept) return jsonError("Department not found in this organization", 400);
+  }
+
+  // parentId is a real FK too — nesting under another org's goal (or a
+  // typo'd id) must 400 here, not 500 at the constraint.
+  if (parentId) {
+    const parent = await prisma.oKR.findFirst({
+      where: { id: parentId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!parent) return jsonError("Parent goal not found in this organization", 400);
   }
 
   const cadence =
@@ -392,7 +432,7 @@ export async function PATCH(req: NextRequest) {
       where: { id: updates.ownerId, organizationId: orgId },
       select: { id: true },
     });
-    if (!owner) return jsonError("Owner not found in this organization", 404);
+    if (!owner) return jsonError("Owner is not a member of this organization", 400);
   }
   // departmentId is a real FK — validate before Prisma hits the constraint.
   if (typeof updates.departmentId === "string" && updates.departmentId.length > 0) {
@@ -400,7 +440,16 @@ export async function PATCH(req: NextRequest) {
       where: { id: updates.departmentId, organizationId: orgId },
       select: { id: true },
     });
-    if (!dept) return jsonError("Department not found in this organization", 404);
+    if (!dept) return jsonError("Department not found in this organization", 400);
+  }
+  // parentId is a real FK — same rule, and a goal can never parent itself.
+  if (typeof updates.parentId === "string" && updates.parentId.length > 0) {
+    if (updates.parentId === id) return jsonError("A goal can't be its own parent", 400);
+    const parent = await prisma.oKR.findFirst({
+      where: { id: updates.parentId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!parent) return jsonError("Parent goal not found in this organization", 400);
   }
 
   // Audience full-replacement: `assignees: [{type, id}]` becomes the
