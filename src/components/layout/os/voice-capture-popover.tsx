@@ -6,8 +6,23 @@
 // Retry. Copy writes the transcript to the clipboard.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Mic, X, Copy, RotateCcw, Square } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Mic, X, Copy, RotateCcw, Square, StickyNote, CheckSquare } from "lucide-react";
 import { useOsToast } from "./toast";
+import { useOsShell } from "./shell-context";
+
+/** ProseMirror-ish doc body from plain text — one paragraph per line.
+ *  Mirrors NotepadPanel.textToContent so a voice note reads back exactly
+ *  like a note typed in the Notepad. */
+function textToContent(text: string) {
+  return {
+    type: "doc",
+    content: text.split("\n").map((line) => ({
+      type: "paragraph",
+      ...(line ? { content: [{ type: "text", text: line }] } : {}),
+    })),
+  };
+}
 
 /* Minimal typing for the non-standard SpeechRecognition API. */
 interface SREvent { resultIndex: number; results: ArrayLike<{ 0: { transcript: string }; isFinal: boolean }> }
@@ -21,10 +36,13 @@ function getSR(): (new () => SR) | null {
 
 export function VoiceCapturePopover() {
   const { toast } = useOsToast();
+  const { openCreateTask } = useOsShell();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [finalText, setFinalText] = useState("");
   const [interim, setInterim] = useState("");
+  const [saving, setSaving] = useState(false);
   const recRef = useRef<SR | null>(null);
 
   const stop = useCallback(() => {
@@ -75,6 +93,38 @@ export function VoiceCapturePopover() {
     catch { toast("Couldn't copy"); }
   }
 
+  // Save the transcript as a real standalone note (Doc) — the same model +
+  // endpoint the Notepad panel writes to — then open it. No more clipboard-only.
+  async function saveAsNote() {
+    if (!text || saving) return;
+    setSaving(true);
+    try {
+      const title = (text.split("\n")[0] ?? "").trim().slice(0, 80) || "Voice note";
+      const res = await fetch("/api/docs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content: textToContent(text), excerpt: text.slice(0, 200) }),
+      });
+      if (!res.ok) { toast("Couldn't save note"); return; }
+      const d = await res.json();
+      const id = d?.doc?.id;
+      toast("Saved as note");
+      stop(); setOpen(false);
+      if (id) router.push(`/docs/${id}`);
+    } catch { toast("Couldn't save note"); }
+    finally { setSaving(false); }
+  }
+
+  // Turn the transcript into a task. The create-task modal is the canonical,
+  // board-aware creator but exposes no external title-prefill, so we stage the
+  // transcript on the clipboard and open the modal for a one-paste finish.
+  async function createTask() {
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); } catch { /* clipboard may be blocked; modal still opens */ }
+    stop(); setOpen(false);
+    openCreateTask();
+    toast("Transcript copied — paste it as the task name");
+  }
+
   return (
     <div className="fixed top-12 right-4 z-[95] w-[360px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl">
       <div className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 dark:border-[#2A2F38]">
@@ -97,14 +147,24 @@ export function VoiceCapturePopover() {
               <Square className="w-3.5 h-3.5" /> Stop
             </button>
           ) : (
-            <>
-              <button type="button" onClick={() => void copy()} disabled={!text} className="flex-1 h-9 rounded-md bg-[#0073EA] text-white text-[13px] font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#0060B9] disabled:opacity-40">
-                <Copy className="w-3.5 h-3.5" /> Copy text
-              </button>
-              <button type="button" onClick={start} className="h-9 px-3 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
-                <RotateCcw className="w-3.5 h-3.5" /> Retry
-              </button>
-            </>
+            <div className="w-full flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void saveAsNote()} disabled={!text || saving} className="flex-1 h-9 rounded-md bg-[#0073EA] text-white text-[13px] font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#0060B9] disabled:opacity-40">
+                  <StickyNote className="w-3.5 h-3.5" /> {saving ? "Saving…" : "Save as note"}
+                </button>
+                <button type="button" onClick={() => void createTask()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
+                  <CheckSquare className="w-3.5 h-3.5" /> Create task
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => void copy()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
+                  <Copy className="w-3.5 h-3.5" /> Copy text
+                </button>
+                <button type="button" onClick={start} className="h-9 px-3 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
+                  <RotateCcw className="w-3.5 h-3.5" /> Retry
+                </button>
+              </div>
+            </div>
           )}
         </div>
         {!recording && !text ? (

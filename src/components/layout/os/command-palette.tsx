@@ -6,21 +6,20 @@
 // Layout top → bottom:
 //   header:  big search input + Ask-AI chip (opens the Sidekick panel)
 //   sources: All / WorkwrK / Gmail / Drive / SharePoint / Apps
-//   filters: Tasks / Docs / People / Spaces / Agents + Filter + Sort
-//   body:    Section-grouped results — see SectionKind. When the query is
-//            empty we show a "today" digest (suggested + recent tasks +
-//            recent docs + key people + quick actions). When typing, we
-//            filter every section by query and only render the ones that
-//            still have matches.
+//   filters: Tasks / Docs / People / Commands / Actions + Filter + Sort
+//   body:    a flat ranked feed. When the query is empty we show real
+//            recents (recently-opened apps) + wired quick actions + the
+//            navigation + command shortcuts. When typing, live results
+//            from /api/search (the real Item/Board/Space/Folder/Doc graph)
+//            lead, followed by the discovery rows filtered by query.
 //   footer:  ←/→ navigate hint + Tab additional actions + settings
 //
-// The data here (TASKS, DOCS, PEOPLE, SPACES) is a curated sample of
-// "what a real WorkwrK workspace looks like" so the UI demonstrates
-// useful results out of the box. Real adapters (DB queries, integration
-// connectors) plug in by replacing the SOURCE arrays below.
+// There is NO mock/demo data here anymore: every row resolves to a real
+// route or fires a real shell action. Entity results come live from the
+// server; the empty state is built from the user's own recents + actions.
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   Search,
@@ -29,9 +28,6 @@ import {
   CalendarDays,
   Users2,
   BarChart3,
-  Code2,
-  Headphones,
-  CircleDollarSign,
   Sparkles,
   Store,
   Settings,
@@ -47,26 +43,23 @@ import {
   ChevronRight,
   ExternalLink as ExternalLinkIcon,
   Megaphone,
-  ThumbsUp,
   Clock,
   Video,
-  MessageSquare,
   FileSpreadsheet,
-  TrendingUp,
   MoreHorizontal,
   Activity,
-  Star,
   Terminal,
   Notebook,
   Hash,
   PenTool,
-  Download,
   Layers,
+  Folder,
   Check,
   type LucideIcon,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { AskAiButton } from "./ask-ai-button";
+import { APPS, type AppEntry } from "./apps-catalog";
 
 /* ─── Item kinds: each row in the palette is one of these ─── */
 
@@ -80,14 +73,14 @@ type BaseItem = {
 type TaskItem = BaseItem & {
   kind: "task";
   status: "todo" | "in_progress" | "done" | "blocked";
-  due?: string;       // "Today", "Tomorrow", "Fri Jun 06"
+  due?: string;
   assignee: { name: string; color: string };
 };
 
 type DocItem = BaseItem & {
   kind: "doc";
   type: "doc" | "spreadsheet" | "whiteboard";
-  editedAt: string;   // "2h ago", "yesterday"
+  editedAt: string;
   editor?: string;
 };
 
@@ -121,127 +114,41 @@ type NavItem = BaseItem & {
   shortcut?: string;
 };
 
-type SuggestedItem = BaseItem & {
-  kind: "suggested";
-  Icon: LucideIcon;
-  color: string;
-  hint?: string;
-};
-
-/** Commands are app-wide ops with a memorable keyword alias (the
- *  "shortcut" — e.g. `dd` runs Download Diagnostics). They mirror the
- *  ClickUp omnibox commands list. */
+/** Commands are app-wide navigation ops with a memorable keyword alias
+ *  (the "shortcut" — e.g. `mw` opens My Work). They mirror the ClickUp
+ *  omnibox commands list. */
 type CommandItem = BaseItem & {
   kind: "command";
   Icon: LucideIcon;
-  /** Keyword alias shown next to the label (and matched against `query`). */
   alias?: string;
 };
 
-type Item = TaskItem | DocItem | PersonItem | SpaceItem | ActionItem | NavItem | SuggestedItem | CommandItem;
+type Item = TaskItem | DocItem | PersonItem | SpaceItem | ActionItem | NavItem | CommandItem;
 
-/* ─── Mock data: what a working WorkwrK looks like ─── */
-
-const SUGGESTED: SuggestedItem[] = [
-  { kind: "suggested", id: "sug-today",   label: "Open my today's plan",                Icon: Home,         color: "var(--os-c-orange)", href: "/today",      hint: "Start your day" },
-  { kind: "suggested", id: "sug-review",  label: "Submit this week's weekly review",    Icon: CheckSquare,  color: "var(--os-brand)", href: "/me/weekly-review", hint: "Due Friday" },
-  { kind: "suggested", id: "sug-stalled", label: "Show me what's stalled in my space",  Icon: TrendingUp,   color: "var(--os-c-red)",    href: "/spaces",     hint: "AI summary" },
-];
-
-const TASKS: TaskItem[] = [
-  { kind: "task", id: "t-budget",   label: "Finalize Q3 budget review",        status: "in_progress", due: "Tomorrow",  assignee: { name: "Ria",    color: "var(--os-c-orange)" } },
-  { kind: "task", id: "t-jd",       label: "Review open job descriptions",     status: "todo",        due: "Fri Jun 06",assignee: { name: "Priya",  color: "var(--os-brand)" } },
-  { kind: "task", id: "t-renewal",  label: "Acme renewal — send proposal",     status: "in_progress", due: "Today",     assignee: { name: "Aman",   color: "var(--os-c-blue)" } },
-  { kind: "task", id: "t-onboard",  label: "Wrap onboarding for 2 new hires",  status: "blocked",     due: "Mon",       assignee: { name: "Priya",  color: "var(--os-brand)" } },
-  { kind: "task", id: "t-mtg-notes",label: "Share weekly all-hands recap",     status: "todo",                          assignee: { name: "Maya",   color: "var(--os-c-green)" } },
-];
-
-const DOCS: DocItem[] = [
-  { kind: "doc", id: "d-mutual",   label: "Mutual Connection — Sales pitch",      type: "doc",         editedAt: "2h ago",       editor: "Ibrahim", href: "/docs?id=mutual" },
-  { kind: "doc", id: "d-okrs",     label: "OKRs Q3 — company-wide",               type: "doc",         editedAt: "yesterday",    editor: "Ria",     href: "/okrs" },
-  { kind: "doc", id: "d-runbook",  label: "Customer onboarding runbook",          type: "doc",         editedAt: "3d ago",       editor: "Priya",   href: "/docs?id=runbook" },
-  { kind: "doc", id: "d-pricing",  label: "2026 Pricing model — proposal",        type: "spreadsheet", editedAt: "5d ago",       editor: "Aman",    href: "/financials/statements" },
-  { kind: "doc", id: "d-roadmap",  label: "Product roadmap — H2",                 type: "whiteboard",  editedAt: "last week",    editor: "Maya",    href: "/whiteboards" },
-];
-
-const PEOPLE: PersonItem[] = [
-  { kind: "person", id: "p-ria",     label: "Ria Patel",     role: "SDR Agent",       isAgent: true,  initials: "R", color: "var(--os-c-orange)", href: "/agents/ria" },
-  { kind: "person", id: "p-priya",   label: "Priya Shah",    role: "HR Operations",                   initials: "P", color: "var(--os-brand)", href: "/people/priya" },
-  { kind: "person", id: "p-aman",    label: "Aman Kapoor",   role: "Account Exec",                    initials: "A", color: "var(--os-c-blue)",   href: "/people/aman" },
-  { kind: "person", id: "p-maya",    label: "Maya Iyer",     role: "Product Manager",                 initials: "M", color: "var(--os-c-green)",  href: "/people/maya" },
-  { kind: "person", id: "p-ibrahim", label: "Ibrahim Surya", role: "You · CEO",                       initials: "I", color: "var(--os-c-orange)",   href: "/me" },
-];
-
-const SPACES: SpaceItem[] = [
-  { kind: "space", id: "s-sales",  label: "Sales",        Icon: BarChart3,        color: "var(--os-c-green)",  members: 12, href: "/crm" },
-  { kind: "space", id: "s-eng",    label: "Engineering",  Icon: Code2,            color: "var(--os-c-blue)",   members: 8,  href: "/dev" },
-  { kind: "space", id: "s-people", label: "People & HR",  Icon: Users2,           color: "var(--os-c-orange)",   members: 6,  href: "/people" },
-  { kind: "space", id: "s-fin",    label: "Finance",      Icon: CircleDollarSign, color: "var(--os-c-teal)",   members: 4,  href: "/financials" },
-  { kind: "space", id: "s-supp",   label: "Support",      Icon: Headphones,       color: "var(--os-c-orange)", members: 5,  href: "/helpdesk" },
-];
-
-const ACTIONS: ActionItem[] = [
-  { kind: "action", id: "a-task",     label: "Create task",             Icon: CheckSquare,       color: "var(--os-c-green)",  shortcut: "⌘ N",     hint: "Quick capture" },
-  { kind: "action", id: "a-doc",      label: "New doc",                 Icon: FileText,          color: "var(--os-c-teal)",   shortcut: "⌘ ⇧ D" },
-  { kind: "action", id: "a-meet",     label: "Schedule meeting",        Icon: CalendarDays,      color: "var(--os-c-orange)",   shortcut: "⌘ M" },
-  { kind: "action", id: "a-announce", label: "Send announcement",       Icon: Megaphone,         color: "var(--os-c-red)" },
-  { kind: "action", id: "a-kudos",    label: "Give kudos",              Icon: ThumbsUp,          color: "var(--os-c-yellow)" },
-  { kind: "action", id: "a-time",     label: "Start time tracker",      Icon: Clock,             color: "var(--os-c-blue)" },
-  { kind: "action", id: "a-clip",     label: "Record a clip",           Icon: Video,             color: "var(--os-brand)" },
-  { kind: "action", id: "a-survey",   label: "Send a survey",           Icon: FileSpreadsheet,   color: "var(--os-c-brown)" },
-  { kind: "action", id: "a-candor",   label: "Open Candor 1-on-1",      Icon: MessageSquare,     color: "var(--os-c-orange)" },
-];
+/* ─── Static discovery rows (all resolve to real routes) ─── */
 
 const NAVIGATE: NavItem[] = [
-  { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",    shortcut: "G T" },
-  { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",    shortcut: "G I" },
-  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)", href: "/tasks",    shortcut: "G K" },
-  { kind: "navigate", id: "n-meet",   label: "Meetings",    Icon: CalendarDays, color: "var(--os-c-orange)",   href: "/planner",  shortcut: "G M" },
-  { kind: "navigate", id: "n-okrs",   label: "OKRs",        Icon: Target,       color: "var(--os-c-blue)", href: "/okrs" },
-  { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-blue)", href: "/store" },
-  { kind: "navigate", id: "n-set",    label: "Workspace settings", Icon: Settings, color: "var(--os-c-brown)", href: "/settings" },
+  { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",   shortcut: "G T" },
+  { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",   shortcut: "G I" },
+  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)",    href: "/tasks",   shortcut: "G K" },
+  { kind: "navigate", id: "n-meet",   label: "Planner",     Icon: CalendarDays, color: "var(--os-c-orange)", href: "/planner", shortcut: "G M" },
+  { kind: "navigate", id: "n-okrs",   label: "Goals",       Icon: Target,       color: "var(--os-c-blue)",   href: "/okrs" },
+  { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-blue)",   href: "/store" },
+  { kind: "navigate", id: "n-set",    label: "Settings",    Icon: Settings,     color: "var(--os-c-brown)",  href: "/settings" },
 ];
 
-/** Commands — app-wide actions with a memorable keyword alias. Modeled
- *  after the ClickUp omnibox: each has a short alias users can type
- *  (e.g. `pri` for Open My Priorities, `dd` for Download Diagnostics). */
+/** Commands — nav shortcuts with a keyword alias users can type. Every
+ *  entry has a real href (routes verified to exist). */
 const COMMANDS: CommandItem[] = [
-  { kind: "command", id: "cmd-planner",      label: "Open Planner",         Icon: CalendarDays, alias: "calendar",  href: "/planner" },
-  { kind: "command", id: "cmd-priorities",   label: "Open My Priorities",   Icon: Target,       alias: "pri",       href: "/today" },
-  { kind: "command", id: "cmd-mywork",       label: "Open My Work",         Icon: CheckSquare,  alias: "mw",        href: "/tasks" },
-  { kind: "command", id: "cmd-activity",     label: "Open My Activity",     Icon: Activity,     alias: "act",       href: "/dashboard" },
-  { kind: "command", id: "cmd-inbox",        label: "Go to Inbox",          Icon: Inbox,        alias: "inb",       href: "/inbox" },
-  { kind: "command", id: "cmd-docs",         label: "Go to Docs home",      Icon: FileText,     alias: "docs",      href: "/docs" },
-  { kind: "command", id: "cmd-pulse",        label: "Go to Pulse",          Icon: TrendingUp,   alias: "pulse",     href: "/pulse" },
-  { kind: "command", id: "cmd-goals",        label: "Go to Goals",          Icon: Target,       alias: "goals",     href: "/okrs" },
-  { kind: "command", id: "cmd-time",         label: "Go to Timesheets",     Icon: Clock,        alias: "ts",        href: "/timesheets" },
-  { kind: "command", id: "cmd-newdoc",       label: "Create new Doc",       Icon: PenTool,      alias: "nd",        href: "/docs?new=1" },
-  { kind: "command", id: "cmd-newnote",      label: "Create new Notepad",   Icon: Notebook,     alias: "nn",        href: "/notepad?new=1" },
-  { kind: "command", id: "cmd-newtask",      label: "Create new Task",      Icon: CheckSquare,  alias: "nt",        href: "/tasks?new=1" },
-  { kind: "command", id: "cmd-fav",          label: "Show Favorites",       Icon: Star,         alias: "fav" },
-  { kind: "command", id: "cmd-tray",         label: "Show Tray",            Icon: Layers,       alias: "tray" },
-  { kind: "command", id: "cmd-recent",       label: "Show Recent Activity", Icon: Activity,     alias: "rec" },
-  { kind: "command", id: "cmd-setstatus",    label: "Set status",           Icon: Check,        alias: "ss" },
-  { kind: "command", id: "cmd-slack",        label: "Update Slack status",  Icon: Hash,         alias: "slack" },
-  { kind: "command", id: "cmd-connect",      label: "Connect apps",         Icon: Store,        alias: "conn",      href: "/integrations" },
-  { kind: "command", id: "cmd-diag",         label: "Download Diagnostics", Icon: Download,     alias: "dd" },
-  { kind: "command", id: "cmd-trace",        label: "Feature Trace",        Icon: Terminal,     alias: "ft" },
-];
-
-// Note: SUGGESTED items are intentionally excluded from the visible set.
-// The whole "AI / suggested for you" concept has been removed from search
-// per the design call — kept the constant only as data scaffolding for a
-// future revival.
-void SUGGESTED;
-
-const ALL_ITEMS: Item[] = [
-  ...TASKS,
-  ...DOCS,
-  ...PEOPLE,
-  ...SPACES,
-  ...ACTIONS,
-  ...NAVIGATE,
-  ...COMMANDS,
+  { kind: "command", id: "cmd-planner",    label: "Open Planner",       Icon: CalendarDays, alias: "calendar", href: "/planner" },
+  { kind: "command", id: "cmd-priorities", label: "Open My Priorities", Icon: Target,       alias: "pri",      href: "/today" },
+  { kind: "command", id: "cmd-mywork",     label: "Open My Work",       Icon: CheckSquare,  alias: "mw",       href: "/tasks" },
+  { kind: "command", id: "cmd-activity",   label: "Open My Activity",   Icon: Activity,     alias: "act",      href: "/dashboard" },
+  { kind: "command", id: "cmd-inbox",      label: "Go to Inbox",        Icon: Inbox,        alias: "inb",      href: "/inbox" },
+  { kind: "command", id: "cmd-docs",       label: "Go to Docs home",    Icon: FileText,     alias: "docs",     href: "/docs" },
+  { kind: "command", id: "cmd-goals",      label: "Go to Goals",        Icon: Target,       alias: "goals",    href: "/okrs" },
+  { kind: "command", id: "cmd-time",       label: "Go to Timesheets",   Icon: Clock,        alias: "ts",       href: "/timesheets" },
+  { kind: "command", id: "cmd-connect",    label: "Connect apps",       Icon: Store,        alias: "conn",     href: "/integrations" },
 ];
 
 /* ─── Top-level filters (source tabs + type chips) ─── */
@@ -251,9 +158,6 @@ const SOURCES: Array<{
   label: string;
   Icon?: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   tint?: string;
-  /** When true, the icon shows a small `+` badge — signals this source
-   *  is an integration the user hasn't connected yet. Tapping the chip
-   *  opens the connect flow (today: routes to /integrations). */
   connectable?: boolean;
 }> = [
   { key: "all",         label: "All" },
@@ -264,10 +168,9 @@ const SOURCES: Array<{
   { key: "apps",        label: "Apps",         Icon: Store,    tint: "#F97316" },
 ];
 
-/** Type filter chip. Each defines its own predicate so a single chip can
- *  span multiple item kinds (e.g. "Whiteboards" only matches docs whose
- *  type === "whiteboard"). Chips not flagged `primary` collapse into the
- *  "···" overflow popover so the chip row stays scannable. */
+/** Type filter chip. Each defines its own predicate. Only kinds the
+ *  palette actually produces get a chip; structural results (boards /
+ *  spaces / folders) render inline but aren't separately filterable. */
 const TYPE_FILTERS: Array<{
   key: string;
   label: string;
@@ -275,36 +178,23 @@ const TYPE_FILTERS: Array<{
   primary?: boolean;
   predicate: (it: Item) => boolean;
 }> = [
-  { key: "task",       label: "Tasks",       Icon: CheckSquare,     primary: true,  predicate: (i) => i.kind === "task" },
-  { key: "doc",        label: "Docs",        Icon: FileText,        primary: true,  predicate: (i) => i.kind === "doc" && (i as DocItem).type === "doc" },
-  { key: "person",     label: "People",      Icon: Users2,          primary: true,  predicate: (i) => i.kind === "person" },
-  { key: "space",      label: "Spaces",      Icon: BarChart3,       primary: true,  predicate: (i) => i.kind === "space" },
-  { key: "command",    label: "Commands",    Icon: Terminal,        primary: true,  predicate: (i) => i.kind === "command" },
-  { key: "whiteboard", label: "Whiteboards", Icon: PenTool,                         predicate: (i) => i.kind === "doc" && (i as DocItem).type === "whiteboard" },
-  { key: "pulse",      label: "Pulse",       Icon: TrendingUp,                      predicate: (i) => i.kind === "task" && (i as TaskItem).status === "in_progress" },
-  { key: "goal",       label: "Goals",       Icon: Target,                          predicate: (i) => i.kind === "navigate" && i.id === "n-okrs" },
-  { key: "form",       label: "Forms",       Icon: FileSpreadsheet,                 predicate: (i) => i.kind === "doc" && (i as DocItem).type === "spreadsheet" },
-  { key: "channel",    label: "Channels",    Icon: Hash,                            predicate: () => false },
-  { key: "comment",    label: "Comments",    Icon: MessageSquare,                   predicate: () => false },
-  { key: "notepad",    label: "Notepads",    Icon: Notebook,                        predicate: () => false },
-  { key: "action",     label: "Actions",     Icon: Sparkles,                        predicate: (i) => i.kind === "action" },
+  { key: "task",    label: "Tasks",    Icon: CheckSquare, primary: true, predicate: (i) => i.kind === "task" },
+  { key: "doc",     label: "Docs",     Icon: FileText,    primary: true, predicate: (i) => i.kind === "doc" },
+  { key: "person",  label: "People",   Icon: Users2,      primary: true, predicate: (i) => i.kind === "person" },
+  { key: "command", label: "Commands", Icon: Terminal,    primary: true, predicate: (i) => i.kind === "command" },
+  { key: "action",  label: "Actions",  Icon: Sparkles,                   predicate: (i) => i.kind === "action" },
 ];
 
-/** Filter dropdown options (header right). Each option toggles a single
- *  active filter; "Any" clears it. Filters are predicate-based against
- *  mock data — Created-by-me uses Ibrahim as the demo "me" since the
- *  palette doesn't yet pull the live caller. */
-const FILTERS: Array<{ key: string; label: string; hint?: string; predicate?: (it: Item) => boolean }> = [
-  { key: "any",         label: "Any" },
-  { key: "by-me",       label: "Created by me",     hint: "Ibrahim",     predicate: (i) => i.kind === "doc" && (i as DocItem).editor === "Ibrahim" },
-  { key: "active",      label: "Active tasks only", predicate: (i) => i.kind === "task" && (i as TaskItem).status !== "done" },
-  { key: "trending",    label: "Trending",          predicate: (i) => i.kind === "task" && (i as TaskItem).status === "in_progress" },
-  { key: "trending-you",label: "Trending for you",  predicate: (i) => i.kind === "task" && (i as TaskItem).assignee.name === "Ibrahim" },
-  { key: "docs-only",   label: "WorkwrK documents", predicate: (i) => i.kind === "doc" },
+/** Filter dropdown options. Predicate-based against the live/discovery
+ *  set; kept honest (no hardcoded "me"). */
+const FILTERS: Array<{ key: string; label: string; predicate?: (it: Item) => boolean }> = [
+  { key: "any",    label: "Any" },
+  { key: "active", label: "Active tasks only", predicate: (i) => i.kind === "task" && (i as TaskItem).status !== "done" },
+  { key: "docs",   label: "Documents",         predicate: (i) => i.kind === "doc" },
 ];
 
 /** Sort dropdown options. Default is "modified" which preserves the
- *  hand-curated order in ALL_ITEMS (most-recent-feeling first). */
+ *  server + discovery order (most-relevant-feeling first). */
 const SORTS: Array<{ key: string; label: string; sorter?: (a: Item, b: Item) => number }> = [
   { key: "modified", label: "Modified date (recent)" },
   { key: "created",  label: "Created date" },
@@ -325,10 +215,31 @@ const DOC_TYPE_ICON: Record<DocItem["type"], LucideIcon> = {
   whiteboard: BarChart3,
 };
 
+/** Per-type icon for live results that render as a generic navigation row
+ *  (boards, spaces, folders, whiteboards, and the org/alignment surfaces). */
+const NAV_ICON: Record<string, LucideIcon> = {
+  board: Layers,
+  space: Hash,
+  folder: Folder,
+  whiteboard: PenTool,
+  department: Users2,
+  meeting: CalendarDays,
+  okr: Target,
+  idea: Sparkles,
+  policy: FileText,
+  announcement: Megaphone,
+};
+
+/** App-key → catalog entry, for turning the shell's recent-app list into
+ *  real navigation rows in the empty state. */
+const APP_BY_KEY = new Map<string, AppEntry>(APPS.map((a) => [a.key, a]));
+
+type ServerHit = { type: string; id: string; title: string; subtitle?: string; href?: string };
+
 /* ─── Component ─── */
 
 export function OsCommandPalette() {
-  const { paletteOpen, closePalette, openSidekick } = useOsShell();
+  const { paletteOpen, closePalette, openSidekick, openCreateTask, recentAppKeys } = useOsShell();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -342,8 +253,55 @@ export function OsCommandPalette() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [mounted, setMounted] = useState(false);
 
+  // Quick doc — mirrors ClickTopbar.createQuickDoc so the palette action
+  // and the top-bar icon behave identically.
+  const createQuickDoc = useCallback(async () => {
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Untitled doc", content: { type: "doc", content: [{ type: "paragraph" }] } }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d?.doc?.id) router.push(`/docs/${d.doc.id}`);
+    } catch { /* transient — ignore */ }
+  }, [router]);
+
+  // Wired quick actions — each fires a real shell action or navigates to a
+  // real route (no more decorative rows that just close the palette).
+  const quickActions = useMemo<ActionItem[]>(() => [
+    { kind: "action", id: "qa-task",     label: "Create task",         Icon: CheckSquare, color: "var(--os-c-green)",  hint: "Quick capture", action: () => openCreateTask() },
+    { kind: "action", id: "qa-doc",      label: "New doc",             Icon: FileText,    color: "var(--os-c-teal)",   action: () => void createQuickDoc() },
+    { kind: "action", id: "qa-note",     label: "New notepad",         Icon: Notebook,    color: "var(--os-brand)",    action: () => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })) },
+    { kind: "action", id: "qa-reminder", label: "Set a reminder",      Icon: Clock,       color: "var(--os-c-orange)", action: () => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })) },
+    { kind: "action", id: "qa-clip",     label: "Open AI Notetaker",   Icon: Video,       color: "var(--os-c-red)",    href: "/notetaker" },
+    { kind: "action", id: "qa-announce", label: "Post an announcement",Icon: Megaphone,   color: "var(--os-c-red)",    href: "/announcements" },
+    { kind: "action", id: "qa-time",     label: "Open Timesheets",     Icon: Clock,       color: "var(--os-c-blue)",   href: "/timesheets" },
+  ], [openCreateTask, createQuickDoc]);
+
+  // Real recents — the user's recently-opened apps, mapped to nav rows.
+  const recents = useMemo<NavItem[]>(() => {
+    return recentAppKeys
+      .map((k) => APP_BY_KEY.get(k))
+      .filter((a): a is AppEntry => !!a)
+      .slice(0, 5)
+      .map((a) => ({
+        kind: "navigate" as const,
+        id: `recent-${a.key}`,
+        label: a.label,
+        href: a.defaultHref,
+        Icon: a.Icon as LucideIcon,
+        color: "var(--os-ink-2)",
+      }));
+  }, [recentAppKeys]);
+
+  const emptyBase = useMemo<Item[]>(
+    () => [...recents, ...quickActions, ...NAVIGATE, ...COMMANDS],
+    [recents, quickActions],
+  );
+
   // Live results from /api/search — debounced fetch on query change.
-  // Items are mapped into Item shapes so they slot into the existing
+  // Server hits are mapped into Item shapes so they slot into the existing
   // flatItems / keyboard-nav / sectioned-render machinery unchanged.
   const [live, setLive] = useState<Item[]>([]);
   useEffect(() => {
@@ -355,26 +313,22 @@ export function OsCommandPalette() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
         if (!res.ok) return;
         const d = await res.json();
-        const hits = (d?.data ?? []) as Array<{
-          type: string; id: string; title: string; subtitle?: string; href?: string;
-        }>;
+        const hits = (d?.data ?? []) as ServerHit[];
         setLive(hits.map((h): Item | null => {
-          if (h.type === "note") {
-            return { kind: "doc", id: `live-note-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: "" } as DocItem;
+          if (h.type === "note" || h.type === "sop") {
+            return { kind: "doc", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: h.type === "sop" ? (h.subtitle ?? "SOP") : (h.subtitle ?? "") } as DocItem;
           }
-          if (h.type === "sop") {
-            return { kind: "doc", id: `live-sop-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: h.subtitle ?? "SOP" } as DocItem;
-          }
-          if (h.type === "task") {
-            return { kind: "task", id: `live-task-${h.id}`, label: h.title, href: h.href, status: "todo", due: h.subtitle, assignee: { name: "", color: "var(--os-c-blue)" } } as TaskItem;
+          if (h.type === "item" || h.type === "task") {
+            return { kind: "task", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, status: "todo", due: h.subtitle, assignee: { name: "", color: "var(--os-c-blue)" } } as TaskItem;
           }
           if (h.type === "person") {
             const initials = h.title.split(" ").map((s) => s[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
             return { kind: "person", id: `live-person-${h.id}`, label: h.title, href: h.href, role: h.subtitle ?? "", initials, color: "var(--os-c-blue)" } as PersonItem;
           }
-          // Fall through: any other server type renders as a generic navigation row.
+          // Boards / spaces / folders / whiteboards / org surfaces → a
+          // navigation row with a per-type icon.
           return h.href
-            ? { kind: "navigate", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, Icon: Search, color: "var(--os-ink-2)" } as NavItem
+            ? { kind: "navigate", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, Icon: NAV_ICON[h.type] ?? Search, color: "var(--os-ink-2)" } as NavItem
             : null;
         }).filter((x): x is Item => !!x));
       } catch { /* abort or transient — ignore */ }
@@ -395,11 +349,11 @@ export function OsCommandPalette() {
 
   /* Visible flat list. Three stacked filters:
    *   1. query — substring match on label OR (for commands) on alias
-   *   2. type chips — predicate-OR: an item matches if any active chip's
-   *      predicate returns true (so toggling "Tasks" + "Docs" widens
-   *      the set, not narrows it)
+   *   2. type chips — predicate-OR
    *   3. Filter dropdown — single active predicate
-   * Then `sortKey` reorders the result.
+   * Then `sortKey` reorders the result. When searching, live server
+   * results lead and the discovery rows follow (filtered by query). When
+   * empty, the emptyBase (recents + actions + nav + commands) shows.
    */
   const flatItems = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -412,17 +366,9 @@ export function OsCommandPalette() {
       if (it.kind === "command" && (it as CommandItem).alias?.toLowerCase().includes(q)) return true;
       return false;
     };
-    // When the writer is searching, prefer live API results for the
-    // entity items (tasks/docs/people). The mock arrays still feed the
-    // empty-query "today" suggestions and the actions/navigate/commands
-    // discovery rows, but they get dropped from the search result list
-    // so we don't double-show fake + real hits side-by-side.
     const baseItems: Item[] = q
-      ? [
-          ...live,
-          ...ALL_ITEMS.filter((it) => it.kind === "action" || it.kind === "navigate" || it.kind === "command" || it.kind === "space"),
-        ]
-      : ALL_ITEMS;
+      ? [...live, ...quickActions, ...NAVIGATE, ...COMMANDS]
+      : emptyBase;
     const filtered = baseItems.filter((it) => {
       if (!matchQuery(it)) return false;
       if (activeTypes.length > 0 && !activeTypes.some((t) => t.predicate(it))) return false;
@@ -431,7 +377,7 @@ export function OsCommandPalette() {
     });
     if (sortDef?.sorter) filtered.sort(sortDef.sorter);
     return filtered;
-  }, [query, typeFilters, filterKey, sortKey, live]);
+  }, [query, typeFilters, filterKey, sortKey, live, quickActions, emptyBase]);
 
   useEffect(() => {
     if (paletteOpen) {
@@ -469,9 +415,7 @@ export function OsCommandPalette() {
         if (item) onItemActivate(item);
       } else if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         // "/" toggles commands-only view (matches the ClickUp palette
-        // hint "Press / for commands"). Only fire when the user is in
-        // the search input AND the value is empty — otherwise the slash
-        // is a normal character (e.g. searching for "TODO/Done").
+        // hint "Press / for commands"). Only fire when the value is empty.
         if (document.activeElement === inputRef.current && inputRef.current?.value === "") {
           e.preventDefault();
           setTypeFilters((prev) => {
@@ -490,9 +434,8 @@ export function OsCommandPalette() {
 
   if (!paletteOpen || !mounted) return null;
 
-  /* Render helpers — one renderer per item kind so each section feels
-     native to its content type. Each helper takes the running flat
-     index so the active-row highlight tracks keyboard nav. */
+  /* Render helpers — one renderer per item kind. Each takes the running
+     flat index so the active-row highlight tracks keyboard nav. */
 
   let runningIdx = -1;
 
@@ -547,16 +490,9 @@ export function OsCommandPalette() {
           <span className="flex items-center gap-2 mt-0.5">
             <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
               <span className="w-2 h-2 rounded-full" style={{ background: tone.dot }} />
-              <span>{tone.label}</span>
+              <span>{it.due || tone.label}</span>
             </span>
-            {it.due ? (
-              <span className="text-[11px] text-zinc-500 dark:text-zinc-400">· due {it.due}</span>
-            ) : null}
           </span>
-        </span>
-        <span className="flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-semibold flex-shrink-0"
-              style={{ background: it.assignee.color }} title={it.assignee.name}>
-          {it.assignee.name.charAt(0)}
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -575,9 +511,11 @@ export function OsCommandPalette() {
         </span>
         <span className="flex-1 min-w-0">
           <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">
-            {it.editor ? `${it.editor} · ` : ""}edited {it.editedAt}
-          </span>
+          {it.editedAt ? (
+            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">
+              {it.editor ? `${it.editor} · ` : ""}{it.editedAt}
+            </span>
+          ) : null}
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -598,7 +536,7 @@ export function OsCommandPalette() {
             {it.label}
             {it.isAgent ? <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-medium">AGENT</span> : null}
           </span>
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.role}</span>
+          {it.role ? <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">{it.role}</span> : null}
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -696,9 +634,6 @@ export function OsCommandPalette() {
       case "action":   return renderAction(it as ActionItem);
       case "navigate": return renderNav(it as NavItem);
       case "command":  return renderCommand(it as CommandItem);
-      // suggested is excluded from ALL_ITEMS now; the case stays for
-      // exhaustiveness even though it's unreachable.
-      case "suggested": return null;
     }
   };
 
@@ -733,15 +668,8 @@ export function OsCommandPalette() {
           <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-[#2A2F38] font-mono">ESC</span>
         </div>
 
-        {/* Source tabs — flat row, real breathing room between providers.
-            ─ Connected sources (All / WorkwrK / Apps) render bright and
-              clickable — text uses Tailwind text-zinc-900 so the
-              existing dark-mode catchall flips it to #E5E7EB.
-            ─ Connectable-but-not-yet-connected (Gmail / Drive /
-              SharePoint) render dimmed so they self-signal "needs
-              connecting" — softer text + slightly desaturated icon.
-            ─ Connection badge sits on the icon corner, emerald gradient
-              chip + canvas-color ring. */}
+        {/* Source tabs. Connectable-but-not-yet-connected sources render
+            dimmed + a connect badge, and route to /integrations on click. */}
 	        <div className="flex items-center px-4 pt-1.5 pb-1" style={{ gap: 24 }}>
           {SOURCES.map((s) => {
             const isUnconnected = !!s.connectable;
@@ -755,8 +683,6 @@ export function OsCommandPalette() {
                     closePalette();
                     return;
                   }
-                  // Connected source — set it active. Real per-source
-                  // adapter filtering wires in later.
                   setSourceKey(s.key);
                 }}
 	                className={`relative flex items-center gap-1.5 h-7 text-[12px] font-medium flex-shrink-0 transition-colors ${
@@ -792,9 +718,6 @@ export function OsCommandPalette() {
                   </span>
                 ) : null}
                 <span>{s.label}</span>
-                {/* Active underline — only on connected sources that
-                    are currently selected. The line signals "this is
-                    the live filter" without dimming the rest. */}
                 {!isUnconnected && sourceKey === s.key ? (
                   <span
                     className="absolute left-0 right-0 -bottom-0.5 h-[2px] rounded-full"
@@ -806,9 +729,7 @@ export function OsCommandPalette() {
           })}
         </div>
 
-        {/* Filter chips (primary + "···" overflow) + Filter + Sort. The
-            overflow popover hosts chips that don't fit inline; toggling
-            a chip from there moves it visually to the active set. */}
+        {/* Filter chips (primary + "···" overflow) + Filter + Sort. */}
 	        <div className="relative flex items-center gap-2 px-4 py-2 border-b border-zinc-100 dark:border-[#2A2F38]">
           {TYPE_FILTERS.filter((f) => f.primary).map((f) => {
             const on = typeFilters.has(f.key);
@@ -829,9 +750,6 @@ export function OsCommandPalette() {
               </button>
             );
           })}
-          {/* Show extra active (non-primary) chips inline so the user
-              sees what's filtering — they live behind the More popover
-              by default but surface here when on. */}
           {TYPE_FILTERS.filter((f) => !f.primary && typeFilters.has(f.key)).map((f) => (
             <button
               key={f.key}
@@ -911,7 +829,6 @@ export function OsCommandPalette() {
 	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <span className="flex-1">{f.label}</span>
-                      {f.hint ? <span className="text-[10.5px] text-zinc-400 dark:text-zinc-400">{f.hint}</span> : null}
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
                     </button>
                   );
@@ -955,10 +872,7 @@ export function OsCommandPalette() {
           </div>
         </div>
 
-        {/* Flat results list. The type chips above are the only bifurcator:
-            click "Tasks" → only tasks render here, etc. Per-row kind is
-            conveyed by each row's own layout (status pill / avatar /
-            file icon / etc.) so the list reads as one ranked feed. */}
+        {/* Flat results list. */}
 	        <div className="flex-1 max-h-[400px] overflow-y-auto px-2.5 py-2.5">
           {flatItems.length === 0 ? (
             <div className="px-4 py-14 text-center">

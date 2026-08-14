@@ -36,7 +36,8 @@ import {
   HelpCircle, Trash2, LogOut, Pin, PinOff, CircleUser,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
-import { PROFILE_TOOLS } from "./profile-tools";
+import { PROFILE_TOOLS, type ToolAction } from "./profile-tools";
+import { useOsToast } from "./toast";
 
 type Props = {
   open: boolean;
@@ -59,7 +60,9 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
     presenceStatus, openStatusModal,
     mutedNotifications, setMutedNotifications,
     profileToolPins, toggleProfileToolPin,
+    openCreateTask,
   } = useOsShell();
+  const { toast } = useOsToast();
 
   useEffect(() => {
     if (!open) return;
@@ -82,6 +85,36 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
 
   const goto = (href: string) => {
     router.push(href);
+    onClose();
+  };
+
+  // Quick doc — mirrors ClickTopbar.createQuickDoc so the profile-menu row
+  // and the pinned top-bar icon behave identically.
+  const createQuickDoc = async () => {
+    try {
+      const res = await fetch("/api/docs", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Untitled doc", content: { type: "doc", content: [{ type: "paragraph" }] } }),
+      });
+      if (!res.ok) { toast("Couldn't create doc"); return; }
+      const d = await res.json();
+      router.push(`/docs/${d.doc.id}`);
+    } catch { toast("Couldn't create doc"); }
+  };
+
+  // Action-only Personal Tools rows used to be inert (their handler only
+  // navigated when href was set, and every action tool has href:null). Route
+  // them through the exact same shell actions / window events ClickTopbar's
+  // runTool uses so the panels + modals actually open.
+  const runTool = (action: ToolAction) => {
+    switch (action) {
+      case "create-task": openCreateTask(); break;
+      case "my-work": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "my-work" })); break;
+      case "notepad": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })); break;
+      case "reminder": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })); break;
+      case "doc": void createQuickDoc(); break;
+      case "voice": window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "voice" })); break;
+    }
     onClose();
   };
 
@@ -187,7 +220,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
               >
                 <button
                   type="button"
-                  onClick={() => tool.href && goto(tool.href)}
+                  onClick={() => { if (tool.action) runTool(tool.action); else if (tool.href) goto(tool.href); }}
                   className="flex items-center gap-2 flex-1 min-w-0 text-left"
                   role="menuitem"
                 >

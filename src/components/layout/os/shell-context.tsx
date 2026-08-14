@@ -513,17 +513,20 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key.toLowerCase() === "k") {
+      if (meta && e.shiftKey && e.key.toLowerCase() === "k") {
+        // Cmd/Ctrl+Shift+K → quick task. Replaces the old Cmd+T chord, which
+        // Chrome/Safari swallow for "new tab" and never deliver to the page —
+        // so the advertised shortcut silently did nothing. ⇧K sits next to the
+        // ⌘K search chord and is free in the target browsers.
+        e.preventDefault();
+        setCreateTaskPreselect(null);
+        setCreateTaskOpen(true);
+      } else if (meta && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setPaletteOpen((v) => !v);
       } else if (meta && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setSidekickOpen((v) => !v);
-      } else if (meta && e.key.toLowerCase() === "t") {
-        // Cmd/Ctrl+T → quick task (some browsers reserve this for a new tab).
-        e.preventDefault();
-        setCreateTaskPreselect(null);
-        setCreateTaskOpen(true);
       } else if (meta && e.key.toLowerCase() === "b") {
         // Cmd+B → toggle secondary sidebar (matches common app shortcuts).
         e.preventDefault();

@@ -7,7 +7,7 @@
 // affordance as the existing ones.
 
 import {
-  CheckSquare, Briefcase, Clock, NotepadText, Video,
+  CheckSquare, Briefcase, Clock, NotepadText,
   AlarmClock, FileText, PencilRuler, Users, BarChart3, Sparkles, Mic,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -28,17 +28,19 @@ export type ProfileTool = {
 };
 
 export const PROFILE_TOOLS: ProfileTool[] = [
-  { key: "create-task",       label: "Quick task",        Icon: CheckSquare,  href: null, action: "create-task", tooltip: "Quick task  ⌘T" },
+  { key: "create-task",       label: "Quick task",        Icon: CheckSquare,  href: null, action: "create-task", tooltip: "Quick task  ⌘⇧K" },
   { key: "my-work",           label: "My Work",           Icon: Briefcase,    href: null, action: "my-work" },
   { key: "notepad",           label: "Notepad",           Icon: NotepadText,  href: null, action: "notepad" },
   { key: "create-reminder",   label: "Reminder",          Icon: AlarmClock,   href: null, action: "reminder" },
   { key: "create-doc",        label: "Quick doc",         Icon: FileText,     href: null, action: "doc" },
   { key: "voice",             label: "Voice to text",     Icon: Mic,          href: null, action: "voice" },
   { key: "track-time",        label: "Track Time",        Icon: Clock,        href: "/timesheets" },
-  { key: "record-clip",       label: "Record a Clip",     Icon: Video,        href: "/notetaker" },
-  { key: "create-whiteboard", label: "Create Whiteboard", Icon: PencilRuler,  href: "/build?new=whiteboard" },
+  // Whiteboards / Dashboards live at their real gallery routes (each with a
+  // "New …" CTA). The old hrefs pointed at /build (wrong app) and /boards
+  // (no index → 404); those surfaces never existed.
+  { key: "create-whiteboard", label: "Create Whiteboard", Icon: PencilRuler,  href: "/whiteboards" },
   { key: "view-people",       label: "View People",       Icon: Users,        href: "/people" },
-  { key: "create-dashboard",  label: "Create Dashboard",  Icon: BarChart3,    href: "/boards?new=dashboard" },
+  { key: "create-dashboard",  label: "Create Dashboard",  Icon: BarChart3,    href: "/dashboards" },
   { key: "ai-notetaker",      label: "AI Notetaker",      Icon: Sparkles,     href: "/notetaker" },
 ];
 

@@ -2,20 +2,27 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
 import { docAccessible } from "@/lib/doc-access";
+import { visibleSpaceIds, isOrgAdminAccessLevel } from "@/lib/space";
 
 /**
  * Unified entity search across the product. Powers the Cmd-K palette's
- * live-results section — typing a phrase searches every major entity
- * in parallel and surfaces a flat ranked list.
+ * live-results section — typing a phrase searches the real work graph in
+ * parallel and surfaces a flat ranked list.
  *
  * Scope policy:
  *   · Every query is org-scoped (no cross-tenant leaks).
- *   · Per-kind cap so a long-prefix query that matches 200 SOPs and 0
- *     tasks still feels instant. Defaults to 5 per kind.
+ *   · Space / Board visibility is enforced so private work never bleeds
+ *     into another viewer's palette (admins see everything).
+ *   · Per-kind cap so a long-prefix query that matches 200 items and 0
+ *     boards still feels instant. Defaults to 5 per kind.
  *   · Empty / too-short queries return an empty array (cheap).
  *
- * Result shape is intentionally a flat array (not grouped) so the
- * palette can render with cmdk's native value-prefix matching.
+ * This searches the ACTUAL work graph — Item (tasks), Board (lists),
+ * Space, Folder, Doc (notes), Whiteboard, and people — plus the alignment
+ * + org surfaces that still have live routes (SOP, OKR, meeting,
+ * department, idea, policy, announcement). It deliberately does NOT search
+ * the legacy `Task` table, nor the amputated procurement / financials /
+ * planning modules whose pages 404.
  */
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -37,47 +44,69 @@ export async function GET(req: NextRequest) {
   const session2 = session as { user: { id: string; accessLevel: string } };
   const me = session2.user.id;
   const myAccess = session2.user.accessLevel;
+  const admin = isOrgAdminAccessLevel(myAccess);
 
   const [
     users,
-    tasks,
-    sops,
+    items,
+    boards,
+    spaces,
+    folders,
+    whiteboards,
     docs,
+    sops,
     departments,
     meetings,
     okrs,
     ideas,
-    vendors,
-    pos,
     policies,
     announcements,
-    glAccounts,
-    plans,
   ] = await Promise.all([
     prisma.user.findMany({
       where: {
         organizationId: orgId,
         deletedAt: null,
-        OR: [
-          { firstName: ci },
-          { lastName: ci },
-          { email: ci },
-        ],
+        OR: [{ firstName: ci }, { lastName: ci }, { email: ci }],
       },
-      select: { id: true, firstName: true, lastName: true, email: true, avatar: true },
+      select: { id: true, firstName: true, lastName: true, email: true },
       take,
     }),
-    prisma.task.findMany({
-      where: { organizationId: orgId, title: ci },
-      select: { id: true, title: true, status: true, date: true },
-      orderBy: { date: "desc" },
-      take,
-    }),
-    prisma.sOP.findMany({
-      where: { organizationId: orgId, title: ci },
-      select: { id: true, title: true, status: true, category: true },
+    // Items (tasks) — over-fetch then gate by their board's read access.
+    prisma.item.findMany({
+      where: { organizationId: orgId, archivedAt: null, title: ci },
+      select: {
+        id: true, title: true, status: true, dueAt: true,
+        board: { select: { id: true, slug: true, name: true, spaceId: true, visibility: true, ownerId: true } },
+      },
       orderBy: { updatedAt: "desc" },
-      take,
+      take: take * 4,
+    }),
+    prisma.board.findMany({
+      where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
+      select: { id: true, slug: true, name: true, spaceId: true, visibility: true, ownerId: true },
+      orderBy: { updatedAt: "desc" },
+      take: take * 3,
+    }),
+    prisma.space.findMany({
+      where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
+      select: { id: true, slug: true, name: true, visibility: true },
+      orderBy: { updatedAt: "desc" },
+      take: take * 3,
+    }),
+    prisma.folder.findMany({
+      where: { organizationId: orgId, archivedAt: null, name: ci },
+      select: {
+        id: true, name: true, spaceId: true, visibility: true, ownerId: true,
+        space: { select: { slug: true, visibility: true } },
+      },
+      orderBy: { updatedAt: "desc" },
+      take: take * 3,
+    }),
+    prisma.whiteboard.findMany({
+      where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
+      select: { id: true, name: true, spaceId: true },
+      orderBy: { updatedAt: "desc" },
+      take: take * 3,
     }),
     // Notes (Doc model). Over-fetch then access-gate so private notes
     // never bleed into another viewer's palette.
@@ -94,6 +123,12 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
+    prisma.sOP.findMany({
+      where: { organizationId: orgId, title: ci },
+      select: { id: true, title: true, status: true, category: true },
+      orderBy: { updatedAt: "desc" },
+      take,
+    }),
     prisma.department.findMany({
       where: { organizationId: orgId, name: ci },
       select: { id: true, name: true, color: true },
@@ -105,77 +140,121 @@ export async function GET(req: NextRequest) {
       take: 3,
     }),
     prisma.oKR.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [{ title: ci }, { description: ci }],
-      },
+      where: { organizationId: orgId, OR: [{ title: ci }, { description: ci }] },
       select: { id: true, title: true, level: true, status: true, quarter: true },
       orderBy: { updatedAt: "desc" },
       take,
     }),
     prisma.idea.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [{ title: ci }, { description: ci }],
-      },
+      where: { organizationId: orgId, OR: [{ title: ci }, { description: ci }] },
       select: { id: true, title: true, status: true },
       orderBy: { createdAt: "desc" },
       take,
     }),
-    prisma.vendor.findMany({
-      where: { organizationId: orgId, name: ci, archived: false },
-      select: { id: true, name: true, email: true },
-      take,
-    }),
-    prisma.purchaseOrder.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [{ description: ci }, { number: ci }],
-      },
-      select: { id: true, number: true, description: true, status: true, amount: true },
-      orderBy: { createdAt: "desc" },
-      take,
-    }),
     prisma.policy.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [{ title: ci }, { content: ci }],
-      },
+      where: { organizationId: orgId, OR: [{ title: ci }, { content: ci }] },
       select: { id: true, title: true, category: true, status: true },
       orderBy: { updatedAt: "desc" },
       take,
     }),
     prisma.announcement.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [{ title: ci }, { content: ci }],
-      },
+      where: { organizationId: orgId, OR: [{ title: ci }, { content: ci }] },
       select: { id: true, title: true, type: true, priority: true },
       orderBy: { createdAt: "desc" },
       take,
     }),
-    prisma.glAccount.findMany({
-      where: {
-        organizationId: orgId,
-        active: true,
-        OR: [{ code: ci }, { name: ci }],
-      },
-      select: { id: true, code: true, name: true, type: true },
-      take,
-    }),
-    prisma.budgetPlan.findMany({
-      where: { organizationId: orgId, name: ci },
-      select: { id: true, name: true, type: true, status: true },
-      orderBy: { updatedAt: "desc" },
-      take,
-    }),
   ]);
+
+  // ── Visibility gating ─────────────────────────────────────────────
+  // Compute the viewer's readable Space set once, then reuse it to gate
+  // every space-scoped kind. Admins read everything (visible = null,
+  // never dereferenced because the readable() helpers short-circuit).
+  const spaceIdSet = new Set<string>();
+  for (const s of spaces) spaceIdSet.add(s.id);
+  for (const b of boards) if (b.spaceId) spaceIdSet.add(b.spaceId);
+  for (const f of folders) if (f.spaceId) spaceIdSet.add(f.spaceId);
+  for (const it of items) if (it.board?.spaceId) spaceIdSet.add(it.board.spaceId);
+  for (const w of whiteboards) if (w.spaceId) spaceIdSet.add(w.spaceId);
+
+  const visible = admin ? null : await visibleSpaceIds([...spaceIdSet], me, myAccess);
+
+  // PRIVATE boards additionally require a BoardMember row (or ownership).
+  const privateBoardIds = new Set<string>();
+  for (const b of boards) if (b.visibility === "PRIVATE") privateBoardIds.add(b.id);
+  for (const it of items) if (it.board?.visibility === "PRIVATE") privateBoardIds.add(it.board.id);
+  const privMemberIds = new Set<string>();
+  if (!admin && privateBoardIds.size > 0) {
+    const rows = await prisma.boardMember.findMany({
+      where: { userId: me, boardId: { in: [...privateBoardIds] } },
+      select: { boardId: true },
+    });
+    for (const r of rows) privMemberIds.add(r.boardId);
+  }
+
+  type BoardGate = { id: string; spaceId: string | null; visibility: string; ownerId: string | null };
+  const boardReadable = (b: BoardGate | null | undefined): boolean => {
+    if (!b) return false;
+    if (admin) return true;
+    if (b.visibility === "ORG") return true;
+    if (b.visibility === "PRIVATE") return b.ownerId === me || privMemberIds.has(b.id);
+    // WORKSPACE — unscoped boards are org-wide; scoped defer to Space access.
+    if (!b.spaceId) return true;
+    return !!visible && visible.has(b.spaceId);
+  };
+  const spaceVisibleById = (spaceId: string | null | undefined, vis?: string): boolean => {
+    if (admin) return true;
+    if (vis === "ORG") return true;
+    return !!spaceId && !!visible && visible.has(spaceId);
+  };
 
   // Drop notes the viewer can't read, then slice down to the per-kind cap.
   const docFlags = await Promise.all(docs.map((d) => docAccessible(d, me, myAccess)));
   const visibleDocs = docs.filter((_, i) => docFlags[i]).slice(0, take);
 
+  const folderReadable = (f: (typeof folders)[number]): boolean => {
+    if (admin) return true;
+    if (f.visibility === "ORG") return true;
+    if (f.visibility === "PRIVATE") return f.ownerId === me;
+    // WORKSPACE — inherit the Space's access.
+    return spaceVisibleById(f.spaceId, f.space?.visibility);
+  };
+
+  const visibleItems = items.filter((it) => boardReadable(it.board)).slice(0, take);
+  const visibleBoards = boards.filter((b) => boardReadable(b)).slice(0, take);
+  const visibleSpacesList = spaces.filter((s) => spaceVisibleById(s.id, s.visibility)).slice(0, take);
+  const visibleFolders = folders.filter(folderReadable).slice(0, take);
+  const visibleWhiteboards = whiteboards
+    .filter((w) => admin || !w.spaceId || (!!visible && visible.has(w.spaceId)))
+    .slice(0, take);
+
   const results = [
+    ...visibleItems.map((it) => {
+      const status = (it.status ?? "").replace(/_/g, " ").trim();
+      const due = it.dueAt ? it.dueAt.toISOString().split("T")[0] : "";
+      const subtitle = [status || "Task", due ? `due ${due}` : ""].filter(Boolean).join(" · ");
+      return { type: "item" as const, id: it.id, title: it.title, subtitle, href: `/item/${it.id}` };
+    }),
+    ...visibleBoards.map((b) => ({
+      type: "board" as const,
+      id: b.id,
+      title: b.name,
+      subtitle: "List",
+      href: `/boards/${b.slug}`,
+    })),
+    ...visibleSpacesList.map((s) => ({
+      type: "space" as const,
+      id: s.id,
+      title: s.name,
+      subtitle: "Space",
+      href: `/spaces/${s.slug}`,
+    })),
+    ...visibleFolders.map((f) => ({
+      type: "folder" as const,
+      id: f.id,
+      title: f.name,
+      subtitle: "Folder",
+      href: `/folders/${f.id}`,
+    })),
     ...visibleDocs.map((d) => {
       const meta = (d.content as { meta?: { icon?: string } } | null)?.meta;
       return {
@@ -186,19 +265,19 @@ export async function GET(req: NextRequest) {
         href: `/docs/${d.id}`,
       };
     }),
+    ...visibleWhiteboards.map((w) => ({
+      type: "whiteboard" as const,
+      id: w.id,
+      title: w.name,
+      subtitle: "Whiteboard",
+      href: `/whiteboards/${w.id}`,
+    })),
     ...users.map((u) => ({
       type: "person" as const,
       id: u.id,
-      title: `${u.firstName} ${u.lastName}`,
+      title: `${u.firstName} ${u.lastName}`.trim(),
       subtitle: u.email,
       href: `/people/${u.id}`,
-    })),
-    ...tasks.map((t) => ({
-      type: "task" as const,
-      id: t.id,
-      title: t.title,
-      subtitle: `${t.status.replace(/_/g, " ")}${t.date ? ` · ${t.date.toISOString().split("T")[0]}` : ""}`,
-      href: `/tasks#${t.id}`,
     })),
     ...sops.map((s) => ({
       type: "sop" as const,
@@ -207,12 +286,12 @@ export async function GET(req: NextRequest) {
       subtitle: `${s.category || "Uncategorized"} · ${s.status}`,
       href: `/sops/${s.id}`,
     })),
-    ...departments.map((d) => ({
-      type: "department" as const,
-      id: d.id,
-      title: d.name,
-      subtitle: "Department",
-      href: `/organization#${d.id}`,
+    ...okrs.map((o) => ({
+      type: "okr" as const,
+      id: o.id,
+      title: o.title,
+      subtitle: `${o.level} · ${o.quarter ?? "—"} · ${o.status}`,
+      href: `/okrs/${o.id}`,
     })),
     ...meetings.map((m) => ({
       type: "meeting" as const,
@@ -221,12 +300,12 @@ export async function GET(req: NextRequest) {
       subtitle: m.type.replace(/_/g, " "),
       href: `/meetings/${m.id}`,
     })),
-    ...okrs.map((o) => ({
-      type: "okr" as const,
-      id: o.id,
-      title: o.title,
-      subtitle: `${o.level} · ${o.quarter ?? "—"} · ${o.status}`,
-      href: `/okrs/${o.id}`,
+    ...departments.map((d) => ({
+      type: "department" as const,
+      id: d.id,
+      title: d.name,
+      subtitle: "Department",
+      href: `/organization#${d.id}`,
     })),
     ...ideas.map((i) => ({
       type: "idea" as const,
@@ -234,20 +313,6 @@ export async function GET(req: NextRequest) {
       title: i.title,
       subtitle: i.status,
       href: `/ideas#${i.id}`,
-    })),
-    ...vendors.map((v) => ({
-      type: "vendor" as const,
-      id: v.id,
-      title: v.name,
-      subtitle: v.email ?? "Vendor",
-      href: `/procurement?tab=vendors#${v.id}`,
-    })),
-    ...pos.map((p) => ({
-      type: "po" as const,
-      id: p.id,
-      title: `${p.number} — ${p.description}`.slice(0, 80),
-      subtitle: `${p.status} · ${p.amount}`,
-      href: `/procurement?tab=pos#${p.id}`,
     })),
     ...policies.map((p) => ({
       type: "policy" as const,
@@ -262,20 +327,6 @@ export async function GET(req: NextRequest) {
       title: a.title,
       subtitle: `${a.type} · ${a.priority}`,
       href: `/announcements#${a.id}`,
-    })),
-    ...glAccounts.map((g) => ({
-      type: "glAccount" as const,
-      id: g.id,
-      title: `${g.code} — ${g.name}`,
-      subtitle: g.type,
-      href: `/financials?tab=accounts#${g.id}`,
-    })),
-    ...plans.map((p) => ({
-      type: "plan" as const,
-      id: p.id,
-      title: p.name,
-      subtitle: `${p.type} · ${p.status}`,
-      href: `/planning/${p.id}`,
     })),
   ];
 
