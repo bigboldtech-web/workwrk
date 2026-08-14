@@ -1,0 +1,175 @@
+---
+title: Glossary
+description: The words WorkwrK uses, what each one actually maps to in the product, and the ones people confuse.
+---
+
+Read this once. Several of these words mean something specific in WorkwrK and something different in other tools.
+
+## People and structure
+
+### Function
+A department. "Function" and "Department" are the same thing, and the database calls it `Department`. You manage them at **People → Departments** (`/people/departments`).
+
+A Function is a container for people. It is not a permission boundary on its own: what you can see is decided by your Level and your reporting line, not by which Function you sit in. The one exception is goals, where a DEPARTMENT level goal is visible to everyone in that department.
+
+Today the Departments page can only create. Rename, head assignment, re-parent and delete are not reachable from the interface.
+
+### Level
+Your position on a fixed access ladder, stored on your user record. The full ladder, top down: Super Admin, Company Admin, C-Level, VP, Director, Manager, Team Lead, HR, Employee, Agent.
+
+Levels are an enum in the code. You cannot invent a new one, and you cannot edit what a Level can do beyond the permission matrix (which only 12 API routes actually consult). Super Admin and Company Admin are deliberately absent from the Level picker so nobody can promote themselves.
+
+Level drives the three-door visibility model. See [Visibility and permissions](./visibility-and-permissions).
+
+### Role
+Your job title. "Head of Customer Success", "Backend Engineer". Roles live at **People → Roles** (`/people/roles`).
+
+A Role is where KRAs are defined. When somebody is hired into a Role, or moved to one, they inherit that Role's KRAs and the published SOPs attached to those KRAs.
+
+**Role is not Level.** Two people can both be "Backend Engineer" (Role) while one is a Team Lead and the other an Employee (Level). Roles decide what you are accountable for. Levels decide what you can see.
+
+### Manager and report tree
+Your manager is a direct field on your user record. Your **report tree** is you plus everyone below you, walked recursively.
+
+There is also a dotted line concept: a second manager relationship used for matrix reporting. Dotted line reports appear in your KPI review queue, your team alignment board and your team timesheets. They do not appear in your goals scope. That inconsistency is known and tracked.
+
+## Accountability
+
+### KRA
+Key Result Area. A permanent area of accountability attached to a **Role**, not to a person. "Customer retention". "Platform reliability".
+
+A KRA has no number and no deadline. It is a container. It carries a **weight** from 0 to 100 expressing what share of the job it represents.
+
+When you hold a Role, you get a `KRAAssignment` for each of its KRAs, and the assignment carries your own weight, seeded from the Role's default and editable per person. Your weights are validated to never exceed 100 in total, but nothing requires them to reach 100.
+
+Important, and easy to get wrong: **KRA weight is displayed but is not used in any scoring math today.** A 5% KRA and a 50% KRA count identically in every score the product computes.
+
+### KPI
+Key Performance Indicator. A permanent running gauge underneath a KRA. It has a definition, a unit, a direction and a healthy line.
+
+Direction is one of:
+- **HIGHER**: bigger is better. At or above the line is healthy, within 10% below is at risk.
+- **LOWER**: smaller is better. At or below the line is healthy, within 10% above is at risk.
+- **MAINTAIN**: hold the line. Anything more than 0.5% off is off track. There is no at-risk band.
+
+A KPI's healthy line (`targetValue`) can be empty. That is a real state, not a mistake. When there is no line, the product reports "no target" and refuses to invent one or to score against nothing.
+
+A KPI is also marked **owned** or **shared**. Owned means the Role controls the number and is graded on it. Shared means the Role influences it.
+
+### KPI record / reading
+One measurement of one KPI by one person for one period. Periods are month keys in `YYYY-MM` form.
+
+A record moves through Pending, Submitted, Approved or Rejected. Rejected records stop counting immediately: they no longer drive any key result or goal.
+
+Older records with week or quarter period keys still exist in the database but no longer drive anything.
+
+### Compliance
+On the team alignment board, "compliance" means the share of a person's **current period** KPI records that are Submitted or Approved. It is not a measure of whether they hit target. Someone can be 100% compliant and entirely off track.
+
+A person with no records shows a dash, not 100%. This is deliberate: the least measured team used to look like the healthiest.
+
+## Goals
+
+### Goal / OKR
+A time boxed objective. The product uses "Goal" in the interface and `OKR` in the code and API paths. They are the same object.
+
+A goal belongs to a **quarter** (or to no quarter) and sits at a level: Company, Department, Team or Individual.
+
+### Owner
+The single accountable person on a goal. One goal, one owner. Not a committee.
+
+### Contributor
+Anyone else attached to the goal. A contributor entry points at exactly one subject: a person, a department, or a role.
+
+Department and role contributors are stored as the department or the role, never as a frozen list of names. Membership is resolved every time the goal is read, so a new hire inherits their team's goals automatically and a leaver drops out automatically. Only active, non-deleted people ever resolve.
+
+A goal shared across five people is still **one record with one scoreboard**. Seeing it on five profiles is seeing the same row five times, not five copies.
+
+### Key result / Target
+A measurable outcome under a goal, with a start value, a target value and a current value.
+
+A key result can be **linked to a KPI**. When it is, its current value and progress are read from that KPI's latest usable reading at the moment you look, scoped to the goal owner's own records. Nothing is written back onto the key result row, and the number you typed by hand is kept (returned as `enteredValue`) rather than overwritten.
+
+### Progress
+One derived number per goal, shown identically everywhere.
+
+- A goal with key results: the mean of their live progress.
+- A goal with sub-goals: the mean of its own key results plus each **measured** sub-goal's progress. Unmeasured sub-goals contribute nothing, so empty sub-goals cannot drag a real number down.
+- A goal with neither: nothing to derive. The API says `MANUAL` if somebody hand set a number, or `NONE` if there is nothing, and the interface shows a dash rather than a 0% that looks like failure.
+
+Status thresholds: 100 or above is Completed, 70 or above is On track, 40 or above is At risk, below that is Behind.
+
+### Check-in
+A dated update on a key result with a value and a note. Checking in recomputes the goal's progress and pushes it up the parent chain.
+
+## Knowledge
+
+### SOP
+Standard Operating Procedure. A written or step-by-step procedure, versioned, and assignable to people.
+
+SOPs can be attached to a KRA. That is what makes them flow automatically: when someone is hired into a Role, every published SOP under that Role's KRAs is assigned to them.
+
+Statuses are Draft, In review, Approved, Published and Archived. Only Published SOPs are visible to ordinary viewers in a folder, and only Published SOPs auto-assign.
+
+Visibility is folder based and inherits downward: access to "HR" also grants "HR / Onboarding". SOPs with no folder are visible org wide.
+
+### SOP assignment
+One person's copy of the obligation to read or run an SOP, with progress in steps completed out of steps total. This is what drives the SOP read rate on the team alignment board and the SOP component of the performance score.
+
+### Process run
+One execution of a step-by-step SOP, with a history at `/process-runs` and a public share link at `/run/<token>` for people outside the workspace.
+
+### Policy
+Distinct from an SOP. A policy is a document people acknowledge rather than execute, with an acknowledgement ledger. Lives at `/policies`.
+
+## Work chassis
+
+### Space
+The top container. Usually a team, a client or a major area of work. A Space holds Folders and Lists, and its visibility (org wide, or membership only) is inherited by everything inside it.
+
+### Folder
+An optional grouping inside a Space. Purely organisational.
+
+### List (board)
+Where tasks live. The interface calls it a List. The code and the API call it a `Board`, so you will see `/api/boards` and `/boards/<slug>` in URLs.
+
+A List owns its own status set. Two Lists can have completely different statuses, and "done" is resolved against each List's own statuses rather than a global assumption.
+
+### Item / Task
+One row on a List. The interface calls it a Task. The code and database call it an `Item`.
+
+An Item carries an owner, status, priority, dates, tags, custom fields, subtasks, a checklist, comments and tracked time.
+
+**Know this:** a separate legacy `Task` table also exists, written only by the older `/api/tasks` endpoint. Global search, `/analytics`, the performance score's task component and `/api/tasks/workload` still read that legacy table, so they cannot see the tasks you create on Lists.
+
+### View
+One way of rendering a List. Seventeen renderers exist: List/Table, Board/Kanban, Calendar, Gantt, Timeline, Workload, Cards, Hierarchy, Pivot, Chart, Dashboard, Form, Doc, Whiteboard, File gallery, Map and Activity.
+
+Views are per List and their configuration (hidden fields, extra columns) autosaves.
+
+## Time
+
+### Timer
+A running clock on a task. Stopping a timer on a board card writes a time entry into your open weekly timesheet, linked back to the card. Timers on anything other than a board card do not reach the timesheet.
+
+### Timesheet
+Your week of logged hours, anchored to Monday. Statuses are Draft, Submitted, Approved. Once a sheet is submitted or approved, card timers stop writing to it: a locked sheet is never modified behind your back.
+
+### Workload
+Open work per person, used for capacity. **Teams → Workload** shows your report tree's open items plus unassigned open items on boards your team actually works in. Completed work is excluded.
+
+## Scoring
+
+### Performance score
+A composite monthly number per person, from KPI records, the latest manager rating, peer feedback, self assessment, SOP compliance, goal progress and task completion, plus a small kudos bonus. Components with no data are skipped rather than counted as zero.
+
+It feeds the person detail API, the dashboard's top performers, and the Talent 9-box auto-placement.
+
+### 9-box / Talent
+A performance by potential grid at `/talent`. You can place people by hand, or auto-place them from performance scores. Review calibration does not feed it: the two systems are currently disconnected.
+
+### Review cycle
+A scheduled performance review across a set of people, moving through self assessment, manager review, calibration and finalize. Administered at `/reviews` by HR admins. Managers see their own tree's reviews at `/team/reviews`.
+
+### Weekly review
+A different, lighter thing: a per-person weekly check-in with a manager approval state. It is what the team alignment board's "weekly review" column reads.

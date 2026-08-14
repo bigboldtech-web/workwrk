@@ -1,0 +1,154 @@
+---
+title: How it connects
+description: The real data flows inside WorkwrK, traced through the code, plus the links that do not exist yet.
+---
+
+WorkwrK is two halves joined by a small number of real wires.
+
+The **work chassis** is Spaces, Folders, Lists (boards) and Tasks (Items). The **alignment chain** is Role, KRA, KPI, and the person who holds them, with Goals sitting on top.
+
+This page traces only the wires that actually exist in the code today. Where a connection looks obvious but is not built, it is listed at the bottom under "Links that are not wired". Read that section before you assume something rolls up.
+
+## The map
+
+Solid arrows are wires that exist. Dotted arrows are the connections people assume exist and that are not built.
+
+```mermaid
+flowchart TD
+  Role["Role, the job title"] -->|"KRA.roleId"| KRA["KRA, weight 0 to 100"]
+  KRA -->|"KPI.kraId"| KPI["KPI gauge with a healthy line"]
+  Role -->|"seedAlignmentForUser"| Assign["KRAAssignment on a person"]
+  KRA --> Assign
+  Assign --> Person["Person"]
+  Person -->|"records a number"| Rec["KPIRecord, YYYY-MM"]
+  Rec -->|"latestKpiValues"| KR["Key result linked by KeyResult.kpiId"]
+  KR -->|"computeGoalRollups"| Goal["Goal progress, one number"]
+  Goal --> Surfaces["Goals list, goal detail, profile, dashboard, self assessment"]
+  Rec --> Score["Performance score"]
+  Goal --> Score
+  SOPA["SOP assignment progress"] --> Score
+  Kudos["Kudos received"] --> Score
+  Review["Review, manager rating"] --> Score
+  Score -->|"auto place"| NineBox["Talent 9-box"]
+  Item["Task, an Item on a List"] -->|"card timer stops"| TE["TimeEntry"]
+  TE --> TS["Weekly timesheet"]
+  Item --> WL["Team workload"]
+  Mgr["Manager"] -->|"recursive report tree"| Person
+
+  Assign -.->|"weight is never applied"| Score
+  Review -.->|"calibration writes no row"| NineBox
+  Item -.->|"no notification on assign or status"| Notif["Notifications"]
+  Item -.->|"invisible to these, they read legacy Task"| Search["Search, analytics, task score"]
+```
+
+## KPI reading to the one goal number
+
+This is the spine of the product, and it is fully built.
+
+1. A person opens their own profile from the Home sidebar's **Me** link, or **Teams → My Profile** (both go to `/people/me`, which redirects to `/people/<their id>`), and opens the KPI recorder. That posts to `/api/kpi-records/self-report`, or to `/api/kpi-records/batch` when a manager records on someone's behalf.
+2. The record is scored on write by one shared function, `scoreKpiRecord` in `src/lib/kpi-record.ts`. Direction matters: HIGHER scores actual over target, LOWER scores target over actual, MAINTAIN subtracts the deviation from the line. A KPI with no `targetValue` produces a null score. No baseline is ever invented.
+3. `latestKpiValues` in `src/lib/alignment.ts` picks the latest usable reading per gauge. Three rules are worth knowing: records with status REJECTED are ignored, records with no `actualValue` are ignored, and only canonical `YYYY-MM` period keys count. Older `2026-W33` and `2026-Q3` rows still exist in the database but no longer drive anything.
+4. A key result linked to that KPI (`KeyResult.kpiId`) reports the gauge's reading instead of its own typed number. The typed number is not overwritten. It is returned as `enteredValue` so nothing you typed is lost.
+5. `computeGoalRollups` derives every goal's effective progress in one pass: a leaf is the mean of its key results' live progress, a parent is the mean of its own key results plus each **measured** child. Unmeasured children contribute nothing, so three empty sub-goals cannot drag a measured sibling from 60% down to 15%.
+
+Because every read path calls the same rollup, the same goal shows the same number everywhere: the goals list (`/api/okrs`), the goal detail page (`/api/okrs/[id]`), My Goals (`/api/okrs/my-okrs`), the home dashboard (`/api/dashboard/my-dashboard`), a person's profile (`src/lib/person-alignment.ts`), and the review self-assessment (`/api/reviews/[id]/self-assessment`).
+
+When a goal has nothing to derive from, the API says so honestly. `progressSource` comes back as `MANUAL` when someone hand set a number and `NONE` when there is nothing at all, so the interface can show a dash instead of a 0% that reads as "behind".
+
+## Role to KRA to person
+
+KRAs hang off a job title, not off a person. `KRA.roleId` is the link.
+
+When someone is hired into a role or moved to one, `seedAlignmentForUser` in `src/lib/alignment-assign.ts` copies that role's KRAs onto them as `KRAAssignment` rows, each inheriting the KRA's role level weight, and assigns every PUBLISHED SOP sitting under those KRAs.
+
+The mirror also runs: when you add a KRA to a job title later, `seedKraToRoleHolders` pushes it to everyone who already holds that title. Both are idempotent, so re-running changes nothing.
+
+Weights are validated on write. `/api/kra-assignments` rejects a weight of 0 or under, over 100, or one that would push a person's total above 100. It does not require the total to reach 100, so a person can legitimately sit at 60% assigned.
+
+## The KPI approval loop
+
+`KPIRecord.status` moves PENDING to SUBMITTED to APPROVED or REJECTED.
+
+- The person submits from their profile.
+- Their manager sees the queue at **Teams → KPI reviews** (`/team/kpi-reviews`), backed by `listKpiReviewsForManager`, which reads the manager's effective report tree and excludes their own records.
+- Approving or rejecting writes a `Notification` row that deep links back to the person's profile, where a rejected record re-surfaces so they can resubmit.
+
+A REJECTED record stops driving key results immediately, because `latestKpiValues` filters it out.
+
+## What a manager's tree is
+
+Two helpers exist and they are not identical. Know which one a surface uses.
+
+- `getTeamUserIds` (`src/lib/team.ts`) is a recursive CTE over `User.managerId`. Solid line only, self included, unbounded depth. This is what the alignment scope, the goals list, the people directory and the KRA list use.
+- `getEffectiveReportTree` (`src/lib/reporting-line.ts`) walks solid **and** dotted lines (`UserDottedLine`), capped at depth 6. This is what the timesheet team scope, the KPI review queue and the team alignment board use.
+
+The practical difference: a dotted line report shows up in your KPI review queue and your team alignment board, but not in your goals list scope.
+
+## Tasks, time and timesheets
+
+There is exactly one automatic bridge from work to hours, and it is narrow.
+
+When a card timer stops (`/api/timers/stop`), and only when the timer's `entityType` is `BOARD_ITEM`, `logTimerToTimesheet` in `src/lib/timesheet.ts` appends a `TimeEntry` to that person's open DRAFT weekly timesheet, linked back to the card. If the week is already submitted or approved, nothing is written. A locked sheet is never mutated.
+
+`/timesheets` then sums entry hours per sheet. Managers read team sheets with `scope=team`, which uses the effective report tree, or `scope=approve` for SUBMITTED sheets awaiting them.
+
+**Teams → Workload** (`/team/workload`) is separate from timesheets. It queries `Item` directly for open work owned by anyone in the manager's report tree, plus unassigned open work on boards that team actually touches. Done rows are excluded server side using each board's own status set, not a hardcoded status list.
+
+## The performance score
+
+`src/services/performanceScoreService.ts` computes one composite score per person per month and upserts it into `PerformanceScore`.
+
+Components, each skipped when there is no data:
+
+| Component | Source | Weight |
+| --- | --- | --- |
+| KPI | mean score of KPI records in the last 90 days, normalised against the 120 score cap | 40, configurable |
+| Manager | latest COMPLETED review's calibrated score, or its manager rating | 25, configurable |
+| Peer | last 20 SUBMITTED peer feedback ratings | 10, configurable |
+| Self | self assessment KRA ratings, scaled from a 5 point scale | 5, configurable |
+| SOP compliance | SOP assignment scores, or steps completed over steps total | 20, configurable |
+| Goals | mean of owned goals' live rollup progress | 10, hardcoded |
+| Tasks | legacy tasks completed over total in the last 30 days | 5, hardcoded |
+
+Kudos received in the last 30 days add a flat bonus of up to 5 points. The weights are read from `settings.scoreWeights` on the organization, edited at **Settings → Scoring and reviews** (`/settings/scoring`). See the caveat below: the editor and the engine do not use the same key set.
+
+Recalculation is triggered from: `/api/kpi-records` and `/api/kpi-records/batch`, `/api/kudos`, `/api/okrs/[id]/check-in`, `/api/sop-assignments/[id]/progress`, `/api/integrations/ingest`, and the `/api/v1` endpoints.
+
+The score feeds three places: the person detail API, the home dashboard's top performers, and the **Talent** 9-box auto-place, which maps a score of 80 or above to High performance, 50 to 79 to Medium, below 50 to Low, and defaults potential to Medium for a human to adjust.
+
+## Links that are not wired
+
+These are the gaps that matter most, because each one looks like it should exist.
+
+**KRA weight does not weight anything.** `KRAAssignment.weightage` is stored, validated, shown on your profile and on **Teams → Alignment**, and passed into AI prompts. No scoring math multiplies by it. The performance score's KPI component is a flat mean of every KPI record in 90 days. The KPI compliance percentage on the team board is a flat count of submitted-or-approved records over total. A 5% KRA and a 50% KRA currently count the same.
+
+**The scoring weight editor and the scoring engine use different keys.** `/settings/scoring` edits four metrics: KPI attainment, SOP compliance, Behavioral rating and Peer, validated to sum to 100. The engine in `performanceScoreService.ts` reads five: `kpi`, `manager`, `peer`, `self`, `sopCompliance`. So `behavioral` is saved and then ignored, and `manager` (25) and `self` (5) always fall back to their defaults because the editor never writes them. Changing the sliders does change the KPI, SOP and peer weights. It does not do what the page implies.
+
+**Review auto-populate ignores the cycle window.** `/api/reviews/[id]/self-assessment` pulls the person's most recent 20 KPI records regardless of the cycle's start and end dates, and averages their scores unweighted. Goal progress in the same response *is* derived correctly from the shared rollup.
+
+**Calibration does not feed the 9-box.** `/api/reviews/[id]/calibration` writes `Review.calibratedScore` and moves the cycle to IN_CALIBRATION. It never writes a `TalentAssessment` row. The 9-box at `/talent` is populated either by hand or by auto-placing from performance scores. The two are not connected.
+
+**The appraisal letter generator has no button.** `/api/reviews/[id]/appraisal-letter` exists and has zero callers in the interface.
+
+**Board tasks emit no notifications.** Assigning an Item, changing its status, or a due date arriving writes no `Notification` row. The only notification the Item pipeline produces comes from comments (`/api/items/[id]/updates`). There is an SLA escalation cron that does notify, but it walks the legacy `Task` table, so it never sees your board work. The bell in the top right is a **reminders** bell showing your pending reminders, not a notification bell.
+
+**Four surfaces still read the legacy `Task` table, not `Item`.** Tasks you create on a List are `Item` rows. These do not see them:
+
+- Global search and the command palette (`/api/search`) index User, legacy Task, SOP, Doc, Department, Meeting and OKR. Items, Boards, Spaces and Whiteboards are not searchable.
+- `/analytics` reads `/api/tasks`.
+- The performance score's task component counts legacy Task rows.
+- `/api/tasks/workload` reads legacy Task. The `/team/workload` page does not use it, it queries `Item` directly.
+
+**Automation declares more triggers than the product emits.** The registry lists 16 trigger types. Only five event names are ever dispatched, and most only from the API and integration paths rather than from in-app actions:
+
+| Event | Emitted from |
+| --- | --- |
+| `task.status_changed` | `/api/items/[id]` PATCH (in-app) |
+| `task.assignee_changed` | `/api/items/[id]` PATCH (in-app) |
+| `task.created` | `/api/v1/tasks` and `/api/integrations/ingest` only |
+| `kpi.recorded` | `/api/v1/kpi-records` and `/api/integrations/ingest` only |
+| `kudos.created` | `/api/v1/kudos` and `/api/integrations/ingest` only |
+
+So a rule on "task created" will not fire when you create a task in the app, and a rule on "KPI recorded" will not fire when someone records a number on their profile. The `review.completed`, `sop.published`, lead, quote, pickup and payment triggers have no producer at all.
+
+**Goal progress and person profiles are correct by construction, but the stored column can lag.** `OKR.progress` is only written back by `persistGoalRollupChain` after a check-in, a key result change or a re-parent, and only when the source is a real rollup. If you query the database directly you may see a stale number. Always read through the API.

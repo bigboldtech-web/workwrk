@@ -1,0 +1,149 @@
+---
+title: Visibility and permissions
+description: The three-door model in practice, what each Level actually sees per module, and where the rules are enforced.
+---
+
+WorkwrK decides visibility with a fixed ladder of **Levels**, not with editable roles. Your Level is a field on your user record (`User.accessLevel`). Your **Role** is your job title and carries your KRAs. The two are separate things.
+
+## The ladder
+
+From the top down: `SUPER_ADMIN`, `COMPANY_ADMIN`, `C_LEVEL`, `VP`, `DIRECTOR`, `MANAGER`, `TEAM_LEAD`, `HR`, `EMPLOYEE`, `AGENT`.
+
+`SUPER_ADMIN` and `COMPANY_ADMIN` are deliberately missing from the Level picker in the interface (`src/lib/access-levels.ts`). They are granted by hand, not from a dropdown, so nobody can promote themselves through a Role edit.
+
+Note that `HR` sits below `TEAM_LEAD` in the seniority list but is treated as an org wide tier for people data. It is a scope, not a rank.
+
+## The three doors
+
+Three named groups do almost all the work. They are defined in `src/lib/alignment-scope.ts` and mirrored in `src/lib/page-gates.ts` and the app catalog, so the nav, the page and the API all agree.
+
+| Door | Levels | Sees |
+| --- | --- | --- |
+| Employee | `EMPLOYEE`, `AGENT` | themselves only |
+| Manager | `TEAM_LEAD`, `MANAGER`, plus everyone above | themselves plus their recursive report tree |
+| Org wide | `COMPANY_ADMIN`, `SUPER_ADMIN`, `C_LEVEL`, `VP`, `DIRECTOR`, `HR` | the whole organization |
+
+Two narrower sets exist for heavier actions:
+
+- **Org admin** is `SUPER_ADMIN` and `COMPANY_ADMIN` only. Deleting a goal, editing org settings and SOP folder access sit here. A Director can edit a goal but cannot delete someone else's.
+- **HR admin** is `SUPER_ADMIN`, `COMPANY_ADMIN` and `HR`. Review cycle administration sits here.
+
+## Hiding a link is never the permission
+
+Every gated page calls a server side gate before it renders, and the matching API re-checks the same ladder. The rail hides apps you cannot use, but if you type the URL you still get redirected or a 404, not the page.
+
+- `requireManagerPage()` sends anyone below manager tier to `/people/me`. It does not strand them: that is their own career home with their KRAs, KPIs, goals and reviews.
+- `requireHrAdminPage()` sends managers to `/team/reviews` and everyone else to `/people/me`.
+- `requireGoalPage(id)` runs `canSeeGoal` and calls `notFound()` when you fail, so a guessed goal URL reads as "does not exist" rather than "exists but you cannot see it".
+
+## What each door sees, per module
+
+### Your own profile and career home
+
+`/people/me` redirects to `/people/<your id>`. That page renders in one of three modes decided on the server:
+
+- **self**: your job title and description, your inherited KRAs with your own KPI readings, the recorder that puts numbers into the approval loop, your goals, your reviews, your assets.
+- **manage**: what a manager or an org wide viewer sees when inspecting a report. The same narrative plus edit actions.
+- **peer**: a minimal directory card. Name, title, department, manager. Never KPI readings, reviews, moods or scores.
+
+Anyone in the org gets at least peer mode on anyone else, because @mentions and tagging need names and avatars.
+
+### People directory
+
+`/api/users` supports `scope=team` and `scope=all`. A caller below the org wide door is forced to `team` no matter what they pass, and `team` means their recursive report tree. If they have no reports, they see only themselves.
+
+### KRAs and KPIs
+
+`/api/kras` resolves scope to `all` for org wide levels, `team` for managers, `own` for everyone else. Non-admins cannot escape their scope by passing a different value.
+
+For a specific person's alignment data, `canTouchUserAlignment` is the single predicate: yourself always, org wide levels always, managers when the target is inside their recursive report tree, nobody else.
+
+### Goals
+
+The goals list at `/okrs` is open to every signed in member. The **rows** are what get filtered, in `/api/okrs`:
+
+- Everyone sees goals at COMPANY level.
+- Everyone sees their own goals, whether they own them or are a resolved member of the audience.
+- Everyone sees DEPARTMENT level goals for their own department.
+- Managers additionally see goals owned by anyone in their report tree, goals whose audience covers anyone in that tree, and unowned objectives.
+- Org wide levels see everything.
+
+Audience membership is resolved at read time, never from a frozen list. A goal assigned to a department or a role is re-resolved on every read, so a new hire inherits it and a leaver drops out automatically. Only ACTIVE, non-deleted users ever resolve.
+
+Editing and deleting use separate predicates. `canEditOkrOwner` allows the owner, org wide levels, and a manager over the owner. `canDeleteGoal` narrows the org wide door to org admins only. The interface gates its Delete button on the same predicate the API enforces, so you never see a Delete that then returns 403.
+
+### Reviews
+
+`/reviews` (review cycle administration) is HR admin. Below that tier, cycle shells still render (names and counts) but the review rows are filtered to ones you are in: your own, ones you are the reviewer on, and for managers, your report tree's.
+
+Weekly reviews have their own resolver: the subject and the recorded manager get edit, org admins get admin, Director and above get read down their tree, everyone else gets nothing.
+
+### Spaces, boards and tasks
+
+This is membership based, not Level based, and it composes downward.
+
+- A Space grants edit to its OWNER and ADMIN members, read to MEMBER and GUEST, and read to everyone in the org when its visibility is ORG. Otherwise nothing.
+- A Board inherits from its parent Space, but can be narrower: a PRIVATE board blocks a viewer who only had read on the Space.
+- An Item inherits from its Board, except that the item's owner always gets at least edit on their own row.
+
+Org admins override all three.
+
+### SOPs
+
+SOP visibility runs through `src/lib/sop-access.ts` and is folder based, with inheritance.
+
+- Org admins see every SOP.
+- Everyone else sees SOPs with no folder (treated as org wide visible) plus SOPs in folders they have been granted, plus every descendant of those folders. Access to "HR" also grants "HR / Onboarding".
+- Within a folder, a viewer sees only PUBLISHED SOPs. Editors, owners and the author also see drafts.
+
+Granting folder access is an org admin action.
+
+### Timesheets
+
+`/api/timesheets` takes a scope: `mine`, `team`, `approve` or `all`. Everything except `mine` requires manager tier. `team` uses the effective report tree, which includes dotted line reports.
+
+Note that `all` is available to any manager tier caller, not just org wide levels. A Team Lead can request org wide timesheet rows.
+
+### Teams cockpit
+
+| Surface | Minimum tier |
+| --- | --- |
+| `/team`, `/team/alignment`, `/team/reviews`, `/team/kpi-reviews`, `/team/workload` | manager |
+| `/team/rollup` | director and above |
+| `/reviews`, `/talent`, `/candor`, `/announcements`, `/kudos`, `/surveys`, `/tools`, `/assets`, `/policies`, `/agreements`, `/trash` | HR admin (rail visibility) |
+| `/settings` org sections, `/organization` admin actions | org admin |
+
+`/team/workload` additionally redirects you to `/team` if you have no reports, because an empty capacity grid is not useful.
+
+## Two report tree definitions
+
+There are two, and they do not return the same people.
+
+- `getTeamUserIds` walks `User.managerId` only. Solid line, self included, no depth cap.
+- `getEffectiveReportTree` walks solid **and** dotted lines (`UserDottedLine`), capped at 6 levels.
+
+Goals, the people directory, KRAs and the alignment scope helpers use the first. Timesheets, the KPI review queue and the team alignment board use the second. If a dotted line report appears on one manager surface and not another, this is why. Consolidating the two is a known open item.
+
+## The permission matrix is mostly aspirational
+
+`/settings/permissions` presents a matrix of 16 modules with per action toggles per Level, stored on `Organization.settings.permissions`.
+
+Only 12 of 439 API route files actually consult it: KRAs, KRA assignments, KPIs, announcements, tag assignments, policies, candor, SOPs, assets. Everything else is governed by the hardcoded Level ladders described above.
+
+Treat the matrix as authoritative for those modules and decorative everywhere else. Trimming it to what is enforced is on the plan.
+
+`SUPER_ADMIN` and `COMPANY_ADMIN` always pass `checkPermission` regardless of the matrix, so an admin cannot lock themselves out.
+
+## Where to look in the code
+
+| Concern | File |
+| --- | --- |
+| Three door sets, alignment scoping | `src/lib/alignment-scope.ts` |
+| Server side page gates | `src/lib/page-gates.ts` |
+| Central resource resolver (space, board, item, user, KRA, weekly review, module) | `src/lib/access.ts` |
+| Goal visibility, audience resolution | `src/lib/goal-audience.ts` |
+| Report trees | `src/lib/team.ts`, `src/lib/reporting-line.ts` |
+| SOP folder visibility | `src/lib/sop-access.ts` |
+| Level list shown in pickers | `src/lib/access-levels.ts` |
+| Permission matrix | `src/lib/permissions.ts` |
+| Rail visibility tiers | `src/components/layout/os/apps-catalog.tsx` |
