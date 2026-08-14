@@ -90,7 +90,7 @@ export function BulkApproveBar({
       busyLabel: "Rejecting…",
       icon: <XCircle size={12} />,
       variant: "outline",
-      className: "text-rose-500",
+      className: "text-[#E2445C]",
       onRun: () => decide("REJECT"),
     },
     {

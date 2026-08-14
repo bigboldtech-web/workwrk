@@ -593,11 +593,11 @@ function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | nu
       })}
       {(breakdown.kudosBonus as number) > 0 && (
         <div className="flex items-center gap-3">
-          <Heart size={12} className="text-rose-500 flex-shrink-0" />
+          <Heart size={12} className="text-[#E2445C] flex-shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between text-xs">
               <span className="text-zinc-500">Kudos Bonus</span>
-              <span className="font-mono font-bold text-rose-500">+{breakdown.kudosBonus as number}</span>
+              <span className="font-mono font-bold text-[#E2445C]">+{breakdown.kudosBonus as number}</span>
             </div>
           </div>
         </div>
@@ -1409,7 +1409,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             user.kudosReceived.map((k: any) => (
               <div key={k.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                 <div className="flex items-start gap-3">
-                  <Heart size={14} className="text-rose-500 mt-0.5 flex-shrink-0" />
+                  <Heart size={14} className="text-[#E2445C] mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-zinc-500">
                       From <span className="text-zinc-900 font-medium">{k.giver.firstName} {k.giver.lastName}</span>

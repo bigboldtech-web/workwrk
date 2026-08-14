@@ -14,7 +14,10 @@ import type {
 
 // Icon color families (shared with the Fields catalog look).
 const MC = {
-  blue: "#3B82F6", green: "#10B981", pink: "#EC4899", violet: "#8B5CF6",
+  // Brand-safe icon families — no pink/violet in product chrome. The old
+  // pink/violet keys stay as ALIASES so preset defs keep compiling, but
+  // they paint sanctioned hues (red / brand blue).
+  blue: "#3B82F6", green: "#10B981", pink: "#E2445C", violet: "#0073EA",
   orange: "#F97316", amber: "#B45309",
 } as const;
 
@@ -47,13 +50,13 @@ export const VIEW_CATALOG: ViewCatalogEntry[] = [
   { key: "LIST", label: "List", shipped: true, required: true, swatch: "#71717A" },
   { key: "BOARD", label: "Board", shipped: true, swatch: "#3B82F6" },
   { key: "CALENDAR", label: "Calendar", shipped: false, swatch: "#F97316" },
-  { key: "TEAM", label: "Team", shipped: false, swatch: "#A855F7" },
+  { key: "TEAM", label: "Team", shipped: false, swatch: "#0073EA" },
   { key: "GANTT", label: "Gantt", shipped: false, swatch: "#EF4444" },
   { key: "TIMELINE", label: "Timeline", shipped: false, swatch: "#F59E0B" },
   { key: "MAP", label: "Map", shipped: false, swatch: "#EA580C" },
   { key: "ACTIVITY", label: "Activity", shipped: false, swatch: "#0EA5E9" },
   { key: "TABLE", label: "Table", shipped: false, swatch: "#10B981" },
-  { key: "MIND_MAP", label: "Mind Map", shipped: false, swatch: "#EC4899" },
+  { key: "MIND_MAP", label: "Mind Map", shipped: false, swatch: "#14B8A6" },
   { key: "WORKLOAD", label: "Workload", shipped: false, swatch: "#14B8A6" },
 ];
 
@@ -107,7 +110,7 @@ export const MODULE_CATALOG: ModuleCatalogEntry[] = [
 const STATUS_COLORS = {
   todo: "#71717A",
   planning: "#6B7280",
-  inProgress: "#6366F1",
+  inProgress: "#0073EA",
   inReview: "#F59E0B",
   atRisk: "#F97316",
   updateRequired: "#EAB308",
@@ -118,7 +121,7 @@ const STATUS_COLORS = {
   published: "#10B981",
   complete: "#10B981",
   done: "#10B981",
-  cancelled: "#EC4899",
+  cancelled: "#9CA3AF",
 } as const;
 
 const STARTER_STATUSES: StatusDef[] = [

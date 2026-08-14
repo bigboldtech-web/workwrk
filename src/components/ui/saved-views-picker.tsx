@@ -124,7 +124,7 @@ export function SavedViewsPicker<T>({
                     e.stopPropagation();
                     remove(v.id);
                   }}
-                  className="text-muted-2 hover:text-rose-500 transition-colors flex-shrink-0"
+                  className="text-muted-2 hover:text-[#E2445C] transition-colors flex-shrink-0"
                   aria-label={`Delete ${v.name}`}
                 >
                   <Trash2 size={11} />

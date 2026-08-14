@@ -2417,7 +2417,7 @@ function AssigneeMenu({
             className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-400"
             disabled
           >
-            <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-pink-300" />
+            <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-amber-300" />
             Project Kickoff Scope Manager
           </button>
           <button

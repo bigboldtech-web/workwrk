@@ -44,7 +44,7 @@ const COMPLEXITY_LABEL: Record<Complexity, string> = {
 const COMPLEXITY_TONE: Record<Complexity, string> = {
   BEGINNER: "bg-emerald-50 text-emerald-700",
   INTERMEDIATE: "bg-amber-50 text-amber-700",
-  ADVANCED: "bg-rose-50 text-rose-700",
+  ADVANCED: "bg-red-50 text-red-700",
 };
 
 export interface TemplateCenterProps {

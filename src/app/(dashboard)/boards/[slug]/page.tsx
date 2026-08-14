@@ -164,7 +164,7 @@ export default async function BoardPage(props: {
           type="button"
           className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
         >
-          <Sparkles className="w-3.5 h-3.5 text-violet-500" />
+          <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
           Ask
         </button>
         <button

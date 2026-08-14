@@ -564,7 +564,7 @@ export default function DashboardContent() {
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
-                <Heart size={16} className="text-pink-400" /> Recent Kudos
+                <Heart size={16} className="text-[#E2445C]" /> Recent Kudos
               </CardTitle>
               <Link href="/kudos" className="text-xs text-[color:var(--accent-strong)] hover:underline">View all →</Link>
             </div>
@@ -582,7 +582,7 @@ export default function DashboardContent() {
                 return (
                   <div key={k.id} className="rounded-lg border border-border bg-background/50 p-4 flex flex-col">
                     <div className="flex items-start gap-3">
-                      <Heart size={14} className="text-pink-400 mt-0.5 flex-shrink-0" />
+                      <Heart size={14} className="text-[#E2445C] mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs">
                           <span className="font-medium">{k.giver.firstName} {k.giver.lastName}</span>
@@ -592,7 +592,7 @@ export default function DashboardContent() {
                         <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-violet-500/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#0073EA]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                           )}
                           <span className="text-[10px] text-muted">{timeAgo}</span>
                         </div>

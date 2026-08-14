@@ -34,7 +34,7 @@ const TYPES: {
   },
   {
     type: "RECORDED", Icon: MousePointerClick,
-    tile: "bg-rose-50", iconColor: "text-rose-600", dot: "bg-rose-400",
+    tile: "bg-red-50", iconColor: "text-red-600", dot: "bg-red-400",
     label: "Click-capture SOP",
     tagline: "Click through a task — the recorder extension auto-captures a screenshot + step for each click.",
     bullets: ["Scribe-style screenshot per step", "Auto-writes the step text", "No video, no narration"],
