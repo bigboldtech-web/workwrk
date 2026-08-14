@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { canTouchUserAlignment } from "@/lib/alignment-scope";
 
 // GET: Generate appraisal letter data for a completed review
 export async function GET(
@@ -12,9 +13,12 @@ export async function GET(
 
   const { id: reviewId } = await params;
   const orgId = getOrgId(session);
+  const callerId = getUserId(session);
 
   const review = await prisma.review.findFirst({
-    where: { id: reviewId },
+    // Org-scoped: an appraisal letter carries a person's PII + comp data,
+    // so it must never resolve a review from another organization.
+    where: { id: reviewId, subject: { organizationId: orgId } },
     include: {
       subject: {
         select: {
@@ -23,13 +27,21 @@ export async function GET(
           role: { select: { title: true } },
         },
       },
-      reviewer: { select: { firstName: true, lastName: true, role: { select: { title: true } } } },
+      reviewer: { select: { id: true, firstName: true, lastName: true, role: { select: { title: true } } } },
       cycle: { select: { name: true, type: true, startDate: true, endDate: true } },
     },
   });
 
   if (!review) return jsonError("Review not found", 404);
   if (review.status !== "COMPLETED") return jsonError("Review not yet completed", 400);
+
+  // Authorize: only the subject, the reviewer, or someone with manage rights
+  // over the subject (self / report tree / org-wide) may read the letter.
+  const isSubject = review.subject?.id === callerId;
+  const isReviewer = review.reviewer?.id === callerId;
+  if (!isSubject && !isReviewer && !(await canTouchUserAlignment(session, review.subjectId))) {
+    return jsonError("You can only view appraisal letters for yourself or your reports.", 403);
+  }
 
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
@@ -57,9 +69,9 @@ export async function GET(
 
   const hike = hikeRecommendation[band] || hikeRecommendation["Meets Expectations"];
 
-  // Extract assessment details
-  const managerAssessment = review.managerAssessment as any;
-  const selfRatings = review.selfRatings as any;
+  // Extract assessment details (Json columns → indexable record).
+  const managerAssessment = review.managerAssessment as Record<string, unknown> | null;
+  const selfRatings = review.selfRatings as Record<string, unknown> | null;
 
   const letter = {
     // Company
