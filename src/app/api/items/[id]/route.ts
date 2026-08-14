@@ -14,6 +14,7 @@ import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } f
 import { advanceSeriesOnComplete } from "@/lib/recurring-tasks";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
+import { notifyItemAssigned, notifyItemStatusChanged } from "@/lib/notify-item";
 
 async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const item = await prisma.item.findUnique({
@@ -101,7 +102,9 @@ async function ctx() {
 async function loadAndGate(itemId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const item = await prisma.item.findUnique({
     where: { id: itemId },
-    include: { board: { select: { id: true, spaceId: true, organizationId: true } } },
+    // `statuses` rides along so a status-change notification can name the
+    // board's own labels ("Ready for QA") instead of raw keys.
+    include: { board: { select: { id: true, spaceId: true, organizationId: true, statuses: true } } },
   });
   if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
@@ -256,6 +259,38 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         },
       }).catch(() => {});
     }
+
+    // ── Inbox notifications ──────────────────────────────────────────
+    // Both emitters live in src/lib/notify-item.ts so the recipient's
+    // /settings/notifications toggle is the single switch, and neither can
+    // notify the actor about their own edit. Guarded on a REAL transition
+    // (no-op PATCHes — same owner, same status — write nothing), and they
+    // never throw: the item is already saved.
+    const ownerChanged = parsed.data.ownerId !== undefined && gate.item.ownerId !== updated.ownerId;
+    const statusChanged = parsed.data.status !== undefined && gate.item.status !== updated.status;
+    if (ownerChanged) {
+      await notifyItemAssigned({
+        organizationId: c.organizationId,
+        item: { id: updated.id, title: updated.title, dueAt: updated.dueAt ?? null },
+        ownerId: updated.ownerId,
+        actorId: c.userId,
+        reassigned: gate.item.ownerId !== null,
+      });
+    }
+    if (statusChanged) {
+      await notifyItemStatusChanged({
+        organizationId: c.organizationId,
+        item: { id: updated.id, title: updated.title, dueAt: updated.dueAt ?? null },
+        board: gate.item.board,
+        previousStatus: gate.item.status,
+        status: updated.status,
+        // When this same PATCH also handed the task to someone new, the
+        // assignment row above already told them — don't double-notify.
+        ownerId: ownerChanged ? null : updated.ownerId,
+        actorId: c.userId,
+      });
+    }
+
     // Repeat turned on/off/changed → (re)compute the anchor's spawn schedule.
     // Every return below responds with the FULL enriched row (counts/links/
     // time/creator — the exact listBoardItems shape). The old lean writer

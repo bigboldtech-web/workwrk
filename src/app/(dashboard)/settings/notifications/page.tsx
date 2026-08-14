@@ -6,7 +6,9 @@
 // Storage: UserPreference.home.notifications via GET/PATCH /api/preferences
 // ({ home: { notifications: { inbox, email } } }) — no schema migration.
 // Enforcement lives in src/lib/notify-prefs.ts (shouldNotify/shouldEmail),
-// wired into the task-assigned / comment / kudos / due-today creation sites.
+// wired into the task-assigned / comment / kudos / due-today creation sites,
+// and — for the real Board-Item task pipeline — src/lib/notify-item.ts, the
+// single door every item notification passes through.
 //
 // Honest-Soon: rows whose notification type isn't produced anywhere yet
 // (@mentions, status changes; and most email types) render disabled with a
@@ -38,7 +40,9 @@ const INBOX_ROWS: Row[] = [
   // recipients through this toggle (filterNotifyUsers "mentions").
   { key: "mentions", label: "@Mentions", sub: "When someone mentions you in a comment or doc", live: true },
   { key: "comments", label: "Comments on my tasks", sub: "When someone comments on a task assigned to you", live: true },
-  { key: "status_changes", label: "Status changes on my tasks", sub: "When a task you're assigned changes status", live: false },
+  // Live since the item-pipeline build — PATCH /api/items/[id] emits through
+  // src/lib/notify-item.ts (owner + comment-thread participants, actor excluded).
+  { key: "status_changes", label: "Status changes on my tasks", sub: "When a task you're assigned changes status", live: true },
   { key: "due_reminders", label: "Due-date reminders", sub: "When a task assigned to you is due today", live: true },
   { key: "kudos", label: "Kudos & recognition", sub: "When a teammate recognizes you", live: true },
 ];

@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
+import { notifyItemAssigned } from "@/lib/notify-item";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -83,6 +84,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       itemTypeId: parsed.data.itemTypeId ?? null,
       tagIds: parsed.data.tagIds,
       parentItemId: parsed.data.parentItemId ?? null,
+      actorId: c.userId,
+    });
+    // Inbox notification — a task created FOR someone else lands in their
+    // bell. Routed through src/lib/notify-item.ts so the recipient's
+    // /settings/notifications toggle is the only switch that matters; the
+    // helper no-ops when the owner is the actor or the item is unassigned.
+    // Never throws (best effort) — the item is already saved.
+    await notifyItemAssigned({
+      organizationId: c.organizationId,
+      item: { id: item.id, title: item.title, dueAt: item.dueAt ?? null },
+      ownerId: parsed.data.ownerId ?? null,
       actorId: c.userId,
     });
     // Respond with the FULL enriched row (counts/links/time/creator — the
