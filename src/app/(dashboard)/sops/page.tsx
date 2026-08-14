@@ -13,7 +13,7 @@ import { useRouter } from "next/navigation";
 import {
   BookCopy, Plus, Search, ClipboardCheck, ChevronRight, ChevronDown, FileText,
   CheckCircle2, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
-  LayoutGrid, List as ListIcon, MoreHorizontal, Trash2,
+  LayoutGrid, List as ListIcon, MoreHorizontal, Trash2, FolderTree,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -21,6 +21,7 @@ import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { useRole } from "@/hooks/use-role";
 
 type SopStatus = "DRAFT" | "IN_REVIEW" | "APPROVED" | "PUBLISHED" | "ARCHIVED";
 
@@ -71,6 +72,7 @@ export default function SopsPage() {
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const { canManageSOPs } = useRole();
 
   const load = useCallback(async () => {
     try {
@@ -150,13 +152,23 @@ export default function SopsPage() {
         iconGradient={GRAD.tealGreen}
         description={rows === null ? "Loading…" : `${stats.total} SOP${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · ${stats.totalAssignments} assignment${stats.totalAssignments === 1 ? "" : "s"}`}
         actions={
-          <Link
-            href="/sops/new"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium hover:opacity-90"
-            style={{ background: "var(--os-brand)", color: "#fff" }}
-          >
-            <Plus className="h-3.5 w-3.5" /> New SOP
-          </Link>
+          <div className="flex items-center gap-2">
+            {canManageSOPs && (
+              <Link
+                href="/sops/manage"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50"
+              >
+                <FolderTree className="h-3.5 w-3.5" /> Organize
+              </Link>
+            )}
+            <Link
+              href="/sops/new"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium hover:opacity-90"
+              style={{ background: "var(--os-brand)", color: "#fff" }}
+            >
+              <Plus className="h-3.5 w-3.5" /> New SOP
+            </Link>
+          </div>
         }
       />
 

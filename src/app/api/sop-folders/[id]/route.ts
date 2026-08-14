@@ -26,7 +26,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!isOrgAdmin(session)) {
     const hasAccess = await prisma.sOPFolderAccess.findUnique({
-      where: { folderId_userId: { folderId: id, userId: (session.user as any).id } },
+      where: { folderId_userId: { folderId: id, userId: (session.user as { id: string }).id } },
       select: { folderId: true },
     });
     if (!hasAccess) return jsonError("Forbidden", 403);
@@ -49,7 +49,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return jsonError("Folder not found", 404);
 
   const body = await req.json();
-  const data: any = {};
+  const data: Record<string, unknown> = {};
   if (typeof body.name === "string") {
     const name = body.name.trim();
     if (!name) return jsonError("Name required");
@@ -93,9 +93,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const updated = await prisma.sOPFolder.update({ where: { id }, data });
     return jsonSuccess(updated);
-  } catch (err: any) {
-    if (err.code === "P2002") return jsonError("A folder with that name already exists at this level");
-    return jsonError(err.message || "Failed to update folder", 500);
+  } catch (err) {
+    const e = err as { code?: string; message?: string };
+    if (e.code === "P2002") return jsonError("A folder with that name already exists at this level");
+    return jsonError(e.message || "Failed to update folder", 500);
   }
 }
 
@@ -109,21 +110,16 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const existing = await prisma.sOPFolder.findFirst({
     where: { id, organizationId: orgId },
     select: {
-      id: true, name: true,
+      id: true, name: true, parentId: true,
       _count: { select: { sops: true, children: true } },
     },
   });
   if (!existing) return jsonError("Folder not found", 404);
 
-  // Refuse to delete a folder that still has SOPs or sub-folders in
-  // it. Admin must empty it first — prevents accidental un-scoping of
-  // content that was meant to stay access-controlled.
-  if (existing._count.sops > 0) {
-    return jsonError(
-      `"${existing.name}" still has ${existing._count.sops} SOP${existing._count.sops === 1 ? "" : "s"} in it. Move them out before deleting.`,
-      409,
-    );
-  }
+  // Sub-folders block deletion: re-homing a whole sub-tree can collide
+  // with the sibling-name unique index, so the admin must move or
+  // delete sub-folders first. SOPs never block — they are reparented,
+  // never deleted (see below).
   if (existing._count.children > 0) {
     return jsonError(
       `"${existing.name}" still has ${existing._count.children} sub-folder${existing._count.children === 1 ? "" : "s"}. Delete or move them first.`,
@@ -131,8 +127,23 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     );
   }
 
-  // Access rows cascade via schema.
-  await prisma.sOPFolder.delete({ where: { id } });
+  // Reparent the folder's SOPs to this folder's parent (or to the
+  // unfoldered bucket when this is a top-level folder), THEN delete the
+  // folder. SOP rows are never deleted — the SOP.folderId FK is
+  // onDelete:SetNull as a backstop, and this explicit move keeps the
+  // SOPs inside the surviving parent's access scope instead of dropping
+  // them to org-wide. Access grants cascade via schema.
+  const [reparented] = await prisma.$transaction([
+    prisma.sOP.updateMany({
+      where: { folderId: id, organizationId: orgId },
+      data: { folderId: existing.parentId },
+    }),
+    prisma.sOPFolder.delete({ where: { id } }),
+  ]);
 
-  return jsonSuccess({ deleted: true });
+  return jsonSuccess({
+    deleted: true,
+    sopsReparented: reparented.count,
+    reparentedTo: existing.parentId,
+  });
 }

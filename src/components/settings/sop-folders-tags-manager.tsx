@@ -99,24 +99,33 @@ export function SopFoldersTagsManager() {
     }
   }
   async function handleDeleteFolder(folder: FolderNode) {
-    if (folder._count.sops > 0) {
-      toastError(`"${folder.name}" still has ${folder._count.sops} SOP${folder._count.sops === 1 ? "" : "s"}. Move them out first.`);
-      return;
-    }
+    // Sub-folders block deletion (server refuses too) — the admin must
+    // clear them first. SOPs never block: they are moved, not deleted.
     const childCount = folders.filter((f) => f.parentId === folder.id).length;
     if (childCount > 0) {
       toastError(`"${folder.name}" still has ${childCount} sub-folder${childCount === 1 ? "" : "s"}. Delete or move them first.`);
       return;
     }
+    const parentName = folder.parentId
+      ? folders.find((p) => p.id === folder.parentId)?.name ?? "the parent folder"
+      : null;
+    const sopCount = folder._count.sops;
+    const reparentNote = sopCount > 0
+      ? ` Its ${sopCount} SOP${sopCount === 1 ? "" : "s"} will move to ${parentName ? `"${parentName}"` : "the unfoldered bucket"} — none are deleted.`
+      : "";
     if (!(await confirm({
       title: `Delete folder "${folder.name}"?`,
-      description: "Folder access grants will also be removed. SOPs are not deleted.",
+      description: `Folder access grants will also be removed.${reparentNote}`,
       confirmLabel: "Delete folder",
       destructive: true,
     }))) return;
     const res = await fetch(`/api/sop-folders/${folder.id}`, { method: "DELETE" });
-    if (res.ok) { toastSuccess("Folder deleted"); load(); }
-    else {
+    if (res.ok) {
+      const d = await res.json().catch(() => ({}));
+      const moved = d?.sopsReparented ?? 0;
+      toastSuccess(moved > 0 ? `Folder deleted — ${moved} SOP${moved === 1 ? "" : "s"} moved` : "Folder deleted");
+      load();
+    } else {
       const err = await res.json().catch(() => ({}));
       toastError(err.error || "Failed to delete folder");
     }
@@ -124,16 +133,16 @@ export function SopFoldersTagsManager() {
   async function handleSetColor(folder: FolderNode) {
     const hex = await prompt({
       title: "Folder color",
-      description: "Hex color used for the dot in the sidebar tree (e.g. #d4ff2e).",
+      description: "Hex color used for the dot in the sidebar tree (e.g. #0073EA).",
       defaultValue: folder.color || "",
-      placeholder: "#d4ff2e",
+      placeholder: "#0073EA",
       submitLabel: "Save",
       required: false,
     });
     if (hex === null) return;
     const value = hex.trim() || null;
     if (value && !/^#[0-9a-fA-F]{6}$/.test(value)) {
-      toastError("Use a 6-digit hex color, e.g. #d4ff2e");
+      toastError("Use a 6-digit hex color, e.g. #0073EA");
       return;
     }
     const res = await fetch(`/api/sop-folders/${folder.id}`, {
@@ -251,7 +260,7 @@ export function SopFoldersTagsManager() {
                 <div key={f.id} className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 p-2 text-xs">
                   <span
                     className="h-2.5 w-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: f.color || "#d4ff2e" }}
+                    style={{ backgroundColor: f.color || "#0073EA" }}
                   />
                   <span className="flex-1 truncate">
                     {f.name}
@@ -271,7 +280,7 @@ export function SopFoldersTagsManager() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className={`h-7 w-7 ${f._count.sops > 0 ? "text-muted-2" : "text-red-400 hover:text-red-300"}`}
+                    className="h-7 w-7 text-red-400 hover:text-red-300"
                     onClick={() => handleDeleteFolder(f)}
                     aria-label={`Delete ${f.name}`}
                   >
@@ -294,7 +303,7 @@ export function SopFoldersTagsManager() {
               </CardTitle>
               <CardDescription>
                 Cross-cutting labels added by anyone creating an SOP. Use this
-                list to consolidate duplicates ("HR" vs "Hr"), rename labels,
+                list to consolidate duplicates (&quot;HR&quot; vs &quot;Hr&quot;), rename labels,
                 or remove unused ones.
               </CardDescription>
             </div>
@@ -337,7 +346,7 @@ export function SopFoldersTagsManager() {
               ))}
               {filteredTags.length === 0 && (
                 <div className="col-span-full text-[11px] text-muted text-center py-3">
-                  No tags match "{tagFilter}".
+                  No tags match &quot;{tagFilter}&quot;.
                 </div>
               )}
             </div>

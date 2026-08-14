@@ -134,6 +134,7 @@ interface SOP {
   publishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  shareToken?: string | null;
   compliance: SOPCompliance[];
 }
 
@@ -141,6 +142,8 @@ function getStatusBadge(status: string) {
   switch (status) {
     case "PUBLISHED":
       return <Badge variant="success">Published</Badge>;
+    case "APPROVED":
+      return <Badge variant="info">Approved</Badge>;
     case "IN_REVIEW":
       return <Badge variant="warning">In Review</Badge>;
     case "DRAFT":
@@ -879,6 +882,72 @@ export default function SOPDetailPage() {
     }
   };
 
+  // Approval workflow — DRAFT → IN_REVIEW → APPROVED (or back to DRAFT).
+  // Uses the existing status field; content is never touched here, so a
+  // transition can't blank a SOP. The server enforces the edit gate.
+  const handleStatusTransition = async (next: string, successMsg: string) => {
+    if (!sop) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/sops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update status");
+      }
+      const updated = await res.json();
+      setSop(updated);
+      toastSuccess(successMsg);
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Failed to update status");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Public share link — mints (or reuses) the SOP's shareToken and copies
+  // the read-only /share/sop/<token> URL. Only offered for PUBLISHED SOPs.
+  const handleCopyPublicLink = async () => {
+    if (!sop) return;
+    try {
+      const res = await fetch(`/api/sops/${id}/share`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Couldn't create a public link");
+      }
+      const data = await res.json();
+      const shareToken: string | undefined = data?.shareToken;
+      if (!shareToken) throw new Error("Couldn't create a public link");
+      setSop((prev) => (prev ? { ...prev, shareToken } : prev));
+      const url = `${window.location.origin}/share/sop/${shareToken}`;
+      await navigator.clipboard.writeText(url);
+      toastSuccess("Public link copied to clipboard");
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Couldn't create a public link");
+    }
+  };
+
+  const handleDisablePublicLink = async () => {
+    if (!sop) return;
+    if (!(await confirm({
+      title: "Turn off public link?",
+      description: "The existing share URL will stop working immediately. You can generate a new one later.",
+      confirmLabel: "Turn off link",
+      destructive: true,
+    }))) return;
+    try {
+      const res = await fetch(`/api/sops/${id}/share`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to disable link");
+      setSop((prev) => (prev ? { ...prev, shareToken: null } : prev));
+      toastSuccess("Public link turned off");
+    } catch {
+      toastError("Failed to disable link");
+    }
+  };
+
   const handleStartRun = async () => {
     if (!sop) return;
     setCreatingRun(true);
@@ -1127,6 +1196,26 @@ export default function SOPDetailPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-52">
+                  {/* Approval workflow — Submit for review / Approve /
+                      Request changes. Uses the existing status field. */}
+                  {sop.status === "DRAFT" && (
+                    <DropdownMenuItem onSelect={() => handleStatusTransition("IN_REVIEW", "Submitted for review")}>
+                      <Send size={14} className="mr-2" /> Submit for review
+                    </DropdownMenuItem>
+                  )}
+                  {sop.status === "IN_REVIEW" && (
+                    <>
+                      <DropdownMenuItem onSelect={() => handleStatusTransition("APPROVED", "SOP approved")}>
+                        <CheckCircle size={14} className="mr-2" /> Approve
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onSelect={() => handleStatusTransition("DRAFT", "Sent back to draft")}>
+                        <ArrowLeft size={14} className="mr-2" /> Request changes
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                  {(sop.status === "DRAFT" || sop.status === "IN_REVIEW") && (
+                    <DropdownMenuSeparator />
+                  )}
                   {sop.status !== "PUBLISHED" && canPublishSOPs && (
                     <DropdownMenuItem onSelect={() => setShowPublishDialog(true)}>
                       <Send size={14} className="mr-2" /> Publish
@@ -1135,6 +1224,16 @@ export default function SOPDetailPage() {
                   {sop.status === "PUBLISHED" && (
                     <DropdownMenuItem onSelect={() => setShowAssignDialog(true)}>
                       <UserPlus size={14} className="mr-2" /> Assign
+                    </DropdownMenuItem>
+                  )}
+                  {sop.status === "PUBLISHED" && (
+                    <DropdownMenuItem onSelect={handleCopyPublicLink}>
+                      <Link2 size={14} className="mr-2" /> Copy public link
+                    </DropdownMenuItem>
+                  )}
+                  {sop.status === "PUBLISHED" && sop.shareToken && (
+                    <DropdownMenuItem onSelect={handleDisablePublicLink}>
+                      <X size={14} className="mr-2" /> Turn off public link
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuItem onSelect={() => setWalkthroughOpen(true)}>

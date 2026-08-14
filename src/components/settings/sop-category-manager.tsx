@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
-  BookOpen, Plus, Edit3, Trash2, ChevronDown, ChevronRight, X, Check, AlertTriangle,
+  BookOpen, Plus, Edit3, Trash2, ChevronDown, ChevronRight, X, Check,
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -163,7 +163,7 @@ export function SopCategoryManager() {
     <Card>
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <BookOpen size={16} className="text-[#d4ff2e]" />
+          <BookOpen size={16} className="text-[color:var(--os-brand,#0073EA)]" />
           SOP Categories
         </CardTitle>
         <CardDescription>
@@ -368,7 +368,7 @@ export function SopCategoryManager() {
 
                       {/* Inline add-subcategory row */}
                       {addingToCategoryId === cat.id && (
-                        <div className="flex items-center gap-2 pl-10 pr-3 py-2 bg-[rgba(212,255,46,0.04)]">
+                        <div className="flex items-center gap-2 pl-10 pr-3 py-2 bg-[color:var(--os-brand-soft,#E6F1FB)]">
                           <Input
                             value={newSubName}
                             onChange={(e) => setNewSubName(e.target.value)}
