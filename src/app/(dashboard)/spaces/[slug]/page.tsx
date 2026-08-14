@@ -16,7 +16,7 @@ import {
   FileText, Bookmark,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
   ChevronLeft, ChevronRight, ChevronDown, X,
-  ListFilter, Zap,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-overview-create";
@@ -565,30 +565,28 @@ export default async function SpacePage(props: {
             {space.visibility === "PRIVATE" ? (
               <Lock className="w-3.5 h-3.5 text-zinc-400" />
             ) : null}
-            <button
-              type="button"
-              aria-label="Filter Space"
-              title="Filter"
-              className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-            >
-              <ListFilter className="w-3.5 h-3.5" />
-            </button>
+            {/* Space-level filtering lives inside the List view's own toolbar
+                (sort / status / owner / due). The former title-row filter icon
+                had no handler, so it's removed rather than left inert. */}
           </h1>
           <div className="flex-1" />
-          <button
-            type="button"
+          <Link
+            href="/automation/workflows"
             className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >
             <Zap className="w-3.5 h-3.5 text-amber-500" />
             Automate
-          </button>
+          </Link>
           <button
             type="button"
-            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            disabled
+            title="Ask AI is coming soon"
+            className="text-sm text-zinc-400 flex items-center gap-1.5 px-2 py-1 rounded cursor-not-allowed"
           >
             <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
             Ask
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
           </button>
           <SpaceShareButton
             spaceId={space.id}

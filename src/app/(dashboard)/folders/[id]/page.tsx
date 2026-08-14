@@ -12,7 +12,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Folder as FolderIcon, FileText, ListFilter, Zap, Sparkles, ChevronDown, Lock,
+  Folder as FolderIcon, FileText, Zap, Sparkles, ChevronDown, Lock,
   List as ListIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -173,18 +173,19 @@ export default async function FolderPage(props: {
               <ChevronDown className="w-3.5 h-3.5" />
             </button>
             {folder.visibility === "PRIVATE" ? <Lock className="w-3.5 h-3.5 text-zinc-400" /> : null}
-            <button type="button" aria-label="Filter" title="Filter" className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
-              <ListFilter className="w-3.5 h-3.5" />
-            </button>
+            {/* The former title-row filter icon was inert (folders have no
+                cross-board filter surface of their own), so it's removed
+                rather than faked. */}
           </h1>
           <div className="flex-1" />
-          <button type="button" className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100" title="Automations">
+          <Link href="/automation/workflows" className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100" title="Automations">
             <Zap className="w-3.5 h-3.5 text-amber-500" />
             Automate
-          </button>
-          <button type="button" className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100">
+          </Link>
+          <button type="button" disabled title="Ask AI is coming soon" className="text-sm text-zinc-400 flex items-center gap-1.5 px-2 py-1 rounded cursor-not-allowed">
             <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
             Ask
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
           </button>
         </div>
       </div>

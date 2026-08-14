@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { PlannerCommandBar } from "./planner-command-bar";
 import { PlannerSidePanel } from "./planner-side-panel";
-import { PlannerConnectGate } from "./planner-connect-gate";
+import { PlannerConnectBanner } from "./planner-connect-gate";
+
+const BANNER_DISMISS_KEY = "planner:connectBannerDismissed";
 
 interface PlannerEvent {
   id: string; source: "task" | "item"; external: boolean;
@@ -55,7 +57,21 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ start: Date; end: Date } | null>(null);
   const [connected, setConnected] = useState<boolean | null>(null);
+  // The connect prompt is a dismissible banner, never a gate — remember the
+  // dismissal locally so it doesn't nag on every visit (no server round-trip).
+  // Read in a lazy initializer (not an effect): safe from hydration mismatch
+  // because the banner only renders once `connected === false`, which is never
+  // true during SSR/first paint (connected starts null).
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem(BANNER_DISMISS_KEY) === "1"; } catch { return false; }
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const dismissBanner = useCallback(() => {
+    setBannerDismissed(true);
+    try { localStorage.setItem(BANNER_DISMISS_KEY, "1"); } catch { /* ignore */ }
+  }, []);
 
   // Drag-to-create state.
   const [sel, setSel] = useState<DragSel | null>(null);
@@ -75,7 +91,8 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
   }, [weekStart]);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 7 * HOUR_PX; }, [connected]);
+  // Grid always mounts now, so scroll to the work-day start once on mount.
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 7 * HOUR_PX; }, []);
 
   useEffect(() => {
     fetch("/api/integrations/google-calendar")
@@ -138,17 +155,18 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
           <button type="button" onClick={() => setAnchor(addDays(weekStart, 7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Next week"><ChevronRight className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
         </div>
         <div className="text-[13.5px] font-medium text-zinc-700 dark:text-zinc-200">{label}</div>
-        {connected && loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
       </div>
 
-      {connected === null ? (
-        <div className="flex-1 flex items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-zinc-300" /></div>
-      ) : connected === false ? (
-        <PlannerConnectGate />
-      ) : (
-        <>
-          <div className="flex flex-1 min-h-0">
-            {!embedded ? <PlannerSidePanel onCreated={load} autoFocusMeet={initialMeet} /> : null}
+      {/* Not a gate: the grid below renders local tasks + work items for
+          everyone. When Google isn't connected we offer it as a dismissible
+          banner rather than blocking the whole Planner. */}
+      {connected === false && !bannerDismissed ? (
+        <PlannerConnectBanner onDismiss={dismissBanner} />
+      ) : null}
+
+      <div className="flex flex-1 min-h-0">
+        {!embedded ? <PlannerSidePanel onCreated={load} autoFocusMeet={initialMeet} /> : null}
 
             <div className="flex-1 flex flex-col min-w-0">
               <div className="flex shrink-0 border-b border-zinc-200 dark:border-[#2A2F38] pr-[14px]">
@@ -224,13 +242,12 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
             </div>
           </div>
 
-          {draft ? <CreateEventPopover draft={draft} onClose={() => setDraft(null)} onCreated={() => { setDraft(null); load(); }} /> : null}
-          <PlannerCommandBar onCreated={load} initialMeet={false} />
-        </>
-      )}
+      {draft ? <CreateEventPopover draft={draft} onClose={() => setDraft(null)} onCreated={() => { setDraft(null); load(); }} /> : null}
+      <PlannerCommandBar onCreated={load} initialMeet={false} />
     </div>
   );
 }
+
 
 const CREATE_TABS = ["Event", "Task", "Focus time", "OOO"] as const;
 type CreateTab = typeof CREATE_TABS[number];

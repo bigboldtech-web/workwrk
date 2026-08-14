@@ -10,11 +10,11 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Share2, Sparkles, ChevronDown, ListChecks,
-  ListFilter, Glasses, Zap, IterationCw,
+  Lock, Sparkles, ChevronDown, ListChecks, Zap, IterationCw,
 } from "lucide-react";
 import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
+import { BoardShareButton } from "@/components/layout/os/board-share-button";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { ensureCoreListViews } from "@/lib/board";
@@ -133,47 +133,37 @@ export default async function BoardPage(props: {
           <span className="truncate">{board.name}</span>
           <ChevronDown className="w-3 h-3 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity" />
         </h1>
-        <button
-          type="button"
-          aria-label="Filter board"
-          title="Filter"
-          className="p-1 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-        >
-          <ListFilter className="w-3.5 h-3.5" />
-        </button>
+        {/* The working board filter lives in the renderer's own toolbar (the
+            FilterMenu BoardCanvas mounts below). The former title-row filter
+            icon + Reader-mode toggle were inert with no backend, so they're
+            gone rather than faked. */}
 
         <div className="flex-1" />
 
-        <button
-          type="button"
-          aria-label="Reader mode"
-          title="Reader mode"
-          className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
-        >
-          <Glasses className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
+        <Link
+          href="/automation/workflows"
           className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
           title="Automations"
         >
           <Zap className="w-3.5 h-3.5 text-amber-500" />
           Automate
-        </button>
+        </Link>
         <button
           type="button"
-          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
+          disabled
+          title="Ask AI is coming soon"
+          className="text-[12.5px] text-zinc-400 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md cursor-not-allowed"
         >
           <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
           Ask
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
         </button>
-        <button
-          type="button"
-          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
-        >
-          <Share2 className="w-3.5 h-3.5" />
-          Share
-        </button>
+        <BoardShareButton
+          boardId={board.id}
+          boardName={board.name}
+          visibility={board.visibility as "PRIVATE" | "WORKSPACE" | "ORG"}
+          parentSpaceName={board.space.name}
+        />
       </div>
 
       {/* View tabs — clicking switches the active view via ?view=<id>.
