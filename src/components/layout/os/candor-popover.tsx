@@ -37,7 +37,7 @@ export function OsCandorPopover({ onClose }: { onClose: () => void }) {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/candor");
-      if (!res.ok) return setSessions([]);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: ApiSession[] = data.data ?? (Array.isArray(data) ? data : []);
       setSessions(list.filter((s) => s.status === "ACTIVE"));
@@ -64,7 +64,7 @@ export function OsCandorPopover({ onClose }: { onClose: () => void }) {
             <small>When your manager launches one, it shows up here so you can respond anonymously.</small>
           </div>
         ) : sessions.map((s) => (
-          <Link key={s.id} href="/candor" className="candor-pop__item" onClick={onClose}>
+          <Link key={s.id} href={`/candor/${s.id}`} className="candor-pop__item" onClick={onClose}>
             <div className="candor-pop__item-main">
               <div className="candor-pop__item-title">{s.title}</div>
               {s.description ? <p className="candor-pop__item-desc">{s.description}</p> : null}

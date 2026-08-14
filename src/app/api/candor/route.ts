@@ -1,6 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 
@@ -35,15 +36,9 @@ export async function GET() {
     orderBy: { createdAt: "desc" },
   });
 
-  // Check which sessions the user has already responded to
-  const sessionIds = sessions.map((s) => s.id);
-  const myResponses = await prisma.candorResponse.findMany({
-    where: { sessionId: { in: sessionIds } },
-    select: { sessionId: true, id: true },
-  });
-  // Since responses are anonymous, we can't filter by userId. Instead, we use a localStorage-based
-  // "already responded" check on the frontend. Here we just return response counts.
-
+  // Responses are anonymous by design — there is no userId on CandorResponse,
+  // so we can't (and must never) tell the server "who already answered". The
+  // client uses a localStorage guard for that; here we only return counts.
   const enriched = sessions.map((s) => ({
     ...s,
     responseCount: s._count.responses,
@@ -65,6 +60,15 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim()) return jsonError("Title is required");
   if (!Array.isArray(prompts) || prompts.length === 0) return jsonError("At least one prompt is required");
+
+  // Org-scope any supplied department id — never trust a cross-org id.
+  if (departmentId) {
+    const dept = await prisma.department.findFirst({
+      where: { id: departmentId, organizationId: orgId },
+      select: { id: true },
+    });
+    if (!dept) return jsonError("Invalid department", 400);
+  }
 
   const candor = await prisma.candorSession.create({
     data: {
@@ -94,7 +98,7 @@ export async function PATCH(req: NextRequest) {
   const orgId = getOrgId(session);
   const userId = getUserId(session);
   const body = await req.json();
-  const { id, status, title, description, prompts } = body;
+  const { id, status, title, description, prompts, departmentId } = body;
 
   if (!id) return jsonError("Session ID required");
 
@@ -103,10 +107,25 @@ export async function PATCH(req: NextRequest) {
   });
   if (!existing) return jsonError("Session not found", 404);
 
-  const data: any = {};
+  const data: Prisma.CandorSessionUpdateInput = {};
   if (title !== undefined) data.title = title;
   if (description !== undefined) data.description = description;
   if (prompts !== undefined) data.prompts = prompts;
+  if (departmentId !== undefined) {
+    // Scope the session to a department (or org-wide when null/empty). If a
+    // department id is supplied it must belong to this org — never trust a
+    // cross-org id from the client.
+    if (departmentId) {
+      const dept = await prisma.department.findFirst({
+        where: { id: departmentId, organizationId: orgId },
+        select: { id: true },
+      });
+      if (!dept) return jsonError("Invalid department", 400);
+      data.departmentId = departmentId;
+    } else {
+      data.departmentId = null;
+    }
+  }
 
   if (status === "ACTIVE" && existing.status !== "ACTIVE") {
     data.status = "ACTIVE";
@@ -130,8 +149,12 @@ export async function PATCH(req: NextRequest) {
   return jsonSuccess(updated);
 }
 
-async function notifyTeamForCandor(session: any, orgId: string, creatorId: string) {
-  const where: any = { organizationId: orgId, deletedAt: null, id: { not: creatorId } };
+async function notifyTeamForCandor(
+  session: { title: string; description: string | null; departmentId: string | null },
+  orgId: string,
+  creatorId: string,
+) {
+  const where: Prisma.UserWhereInput = { organizationId: orgId, deletedAt: null, id: { not: creatorId } };
   if (session.departmentId) where.departmentId = session.departmentId;
 
   const users = await prisma.user.findMany({

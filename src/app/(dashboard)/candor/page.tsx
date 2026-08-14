@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   MessageCircleHeart, Plus, Search, Hash, ChevronRight, Activity, CheckCircle2,
   Edit3, Lock, Eye, Users, MessageCircle, Building, Globe, Sparkles,
@@ -58,6 +59,7 @@ export default function CandorPage() {
   const [statusFilter, setStatusFilter] = useState<"ALL" | CandorStatus>("ALL");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  const router = useRouter();
 
   const load = useCallback(async () => {
     try {
@@ -85,7 +87,9 @@ export default function CandorPage() {
         }),
       });
       if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
-      toast("Draft created — add prompts then launch");
+      const created = await res.json().catch(() => null);
+      toast("Draft created — set it up, then launch");
+      if (created?.id) { router.push(`/candor/${created.id}`); return; }
       void load();
     } catch { toast("Couldn't create"); }
   }
