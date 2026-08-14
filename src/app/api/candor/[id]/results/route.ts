@@ -1,20 +1,27 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+
+type Prompt = { id: string; text: string; type: string };
+type Answer = { promptId: string; value: unknown };
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
+  // Authz: results are for managers/admins only — never a rank-and-file peer.
   if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
   const orgId = getOrgId(session);
 
+  // Org-scoped: a session id from another org can never be resolved here.
   const candor = await prisma.candorSession.findFirst({
     where: { id, organizationId: orgId },
   });
   if (!candor) return jsonError("Session not found", 404);
 
+  // Anonymity: we read ONLY the answers + timestamp. CandorResponse has no user
+  // column, so there is nothing here that could identify a respondent.
   const responses = await prisma.candorResponse.findMany({
     where: { sessionId: id },
     select: { answers: true, createdAt: true },
@@ -22,11 +29,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   });
 
   // Aggregate results per prompt
-  const prompts = (candor.prompts as any[]) || [];
-  const aggregated = prompts.map((prompt: any) => {
+  const prompts: Prompt[] = Array.isArray(candor.prompts) ? (candor.prompts as unknown as Prompt[]) : [];
+  const aggregated = prompts.map((prompt) => {
     const promptAnswers = responses
       .map((r) => {
-        const ans = (r.answers as any[]).find((a: any) => a.promptId === prompt.id);
+        const arr: Answer[] = Array.isArray(r.answers) ? (r.answers as unknown as Answer[]) : [];
+        const ans = arr.find((a) => a.promptId === prompt.id);
         return ans?.value;
       })
       .filter((v) => v !== undefined && v !== null && v !== "");

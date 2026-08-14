@@ -19,16 +19,27 @@ export async function GET() {
     select: { departmentId: true },
   });
 
+  // Build the visibility OR explicitly. A department-scoped session must only
+  // be visible to members of THAT department. Note the Prisma trap: an object
+  // with `departmentId: undefined` drops the filter entirely, so a user with no
+  // department would otherwise match every department's active session and see
+  // its title/prompts. We only add the department clause when the user actually
+  // has one; everyone always sees org-wide (departmentId: null) active sessions.
+  const visibility: Prisma.CandorSessionWhereInput[] = [
+    { status: "ACTIVE", departmentId: null },
+  ];
+  if (me?.departmentId) {
+    visibility.push({ status: "ACTIVE", departmentId: me.departmentId });
+  }
+  // Managers additionally see their own sessions in any status (draft/closed).
+  if (userIsManager) {
+    visibility.push({ createdBy: userId });
+  }
+
   const sessions = await prisma.candorSession.findMany({
     where: {
       organizationId: orgId,
-      OR: [
-        // Active sessions for my department or org-wide
-        { status: "ACTIVE", departmentId: me?.departmentId || undefined },
-        { status: "ACTIVE", departmentId: null },
-        // Managers see all their sessions (any status)
-        ...(userIsManager ? [{ createdBy: userId }] : []),
-      ],
+      OR: visibility,
     },
     include: {
       _count: { select: { responses: true } },
