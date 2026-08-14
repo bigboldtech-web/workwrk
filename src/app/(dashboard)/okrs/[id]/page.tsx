@@ -177,11 +177,15 @@ export default async function OkrDetailPage(
     .flatMap((kr) => kr.checkIns.map((c) => c.createdAt))
     .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
+  // NONE = the owner opted this goal out of check-in reminders. Treat it
+  // like COMPLETED for staleness — never nag (mirrors the okr-reminders
+  // cron, which skips NONE goals), so the detail page and the cron agree.
+  const cadenceOff = okr.checkInCadence === "NONE";
   const cadenceDays = CADENCE_DAYS[okr.checkInCadence] ?? 7;
   const { isStale, daysSinceLastCheckin } = checkinRecency(
     lastCheckIn,
     cadenceDays,
-    okr.status === "COMPLETED",
+    okr.status === "COMPLETED" || cadenceOff,
   );
 
   const canEditLinks =
@@ -283,7 +287,9 @@ export default async function OkrDetailPage(
                 </span>
                 {okr.quarter && <span className="okrd__chip">{okr.quarter}</span>}
                 <span className="okrd__chip"><Calendar /> {fmtDate(okr.startDate)} → {fmtDate(okr.endDate)}</span>
-                <span className="okrd__chip"><Clock /> {okr.checkInCadence.toLowerCase()} check-ins</span>
+                <span className="okrd__chip">
+                  <Clock /> {cadenceOff ? "No check-in reminders" : `${okr.checkInCadence.toLowerCase()} check-ins`}
+                </span>
               </div>
             </div>
             <div className="okrd__hero-side">

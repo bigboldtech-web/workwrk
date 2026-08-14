@@ -32,11 +32,14 @@ const LEVEL_OPTIONS: { value: GoalLevel; label: string }[] = [
   { value: "INDIVIDUAL", label: "Individual" },
 ];
 
-type Cadence = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+// "NONE" silences the check-in reminder cron (src/app/api/cron/okr-reminders)
+// for this one goal — a first-class opt-out, not a hidden sentinel.
+type Cadence = "WEEKLY" | "BIWEEKLY" | "MONTHLY" | "NONE";
 const CADENCE_OPTIONS: { value: Cadence; label: string }[] = [
   { value: "WEEKLY", label: "Weekly" },
   { value: "BIWEEKLY", label: "Biweekly" },
   { value: "MONTHLY", label: "Monthly" },
+  { value: "NONE", label: "None" },
 ];
 
 // Mirrors isManager() server-side (api-helpers): only these levels may
@@ -103,7 +106,9 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
   const [endDate, setEndDate] = useState(toDateInput(goal?.endDate));
   const [quarter, setQuarter] = useState(goal?.quarter ?? "");
   const [cadence, setCadence] = useState<Cadence>(
-    goal?.checkInCadence === "BIWEEKLY" || goal?.checkInCadence === "MONTHLY"
+    goal?.checkInCadence === "BIWEEKLY" ||
+    goal?.checkInCadence === "MONTHLY" ||
+    goal?.checkInCadence === "NONE"
       ? goal.checkInCadence
       : "WEEKLY",
   );
@@ -310,6 +315,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                   </button>
                 ))}
               </div>
+              {cadence === "NONE" && (
+                <p className="mt-1 text-[11px] text-zinc-400">
+                  No check-in reminders for this goal.
+                </p>
+              )}
             </div>
           </div>
 

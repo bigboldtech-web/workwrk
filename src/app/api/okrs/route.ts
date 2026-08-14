@@ -261,8 +261,11 @@ export async function POST(req: NextRequest) {
     if (!parent) return jsonError("Parent goal not found in this organization", 400);
   }
 
+  // NONE is a first-class opt-out: it silences the check-in reminder cron
+  // (src/app/api/cron/okr-reminders) for this goal. checkInCadence is a
+  // String column, so no migration is needed to carry the sentinel.
   const cadence =
-    checkInCadence && ["WEEKLY", "BIWEEKLY", "MONTHLY"].includes(checkInCadence)
+    checkInCadence && ["WEEKLY", "BIWEEKLY", "MONTHLY", "NONE"].includes(checkInCadence)
       ? checkInCadence
       : "WEEKLY";
 
@@ -445,6 +448,13 @@ export async function PATCH(req: NextRequest) {
     const lvl = normalizeGoalLevel(updates.level);
     if (lvl) updates.level = lvl;
     else delete updates.level;
+  }
+  // checkInCadence is a free String column — only let known values through
+  // (NONE opts the goal out of the check-in reminder cron). A garbage value
+  // must never reach the column or the cron's cadence lookup.
+  if ("checkInCadence" in updates &&
+      !["WEEKLY", "BIWEEKLY", "MONTHLY", "NONE"].includes(updates.checkInCadence as string)) {
+    delete updates.checkInCadence;
   }
   if (typeof updates.ownerId === "string" && updates.ownerId !== existing.ownerId) {
     const owner = await prisma.user.findFirst({
