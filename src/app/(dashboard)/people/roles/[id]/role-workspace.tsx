@@ -28,6 +28,8 @@ import { KpiDialog, type KpiDialogKpi } from "@/components/alignment/kpi-dialog"
 
 // ─────────────────────────── types ───────────────────────────
 type Person = { id: string; firstName: string | null; lastName: string | null; email: string; avatar: string | null };
+/** A role holder + how many of the role's template KRAs they're missing. */
+type Holder = Person & { missingKras: number };
 type KpiDirection = "HIGHER" | "LOWER" | "MAINTAIN";
 type Kpi = {
   id: string; name: string; description: string | null; unit: string | null; frequency: string; type: string;
@@ -48,7 +50,7 @@ export interface RoleBundle {
   boundaries: Boundary[];
   thresholds: Threshold[];
   instances: Instance[];
-  people: Person[];
+  people: Holder[];
   allAreas: Area[];
   allRoles: { id: string; title: string }[];
   allKras: { id: string; name: string; category: string | null }[];
@@ -509,8 +511,28 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
   const [kraDialog, setKraDialog] = useState<{ kra?: Kra } | null>(null);
   const [kpiDialog, setKpiDialog] = useState<{ kraId: string; kraName: string; kpi?: KpiDialogKpi } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
+  const [seedingId, setSeedingId] = useState<string | null>(null);
 
   const onSaved = (msg: string) => { toast(msg); router.refresh(); };
+
+  // Backfill a drifted holder's assignments from this job title's templates.
+  // Same endpoint the Instances panel uses; idempotent (skipDuplicates).
+  const seedHolder = async (p: Holder) => {
+    setSeedingId(p.id);
+    try {
+      const res = await fetch(`/api/users/${p.id}/seed-alignment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ roleId: bundle.role.id }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d?.error ?? "Couldn't seed assignments"); return; }
+      toast(`Seeded ${personName(p)} from ${bundle.role.title}`);
+      router.refresh();
+    } catch {
+      toast("Network error");
+    } finally { setSeedingId(null); }
+  };
 
   const runConfirm = async () => {
     if (!confirm) return;
@@ -701,20 +723,51 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
         <div className="mt-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">People with this job title</div>
           <div className="flex flex-wrap items-center gap-1.5">
-            {bundle.people.map((p) => (
-              <Link
-                key={p.id}
-                href={`/people/${p.id}`}
-                title={personName(p)}
-                className="inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border border-zinc-200 hover:bg-zinc-50"
-              >
-                <Avatar className="h-5 w-5">
-                  {p.avatar ? <AvatarImage src={p.avatar} alt="" /> : null}
-                  <AvatarFallback className="text-[9px]">{initials(p)}</AvatarFallback>
-                </Avatar>
-                <span className="text-[12px] text-zinc-700">{personName(p)}</span>
-              </Link>
-            ))}
+            {bundle.people.map((p) => {
+              const totalTemplates = bundle.kras.length;
+              const missing = Math.min(Math.max(p.missingKras ?? 0, 0), totalTemplates);
+              const drifted = missing > 0;
+              return (
+                <span
+                  key={p.id}
+                  className={`inline-flex items-center gap-1.5 h-7 pl-1 pr-2.5 rounded-full border ${drifted ? "border-amber-300 bg-amber-50/50" : "border-zinc-200"}`}
+                >
+                  <Link
+                    href={`/people/${p.id}`}
+                    title={personName(p)}
+                    className="inline-flex items-center gap-1.5 hover:opacity-80"
+                  >
+                    <Avatar className="h-5 w-5">
+                      {p.avatar ? <AvatarImage src={p.avatar} alt="" /> : null}
+                      <AvatarFallback className="text-[9px]">{initials(p)}</AvatarFallback>
+                    </Avatar>
+                    <span className="text-[12px] text-zinc-700">{personName(p)}</span>
+                  </Link>
+                  {drifted ? (
+                    <>
+                      <span
+                        className="text-[10.5px] font-medium text-amber-600 whitespace-nowrap"
+                        title={`Missing ${missing} of this job title's ${totalTemplates} template KRA assignment${totalTemplates === 1 ? "" : "s"}`}
+                      >
+                        missing {missing} of {totalTemplates}
+                      </span>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          disabled={seedingId === p.id}
+                          onClick={() => void seedHolder(p)}
+                          title="Backfill the missing KRA assignments from this job title's templates"
+                          className="inline-flex items-center gap-0.5 text-[10.5px] font-medium text-[var(--os-brand)] hover:underline disabled:opacity-50"
+                        >
+                          {seedingId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                          Seed
+                        </button>
+                      ) : null}
+                    </>
+                  ) : null}
+                </span>
+              );
+            })}
           </div>
         </div>
       ) : null}

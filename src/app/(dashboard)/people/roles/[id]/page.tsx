@@ -88,6 +88,23 @@ export default async function RolePage(props: {
 
   const stripEmail = <T extends { email: string }>(p: T): T => (canEdit ? p : { ...p, email: "" });
 
+  // Drift check — which holders are missing any of this job title's template
+  // KRA assignments. Auto-seeding only fires on hire/role-change, so a KRA
+  // attached later (or a legacy holder) silently drifts. One grouped count
+  // query; the workspace renders an amber "missing N of M" note + a Seed
+  // action (POST /api/users/[id]/seed-alignment) per drifted holder.
+  const templateKraIds = role.kraTemplates.map((k) => k.id);
+  const holderIds = role.users.map((u) => u.id);
+  const seededCounts = new Map<string, number>();
+  if (templateKraIds.length > 0 && holderIds.length > 0) {
+    const grouped = await prisma.kRAAssignment.groupBy({
+      by: ["userId"],
+      where: { userId: { in: holderIds }, kraId: { in: templateKraIds } },
+      _count: { _all: true },
+    });
+    for (const g of grouped) seededCounts.set(g.userId, g._count._all);
+  }
+
   // Serialize into plain shapes the client workspace renders.
   const bundle = {
     role: {
@@ -116,7 +133,10 @@ export default async function RolePage(props: {
     boundaries: role.boundaries.map((b) => ({ id: b.id, relation: b.relation as string, area: b.area })),
     thresholds: role.thresholds.map((t) => ({ id: t.id, label: t.label, trigger: t.trigger, value: t.value, unit: t.unit, businessHoursOnly: t.businessHoursOnly })),
     instances: role.instances.map((i) => ({ id: i.id, name: i.name, status: i.status, scope: i.scope, user: i.user ? stripEmail(i.user) : i.user })),
-    people: role.users.map(stripEmail),
+    people: role.users.map((u) => ({
+      ...stripEmail(u),
+      missingKras: templateKraIds.length - (seededCounts.get(u.id) ?? 0),
+    })),
     allAreas,
     allRoles,
     allKras,

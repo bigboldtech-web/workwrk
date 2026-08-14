@@ -11,7 +11,9 @@
  *   - Save updates all KPIRecord rows for the period and triggers
  *     PerformanceScore recalculation server-side.
  *
- * Period toggle (top): week / month / quarter — used as the KPIRecord.period key.
+ * Period toggle (top): week / month / quarter — the review CADENCE. The
+ * KPIRecord.period storage key is always the canonical "YYYY-MM" month key
+ * (see periodKey below): goals/KR derivation reads only canonical keys.
  *
  * Reads:
  *   GET /api/users?managerId=me
@@ -62,17 +64,20 @@ const AV_PALETTE = ["var(--os-c-blue)", "var(--os-c-green)", "var(--os-c-orange)
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
 
-function periodKey(p: Period): string {
+/**
+ * KPIRecord.period storage key — ALWAYS the canonical "YYYY-MM" month key,
+ * whatever the review cadence. lib/alignment.ts#latestKpiValues (which
+ * drives goal key results and every "latest reading" surface) reads ONLY
+ * canonical month keys, so the legacy "YYYY-Www"/"YYYY-Qn" keys this page
+ * used to write were invisible to goals forever. Weekly/quarterly cadences
+ * now land on the month they fall in — a weekly review simply updates the
+ * current month's reading in place (POST /api/kpi-records upserts on
+ * kpiId+userId+period). Historical W/Q rows are left untouched; derivation
+ * already ignores them.
+ */
+function periodKey(): string {
   const d = new Date();
-  if (p === "week") {
-    // ISO-ish week key. Monday-based ISO weeks are robust across years.
-    const onejan = new Date(d.getFullYear(), 0, 1);
-    const weekNum = Math.ceil((((d.getTime() - onejan.getTime()) / 86400000) + onejan.getDay() + 1) / 7);
-    return `${d.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
-  }
-  if (p === "month") return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  const q = Math.floor(d.getMonth() / 3) + 1;
-  return `${d.getFullYear()}-Q${q}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 function scoreColor(score: number, lowerIsBetter = false): string {
@@ -92,7 +97,8 @@ type SubjectState = {
 };
 
 export default function ReviewPage() {
-  const [period, setPeriod] = useState<Period>("week");
+  // Default to the monthly cadence — the canonical recording rhythm.
+  const [period, setPeriod] = useState<Period>("month");
   const [reports, setReports] = useState<ApiUser[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [subjectMap, setSubjectMap] = useState<Map<string, SubjectState>>(new Map());
@@ -102,7 +108,7 @@ export default function ReviewPage() {
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
-  const period$ = periodKey(period);
+  const period$ = periodKey();
 
   // Org scoring bands drive the score-chip color + legend (set in
   // Settings → Scoring & reviews).

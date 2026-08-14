@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -159,6 +160,13 @@ function getOutcomeBadge(outcome: string) {
   }
 }
 
+// Mirror of the API's isManager() tier (lib/api-helpers) — POST /launch
+// 403s below this, so the DRAFT launch banner must not render a button
+// that can only fail for the viewer.
+const MANAGER_TIER = new Set([
+  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR",
+]);
+
 const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
   quality: { label: "Quality of Work", anchors: ["Consistently below standard", "Sometimes meets standard", "Meets expectations", "Often exceeds expectations", "Exceptional quality"] },
   reliability: { label: "Reliability & Accountability", anchors: ["Unreliable", "Needs reminders", "Dependable", "Very reliable", "Exemplary accountability"] },
@@ -170,6 +178,8 @@ const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
 export default function ReviewCycleDetailPage() {
   const { id: cycleId } = useParams();
   const router = useRouter();
+  const { data: session } = useSession();
+  const canLaunch = MANAGER_TIER.has(session?.user?.accessLevel ?? "");
 
   const [cycle, setCycle] = useState<CycleData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -564,8 +574,10 @@ export default function ReviewCycleDetailPage() {
 
         {/* DRAFT cycles haven't generated any per-person reviews yet —
             launching is what creates them (one per active employee,
-            reviewer = their manager) and moves the cycle to Active. */}
-        {cycle.status === "DRAFT" && (
+            reviewer = their manager) and moves the cycle to Active.
+            Manager tier only: mirrors the API's isManager gate, so
+            non-managers never see a launch button that just 403s. */}
+        {cycle.status === "DRAFT" && canLaunch && (
           <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3">
             <div className="flex-1 min-w-[220px]">
               <p className="text-sm font-medium">This cycle hasn&apos;t been launched yet</p>

@@ -55,13 +55,14 @@ export async function POST(
     status: "PENDING" as const,
   }));
 
-  await prisma.review.createMany({ data: reviewData });
-
-  // Update cycle status to ACTIVE
-  await prisma.reviewCycle.update({
-    where: { id },
-    data: { status: "ACTIVE" },
-  });
+  // Create the reviews and flip the cycle ACTIVE atomically — a crash
+  // between the two would strand a cycle with reviews still in DRAFT (or,
+  // reordered, an ACTIVE cycle with zero reviews) that the dedupe guard
+  // above then refuses to re-launch.
+  await prisma.$transaction([
+    prisma.review.createMany({ data: reviewData }),
+    prisma.reviewCycle.update({ where: { id }, data: { status: "ACTIVE" } }),
+  ]);
 
   // Create notifications for all employees
   const notifications = employees.map((emp) => ({

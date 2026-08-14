@@ -1206,13 +1206,15 @@ export const APPS: AppEntry[] = [
   // the People section below.
 
   // ── People ──────────────────────────────────────────────────
-  { key: "reviews", label: "Reviews", Icon: ClipboardCheck, defaultHref: "/reviews",
+  // "Review cycles", not "Reviews" — the Teams sidebar's weekly "Reviews"
+  // queue keeps that name, and the two colliding was the confusion.
+  { key: "reviews", label: "Review cycles", Icon: ClipboardCheck, defaultHref: "/reviews",
     matchPaths: ["/reviews"], category: "People", requiredAccess: "hr-admin",
     // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
     // reviews-client.tsx, so repeat "+" clicks re-open it).
     createActions: [{ label: "Start review cycle", icon: ClipboardCheck, href: "/reviews?new=1", requiredAccess: "manager" }],
     Sidebar: linksSidebar([
-      { href: "/reviews", label: "Reviews", Icon: ClipboardCheck },
+      { href: "/reviews", label: "Review cycles", Icon: ClipboardCheck },
       { href: "/talent",  label: "Talent (9-box)", Icon: Award },
     ]) },
   { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor",
