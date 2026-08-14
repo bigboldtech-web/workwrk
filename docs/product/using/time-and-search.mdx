@@ -1,0 +1,138 @@
+---
+title: Time tracking and finding things
+description: Task timers, how tracked time reaches your weekly timesheet, the approval flow, and an honest map of what search actually covers.
+---
+
+# Time tracking and finding things
+
+Two unglamorous surfaces you will use every day. Both have sharp edges worth knowing before you rely on them.
+
+---
+
+## Tracking time on a task
+
+Time is tracked **against a task**. There are three ways to start:
+
+- the **Track time** field in the task detail: a play button and your running total
+- **Start timer** in a task row's `…` or right-click menu
+- the topbar timer pill, which appears whenever a timer is running and stops it in one click
+
+Only one timer runs at a time per person. While one is running, the pill in the topbar shows the task and a live clock; the task's own Track time field shows the same clock in red.
+
+Click the total (not the play button) in the task detail to open the full tracker: your recent sessions, and a manual-entry form for time you forgot to track.
+
+### The one gotcha with manual entries
+
+**Stopping a running timer** on a task writes an entry into your weekly timesheet. **Adding a manual entry** does not. Manual entries count toward the task's tracked total and show in the session list, but they never reach your timesheet.
+
+If the time needs to appear on your timesheet, run the timer.
+
+---
+
+## How tracked time becomes a timesheet
+
+When you stop a task timer, the system:
+
+1. Closes the session and stores its duration.
+2. Finds (or creates) your **DRAFT** timesheet for the week that contains the stop time. Weeks start Monday, in UTC.
+3. Appends a time entry to it, in hours rounded to two decimals, on that day, described with the task's title and linked back to the task.
+
+If the week's timesheet has already been submitted or approved, **nothing is written**. A locked week is never silently modified. Track the time, then talk to whoever approves your sheets.
+
+---
+
+## The Timesheets page
+
+`/timesheets` opens on four stat tiles (drafts, submitted, approved, hours logged) and four scopes:
+
+| Scope | Who can use it | What it shows |
+| --- | --- | --- |
+| **Mine** | Everyone | Your recent weeks. |
+| **Approve queue** | Managers | Submitted weeks assigned to you, plus unassigned ones. |
+| **Team** | Managers | Your full report tree, direct and indirect. |
+| **All** | Managers | Org-wide. |
+
+**Start this week** opens (or reopens) the current week's timesheet so entries have somewhere to land. It is idempotent: pressing it twice does not create two sheets.
+
+Click a row to expand it and see its entries, with the task each entry came from.
+
+Row actions depend on status:
+
+- A **Draft** week can be **Submit**ted.
+- A **Submitted** week can be **Retract**ed back to draft.
+- In the **Approve queue**, a submitted week can be **Approve**d or **Reject**ed.
+
+There is no control on this page for typing a time entry by hand. Entries arrive from stopped task timers.
+
+---
+
+## Finding things
+
+### Search (Cmd/Ctrl + K)
+
+The command palette opens with **Cmd + K** (**Ctrl + K** on Windows and Linux) or the search box in the topbar. Type at least two characters and results come back live from the server.
+
+**What search actually covers today:**
+
+- People
+- Notes and documents (access-checked, so private notes never appear in someone else's results)
+- SOPs
+- Goals
+- Departments
+- Meetings
+- Policies
+- Announcements
+- Ideas
+- Legacy tasks (the older task table, not board tasks)
+
+**What search does not cover today:**
+
+- **Tasks on Lists.** This is the big one. Board tasks are not in the search index, so searching a task title finds nothing. Use **Everything** or the List's own search box instead.
+- Spaces, Folders and Lists
+- Whiteboards, files and tables
+
+Two more things to know about the palette, so you do not mistake decoration for data:
+
+- With an **empty query**, the sections show **placeholder sample content** (invented tasks, documents, people and Spaces) as a layout demonstration. Several of those rows link to routes that do not exist. Ignore them and type your query.
+- The **Actions** rows in the palette (Create task, New doc, Schedule meeting, and the rest) are decorative. Clicking one closes the palette and does nothing.
+
+The **Navigate** and **Command** rows, by contrast, are real links to real pages.
+
+### Other keyboard shortcuts
+
+| Shortcut | Does |
+| --- | --- |
+| **Cmd/Ctrl + K** | Open or close the search palette. |
+| **Cmd/Ctrl + J** | Open or close the AI panel. |
+| **Cmd/Ctrl + T** | Quick task modal. Some browsers reserve this for a new tab. |
+| **Cmd/Ctrl + B** | Collapse or expand the sidebar. |
+| **Cmd/Ctrl + 1-9** | Jump to the Nth pinned app in the rail. |
+| **Escape** | Close the palette. |
+
+### Better ways to find a task
+
+Since search does not index board tasks, use these instead:
+
+- **Everything** (`/everything`): every task you are allowed to read across all Spaces, newest 500, grouped by status, with the full List-view toolbar. The search box and filters in that toolbar work over the whole set.
+- **A List's own search**: the magnifier in the board toolbar filters that List's tasks by title as you type.
+- **My Wrk** (`/tasks`) and its sub-pages: **Assigned to me**, **Today & Overdue**, **Personal List**.
+- **Filters** on any view, which are far more precise than text search: field, operator, value, joined with AND or OR, and savable.
+
+### Finding notes and files
+
+- The **Library** (`/library`) has a search box per tab and Space chips to narrow by Space.
+- The **Docs** home has its own search, sort and tabs.
+- **Mentions** (`/me/mentions`) collects every place across documents and SOPs where someone `@`-mentioned you, with the surrounding text as the excerpt. Clicking a row jumps to the exact block.
+
+---
+
+## Inbox, and what actually reaches it
+
+`/inbox` sorts notifications into Primary, Other, Later (snoozed) and Cleared.
+
+Be realistic about what arrives there. **Comment mentions on a task create a notification.** Assigning a task, changing its status, and a due date arriving currently create **none**. Until that changes, treat the Inbox as a mentions feed, not a work queue, and use My Wrk and the "assigned to me" filters to see what is on your plate.
+
+Two related surfaces to set expectations on:
+
+- **Assigned Comments** in the sidebar renders its empty state permanently. Assigning a comment to a person is not built yet, so there is no data behind either tab.
+- **Favorites** in the sidebar (the section with your starred Spaces, Lists, Docs, Folders, tables, whiteboards and files) is the real favorites list. The separate `/favorites` page is something else entirely: it is the pinboard for your pinned AI chats.

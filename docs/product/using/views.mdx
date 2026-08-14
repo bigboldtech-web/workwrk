@@ -1,0 +1,126 @@
+---
+title: Views
+description: The 17 view types a List can render, what each one is for, and how filters, grouping, hidden columns and per-view settings are saved.
+---
+
+# Views
+
+A List holds tasks once. A **view** is a way of drawing them. Adding a Calendar view to a List does not copy anything: it is the same tasks, arranged by date.
+
+Views appear as tabs above the board. Click a tab to switch. Drag a tab to reorder it, and the new order is saved for everyone. Right-click a tab for **Rename**, **Set default**, **Duplicate** and **Delete** (the last view on a List cannot be deleted).
+
+---
+
+## Adding a view
+
+Click **+ View** at the end of the tab strip. The panel has three sections:
+
+**Popular**: List, Gantt, Calendar, Doc, Board, Form, Dashboard.
+
+**Everything else**: Table, Whiteboard, Activity, Workload, Team, Mind Map, Map, Chart, Timeline, Cards, Pivot, Hierarchy, File gallery.
+
+**Embed**: Any website, Google Sheets, Google Docs, Google Calendar, Google Maps, YouTube, Figma.
+
+Two honest notes on that panel:
+
+- The **Embed** tiles are not built. Clicking one shows a "coming soon" toast and creates nothing. The same goes for the magnifier in the search box, which is an AI-create placeholder. Typing in that box does work: it filters the tiles by name.
+- The **Private view** checkbox is recorded on the view but is **not enforced yet**. Everyone with access to the List still sees the tab. The **Pin view** checkbox likewise only shows a toast.
+
+Two tiles are the same underlying type with a different preset. **List** and **Table** are both table views; Table uses the denser grid with a horizontal scroll. **Workload** and **Team** are both the workload type; Team renders one column per assignee instead of a capacity grid. **Mind Map** creates a Whiteboard.
+
+---
+
+## What each view is for
+
+### Views that draw the task list
+
+These all read the same filtered set of tasks and all get the toolbar filter menu.
+
+**List / Table**: the workhorse. One row per task, inline-editable title, status pill, and a column per built-in or custom field. Rows nest subtasks underneath their parent. The toolbar carries group-by, subtask expand/collapse, a Columns button, filters, a "only my tasks" toggle, sort, CSV export and a quick search.
+
+**Board (Kanban)**: one column per status. Drag a card between columns to change its status. Cards carry the same controls as a row: title rename, assignee, due date, priority, tags, plus a hover rail for mark-complete, add-subtask and the `…` menu.
+
+**Calendar**: a month grid bucketed by due date. `+` on a day creates a task due that day; drag a chip to another day to reschedule it.
+
+**Gantt**: a sticky name column beside a 12-week timeline. Tasks with dates render as bars you can drag to move or grab by an edge to resize; tasks with no dates park as a marker on today so they are never invisible. The Backlog toggle docks an Unscheduled/Overdue panel you can drag rows out of onto the timeline.
+
+**Timeline**: the read-only sibling of Gantt: one swimlane per status, bars spanning start to due, undated tasks collected below. Use Gantt when you want to edit dates, Timeline when you want to read the plan.
+
+**Workload**: a people-by-day capacity grid. Its **Team** variant is a per-person kanban: one column per assignee.
+
+**Cards**: every task as a card in a responsive grid, with the first line of the description as the card body. Kanban minus the columns.
+
+**Hierarchy**: an expand/collapse tree of parent-to-subtask chains, depth-first, with status and assignee on each node.
+
+**Pivot**: a two-axis cross-tab with an aggregate per cell (a count, or the sum of a numeric field) plus row and column totals. Axes can be status, owner, priority or any choice field.
+
+**Chart**: bar, pie, line or a single number, grouped by status, owner, priority or a choice field, metered by count or by the sum of a numeric field. Line mode ignores the grouping and plots tasks created per week.
+
+**Dashboard**: a fixed board-scoped report: stat cards plus status, priority and owner breakdowns. There is no per-widget configuration in this view.
+
+**Map**: groups tasks by the value of a Location field and renders a card per place with its tasks and an open-in-Google-Maps link. There is no interactive pin map yet; this view makes location data usable, it does not draw a map.
+
+### Views that hold content instead of tasks
+
+These do not show the task list and do not get the filter menu.
+
+**Doc**: embeds a document as a tab on the List, with the full block editor. Create a new one or connect an existing one.
+
+**Whiteboard**: embeds an Excalidraw canvas as a tab, with the same autosave as a standalone whiteboard. Viewers without edit rights get read-only mode.
+
+**Form**: hosts an intake form whose submissions create tasks on this List. Create a new form targeting the List or connect an existing one, then use Edit, Copy link or Change.
+
+**File gallery**: a grid of every file attached to this List's tasks. Images get real thumbnails, everything else gets an icon. Clicking a card opens the task that owns the file.
+
+**Activity**: a chronological board-wide feed of every change across every task on the List. Each row carries a chip that opens the task.
+
+---
+
+## Filtering
+
+The **Filter** button in the toolbar (the one below the tabs, not the inert one on the title row) opens a rule builder:
+
+- Each rule is *field · operator · value*.
+- Operators: is, is not, is set, is not set, is before, is after, is on, contains.
+- Fields: status, assignee, priority, due date, tags, title, task type, and any custom field on the List.
+- Rules join with **AND** or **OR**, chosen once for the whole set.
+- A **hide done** switch drops anything in a Done-group status.
+- A free-text search box narrows by title.
+
+You can name and save a rule set, then reapply it later from the same menu.
+
+The filter applies to every task-driven view on that tab, so a Calendar view and a Chart view can hold different filters on the same List.
+
+---
+
+## What is saved, and where
+
+Per-view configuration is stored on the view itself on the server, not in your browser, so it is the same for everyone who opens that tab, on any device.
+
+Saved per view:
+
+- filters, and saved filter sets
+- hidden columns and the optional built-in columns you switched on (task type, start date, tags, created, updated, task ID)
+- group-by field and direction
+- column widths
+- the column-header sort (click a column heading to sort by it)
+- Chart type, group-by and metric
+- Pivot row axis, column axis and metric
+- Gantt zoom level and whether the backlog panel is docked
+- Workload capacity settings
+- which Doc, Whiteboard or Form a content view is pointing at
+
+Not saved, and personal to you for as long as the page is open: which subtask rows you have expanded, the "only my tasks" toggle, the toolbar's quick search, and the toolbar's sort dropdown (as opposed to the column-header sort, which is saved).
+
+---
+
+## Columns and fields
+
+**Columns** opens the field shelf. It manages two things at once:
+
+- **Built-in columns.** Some are on by default (assignee, due date, priority) and hide from here. Others are off by default (task type, start date, tags, created, updated, task ID) and switch on from here.
+- **Custom fields.** These are defined per List. If the Space's Custom Fields module is off, the shelf still manages built-in columns but cannot create custom fields, and custom-field columns do not render.
+
+Hiding a column only affects the current view. The task detail always shows every field regardless of what the view hides.
+
+**Statuses** next to it edits the List's own status set: value, label, colour, and whether each status counts as Active, Done or Closed.

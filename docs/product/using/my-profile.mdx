@@ -1,0 +1,96 @@
+---
+title: Your profile (Me)
+description: The Me page: your job title, your KRAs and KPI readings, recording your numbers, your goals, and your review record.
+---
+
+# Your profile (Me)
+
+**Me** is the first row in the Home sidebar. It goes to `/people/me`, which resolves to your own person page at `/people/<your id>`.
+
+This is your career home. It answers three questions in one place: what am I accountable for, how is it reading, and what is the record.
+
+---
+
+## Three views of the same page
+
+The same route renders in one of three modes, decided on the server before anything is drawn:
+
+- **Self**: your own page. Your job title and description, your KRAs with **your** KPI readings, the recorder for your own numbers, your goals, your reviews, your assets.
+- **Manage**: a manager or an org-wide viewer looking at a report. The same narrative about that person, plus Edit profile, Manage alignment, and recording numbers on their behalf.
+- **Peer**: a colleague you do not manage. A minimal directory card: name, title, department, manager. No KPI readings, no reviews, no mood check-ins, no scores.
+
+The mode is not a UI toggle. The APIs behind the page enforce the same ladder again, so a peer cannot pull a report's numbers by calling them directly.
+
+---
+
+## Your KRAs and KPIs
+
+The **My KRAs & KPIs** section is the core of the page.
+
+KRAs come **with your job title**. You do not create them here. If yours is empty, the page says so plainly: "KRAs come with your job title: once your role's template is defined, they appear here." Ask your manager, or whoever owns the role definition, to define them on the role.
+
+The section header shows the **total weight** across your KRAs and the current measurement period.
+
+Each KRA card shows its name, the job title it came from (as a link to that role's page), its **weight**, its description, and then one row per KPI underneath. A KRA whose role has been detached shows an amber "No job title" marker instead of pretending.
+
+Each KPI row shows:
+
+| Element | Meaning |
+| --- | --- |
+| Star icon | This is a north-star KPI. |
+| Direction arrow | Higher is better, lower is better, or hold the line. |
+| **Shared** chip | A shared gauge: you influence it and it is reviewed, but you are not graded on it. Absence of the chip means you own it. |
+| Coloured dot | Health against the healthy line: Healthy, At risk, Off track, or No baseline. |
+| Value | Your latest reading and its period, or "No reading". |
+| Target | The healthy line, or "no baseline yet" when the KPI has none. |
+| Status chip | Where this period's record stands: Pending, Submitted, Approved or Sent back. |
+
+Two honesty rules are built into this display. A KPI with no target reads **"no baseline yet"** rather than inventing a line, and a KPI with no reading reads **"No reading"** rather than showing a zero.
+
+### Recording your numbers
+
+**Record my numbers** opens the recorder inline. Pick a period, expand a KRA, and type the actual value for each KPI, with an optional note.
+
+Saving a self-report writes a **SUBMITTED** record into the manager approval loop. It is not final until your manager signs off, which is why the row's status chip moves from Pending to Submitted and then to Approved or Sent back. Your note travels with it and is visible to your manager at sign-off.
+
+A manager recording numbers on a report's behalf writes through the manager path instead, and their notes are stored separately as manager notes.
+
+---
+
+## Your goals
+
+The **My goals** section lists the goals you carry this quarter with their status chip and progress bar. Each row links to the goal detail page.
+
+The number here is the same derived rollup the Goals page shows: it reads **"—"** when nothing about the goal is measured yet, not `0%`. If you have no goals, the section offers a link to set one.
+
+**All goals** in the section header goes to `/okrs?mine=1`, filtered to goals you own or contribute to.
+
+---
+
+## The record: tabs at the bottom
+
+| Tab | Contents |
+| --- | --- |
+| **My reviews** | Your performance reviews as the subject, with the cycle name and who reviewed you. On your own page it also links to **My weekly review**. |
+| **KPI history** | Past KPI records: the KPI name, its period, the score, and actual-over-target. A record awaiting sign-off shows "Pending" instead of a score. |
+| **Skills** | Skills with your self-rating out of 10, and your manager's rating when one exists. |
+| **Kudos** | Kudos you have received. |
+| **Check-ins** | Your daily mood check-ins: the mood, what went well, challenges, and tomorrow's plan. |
+| **Assets** | Equipment assigned to you. |
+| **Direct Reports** | Only appears if you have reports. Cards linking to each person's page. |
+
+Managers looking at a report see extra blocks above the tabs: a composite score with its breakdown, a performance trend chart when there is history, and four stat tiles (average KPI, active KRAs, average mood, latest review score). Where there is no data, these read "N/A" rather than a fabricated figure.
+
+---
+
+## My weekly review
+
+`/me/weekly-review` is the heartbeat surface, linked from the Reviews tab on your own page.
+
+It opens the current week's review, creating a draft if one does not exist, and gives you:
+
+- a progress slider for each of your active KRAs
+- a snapshot input for each KPI under those KRAs
+- **Highlights**, **Blockers** and **Plan** text areas
+
+You can **Save draft**, **Submit**, or reopen a submitted week. A banner at the top shows where the week stands: Draft, Submitted or Acknowledged, plus your manager's status (Pending, Approved or Changes requested).

@@ -1,0 +1,121 @@
+---
+title: Goals
+description: Creating a goal, the difference between the owner and contributors, adding targets, checking in, and where the single progress number comes from.
+---
+
+# Goals
+
+A goal in WorkwrK is one record with **one accountable owner**, **many contributors**, and **one progress number**. There are no per-person copies of a shared goal, so there is never a question about whose number is the real one.
+
+Goals live at `/okrs`, reached from **Goals** in the left rail.
+
+---
+
+## The Goals page
+
+The page opens with a stats strip (average progress, on track, needs attention, completed), then one card per level:
+
+- **Company Goals**: what the whole company is pushing toward
+- **Department Goals**: how each department supports the company goals
+- **Individual Goals**: what each person commits to this cycle
+
+Each goal is a row linking to its detail page: name, level chip, quarter or due date, the contributor avatar stack, the owner's avatar, and a thin progress bar with a percentage.
+
+`?mine=1` narrows the list to goals you carry, either as owner or as a resolved contributor. That filtering happens on the server, so it is a real narrowing, not a client-side hide.
+
+Hover a row for its `…` menu, or right-click it. The menu offers **Open**, **Edit goal**, **Assign owner**, **Copy link** and **Delete goal**. Edit, Assign owner and Delete only appear when you are actually allowed to do them, matching what the API will accept.
+
+---
+
+## Creating a goal
+
+Use the `+` on the Goals sidebar, the **New goal** button in a level card's header (which presets that level), or go to `/okrs?new=1`.
+
+The modal asks for:
+
+| Field | Notes |
+| --- | --- |
+| **Goal name** | Required. |
+| **Owner** | "Who is responsible for this Goal?" Only managers and above see this field; everyone else's goals are owned by them. |
+| **Level** | Company, Department or Individual. Non-managers can only create Individual goals. |
+| **Contributors** | People, departments and roles. Departments and roles resolve to their current members. |
+| **Start date** and **End date** | Optional. |
+| **Quarter** | Free text, for example `Q3 2026`. |
+| **Check-in cadence** | Weekly, Biweekly or Monthly. Drives the overdue-check-in warning. |
+| **Description** | Why the goal is set and how it should be achieved. |
+
+The same modal is used for editing. Open it from the `…` menu on a row or from the goal detail header.
+
+### Owner versus contributors
+
+This distinction is the point of the model, so it is worth stating plainly:
+
+- The **owner** is a single person. They are accountable. They appear in the hero of the goal page and in the owner column on the list.
+- **Contributors** are the audience: who can see the goal and push it. You add them as individual people, as whole departments, or as roles. Departments and roles are stored as references and resolved to their **current** active members whenever the goal is read. Move someone into a department and they inherit that department's goals without anyone editing the goal.
+
+Both feed the same visibility rules: a goal is visible to its owner, to its resolved contributors, to a manager looking down their report tree, and to org-wide levels. Company goals are visible to everyone. Guessing the URL of a goal you are not entitled to see returns a 404, not a redirect.
+
+---
+
+## The goal detail page
+
+The hero band carries the large progress ring, the title with its `…` menu (right-click anywhere in the hero opens the same menu), the description, and meta chips: level, status, quarter, date range, and cadence. On the right: due date, owner, and the resolved contributor stack, which is also the editor for contributors if you have edit rights.
+
+Below the hero:
+
+- **Targets**: the key results (see next section)
+- **Timeline**: the check-in history, newest first, with the target name, the new value, any note, and who logged it
+- **Cascades from**: the parent goal, shown only if you are allowed to see it
+- **Cascades to**: child goals, each showing its own rolled-up number
+- **Linked work**: Spaces, Lists and KRAs attached to this goal
+- **Custom fields**
+
+If the goal has not been checked in within its cadence, an amber banner appears at the top of the cards saying how long it has been.
+
+### Linked work does not drive progress
+
+Attaching a Space or a List to a goal is a navigation aid: it records the connection so you can jump from the objective to the projects moving it. It does **not** feed the progress number. Only targets do.
+
+---
+
+## Targets (key results)
+
+A target is a measurable result: a name, a **start** value, a **target** value, and an optional **unit** such as `%`, `$` or `users`. Add one from **+ Add** on the Targets card, or **Create a Target** from the empty state.
+
+Each target row shows the owner's avatar, the title, a progress bar with the current-over-target fraction, and a `…` menu with **Check in** and **Delete target**.
+
+### Checking in
+
+Click a row, or **Check in** from its menu, to open the check-in dialog. It shows the target's progress bar and its Start / Current / Target values, then asks for a change:
+
+1. Choose **Increase** or **Decrease**.
+2. Type the amount. This is a delta against the current value, not the new total; the dialog does the arithmetic.
+3. Add an optional note.
+4. **Save update**.
+
+The check-in lands in the goal's Timeline and the ring repaints.
+
+### Targets measured by a KPI
+
+A target can be linked to a role KPI. When it is, **the gauge is the measurement**: the target reads the KPI's latest recorded value at the moment you load the page, and hand check-ins are refused by the server.
+
+Those targets are labelled as derived and the check-in dialog shows an amber notice up front telling you to record the KPI reading instead. If you try anyway, the same notice repeats the server's answer.
+
+Nothing you typed is destroyed by this. A hand-entered value stays stored on the target; it simply is not what the UI reads while the KPI link exists.
+
+---
+
+## Where the one number comes from
+
+Progress is derived when the page is read, not stored and re-shown. The rule:
+
+1. If the goal has targets, the number rolls up from them. Each target's own progress runs from its start value toward its target value, honouring direction, so a target that improves by going **down** rises as the value falls.
+2. If the goal has no targets but has child goals that are measured, it rolls up from those children. The rollup uses org-wide context, so a parent is still correct even when you cannot see every child.
+3. If a number was set by hand and nothing else measures the goal, that hand-set number is shown.
+4. If nothing measures the goal at all, it shows **"—"**, not `0%`.
+
+That last rule is deliberate. A brand-new goal with no targets is not "0% done and behind", it is "not measured yet", and the product says so.
+
+Status follows the same source. While a goal is measured, On track / At risk / Behind / Completed is derived from the rolled-up progress rather than read from a stale column.
+
+Because it is derived in one place, the same number appears on the Goals list, on the goal detail ring, in the "Cascades to" rows on the parent, and in the Goals section of your profile. If they ever disagreed, one of them would be lying, so they do not disagree.

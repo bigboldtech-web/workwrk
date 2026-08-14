@@ -1,0 +1,113 @@
+---
+title: Docs and Library
+description: Writing in the block editor, sub-pages, version history and sharing; plus the Library's notes, whiteboards, files and tables.
+---
+
+# Docs and Library
+
+Two related surfaces. **Docs** is the writing app. **Library** is the shelf where notes, whiteboards, files and tables all sit together, filterable by Space.
+
+---
+
+## Docs
+
+### Finding and creating documents
+
+`/docs` is the All Docs home. It lists documents as a table with Name, Location, Date updated, Date viewed and Contributors.
+
+Four tabs sit on the page itself: **All**, **Recent**, **Favorites**, **Created by me**. The Docs sidebar adds four more views that the page renders but does not tab for: Shared with me, Private, Meeting Notes, Archived.
+
+Create a document from the Docs sidebar's `+`, from the `+ New` button on the list, or from a Space or Folder's `…` menu → **Create new** → **Doc**, which anchors the document to that container so it shows up in the Space's tree.
+
+Open documents stack into a browser-style tab strip across the top of the Docs area. The strip survives navigating between documents.
+
+### The editor
+
+The page is a block editor. Each block is a paragraph, heading, list item, table, image, code block and so on, and the block menu is reachable from the handle on the left of each block or by typing `/`.
+
+Around the blocks, the page carries:
+
+- an **emoji icon** and a **cover** (gradient or image) above the title
+- an inline **title** that autosaves as you type
+- a **font** choice (default, serif, mono) plus **Small text** and **Full width** toggles
+- a **Lock page** toggle that puts the document into read-only mode
+- an **outline** panel for jumping between headings
+- **reading mode**
+
+Everything autosaves. Saves use a keepalive request, so navigating away mid-edit still lands the change.
+
+### Sub-pages
+
+Documents nest. The **Pages** panel on the left of an open document shows the tree around the current page: its ancestors, its siblings, and its children. Create a child page from the panel's `+` and it opens straight away.
+
+Row actions in that panel are the same shared note menu used in the sidebar and the Docs list: Open, Open in new tab, Rename, Copy link, Add or remove favorite, Duplicate, Move to Trash.
+
+Pages cannot be dragged to reorder yet. That is deliberately absent rather than half-working.
+
+### Version history
+
+The page menu (`…`) and the history icon in the top chrome both open **Version history**. It lists the saved versions of the document; picking one restores its content, meta and title into the editor and saves that as the current state. The editor remounts on restore, so you never end up with a stale copy in memory.
+
+### The rest of the page menu
+
+- **Copy link**, **Copy page contents**, **Duplicate**, **Move to Trash**
+- **Use with AI** → **Summarize with AI** (or re-summarize) and **Extract table**
+- **Export as Markdown**
+- **Keyboard shortcuts**
+
+Trashed documents keep their row and their versions. `/docs/trash` lists them, and opening a trashed page offers to restore it.
+
+### Comments and mentions
+
+Comments attach to a specific block, not the whole page. Use the comment action on a block and the thread opens in a side panel.
+
+`@`-mentioning someone inside a document records a reference. Those references are what feed the **Mentions inbox** at `/me/mentions`.
+
+### Sharing
+
+The **Share** button opens the sharing panel:
+
+- **Public link.** Turn it on and the document gets a public URL of the form `/share/doc/<id>.<secret>` that anyone with the link can read without signing in. Turning it off revokes the secret immediately.
+- **Private link** to copy for people who already have access.
+- **Share with**, a per-person role map of **edit** or **view** for people in your org.
+- **Make private**, which restricts the document to its creator plus whoever you have explicitly listed.
+
+The creator cannot be demoted from their own document; the server strips that.
+
+Inviting someone by email from this panel is **not built**. The row is there and labelled as coming soon. Add people who are already in the org instead.
+
+---
+
+## Library
+
+`/library` has four tabs: **Notes**, **Whiteboards**, **Files**, **Tables**. Each tab has a search box and a row of Space chips (All, Unscoped, then one per Space) so you can narrow to what belongs to a given Space.
+
+Notes created from a Space chip are tagged to that Space.
+
+### Whiteboards
+
+A whiteboard is an Excalidraw canvas. The page gives you a back button, an inline-editable title, and an autosave status pill; everything else is Excalidraw's own toolbar.
+
+The `…` menu has **Rename**, **Copy link** and **Delete**, plus the star to favorite it. Whiteboards can also be embedded as a tab on a List using the Whiteboard view.
+
+Saving is debounced while you draw and flushed when you leave the page.
+
+### Files
+
+`/files` is the drive: a folder tree on the left (including a virtual **Starred** folder) and a file grid on the right with breadcrumbs and search.
+
+Drop files onto the grid, or use the picker. Each upload posts the file, then records it against the active folder. Per-file actions: star, rename, move, delete, and open in a new tab.
+
+Files also attach directly to tasks, from the task detail's linked attachments section. Files attached to a List's tasks show up in that List's File gallery view.
+
+### Tables
+
+A table is a spreadsheet-shaped data grid, separate from Lists. It is for reference data: a price book, a client list, an inventory.
+
+- Cells edit inline and save on blur. Click a column header to rename it, use the `+` header to add a column, the row-end `+` to add a row, and right-click a row or column to delete it.
+- Column types: short text, long text, number, currency, percent, rating, select, multi-select, date, checkbox, URL, email, **formula**, and the relational trio **link**, **lookup** and **rollup**, plus attachment and person.
+- **Link** points a column at another table; **lookup** pulls a column from the linked row; **rollup** aggregates it (SUM, COUNT, AVG, MIN, MAX, CONCAT).
+- **Saved views** are named and persist on the table: grid, kanban, calendar and gallery. A table always keeps at least one view.
+- **Import** takes a CSV and creates rows, adding columns it does not recognise. **Export** downloads the current table as CSV.
+
+There is a **Public** toggle in the header. Be precise about what it does: it marks the table readable through an unauthenticated read-only data endpoint. There is **no public web page** for a table yet, so there is nothing to hand a non-user to look at. Treat the toggle as an API switch, not a share link.

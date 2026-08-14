@@ -1,0 +1,167 @@
+---
+title: Spaces and tasks
+description: How to create Spaces, Folders and Lists, add tasks, work the task detail panel, use right-click menus, and act on many tasks at once.
+---
+
+# Spaces and tasks
+
+This page covers the day-to-day mechanics of the work hierarchy: making the containers, putting tasks in them, and editing a task. For what the containers mean, read Core concepts first.
+
+---
+
+## The sidebar tree
+
+Everything in the work hierarchy is reachable from the **Home** sidebar (the house icon in the left rail). It shows, top to bottom: Me, Inbox, Assigned Comments, My Wrk, Everything, then your Favorites and your Spaces.
+
+Click the chevron on a Space row to expand it. The tree lazy-loads that Space's Folders, Lists, Docs, tables and whiteboards the first time you open it and remembers the expanded state for the rest of your session.
+
+### Creating containers
+
+- **New Space**: the `+` next to the "Spaces" header, or the "New Space" row at the bottom of the list.
+- **New Folder or List inside a Space**: hover a Space row and use its `+`, or open the Space's `…` menu → **Create new**.
+- **New List inside a Folder**: the Folder's `…` menu → **Create new** → **List**.
+
+The Space wizard has two steps. Step 1 is the basics: icon, colour, name, description, the default permission members get (Full edit, Edit, Comment, View) and a Private toggle. Step 2 is the workflow: a preset, the Space owner, which views to create, the starting statuses, and which modules are on.
+
+### Modules gate what a Space's tasks can do
+
+A Space's modules decide whether Priority, Tags, Time tracking and Custom fields appear at all. Turn one off in the Space `…` menu → **Modules** and that capability disappears from the List columns, the kanban cards, the task detail and the row menus for every List in that Space. It does not delete data, it hides the controls.
+
+### Dragging things around
+
+In the sidebar you can drag:
+
+- a **List** into a Folder, or onto the Space row to move it back to the Space root
+- a **Folder** into another Folder, or onto a Folder row's top/bottom edge to reorder it among its siblings
+- a **Doc** into a Folder or to the Space root
+- a **Space** row up or down to reorder your Spaces
+
+Reordering persists immediately. If the save fails, the tree reloads from the server so what you see is always what is stored.
+
+---
+
+## Right-click menus
+
+Every Space, Folder, List and Doc row in the sidebar opens the same menu on right-click as it does from its hover `…` button. Some entries are live, some are placeholders that show a "coming soon" toast. Here is the honest split.
+
+### Space `…`
+
+Working: Favorite, Rename, Copy link, **Create new** (List, Doc, Folder), Color & Icon, Modules, Space settings, **Templates** (Browse templates, Save as template), Duplicate, Archive, Delete, Sharing & Permissions.
+
+Not built yet: Automations, Imports, Move, Hide from sidebar. Custom Fields and Task statuses show a message pointing you at the List, because both are configured per List.
+
+### Folder `…`
+
+Working: Favorite, Rename, Copy link, **Create new** (List, Doc, Whiteboard), Folder color, Templates, Archive, Delete.
+
+Not built yet: Automations, Custom Fields, Task statuses, Convert to Space, Imports, Move, Duplicate.
+
+### List `…`
+
+Working: Favorite, Rename, Copy link, List color, **Custom Fields** (opens the List's Fields panel), **Task statuses** (opens the status editor), Default task type (goes to Settings → Task types), List info, Browse templates, Save as template, Archive, Delete, Sharing & Permissions.
+
+Not built yet: Email to List, Automations, Imports, Move, Duplicate.
+
+### Task row `…` or right-click
+
+The task menu is the same everywhere: List rows, kanban cards, and the chips, bars, cards and tree rows in Calendar, Gantt, Timeline, Hierarchy and Cards views.
+
+Working: **Copy link**, **Copy ID**, **New tab**, Open, Rename, **Remind me** (In 1 hour, This evening, Tomorrow, Next week), Duplicate, **Task type**, **Start timer**, **Archive**, **Delete**.
+
+Not built yet: Favorite, Move to.
+
+**Archive and Delete are not the same thing, and the difference is not obvious from the dialogs.**
+
+- **Delete** snapshots the task and its subtasks into Trash and removes it. It is recoverable from `/trash` for 60 days. That page is manager-only.
+- **Archive** marks the task archived and hides it from the board. It does **not** appear in Trash, and there is no button anywhere today that un-archives a task. The confirmation dialog says you can restore it from Trash; that copy is wrong. Treat Archive as "hide it and move on", and use Delete when you actually want a recoverable removal.
+
+---
+
+## Creating tasks
+
+Several routes, all landing in the same place:
+
+- **`+ Task`** on the List toolbar opens the full create-task modal with that List preselected.
+- **`+ Add row`** at the bottom of a List view types a task inline.
+- **`+`** on a Calendar day cell creates a task due that day.
+- **`+`** at the bottom of a kanban column creates a task already in that status.
+- **Cmd/Ctrl + T** opens the quick task modal from anywhere. Some browsers reserve this shortcut for a new tab; if nothing happens, use the topbar tool instead.
+
+---
+
+## The task detail
+
+Click a task title on a board and it opens in a drawer over the board. Open it as a full page at `/item/<id>` (the row menu's "New tab" does exactly that). Both surfaces render the same body, so nothing is missing in either.
+
+Every field saves as you change it. There is no Save button.
+
+### The field grid
+
+| Field | What it does |
+| --- | --- |
+| **Status** | The List's own status set, as a pill picker. |
+| **Assignees** | One owner, picked from your org's people. |
+| **Dates** | Opens the date planner (see below). |
+| **Priority** | Urgent, High, Normal, Low, or cleared. Hidden if the Space's Priority module is off. |
+| **Time estimate** | Free text like `2h 30m`, `90m` or `1.5h`, stored as minutes. |
+| **Track time** | Start/stop button plus your running total. Hidden if the Time tracking module is off. |
+| **Tags** | Free-text tags shared across the org. Hidden if the Tags module is off. |
+| **Alignment** | Ties this task to a KRA and/or KPI. Picking a KPI carries its parent KRA with it. |
+
+Below the grid: the created and updated stamps, then the description.
+
+### Dates, reminders and repeat
+
+The **Dates** field opens a three-tab planner:
+
+- **Date** sets and clears the start and due date and time, with quick chips and a month grid.
+- **Reminder** arms one or more reminders on the task, relative to the due date or at a custom time. These are real reminder records, so they surface in the topbar reminders bell.
+- **Repeat** configures recurrence: frequency and interval, a trigger, an end condition, and the status to set when it recurs. Edits are buffered and applied when you hit Save.
+
+The two recurrence triggers behave differently, and the difference matters:
+
+- **After completion** rolls *this same task* forward the moment you mark it done. No new record is created.
+- **On schedule** leaves this task alone and spawns a fresh copy each cycle. The copies are created by an hourly scheduled job, not at the moment you set the rule, so the next occurrence appears on its schedule rather than instantly.
+
+Changing the due date on an "On schedule" series re-anchors the whole series to the new date.
+
+### Sections below the description
+
+- **Custom fields** are the List's fields. Search them by name and hide the empty ones.
+- **Subtasks** are real tasks with this one as their parent. Add them inline; click one to open it.
+- **Checklist** is a simple list of text items with checkboxes, stored on the task itself. Use it for throwaway steps that do not deserve their own task.
+- **Linked notes, whiteboards, files and relations** attach existing objects or upload new files to this task.
+- **Comments** and **Activity** share a tabbed strip. Type `@` in the comment composer to mention someone: they get an Inbox notification linking back to the task. Activity is the system-written history (created, status changed, renamed, owner changed, fields updated, archived).
+
+One honest caveat about notifications: **comment mentions produce a notification, but assigning a task or changing its status or due date currently produces none.** Do not rely on the Inbox to tell someone you gave them work.
+
+---
+
+## Working on many tasks at once
+
+Select rows with the checkbox in a List view, or cards with the checkbox on a kanban card, and a dark action bar appears at the bottom of the screen:
+
+- **Set status** to any of the List's statuses
+- **Set owner** to anyone in the org, or Unassign
+- **Set due date**, or clear it
+- **Priority**, or clear it
+- **Archive** the selection (hidden, not recoverable from Trash, see above)
+- **Delete** the selection (to Trash)
+- **Clear** the selection
+
+If part of a bulk action fails, the bar reports which tasks did not update instead of silently dropping them.
+
+---
+
+## Two places that show tasks across everything
+
+- **Everything** (`/everything` from the sidebar) is one flat List of every task you are allowed to read across all Spaces, newest 500, grouped by status. It is read-only: clicking a title opens the full task page, and the chip after the title jumps to its source List.
+- **My Wrk** (`/tasks`) is your personal home, with sub-pages for **Assigned to me**, **Today & Overdue**, and your **Personal List**, a private, Space-less List that only you can see and that behaves exactly like any other List.
+
+---
+
+## What is not wired on a board page
+
+The five controls on a List's title row, next to the breadcrumb, are visual only right now: **Filter**, **Reader mode**, **Automate**, **Ask**, and **Share**. They have no click handlers.
+
+Use the working equivalents instead: the **Filter** control in the toolbar underneath the view tabs, and Sharing & Permissions from the List's `…` menu.
