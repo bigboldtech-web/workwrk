@@ -96,7 +96,7 @@ There are two different controls, and they do different things.
 
 One sharp edge: Finalize only submits reviews that already have an outcome recorded, but it completes the whole cycle either way. Reviews with no outcome are left behind in whatever state they were in, on a cycle that now reads Completed. Check the Dashboard tab counts before you finalize.
 
-One gap to know about: an appraisal letter generator exists as an API but has no button anywhere in the product, so there is no way to produce a letter from a finalized review today.
+Once a review is finalized you can produce its appraisal letter. A **Generate appraisal letter** button appears on any COMPLETED review: on the person's own My Review card, and on each row of the manager's Team Reviews list. It opens a printable letter (company header, scores, band, a hike recommendation and the assessment details) that you can download. The endpoint behind it is org-scoped and authz-gated, so only the subject, the reviewer, or someone with manage rights over the subject can generate it.
 
 ## Cadences and scoring configuration
 

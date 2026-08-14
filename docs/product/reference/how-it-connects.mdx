@@ -48,7 +48,7 @@ flowchart TD
 This is the spine of the product, and it is fully built.
 
 1. A person opens their own profile from the Home sidebar's **Me** link, or **Teams → My Profile** (both go to `/people/me`, which redirects to `/people/<their id>`), and opens the KPI recorder. That posts to `/api/kpi-records/self-report`, or to `/api/kpi-records/batch` when a manager records on someone's behalf.
-2. The record is scored on write by one shared function, `scoreKpiRecord` in `src/lib/kpi-record.ts`. Direction matters: HIGHER scores actual over target, LOWER scores target over actual, MAINTAIN subtracts the deviation from the line. A KPI with no `targetValue` produces a null score. No baseline is ever invented.
+2. The record is scored on write by one shared function, `scoreKpiRecord` in `src/lib/kpi-record.ts`. Direction matters: HIGHER scores actual over target, LOWER scores target over actual, MAINTAIN subtracts the deviation from the line. A quantitative KPI with no `targetValue` produces a null score, and no baseline is ever invented. Qualitative KPIs are the exception: `resolveKpiLine` substitutes the rubric ceiling (the KPI's own target rating, or 5) so a 1 to 5 anchor rating always scores as rating over ceiling.
 3. `latestKpiValues` in `src/lib/alignment.ts` picks the latest usable reading per gauge. Three rules are worth knowing: records with status REJECTED are ignored, records with no `actualValue` are ignored, and only canonical `YYYY-MM` period keys count. Older `2026-W33` and `2026-Q3` rows still exist in the database but no longer drive anything.
 4. A key result linked to that KPI (`KeyResult.kpiId`) reports the gauge's reading instead of its own typed number. The typed number is not overwritten. It is returned as `enteredValue` so nothing you typed is lost.
 5. `computeGoalRollups` derives every goal's effective progress in one pass: a leaf is the mean of its key results' live progress, a parent is the mean of its own key results plus each **measured** child. Unmeasured children contribute nothing, so three empty sub-goals cannot drag a measured sibling from 60% down to 15%.
@@ -65,7 +65,7 @@ When someone is hired into a role or moved to one, `seedAlignmentForUser` in `sr
 
 The mirror also runs: when you add a KRA to a job title later, `seedKraToRoleHolders` pushes it to everyone who already holds that title. Both are idempotent, so re-running changes nothing.
 
-Weights are validated on write. `/api/kra-assignments` rejects a weight of 0 or under, over 100, or one that would push a person's total above 100. It does not require the total to reach 100, so a person can legitimately sit at 60% assigned.
+Weights are validated on write, but only per weight. `/api/kra-assignments` (both the POST and the `[id]` PUT) rejects an individual weight of 0 or under or over 100. A total that would push a person above 100 is no longer rejected: the write goes through and the response carries a soft `weightWarning` plus the running `weightTotal`, so someone already over budget can still save the edit that rebalances them. Nothing requires the total to reach 100 either, so a person can legitimately sit at 60% assigned.
 
 ## The KPI approval loop
 
@@ -130,7 +130,7 @@ These are the gaps that matter most, because each one looks like it should exist
 
 **Calibration does not feed the 9-box.** `/api/reviews/[id]/calibration` writes `Review.calibratedScore` and moves the cycle to IN_CALIBRATION. It never writes a `TalentAssessment` row. The 9-box at `/talent` is populated either by hand or by auto-placing from performance scores. The two are not connected.
 
-**The appraisal letter generator has no button.** `/api/reviews/[id]/appraisal-letter` exists and has zero callers in the interface.
+**The appraisal letter is now wired.** `/api/reviews/[id]/appraisal-letter` used to have no caller; it now has a **Generate appraisal letter** button on every COMPLETED review, both the subject's own My Review card and each row of the manager's Team Reviews list. The route is org-scoped and only the subject, the reviewer, or someone with manage rights over the subject can read it. (Listed here because this section is where the old gap was called out.)
 
 **Board tasks now emit notifications, with one gap.** `src/lib/notify-item.ts` is the single door between the Item pipeline and the `Notification` table. Assigning or reassigning an Item notifies the new owner (`/api/boards/[id]/items` on create, `/api/items/[id]` on an owner change); changing its status notifies the owner plus everyone who has commented on the task; comment mentions notify the person mentioned. Every emission passes the recipient's `/settings/notifications` prefs and excludes the actor. The remaining gap is due dates: `notifyItemsDueToday` is written and idempotent, but no cron calls it yet (the closest scheduled job, the digest sweep, walks the legacy `Task` table), so due-today and overdue notifications do not fire on their own. The top right now carries two bells: a **notifications** bell with an unread badge, and, beside it, the **reminders** bell.
 

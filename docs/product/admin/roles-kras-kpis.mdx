@@ -115,9 +115,9 @@ The dialog lists their KRAs with an editable weight box on each row, their assig
 
 - Edit a weight inline. It commits on blur or Enter, and Escape reverts.
 - The header shows the person's running total, in red above 100%.
-- The server enforces the person level cap: a weight must be between 1 and 100, and the person's total across active assignments in the same period must not exceed 100. If it would, the save is rejected with an error naming the exact totals, for example "Total weightage would be 115%. Others: 95%, this: 20%."
+- The server bounds each individual weight to between 1 and 100, and that bound is a hard reject. The person's **total** across active assignments is no longer a hard cap. A save that pushes the total over 100 still goes through, and the server hands back an advisory warning with the running total instead of refusing. This is deliberate: a hard reject would trap a person already over budget (from role-seed defaults or legacy data) so they could never save the very edit that rebalances them. Watch the red total and trim another KRA to get back under 100.
 
-Note the asymmetry. The 100% cap is enforced for a person, but not for a role. A role can be built to 140% and you will only find out when the third holder's weight save gets rejected.
+There is no 100% ceiling enforced anywhere, for a person or a role. A role can be built to 140%, and a person can end up over 100%; in both cases nothing blocks the save, and the only signal is the running total turning red. Check it yourself before you walk away.
 
 The dialog also lets you add a KRA outside the person's role template (the picker flags KRAs with no job title), remove a KRA, and add or remove SOP assignments.
 

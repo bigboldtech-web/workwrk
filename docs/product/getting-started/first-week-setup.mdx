@@ -89,7 +89,7 @@ For each gauge, set:
 **Honest notes:**
 
 - The KPI editor has **no frequency control**. The model supports daily through annually and the recorder converts targets between cadences, but every KPI you create from this dialog is monthly. Changing it requires the API.
-- A KPI can be typed Qualitative, but the recorder is numeric either way.
+- A KPI can be typed Qualitative. The recorder handles that natively: instead of a raw number it shows a 1 to 5 rubric with labelled anchors (Well below, Below, Meets, Exceeds, Outstanding), and stores the rating scored against the scale ceiling.
 
 ---
 
@@ -156,7 +156,7 @@ For each goal:
 3. **Contributors**: add people, whole departments, or whole roles. Department and role contributors resolve to their current members on every read, so you do not have to maintain the list as the team changes.
 4. **Level**: Company, Department or Individual.
 5. **Quarter and dates.**
-6. **Check-in cadence**: weekly, biweekly or monthly.
+6. **Check-in cadence**: weekly, biweekly, monthly, or none. None silences that goal's check-in reminders.
 
 Then open the goal and add **Targets** (Key Results) on the goal detail page: title, start value, target value, and an optional unit. Progress rolls up from the targets automatically, and a goal with nothing measurable shows a dash rather than a fake 0%.
 
@@ -213,4 +213,3 @@ These are real limits in the current build, not things you are doing wrong:
 - KRA weights are not forced to total 100 on the server.
 - The KPI editor has no frequency control, so every KPI created there is monthly.
 - There is no UI to link a goal target to a KPI.
-- Qualitative KPIs still record numerically.

@@ -39,11 +39,11 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Module | Where | Status | What you need to know |
 | --- | --- | --- | --- |
 | Roles (job titles) | `/people/roles` | Built | Role definition pages, KRA templates per role. |
-| KRAs and KPIs | `/kra-kpi` | Built | Create, edit, assign, weight. Weights are validated to never exceed 100 per person, but are not required to reach 100. |
+| KRAs and KPIs | `/kra-kpi` | Built | Create, edit, assign, weight. Each individual weight is bounded 1 to 100. A person's total over 100 is no longer blocked: the save goes through and hands back an advisory warning with the running total, so a person already above budget can still rebalance. Totals are not required to reach 100. |
 | KRA inheritance | automatic | Built | Hiring into a role seeds its KRAs and published SOPs. Adding a KRA to a role pushes it to existing holders. |
-| KPI recording | your profile | Built | Record numbers, direction aware scoring, no invented baselines. |
+| KPI recording | your profile | Built | Record numbers with direction aware scoring and no invented baselines. Qualitative KPIs are the exception: they record on a 1 to 5 rubric with labelled anchors (Well below, Below, Meets, Exceeds, Outstanding), scored as the rating over the scale ceiling, so they always yield a score instead of reading "no target". |
 | KPI approval loop | `/team/kpi-reviews` | Built | Submit, approve, request changes, notification back to the person. |
-| Goals and OKRs | `/okrs` | Built | One accountable owner plus contributors resolved at read time. One derived progress number shown everywhere. |
+| Goals and OKRs | `/okrs` | Built | One accountable owner plus contributors resolved at read time. One derived progress number shown everywhere. Each goal carries a check-in cadence, including **None**, which silences its reminders. A stale check-in nudges the owner through the notifications bell and escalates by email (email respects the owner's notification prefs). The escalation runs from `/api/cron/okr-reminders`, so it only fires once that cron is registered on the box. |
 | Key result to KPI linking | goal detail | Built | A linked key result reads the gauge's latest value. Your typed number is preserved, not overwritten. |
 | KRA weight in scoring | anywhere a score appears | **Coming soon** | Weights are displayed but no scoring math uses them. A 5% KRA counts the same as a 50% KRA today. |
 | Team alignment board | `/team/alignment` | Built | Per report: active KRAs with weights, current period KPI compliance, SOP read rate, weekly review state. Unmeasured people show a dash, never a fake 100%. |
@@ -55,8 +55,8 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Module | Where | Status | What you need to know |
 | --- | --- | --- | --- |
 | Review cycles | `/reviews` | Built | Create, launch, self assessment, manager review, calibration, finalize. |
-| Appraisal letter | none | Coming soon | `/api/reviews/[id]/appraisal-letter` works but nothing in the interface calls it. |
-| Talent 9-box | `/talent` | In progress | You can place people by hand, and auto place from performance scores. Review calibration does **not** feed it. The two systems are disconnected. |
+| Appraisal letter | `/reviews` | Built | `/api/reviews/[id]/appraisal-letter` now has a button. A **Generate appraisal letter** control appears on every COMPLETED review, both on the person's own My Review card and on each row of the manager's Team Reviews list. The route is org-scoped and authz-gated: only the subject, the reviewer, or someone with manage rights over the subject can read it. |
+| Talent 9-box | `/talent` | In progress | **New assessment** opens a placement modal that writes a real `TalentAssessment` (it is no longer a dead toast), and you can also auto place everyone from their performance scores. Review calibration still does **not** feed it, so the calibration step and the 9-box remain disconnected. |
 | Weekly reviews | `/team/reviews` | Built | Manager queue, submit and approve. |
 | People directory | `/people` | Built | Manager tier for the full directory, scoped to your report tree below the org wide door. |
 | Person profile | `/people/[id]`, `/people/me` | Built | Three render modes: self, manage, peer. |
@@ -74,9 +74,9 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 
 | Module | Where | Status | What you need to know |
 | --- | --- | --- | --- |
-| SOPs | `/sops` | Built | Create in one of three types (Written, Checklist, Click-capture), version with rollback, publish, archive, assign, track progress and compliance. Folder based visibility with inheritance. AI generation is not a create option: it is an in-editor action on a checklist SOP that drafts steps from the title and description. |
-| SOP folders and tags admin | none | **Coming soon** | The folder manager and the tags manager components are fully written and imported by nothing. You cannot rename or merge a tag today. |
-| SOP review and approval flow | `/sops/[id]` | In progress | Five statuses exist (Draft, In review, Approved, Published, Archived) and you can filter by them. The only status transitions the detail page offers are Publish and Archive (the same menu also carries Assign and Run, which are not status changes). There is no assigned reviewer, no approve action and no notification, so "In review" and "Approved" are labels you set, not a workflow. |
+| SOPs | `/sops` | Built | Create in one of three types (Written, Checklist, Click-capture), version with rollback, publish, archive, assign, track progress and compliance. Folder based visibility with inheritance. AI generation is not a create option: it is an in-editor action on a checklist SOP that drafts steps from the title and description. A published SOP can also be shared read-only outside the org: **Copy public link** mints a `shareToken` and copies a `/share/sop/<token>` URL that only ever resolves while the SOP stays PUBLISHED, and **Turn off public link** revokes it. |
+| SOP folders and tags admin | `/sops/manage` | Built | The **Organize** action on the SOP library (shown to anyone who can manage SOPs) opens the taxonomy admin: the folder and tag manager plus the category and subcategory manager, both now mounted. The underlying writes enforce their own gate: folder and tag edits require org admin, category edits require manager, so a manager who is not an admin still lands on the page and gets honest 403 toasts on the admin-only actions. Deleting a folder never deletes its SOPs: they are re-parented to the folder's parent (or the unfoldered bucket), and a folder with sub-folders refuses deletion until those are moved or removed. |
+| SOP review and approval flow | `/sops/[id]` | Built | Five statuses exist (Draft, In review, Approved, Published, Archived). The detail page now drives a real transition flow off the status field: **Submit for review** (Draft to In review), **Approve** (In review to Approved) and **Request changes** (In review back to Draft), alongside Publish and Archive. Two honest limits: the transitions are gated on the SOP edit permission (there is no separate reviewer role or governance capability, and publishing keeps its own separate publish capability), and no notification is sent on any status change. |
 | Process runs | `/process-runs` | Built | Run history, plus a public share link at `/run/<token>`. |
 | Policies | `/policies` | Built | Create, assign, acknowledge, compliance view, ledger export. |
 | Contracts and agreements | `/agreements` | Built | Create, templates, parties, send, signing at `/sign/<token>`. |

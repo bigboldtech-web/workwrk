@@ -192,7 +192,7 @@ Readings are recorded per person, per period, as KPI records. A person records t
 **Honest notes on KPIs:**
 
 - A KPI carries a **frequency** (daily, weekly, monthly, quarterly, annually) in the data model, and the recorder uses it to convert a target defined at one cadence into the target for the period you are actually recording (a weekly target of 40 recorded monthly shows as roughly 174). But the KPI editor on the Role page does **not** expose a frequency control, so every KPI created there is monthly. Changing it requires the API.
-- A KPI can be typed Quantitative or Qualitative, but recording is numeric in both cases.
+- A KPI can be typed Quantitative or Qualitative, and the recorder treats them differently. Quantitative KPIs take a raw number. Qualitative KPIs take a 1 to 5 rubric rating with labelled anchors (Well below, Below, Meets, Exceeds, Outstanding), stored as the rating scored against the scale ceiling.
 
 ### Where KRAs and KPIs are managed
 
@@ -209,7 +209,7 @@ A **Goal** (an OKR in the schema) is temporary and time-boxed, and it is the opp
 - **Contributors resolve at read time.** A department or role contributor is stored as the department or the role, never as a frozen list of names. Membership is recalculated on every read, so a new hire inherits their team's goals and a leaver drops out automatically. Only active, non-deleted users ever resolve.
 - **One shared progress number.** Everyone looking at the goal sees the same number.
 
-Goals have a level (Company, Department, Individual), a quarter, a check-in cadence (weekly, biweekly, monthly), and can nest under a parent goal.
+Goals have a level (Company, Department, Individual), a quarter, a check-in cadence (weekly, biweekly, monthly, or none, where none silences that goal's check-in reminders), and can nest under a parent goal.
 
 ### How goal progress is calculated
 

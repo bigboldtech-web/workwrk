@@ -40,7 +40,7 @@ Key Result Area. A permanent area of accountability attached to a **Role**, not 
 
 A KRA has no number and no deadline. It is a container. It carries a **weight** from 0 to 100 expressing what share of the job it represents.
 
-When you hold a Role, you get a `KRAAssignment` for each of its KRAs, and the assignment carries your own weight, seeded from the Role's default and editable per person. Your weights are validated to never exceed 100 in total, but nothing requires them to reach 100.
+When you hold a Role, you get a `KRAAssignment` for each of its KRAs, and the assignment carries your own weight, seeded from the Role's default and editable per person. Each individual weight is bounded 1 to 100, but the total is not a hard cap: a total over 100 saves and returns an advisory warning rather than being rejected, so someone already over budget can still rebalance. Nothing requires the total to reach 100 either.
 
 Important, and easy to get wrong: **KRA weight is displayed but is not used in any scoring math today.** A 5% KRA and a 50% KRA count identically in every score the product computes.
 

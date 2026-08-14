@@ -41,7 +41,7 @@ The modal asks for:
 | **Contributors** | People, departments and roles. Departments and roles resolve to their current members. |
 | **Start date** and **End date** | Optional. |
 | **Quarter** | Free text, for example `Q3 2026`. |
-| **Check-in cadence** | Weekly, Biweekly or Monthly. Drives the overdue-check-in warning. |
+| **Check-in cadence** | Weekly, Biweekly, Monthly, or None. Drives the overdue-check-in warning and the reminders below. **None** is the per-goal off switch: it silences that goal's check-in reminders entirely, and the modal says so when you pick it. |
 | **Description** | Why the goal is set and how it should be achieved. |
 
 The same modal is used for editing. Open it from the `…` menu on a row or from the goal detail header.
@@ -71,6 +71,8 @@ Below the hero:
 - **Custom fields**
 
 If the goal has not been checked in within its cadence, an amber banner appears at the top of the cards saying how long it has been.
+
+The same staleness also drives reminders, unless the cadence is None. A daily job (`/api/cron/okr-reminders`) checks every goal that has an owner and is not complete: when a goal has gone past its cadence window without a check-in, it drops a notification in the owner's bell and escalates by email to the owner. The email honours the owner's notification preferences, so someone who has turned off reminder emails is nudged in the bell only. A goal set to the None cadence is skipped entirely, no bell and no email. Like the other scheduled jobs, this only fires once the cron is registered on your server.
 
 ### Linked work does not drive progress
 
