@@ -37,8 +37,10 @@ flowchart TD
 
   Assign -.->|"weight is never applied"| Score
   Review -.->|"calibration writes no row"| NineBox
-  Item -.->|"no notification on assign or status"| Notif["Notifications"]
-  Item -.->|"invisible to these, they read legacy Task"| Search["Search, analytics, task score"]
+  Item -->|"notifies owner on assign + status"| Notif["Notifications"]
+  Item -.->|"due-date sweep built, no cron yet"| Notif
+  Item -->|"now indexed"| Search["Global search"]
+  Item -.->|"still read the legacy Task table"| Legacy["Analytics, task-score component"]
 ```
 
 ## KPI reading to the one goal number
@@ -130,14 +132,15 @@ These are the gaps that matter most, because each one looks like it should exist
 
 **The appraisal letter generator has no button.** `/api/reviews/[id]/appraisal-letter` exists and has zero callers in the interface.
 
-**Board tasks emit no notifications.** Assigning an Item, changing its status, or a due date arriving writes no `Notification` row. The only notification the Item pipeline produces comes from comments (`/api/items/[id]/updates`). There is an SLA escalation cron that does notify, but it walks the legacy `Task` table, so it never sees your board work. The bell in the top right is a **reminders** bell showing your pending reminders, not a notification bell.
+**Board tasks now emit notifications, with one gap.** `src/lib/notify-item.ts` is the single door between the Item pipeline and the `Notification` table. Assigning or reassigning an Item notifies the new owner (`/api/boards/[id]/items` on create, `/api/items/[id]` on an owner change); changing its status notifies the owner plus everyone who has commented on the task; comment mentions notify the person mentioned. Every emission passes the recipient's `/settings/notifications` prefs and excludes the actor. The remaining gap is due dates: `notifyItemsDueToday` is written and idempotent, but no cron calls it yet (the closest scheduled job, the digest sweep, walks the legacy `Task` table), so due-today and overdue notifications do not fire on their own. The top right now carries two bells: a **notifications** bell with an unread badge, and, beside it, the **reminders** bell.
 
-**Four surfaces still read the legacy `Task` table, not `Item`.** Tasks you create on a List are `Item` rows. These do not see them:
+**Three surfaces still read the legacy `Task` table, not `Item`.** Tasks you create on a List are `Item` rows. These do not see them:
 
-- Global search and the command palette (`/api/search`) index User, legacy Task, SOP, Doc, Department, Meeting, OKR, Idea, Policy and Announcement, plus four leftovers from removed finance modules (Vendor, PurchaseOrder, GlAccount, BudgetPlan) whose result links point at `/procurement`, `/financials` and `/planning` and therefore 404. Items, Boards, Spaces and Whiteboards are not searchable.
 - `/analytics` reads `/api/tasks`.
 - The performance score's task component counts legacy Task rows.
 - `/api/tasks/workload` reads legacy Task. The `/team/workload` page does not use it, it queries `Item` directly.
+
+Global search used to be a fourth reader of the legacy table. It no longer is. `/api/search` was rewritten over the real work graph and now indexes Items, Boards, Spaces, Folders, Docs (notes), Whiteboards and people, plus the alignment and org surfaces that still have live routes (SOP, OKR, Meeting, Department, Idea, Policy, Announcement), with Space and Board visibility enforced. It deliberately skips the legacy `Task` table, and the removed finance result types (Vendor, PurchaseOrder, GlAccount, BudgetPlan) are gone with their 404 links.
 
 **Automation declares more triggers than the product emits.** The registry lists 16 trigger types. Only five event names are ever dispatched, and most only from the API and integration paths rather than from in-app actions:
 

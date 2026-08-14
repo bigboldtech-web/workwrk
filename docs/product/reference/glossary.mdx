@@ -140,7 +140,7 @@ One row on a List. The interface calls it a Task. The code and database call it 
 
 An Item carries an owner, status, priority, dates, tags, custom fields, subtasks, a checklist, comments and tracked time.
 
-**Know this:** a separate legacy `Task` table also exists, written only by the older `/api/tasks` endpoint. Global search, `/analytics`, the performance score's task component and `/api/tasks/workload` still read that legacy table, so they cannot see the tasks you create on Lists.
+**Know this:** a separate legacy `Task` table also exists, written only by the older `/api/tasks` endpoint. `/analytics`, the performance score's task component and `/api/tasks/workload` still read that legacy table, so they cannot see the tasks you create on Lists. Global search used to read it too, but no longer: `/api/search` now indexes the real `Item` graph, so searching finds your board tasks.
 
 ### View
 One way of rendering a List. Seventeen renderers exist: List/Table, Board/Kanban, Calendar, Gantt, Timeline, Workload, Cards, Hierarchy, Pivot, Chart, Dashboard, Form, Doc, Whiteboard, File gallery, Map and Activity.

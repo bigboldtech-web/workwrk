@@ -70,51 +70,50 @@ There is no control on this page for typing a time entry by hand. Entries arrive
 
 ### Search (Cmd/Ctrl + K)
 
-The command palette opens with **Cmd + K** (**Ctrl + K** on Windows and Linux) or the search box in the topbar. Type at least two characters and results come back live from the server.
+The command palette opens with **Cmd + K** (**Ctrl + K** on Windows and Linux) or the search box in the topbar. Type at least two characters and results come back live from the server, searched across the real work graph in parallel and returned as one ranked list.
 
-**What search actually covers today:**
+**What search covers today:**
 
-- People
-- Notes and documents (access-checked, so private notes never appear in someone else's results)
-- SOPs
-- Goals
-- Departments
-- Meetings
-- Policies
-- Announcements
-- Ideas
-- Legacy tasks (the older task table, not board tasks)
+- **Tasks** (the Items on your Lists), each linking to `/item/<id>`
+- **Lists** (boards), linking to `/boards/<slug>`
+- **Spaces** and **Folders**
+- **Notes and documents**, access-checked so a private note never appears in someone else's results, linking to `/docs/<id>`
+- **Whiteboards**
+- **People**
+- **SOPs**
+- **Goals** (OKRs)
+- **Meetings**
+- **Departments**
+- **Ideas**, **Policies** and **Announcements**
 
-The query also still runs against four tables left over from removed finance modules: vendors, purchase orders, GL accounts and budget plans. If your database has rows in those, they will appear in results and their links go to `/procurement`, `/financials` and `/planning`, none of which exist any more. Those hits are dead ends.
+Results are visibility-gated the same way the app is. A Space or Board you cannot read never appears, private notes are checked per viewer, and org admins see everything. Search deliberately does **not** touch the legacy `Task` table, and the old finance result types (vendors, purchase orders, GL accounts, budget plans) are gone: those modules were removed and their dead-link results with them.
 
-**What search does not cover today:**
+### The palette before you type
 
-- **Tasks on Lists.** This is the big one. Board tasks are not in the search index, so searching a task title finds nothing. Use **Everything** or the List's own search box instead.
-- Spaces, Folders and Lists
-- Whiteboards, files and tables
+With an **empty query** the palette shows real, working rows, not sample data. In order:
 
-Three more things to know about the palette, so you do not mistake decoration for data:
+- **Recents**: the apps you opened most recently, as navigation rows.
+- **Quick actions**: Create task, New doc, New notepad, Set a reminder, Open AI Notetaker, Post an announcement, Open Timesheets. Each one fires a real shell action or opens a real page.
+- **Navigate and Command rows**: every entry is a real link to a real page (Today, Inbox, My tasks, Planner, Goals, Docs home, Timesheets, Connect apps, and more). Command rows also carry a short keyword alias you can type, for example `mw` for My Work.
 
-- With an **empty query**, the sections show **placeholder sample content** (invented tasks, documents, people and Spaces) as a layout demonstration. Several of those rows link to routes that do not exist. Ignore them and type your query.
-- The **Actions** rows in the palette (Create task, New doc, Schedule meeting) are decorative. They carry neither a link nor a handler, so clicking one just closes the palette.
-- The **Command** rows are a mixed bag. Most are real links (Open Planner, Open My Work, Go to Inbox, Go to Docs home, Go to Goals, Go to Timesheets, Create new Doc, Create new Task, Connect apps). Two point at routes that do not exist: **Go to Pulse** and **Create new Notepad**. Seven have no link and no handler at all, so they do nothing: **Show Favorites**, **Show Tray**, **Show Recent Activity**, **Set status**, **Update Slack status**, **Download Diagnostics** and **Feature Trace**.
-
-The **Navigate** rows are all real links to real pages.
+There are no decorative rows left. Every row either navigates or runs an action.
 
 ### Other keyboard shortcuts
 
 | Shortcut | Does |
 | --- | --- |
 | **Cmd/Ctrl + K** | Open or close the search palette. |
+| **Cmd/Ctrl + Shift + K** | Open the quick task modal. |
 | **Cmd/Ctrl + J** | Open or close the AI panel. |
-| **Cmd/Ctrl + T** | Quick task modal. Some browsers reserve this for a new tab. |
 | **Cmd/Ctrl + B** | Collapse or expand the sidebar. |
 | **Cmd/Ctrl + 1-9** | Jump to the Nth pinned app in the rail. |
 | **Escape** | Close the palette. |
 
-### Better ways to find a task
+Quick task moved off **Cmd/Ctrl + T** to **Cmd/Ctrl + Shift + K**. Browsers reserve Cmd/Ctrl + T for a new tab and never delivered it to the app, so the old binding silently did nothing. Shift + K sits next to the search chord and is free in every target browser.
 
-Since search does not index board tasks, use these instead:
+### Precise ways to work a set of tasks
+
+Search finds a task by title now, but these remain the sharper tools when you want many tasks at once, not one:
 
 - **Everything** (`/everything`): every task you are allowed to read across all Spaces, newest 500, grouped by status, with the full List-view toolbar. The search box and filters in that toolbar work over the whole set.
 - **A List's own search**: the magnifier in the board toolbar filters that List's tasks by title as you type.
@@ -133,7 +132,17 @@ Since search does not index board tasks, use these instead:
 
 `/inbox` sorts notifications into Primary, Other, Later (snoozed) and Cleared.
 
-Be realistic about what arrives there. **Comment mentions on a task create a notification.** Assigning a task, changing its status, and a due date arriving currently create **none**. Until that changes, treat the Inbox as a mentions feed, not a work queue, and use My Wrk and the "assigned to me" filters to see what is on your plate.
+The task pipeline now emits real notifications:
+
+- **Assigning or reassigning a task** notifies the new owner.
+- **Changing a task's status** notifies the owner plus everyone who has commented on the task.
+- **Comment mentions** notify the person mentioned.
+
+Each of these honors the recipient's `/settings/notifications` toggles, and you are never notified about your own action (assigning yourself work, or moving your own task, is not news).
+
+**Due-date notifications do not fire automatically yet.** The producer that sweeps tasks due today and overdue is written and ready, but nothing calls it on a schedule: no cron job covers board Items today. So a due date arriving does not, on its own, land in your Inbox. Until that job is wired, use My Wrk and the "Today & Overdue" filter for what is due.
+
+A live **notifications bell** sits in the top right, next to the reminders bell. It carries an unread count badge, opens a popover of your recent notifications with **Mark all read**, and can raise a desktop notification when the count climbs while the tab is in the background, once you grant permission from the popover's **Enable desktop alerts** button.
 
 Two related surfaces to set expectations on:
 

@@ -20,9 +20,9 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Spaces, Folders, Lists | rail Home, `/spaces` | Built | Full create, rename, move, delete through `/api/spaces`, `/api/folders`, `/api/boards`. |
 | Tasks (Items) | any List | Built | Create, edit, assign, subtasks, checklists, comments, priority, tags, custom fields, time tracking. Written to the `Item` table. |
 | View types | board view tabs | Built | 17 renderers exist: List/Table, Board/Kanban, Calendar, Gantt, Timeline, Workload, Cards, Hierarchy, Pivot, Chart, Dashboard, Form, Doc, Whiteboard, File gallery, Map, Activity. |
-| Board title row buttons | any board header | In progress | Filter, Reader mode, Automate, Ask and Share are rendered with no click handler. They do nothing. |
-| Global search and command palette | search box, keyboard shortcut | In progress | Indexes People, legacy Tasks, SOPs, Docs, Departments, Meetings, Goals, Policies, Announcements and Ideas, plus four dead finance tables whose result links 404. **Items, Boards, Spaces and Whiteboards are not searchable.** Most palette Command rows are real links; nine are dead. |
-| Planner | `/planner` | In progress | The week grid refuses to render until you connect Google Calendar, even though the events API serves local tasks fine. |
+| Board title row controls | any board header | Built | Filter and Reader mode were removed (no backend, so they are gone rather than faked). Automate links to `/automation/workflows`, Share opens the share dialog, Ask is a deliberately disabled "Soon" button. |
+| Global search and command palette | search box, `Cmd/Ctrl + K` | Built | Rewritten over the real work graph. Indexes Items (tasks), Boards, Spaces, Folders, Docs, Whiteboards and people, plus SOPs, Goals, Meetings, Departments, Ideas, Policies and Announcements, all visibility-gated. The dead finance result types are gone. The empty-state palette shows real recents and wired quick actions; every Command and Navigate row is a real link. |
+| Planner | `/planner` | Built | The week grid renders your local tasks and work items for everyone, no connection required. Google Calendar is a dismissible connect banner, not a gate. Two-way Google sync still depends on connecting the integration and the calendar-sync cron. |
 | Docs | `/docs`, `/library` | Built | Create, edit, save and delete via `/api/docs`. |
 | Whiteboards | `/whiteboards`, `/library` | Built | Create, edit, save and delete via `/api/whiteboards`. |
 | Tables | `/tables`, `/library` | Built | Spreadsheet-shaped data grids, with formula columns and the relational link, lookup and rollup trio, saved named views, CSV import and export. The header **Public** toggle really does publish: it opens an unauthenticated read-only page at `/embed/tables/<id>`. |
@@ -120,17 +120,18 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 
 ## Notifications and reminders
 
-This is the biggest single truth gap in the product, so it gets its own section.
+Wave 1 closed most of the old gap here. What is true now, precisely:
 
 | Thing | Status | What you need to know |
 | --- | --- | --- |
-| Reminders bell | Built | Top right. Shows your PENDING reminders grouped Overdue, Today, Upcoming. Snooze and dismiss work. Polls every 60 seconds. |
-| Reminder firing | In progress | A fired reminder shows a 3.2 second toast and then disappears from the bell, because the bell only lists PENDING. Look away and it is gone. |
-| Reminder cron in production | **Not registered** | `/api/cron/reminders` is not in the production cron table, so reminders do not fire for users with the app closed. |
-| Notification rows | Built | Many modules write real `Notification` rows: KPI approvals, KRA assignment, SOP assignment, announcements, policies, kudos, meetings, goals, timesheets. |
-| Task notifications | **Coming soon** | Creating, assigning or changing the status of a task on a List writes no notification. Only comments do. |
-| Unread badge | **Coming soon** | There is no unread badge anywhere in the app. A complete notification popover component and a banner component exist and are imported by nothing. |
-| Desktop notifications | **Coming soon** | The hook and chime exist. Nothing ever calls `Notification.requestPermission`, so they never fire. |
+| Notifications bell | Built | Top right, a bell of its own separate from reminders. Unread-count badge, popover of recent notifications with Mark all read, each row deep-links. Polls `/api/inbox/count` every 25 seconds and on tab focus. |
+| Task notifications | Built | The Item pipeline emits through `src/lib/notify-item.ts`: assign and reassign notify the new owner, a status change notifies the owner plus everyone who commented, comment mentions notify the mentioned. All gated by `/settings/notifications` prefs; the actor is never notified about their own action. |
+| Due-date notifications | In progress | `notifyItemsDueToday` (the due-today + overdue sweep) is written and idempotent, but nothing calls it on a schedule yet, so it does not fire automatically. Assign and status notifications are unaffected. |
+| Desktop notifications | Built | When the unread count climbs while the tab is backgrounded, the bell raises a browser notification + chime for the newest item. Permission is requested only from the popover's "Enable desktop alerts" button, never on load. Muting silences the popup, not the badge. |
+| Other notification rows | Built | Many modules also write real `Notification` rows: KPI approvals, KRA assignment, SOP assignment, announcements, policies, kudos, meetings, goals, timesheets. |
+| Reminders bell | Built | Top right. Groups Fired, Overdue, Today and Upcoming, plus a read-only "Recently done" history (last 14 days). Snooze (+1h) and dismiss work. Polls every 60 seconds. |
+| Reminder firing | Built | A fired reminder is a persistent bottom-right popup (Snooze 10m / 1h / tomorrow, Dismiss, Open), not a 3-second toast. It survives reloads: the fired-but-unacted set is reloaded on mount, so nothing is lost by looking away. |
+| Reminder cron in production | **Needs manual registration** | The in-app ticker fires reminders while the app is open. `/api/cron/reminders` exists and is documented in `scripts/CRON-SETUP.md`, but it must be added to the aaPanel cron by hand. Until it is, reminders do not fire for users with the app closed. |
 
 ## The legacy task table
 
@@ -138,7 +139,7 @@ Worth stating plainly because it explains several oddities above.
 
 There are two task tables. Everything you create on a List is an `Item`. A separate legacy `Task` table still exists and is written only by `/api/tasks`.
 
-Four places still read the legacy table and therefore cannot see your board work: global search, `/analytics`, the performance score's task completion component, and `/api/tasks/workload`. Migrating these is a tracked debt.
+Three places still read the legacy table and therefore cannot see your board work: `/analytics`, the performance score's task completion component, and `/api/tasks/workload`. Global search was a fourth until Wave 1 rewrote it over the `Item` graph. Migrating the rest is a tracked debt.
 
 ## Reporting an inaccuracy
 

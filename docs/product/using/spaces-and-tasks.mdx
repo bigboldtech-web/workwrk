@@ -85,7 +85,7 @@ Several routes, all landing in the same place:
 - **`+ Add row`** at the bottom of a List view types a task inline.
 - **`+`** on a Calendar day cell creates a task due that day.
 - **`+`** at the bottom of a kanban column creates a task already in that status.
-- **Cmd/Ctrl + T** opens the quick task modal from anywhere. Some browsers reserve this shortcut for a new tab; if nothing happens, use the topbar tool instead.
+- **Cmd/Ctrl + Shift + K** opens the quick task modal from anywhere. (This replaced the old Cmd/Ctrl + T binding, which browsers swallow for a new tab and never delivered to the app.) The Create task icon in the topbar tools opens the same modal.
 
 ---
 
@@ -133,7 +133,7 @@ Changing the due date on an "On schedule" series re-anchors the whole series to 
 - **Linked notes, whiteboards, files and relations** attach existing objects or upload new files to this task.
 - **Comments** and **Activity** share a tabbed strip. Type `@` in the comment composer to mention someone: they get an Inbox notification linking back to the task. Activity is the system-written history (created, status changed, renamed, owner changed, fields updated, archived).
 
-One honest caveat about notifications: **comment mentions produce a notification, but assigning a task or changing its status or due date currently produces none.** Do not rely on the Inbox to tell someone you gave them work.
+Notifications from the task pipeline: **assigning or reassigning a task notifies the new owner, and changing its status notifies the owner plus everyone who has commented**, alongside the comment-mention notification. All of them respect the recipient's `/settings/notifications` toggles, and nobody is notified about their own action. The one gap left is due dates: the sweep that would notify on tasks due today or overdue is built but not yet wired to a schedule, so a due date arriving does not notify anyone automatically.
 
 ---
 
@@ -160,8 +160,11 @@ If part of a bulk action fails, the bar reports which tasks did not update inste
 
 ---
 
-## What is not wired on a board page
+## The board title row controls
 
-The five controls on a List's title row, next to the breadcrumb, are visual only right now: **Filter**, **Reader mode**, **Automate**, **Ask**, and **Share**. They have no click handlers.
+The controls on a List's title row, next to the breadcrumb, are now honest about what they do:
 
-Use the working equivalents instead: the **Filter** control in the toolbar underneath the view tabs, and Sharing & Permissions from the List's `…` menu.
+- **Filter** and **Reader mode** were removed. Both were inert with no backend, so rather than fake them they are gone. The real filtering lives in the toolbar underneath the view tabs.
+- **Automate** links to the automation workflows page (`/automation/workflows`).
+- **Share** opens the share dialog for the List.
+- **Ask** is a deliberately disabled button labelled **Soon**. Ask-AI on a board is not built, and the control says so instead of doing nothing on click.
