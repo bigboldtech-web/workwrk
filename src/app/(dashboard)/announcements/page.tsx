@@ -11,13 +11,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Megaphone, Plus, Search, Hash, ChevronRight, Pin, AlertTriangle, CheckCircle2,
-  Info, PartyPopper, ShieldCheck, CalendarRange, Bell, Clock,
+  Info, PartyPopper, ShieldCheck, CalendarRange, Bell, Clock, Users2,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { usePermission } from "@/hooks/use-permission";
+import { AnnouncementComposer } from "./composer-dialog";
+import { AckStatusDialog } from "./ack-status-dialog";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -72,8 +75,14 @@ export default function AnnouncementsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<"ALL" | AnnType>("ALL");
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [ackStatusFor, setAckStatusFor] = useState<{ id: string; title: string } | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+  // Mirrors the POST /api/announcements gate (requirePermission
+  // "announcements","create") so the composer + ack-status view only
+  // surface for admins/HR/managers. null while the matrix loads.
+  const canManage = usePermission("announcements", "create") === true;
 
   const load = useCallback(async () => {
     try {
@@ -90,26 +99,9 @@ export default function AnnouncementsPage() {
   const v = rowVersion("announcements");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  async function quickAdd() {
-    try {
-      const res = await fetch("/api/announcements", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Untitled announcement",
-          content: "Write the announcement…",
-          type: "INFO",
-          priority: "NORMAL",
-        }),
-      });
-      if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't post"); return; }
-      toast("Announcement posted");
-      void load();
-    } catch { toast("Couldn't post"); }
-  }
-
   async function ack(id: string) {
     try {
-      const res = await fetch(`/api/announcements/${id}/ack`, {
+      const res = await fetch(`/api/announcements/${id}/acknowledge`, {
         method: "POST", headers: { "Content-Type": "application/json" },
       });
       if (!res.ok) { toast("Couldn't acknowledge"); return; }
@@ -158,9 +150,11 @@ export default function AnnouncementsPage() {
         actions={
           <div className="ann__head-actions">
             <Link href="/policies" className="ann__nav-link"><ShieldCheck /> Policies</Link>
-            <button type="button" className="ann__btn-primary" onClick={quickAdd}>
-              <Plus /> New announcement
-            </button>
+            {canManage && (
+              <button type="button" className="ann__btn-primary" onClick={() => setComposerOpen(true)}>
+                <Plus /> New announcement
+              </button>
+            )}
           </div>
         }
       />
@@ -216,6 +210,8 @@ export default function AnnouncementsPage() {
             subtitle="Broadcast org-wide updates. Use Urgent for outages, Policy for rule changes, Celebration for wins."
             chips={["Info", "Warning", "Policy", "Event", "Celebration"]}
             cta="New announcement"
+            hideCta={!canManage}
+            onCta={() => setComposerOpen(true)}
           />
         ) : filtered.length === 0 ? (
           <div className="ann__no-match"><Search /> No announcements match the filter.</div>
@@ -229,7 +225,7 @@ export default function AnnouncementsPage() {
                   <span className="ann__section-line" />
                 </header>
                 <div className="ann__list">
-                  {pinned.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} />)}
+                  {pinned.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} onViewAcks={() => setAckStatusFor({ id: a.id, title: a.title })} />)}
                 </div>
               </section>
             )}
@@ -242,18 +238,33 @@ export default function AnnouncementsPage() {
                   <span className="ann__section-line" />
                 </header>
                 <div className="ann__list">
-                  {g.items.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} />)}
+                  {g.items.map((a) => <AnnCard key={a.id} a={a} onAck={() => ack(a.id)} canManage={canManage} onViewAcks={() => setAckStatusFor({ id: a.id, title: a.title })} />)}
                 </div>
               </section>
             ))}
           </>
         )}
       </div>
+
+      {canManage && (
+        <AnnouncementComposer
+          open={composerOpen}
+          onClose={() => setComposerOpen(false)}
+          onCreated={(msg) => { toast(msg); void load(); }}
+        />
+      )}
+      {canManage && ackStatusFor && (
+        <AckStatusDialog
+          announcementId={ackStatusFor.id}
+          title={ackStatusFor.title}
+          onClose={() => setAckStatusFor(null)}
+        />
+      )}
     </>
   );
 }
 
-function AnnCard({ a, onAck }: { a: ApiAnn; onAck: () => void }) {
+function AnnCard({ a, onAck, canManage, onViewAcks }: { a: ApiAnn; onAck: () => void; canManage: boolean; onViewAcks: () => void }) {
   const TypeIcon = TYPE_ICON[a.type];
   return (
     <article className={`ann__card ann__card--${a.type.toLowerCase()}`} style={{ ["--c-c" as unknown as string]: TYPE_HUE[a.type], ["--p-c" as unknown as string]: PRIO_HUE[a.priority] }}>
@@ -269,9 +280,18 @@ function AnnCard({ a, onAck }: { a: ApiAnn; onAck: () => void }) {
         {a.expiresAt && (
           <span className="ann__card-expires">Expires {new Date(a.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
         )}
+        {a.mustAcknowledge && canManage && (
+          <button
+            type="button"
+            onClick={onViewAcks}
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[var(--os-line)] text-[12px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+          >
+            <Users2 className="w-3.5 h-3.5" /> Ack status
+          </button>
+        )}
         {a.mustAcknowledge && (
           a.ackedByMe ? (
-            <span className="ann__card-acked"><CheckCircle2 /> You've acked</span>
+            <span className="ann__card-acked"><CheckCircle2 /> You&apos;ve acked</span>
           ) : (
             <button type="button" className="ann__card-ack-btn" onClick={onAck}>
               <Bell /> Acknowledge

@@ -14,6 +14,9 @@ import { Megaphone, X, Pin, AlertTriangle, PartyPopper, Info, CalendarDays, Chev
 type ApiAnnouncement = {
   id: string;
   title: string;
+  // GET /api/announcements returns the model field `content`; keep `body`
+  // as a fallback for any legacy shape.
+  content?: string | null;
   body?: string | null;
   type: "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
   priority?: "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -50,14 +53,15 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/announcements");
-      if (!res.ok) return setItems([]);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const list: ApiAnnouncement[] = data.data ?? (Array.isArray(data) ? data : []);
-      setItems(list);
       // Auto-open the first item that needs ack so it surfaces without
       // requiring another click.
       const firstAck = list.find((a) => a.mustAcknowledge && !a.acknowledged);
-      if (firstAck) setExpanded((prev) => new Set(prev).add(firstAck.id));
+      const nextExpanded = firstAck ? new Set([firstAck.id]) : null;
+      setItems(list);
+      if (nextExpanded) setExpanded((prev) => new Set([...prev, ...nextExpanded]));
     } catch { setItems([]); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -87,7 +91,7 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
 
   async function ack(id: string) {
     try {
-      await fetch(`/api/announcements/${id}/ack`, { method: "POST" });
+      await fetch(`/api/announcements/${id}/acknowledge`, { method: "POST" });
       void load();
     } catch { /* ignore */ }
   }
@@ -112,6 +116,7 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
           const hue = TYPE_HUE[a.type];
           const needsAck = a.mustAcknowledge && !a.acknowledged;
           const isOpen = expanded.has(a.id);
+          const bodyText = a.content ?? a.body ?? "";
           return (
             <div key={a.id} className={`ann-pop__item ${needsAck ? "needs-ack" : ""} ${isOpen ? "is-open" : ""}`}>
               <button type="button" className="ann-pop__item-summary" onClick={() => toggle(a.id)} aria-expanded={isOpen}>
@@ -121,8 +126,8 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
                     {a.pinned && <Pin className="ann-pop__pin" aria-label="Pinned" />}
                     <span>{a.title}</span>
                   </div>
-                  {a.body && !isOpen ? (
-                    <p className="ann-pop__item-body">{a.body.slice(0, 110)}{a.body.length > 110 ? "…" : ""}</p>
+                  {bodyText && !isOpen ? (
+                    <p className="ann-pop__item-body">{bodyText.slice(0, 110)}{bodyText.length > 110 ? "…" : ""}</p>
                   ) : null}
                   <div className="ann-pop__item-meta">
                     <span>{timeAgo(a.publishedAt ?? a.createdAt)}</span>
@@ -133,7 +138,7 @@ export function OsAnnouncementsPopover({ onClose }: { onClose: () => void }) {
               </button>
               {isOpen ? (
                 <div className="ann-pop__item-detail">
-                  {a.body ? <p>{a.body}</p> : <p className="ann-pop__item-body">No additional details.</p>}
+                  {bodyText ? <p>{bodyText}</p> : <p className="ann-pop__item-body">No additional details.</p>}
                   <div className="ann-pop__item-actions">
                     {needsAck ? (
                       <button type="button" className="ann-pop__ack" onClick={() => void ack(a.id)}>
