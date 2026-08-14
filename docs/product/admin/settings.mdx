@@ -7,23 +7,56 @@ Settings is a full screen takeover. Open it and the app rail, sidebar and topbar
 
 ## The two doors
 
-The intent is a clean split: **Admin settings** that change the organization for everybody, and **Personal settings** that only change things for you.
+Settings is split into two doors, and the split is now built.
 
-That split is the plan, and it is not built yet. Today both sets live in one nav with five section headings:
+- **Admin** changes the organization for everybody. It is hidden entirely for anyone below Company Admin or Super Admin. A manager never sees it.
+- **Personal** changes things only for you. Everyone gets it, on every level.
 
-- **Admin**: Members, Hierarchy, Roles & permissions, Audit log, Enabled modules.
-- **Workspace**: Overview, Identity & profile, Tags & labels, Task types, Locale & finance, Plan & billing.
-- **Platform**: API keys, Calendar feeds, Integrations, Import / Export.
-- **Performance**: Scoring & reviews.
-- **Account**: Security, Profile, Notifications, Appearance.
+The Admin door groups its pages into Organization, People & structure, Governance, Platform, and Billing & performance. The Personal door is a single short list: Profile, Notifications, Appearance, Security.
 
-Everything above **Account** is org wide. Everything under **Account** is yours alone, and lives under `/account/*` except Notifications, which points at `/settings/notifications`.
+### Who can open what
 
-There is no page level access gate on `/settings`. Anyone signed in can open any settings page and read it. The protection is on the writes: saving org settings requires Company Admin, Super Admin or C-Level, and access level changes require Company Admin or Super Admin. So a normal employee can look at the Scoring page, but their save will come back as "Admin access required".
+The Admin door is not just hidden from the nav for non-admins. Its most sensitive pages also enforce a server-side redirect, so a manager who types the URL directly is bounced back to their workspace, not shown the page. That guard is in place on **Identity & profile**, **Tags & labels**, **Org structure**, **Audit log**, **Data & compliance** and **Defaults & locks**.
+
+The remaining Admin pages (Overview, Members, Locale & finance, Enabled modules, Task types, Reporting hierarchy, Roles & permissions, API keys, Calendar feeds, Integrations, Import / Export, Plan & billing, Scoring & reviews) rely on the hidden nav plus write-time permission checks rather than a page-level redirect. A determined non-admin who guesses one of those URLs can still read it, but the save is refused: org settings writes require Company Admin, Super Admin or C-Level, and access level changes require Company Admin or Super Admin. So a normal employee who reaches the Scoring page by URL sees it, but their save comes back as "Admin access required".
 
 ## Admin
 
-### Members
+### Organization
+
+#### Overview
+
+A card grid summarizing the organization: name, slug, domain, timezone, currency, fiscal start, plan, module count, scoring weights, password policy, and usage counts for people, SOPs and AI queries. The cards deep link to the pages that edit those values, though several of them currently link back to Overview itself rather than to a dedicated page. This is the Admin door's landing page.
+
+#### Identity & profile
+
+**Saving works.** The page writes the organization name and primary domain, uploads (or removes) the org logo, and edits the company profile: industry, mission, vision, an "about" description and core values.
+
+The company profile is not decoration. It feeds AI KRA and KPI generation, so the richer it is, the more relevant the suggested accountabilities. This was a real engine with no UI before; the editor now sits on top of it.
+
+Timezone, currency, fiscal year and language are deliberately not duplicated here. They live under Locale & finance, one writer per field, so nothing drifts.
+
+#### Locale & finance
+
+Real. Timezone, currency, fiscal year start and language, saved as the org's general settings.
+
+#### Enabled modules
+
+Toggles a list of modules and saves it to the organization. It saves correctly.
+
+What it does not do is hide anything. Nothing in the app rail, sidebar or routing reads the enabled modules list. App visibility is decided by your access tier. The list is used when a new organization is set up, to seed which products it starts with, and is otherwise inert.
+
+#### Tags & labels
+
+**Create only.** It lists the shared tag taxonomy used across boards, tasks and SOPs, and it can add a tag. It cannot rename, recolour, archive or delete one against the server: the page never calls the update or delete endpoints, which do exist, and its delete control only removes the row from the current screen. Get the tag name right when you create it.
+
+#### Task types
+
+**Create, delete and set default.** You can add a custom item type, remove one, and choose which type new tasks default to, so tasks can present as Milestones, Bugs, Deals and so on. There is no control for editing an existing type's name, icon or description; the only field this page ever patches is the default flag.
+
+### People & structure
+
+#### Members
 
 The people governance surface, and the most reliable page in Settings.
 
@@ -33,131 +66,131 @@ It also lists pending invitations with the email, level and age, each with a rev
 
 The server refuses to demote the last remaining Company Admin.
 
-### Hierarchy
+#### Org structure
+
+New. The hub for how the company is shaped: **Functions** (Departments), **Roles**, **Offices**, and a read-only explainer of the access **Levels** ladder. Every number on it is live, computed server-side: department count, role count, office count, and the number of people sitting on each level.
+
+The Functions and Roles tiles link to their full management pages. Offices is an honest "Coming soon" placeholder: the model and API exist, the directory viewer does not yet, so the tile is not clickable.
+
+The Levels section is deliberately read only. Access levels are a fixed Prisma enum that the permission matrix is built on, so the rungs cannot be renamed, reordered or added from here. The page explains each rung, marks the two that unlock the Admin door, and shows the head count on each. You place people on a rung on their profile or through a role; you tune what a rung can do in Roles & permissions.
+
+See [Functions and levels](/admin/functions-and-levels) for the full detail.
+
+#### Reporting hierarchy
 
 A read only reporting tree built from each person's manager. It is the visible "who reports to whom". To change a reporting line, use Members or the person's profile.
 
-### Roles & permissions
+#### Roles & permissions
 
 The permission matrix: access levels down one axis, modules and actions across the other. Super Admin and Company Admin are always full and shown locked. Only those two can save.
 
 Know what you are actually editing. The matrix advertises 16 modules: people, organization, KRAs & KPIs, SOPs, reviews, OKRs, tasks, meetings, policies, announcements, assets, surveys, ideas, analytics, tools and settings.
 
-**Five of them are consulted by API routes today**: `kras`, `sops`, `assets`, `policies` and `announcements`. Ten route files out of 439 call the check. The rest of the product, `people` included, is governed by the access level ladder and the three door model instead, not by this matrix. Toggling a checkbox for, say, `meetings` or `people` changes a stored value and nothing else.
+**Five of them are consulted by API routes today**: `kras`, `sops`, `assets`, `policies` and `announcements`. Ten route files call the check. The rest of the product, `people` included, is governed by the access level ladder and the three door model instead, not by this matrix. Toggling a checkbox for, say, `meetings` or `people` changes a stored value and nothing else.
 
 See [Functions and levels](/admin/functions-and-levels) for the ladder that actually governs most of the product.
 
-### Audit log
+### Governance
 
-**Do not trust this page.** It fetches `/api/audit-logs`, which does not exist. Every load 404s and falls back to six hardcoded sample rows: a login, a timesheet create, a policy update, a role change, an API key delete and an export. The counters above the list are computed from those fake rows.
+#### Audit log
 
-Real audit rows are being written. Invitations, org settings changes, KRA creation, user removal and restore all log correctly, and they are readable at `/api/audit`. There is also an export route at `/api/audit-log/export`. Neither is wired to a screen. Until the page is rewired, treat the audit log as a backend feature with no UI.
+**Real, and wired.** The page reads the live activity engine at `/api/audit`: every row is a persisted audit record scoped to your organization, cursor-paginated, filterable by type, actor and date range. Invitations, org settings changes, KRA creation, user removal and restore, and more, all log here.
 
-Note also that Import / Export links to this page and calls it "Export the signed activity log". There is no export control on the page.
+The **Export** button in the header downloads the signed log through the real export route at `/api/audit-log/export`, honouring the type and date filters you have set. There is no sample or demo data anywhere on this page any more.
 
-### Enabled modules
+Import / Export also links here and calls it "Export the signed activity log"; that link now leads to a page where the export control genuinely works.
 
-Toggles a list of modules and saves it to the organization. It saves correctly.
+#### Data & compliance
 
-What it does not do is hide anything. Nothing in the app rail, sidebar or routing reads the enabled modules list. App visibility is decided by your access tier. The list is used when a new organization is set up, to seed which products it starts with, and is otherwise inert.
+New. The Admin-only export and data-governance hub. It surfaces export endpoints that already existed but had no UI:
 
-## Workspace
+- **Full organization export** as a ZIP of CSVs plus a manifest: people, departments, tasks, SOPs, reviews, meetings, KRAs and the activity trail (`/api/export/all`).
+- **Granular CSVs**: people roster (`/api/export/people`), and timesheets, purchase orders, invoices and the audit trail (`/api/export/[type]`).
+- **Governance links** to the data import surface and the org recycle bin (Trash).
 
-### Overview
+Every export is admin-only and recorded in the audit trail. The page invents no new endpoints; it only exposes the real ones.
 
-A card grid summarizing the organization: name, slug, domain, timezone, currency, fiscal start, plan, module count, scoring weights, password policy, and usage counts for people, SOPs and AI queries. The cards deep link to the pages that edit those values, though several of them currently link back to Overview itself rather than to a dedicated page.
+#### Defaults & locks
 
-### Identity & profile
+New. The one page that finally activates the org-wide preference system that was built but unreachable.
 
-**Saving is broken on this page.** It sends the org identity in the wrong shape, and the API rejects it as an invalid section. The page will tell you it could not save. Nothing you type here persists.
+It has two halves. **Defaults** set the look every member starts with: default appearance (light / dark / auto), a brand-safe default accent, and default density. These seed new members and anyone who has not customized. **Locks** go further: locking a control (theme, density, sidebar layout, or Home cards) re-stamps that setting on every load, so members cannot override it and the matching control is greyed out in their Appearance page and Customize panel.
 
-Until it is fixed, change the organization name and domain through another path.
+It reads and writes `/api/org/preferences`, which is admin-gated and validated. Only Super Admin and Company Admin reach the page or the endpoint.
 
-### Tags & labels
+### Platform
 
-**Create only.** It lists the shared tag taxonomy used across boards, tasks and SOPs, and it can add a tag. It cannot rename, recolour, archive or delete one: the page never calls the update or delete endpoints, which do exist. Get the tag name right when you create it.
+#### API keys
 
-### Task types
+**Real.** This page is a thin client over the production key engine at `/api/keys`. Generating a key mints it on the server and shows the full secret exactly once, at creation; only the prefix is stored afterwards, and there is no way to recover the secret later. Revoking a key round-trips a real soft-delete, so the service using it stops immediately.
 
-**Create, delete and set default.** You can add a custom item type, remove one, and choose which type new tasks default to, so tasks can present as Milestones, Bugs, Deals and so on. There is no control for editing an existing type's name, icon or description; the only field this page ever patches is the default flag.
+The list shows each key's scopes, last-used time and IP, request count, and who created it. Managing keys is limited to Company Admin and Super Admin; everyone else sees an "admins only" notice. Nothing on this page is fabricated in the browser any more, so a string it produces is a live credential you can hand to an integration.
 
-### Locale & finance
+#### Calendar feeds
 
-Real. Timezone, currency, fiscal year start and language, saved as the org's general settings.
+**Honest "Coming soon".** External calendar sync (Google, Outlook, iCloud, Fastmail, ICS) is on the roadmap and shown as planned providers, each marked Coming soon. The page makes no network calls and fabricates no connections or fake OAuth flow. Nothing is connected here. (The Planner module has its own separate Google hook; that is unrelated to this page.)
 
-### Plan & billing
+#### Integrations
+
+A static hub with three navigation cards: Calendar feeds, the app marketplace, and API keys. No data of its own. The app marketplace it links to is itself now honest: it is a browsable catalog where every connector reads "Coming soon", with no fabricated "installed" flags.
+
+#### Import / Export
+
+A static hub with two navigation cards: the data import surface, and the audit log export (which now works, see above). For the richer, admin-only export set, use Data & compliance.
+
+### Billing & performance
+
+#### Plan & billing
 
 Reads the real plan and status, shows the limits for that plan, and opens the billing portal. The portal button depends on billing being configured on the backend, and it surfaces a clear error when it is not.
 
-## Platform
-
-### API keys
-
-**This page is entirely fake.** It ships with four sample keys ("Zapier integration", "Data warehouse sync", "CI test runner", "Legacy webhook"). **Generate key** builds a random string in your browser, copies it to your clipboard and adds a row to local state. Nothing is created on the server. Revoke removes the row from the screen and nothing else. Reload the page and you are back to the same four samples.
-
-A real API key engine exists at `/api/keys`. This page is not connected to it. Do not hand any string this page produces to an integration, and do not treat the list as an inventory of live credentials.
-
-### Calendar feeds
-
-Also a mock. The connections shown are sample data and **Connect** raises a toast that says a demo OAuth flow would open here. No calendar is connected by this page.
-
-### Integrations
-
-A static hub with three navigation cards: Calendar feeds, the app marketplace, and API keys. No data of its own.
-
-### Import / Export
-
-A static hub with two navigation cards: the data import surface, and the audit log (see the caveat above).
-
-## Performance
-
-### Scoring & reviews
+#### Scoring & reviews
 
 Real, and the most substantial configuration page in the product: review cadences, composite score weights, performance bands and behavioral anchors, each saving independently with proper validation.
 
 There is one important mismatch between the weights on this page and the scoring engine. It is documented in detail in [Review cycles and cadences](/admin/reviews-and-cadences). The short version: the "Behavioral rating" weight is written but never read, and the engine's manager and self weights cannot be edited from anywhere in the product.
 
-## Account (personal)
+## Personal
 
 ### Profile, Appearance
 
-Your own profile fields and your own theme and accent. These affect nobody else.
-
-### Security
-
-A security posture score plus a checklist. The status readings are real: whether your email is verified and whether two factor is on are both read from the server, and the org password and 2FA policy shown underneath comes from the real org settings.
-
-The actions are not. **Resend** verification, **Enable** or **Manage** two factor, and **Manage** sessions all just raise a toast saying the flow would open. The "2 active sessions" line is a hardcoded string, not a count of your real sessions. Treat this page as a read only posture summary for now.
+Your own profile fields and your own theme and accent. These affect nobody else. Note that anything an admin has locked in Defaults & locks is greyed out on the Appearance page.
 
 ### Notifications
 
-Two overlapping notification pages exist and they store to different places.
+**One page now.** Personal notification preferences live at a single merged page, `/settings/notifications`, the Notifications target in the Personal door. It has an Inbox section (in-app rows in `/inbox` and the bell) and an Email section (what WorkwrK emails you), and it reconciles the two historical storage backends behind that one surface so the visible state always matches what will actually be delivered.
 
-`/settings/notifications`, which is the one the nav links to, holds per user in app and email preferences and stores them on your user preferences. It is honest about coverage: notification types the platform does not produce yet render as disabled rows with a **Soon** chip instead of a live toggle that would do nothing.
+The older second page at `/account/notifications` is retired: it now redirects here, so there is no longer a competing page that stores to a different place. It is honest about coverage too: a notification type whose producer does not exist yet renders as a disabled row with a **Soon** chip rather than a live toggle that would do nothing.
 
-`/account/notifications` is a second, older page with five email preference booleans stored through a different API. It is not linked from the settings nav. Reaching it by URL and toggling things there will not change what the linked page shows.
+### Security
 
-Use `/settings/notifications`.
+A security posture score plus a checklist and the org policy. The status readings are real: whether your email is verified and whether two factor is on are both read from the server, and the org password and 2FA policy shown underneath comes from the real org settings.
+
+The actions are wired now. **Resend** verification posts to the real request-verify endpoint. **Enable** two factor opens a real TOTP enrolment dialog (QR plus backup codes) against `/api/auth/mfa/enroll`, and **Turn off** opens the matching disable dialog. The old hardcoded "2 active sessions" line is gone; the page no longer claims a sessions feature it does not have.
 
 ## Quick reference
 
 | Page | State |
 | --- | --- |
-| Members | Works |
-| Hierarchy | Works, read only by design |
-| Roles & permissions | Saves, but only 5 of 16 modules are enforced |
-| Audit log | Fake data, real backend not wired |
-| Enabled modules | Saves, but nothing reads it |
-| Identity & profile | Save is broken |
-| Tags & labels | Create only, no rename or delete |
-| Task types | Create, delete and set default; no edit |
+| Overview | Works |
+| Identity & profile | Works, incl. logo and company profile |
 | Locale & finance | Works |
-| Plan & billing | Works |
-| API keys | Entirely fake, do not use |
-| Calendar feeds | Mock, connects nothing |
+| Enabled modules | Saves, but nothing reads it |
+| Tags & labels | Create only, no server-side rename or delete |
+| Task types | Create, delete and set default; no edit |
+| Members | Works |
+| Org structure | Works; Offices tile is Coming soon |
+| Reporting hierarchy | Works, read only by design |
+| Roles & permissions | Saves, but only 5 of 16 modules are enforced |
+| Audit log | Works, reads `/api/audit` with real export |
+| Data & compliance | Works, real exports over existing endpoints |
+| Defaults & locks | Works, writes org-wide defaults + locks |
+| API keys | Works, real `/api/keys` engine |
+| Calendar feeds | Honest Coming soon, connects nothing |
 | Integrations | Static links |
-| Import / Export | Static links |
+| Import / Export | Static links; audit export works |
+| Plan & billing | Works |
 | Scoring & reviews | Works, with a documented weight mismatch |
-| Account → Profile, Appearance | Works |
-| Account → Security | Partly display only |
-| Account → Notifications | Works, second unlinked page exists |
+| Personal → Profile, Appearance | Works |
+| Personal → Notifications | Works, single merged page |
+| Personal → Security | Works, MFA enrol/disable wired |

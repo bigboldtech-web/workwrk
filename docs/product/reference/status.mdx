@@ -60,9 +60,9 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Weekly reviews | `/team/reviews` | Built | Manager queue, submit and approve. |
 | People directory | `/people` | Built | Manager tier for the full directory, scoped to your report tree below the org wide door. |
 | Person profile | `/people/[id]`, `/people/me` | Built | Three render modes: self, manage, peer. |
-| Departments (Functions) | `/people/departments` | In progress | **Create only.** No rename, no head assignment, no re-parent, no delete from the interface. The endpoints exist but nothing calls them. |
+| Departments (Functions) | `/people/departments` | Built | Full CRUD from the interface: create, rename, edit description and colour, assign a department head, re-parent into a nested tree, and delete (the server refuses to delete a department that still has members). Tree and Grid views with rolled-up headcount. No merge/archive yet. |
 | Org chart | `/organization` | Built | Reads the manager chain. |
-| Invite a person | invite modal | In progress | The API accepts department, role and manager but the modal collects none of them, so every new hire lands unplaced. Accept-invite also seeds flat even KRA weights instead of the role template weights. |
+| Invite a person | invite modal | Built | The modal now collects department, role and manager (all optional) alongside the required KRAs and SOPs, so a hire can land placed. Accept-invite seeds each KRA's role-level weight when set and only even-splits the rest, instead of flat even weights across the board. |
 | Candor | `/candor` | **Coming soon** | You can create a candor round. Employees cannot respond and nobody can see results: `/candor/[id]` does not exist and the respond and results endpoints have zero callers. |
 | Surveys | `/surveys` | **Coming soon** | Same shape. You can create a survey. `/surveys/[id]` does not exist, and the respond and responses endpoints have zero callers. |
 | Announcements | `/announcements` | In progress | You can read announcements. The Acknowledge button posts to `/api/announcements/<id>/ack` while the route is `/acknowledge`, so acknowledging always fails. **New announcement** does post a real row, but it is a quick add that writes a fixed placeholder titled "Untitled announcement": there is no composer and no way to edit the text afterwards. |
@@ -91,32 +91,38 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | AI agents | `/agents` | **Coming soon** | Entirely hardcoded, including the usage metrics shown on each agent card. Nothing is connected. |
 | AI Sidekick | `/sidekick` | Built | Real chat against `/api/ai`. |
 | Clips | `/notetaker` | In progress | The rail calls it Clips with a video icon and the sidebar says "All Clips". Nothing records. The page is an AI notetaker: paste a meeting transcript and it extracts decisions, action items and attendees. That part works. |
-| Integrations | `/integrations` | In progress | Google Calendar, Xero, QuickBooks and Razorpay have real OAuth or webhook paths. The marketplace grid's "installed" flags are not real. |
+| Integrations | `/integrations` | **Coming soon** | Honest catalog preview: connectors are browsable by category and every one reads "Coming soon". No fabricated "installed" flags and no connect action. (The Planner's own Google hook is a separate surface.) |
 
 ## Settings
 
+Settings is now a two-door nav. The **Admin** door (org configuration) is hidden entirely for anyone below Company Admin or Super Admin, and its most sensitive pages (`/settings/identity`, `/settings/tags`, `/settings/structure`, `/settings/audit`, `/settings/data`, `/settings/defaults`) also enforce a server-side redirect so a manager cannot reach them by URL. The **Personal** door (`/account/*` plus Notifications) is available to everyone.
+
 | Page | Status | What you need to know |
 | --- | --- | --- |
-| `/settings/members` | Built | Members and invitations. |
-| `/settings/scoring` | In progress | Cadences, bands and anchors save correctly. The weight sliders edit KPI, SOP compliance, Behavioral and Peer, but the scoring engine reads KPI, Manager, Peer, Self and SOP compliance. Behavioral is ignored, and Manager and Self always use defaults. |
-| `/settings/permissions` | In progress | The matrix saves, but only 10 of 439 API route files consult it, covering five of the sixteen modules (`kras`, `sops`, `assets`, `policies`, `announcements`). Everything else uses hardcoded Level ladders. |
-| `/settings/hierarchy` | In progress | Read only. It renders the reporting structure from the user list. You cannot change a reporting line here. |
+| `/settings` | Built | Admin-door overview: an org summary card grid that deep-links to the editors. |
+| `/settings/identity` | Built | Saves org name, primary domain, logo upload, and the company profile (industry, mission, vision, about, values). The profile feeds AI KRA/KPI generation. This replaced a save that used to 400. |
 | `/settings/locale` | Built | Saves to org settings. |
-| `/settings/tags` | In progress | Create only. The tag update and delete endpoints exist but this page never calls them. |
+| `/settings/modules` | Built | Saves to org settings, but nothing in the app reads the list; app visibility is by access tier. |
+| `/settings/tags` | In progress | Create only. It never calls the tag update or delete endpoints; the delete control only drops the row from the current screen. |
 | `/settings/task-types` | In progress | Create, delete and set default all work. There is no edit control: the only field the page patches is the default flag, so a type's name and icon are fixed at creation. |
-| `/settings/modules` | Built | Saves to org settings. |
-| `/settings/notifications` | In progress | There are two notification settings pages with different storage. This one saves to `/api/preferences`; `/account/notifications` saves to `/api/email-preferences`. They are not the same settings and neither one covers everything. |
-| `/settings/billing` | Built | Opens a real Stripe customer portal, and returns a clear "Stripe not configured" error when billing keys are absent. Org admin only. |
-| `/settings/identity` | **Broken** | Saving does not work. The page sends a payload the API rejects with a 400, and always has. |
-| `/settings/api` | **Coming soon** | The page generates fake API keys in the browser with `Math.random` and copies them to your clipboard as if they were real. They are not. A working `/api/keys` engine exists but is not connected. Do not use this page. |
-| `/settings/audit` | **Coming soon** | Fetches `/api/audit-logs`, which does not exist. Real audit rows are accumulating behind `/api/audit`. |
-| `/settings/calendar` | **Coming soon** | Connection theater. It makes no network calls at all. Connect Google Calendar from the Planner instead. |
+| `/settings/members` | Built | Members and invitations. Inline access-level and manager edits for admins. |
+| `/settings/structure` | Built | New. Org-structure hub: live counts for Functions (Departments), Roles and Offices, plus a read-only Levels explainer with per-rung head counts. Offices viewer is Coming soon; Levels are a fixed enum, explained not edited. |
+| `/settings/hierarchy` | In progress | Read only. It renders the reporting structure from the user list. You cannot change a reporting line here. |
+| `/settings/permissions` | In progress | The matrix saves, but only 10 of 439 API route files consult it, covering five of the sixteen modules (`kras`, `sops`, `assets`, `policies`, `announcements`). Everything else uses hardcoded Level ladders. |
+| `/settings/audit` | Built | Reads the real activity engine at `/api/audit`: persisted rows, cursor-paginated, filterable by type/actor/date. The header Export button downloads the signed log through `/api/audit-log/export`. No sample data. |
+| `/settings/data` | Built | New. Admin-only export hub over endpoints that existed with no UI: full-org ZIP (`/api/export/all`), people CSV (`/api/export/people`), and timesheets/purchase-orders/invoices/audit CSVs (`/api/export/[type]`), plus links to import and Trash. |
+| `/settings/defaults` | Built | New. Writes the org-wide preference system (`/api/org/preferences`): default appearance/accent/density that seed members, and locks (theme, density, sidebar, Home cards) that re-stamp on every load so members can't override them. |
+| `/settings/api` | Built | Thin client over the real `/api/keys` engine: mint (secret shown once), list with scopes/last-used/request-count, and real soft-delete revoke. Admins only. No browser-side fabrication. |
+| `/settings/calendar` | **Coming soon** | Honest placeholder. External calendar sync (Google, Outlook, iCloud, Fastmail, ICS) is shown as planned providers; the page makes no network calls and fabricates no connections. |
 | `/settings/integrations` | Built | A static navigation hub, which is all it claims to be. |
-| `/settings/import-export` | Built | A static navigation hub. |
+| `/settings/import-export` | Built | A static navigation hub. Its audit-log export link now leads to a working export. |
+| `/settings/billing` | Built | Opens a real Stripe customer portal, and returns a clear "Stripe not configured" error when billing keys are absent. Org admin only. |
+| `/settings/scoring` | In progress | Cadences, bands and anchors save correctly. The weight sliders edit KPI, SOP compliance, Behavioral and Peer, but the scoring engine reads KPI, Manager, Peer, Self and SOP compliance. Behavioral is ignored, and Manager and Self always use defaults. |
+| `/settings/notifications` | Built | The single merged personal notifications page (Inbox + Email). It reconciles both historical stores (`/api/preferences` JSON store and `/api/email-preferences`) behind one surface. Unproduced types render as disabled "Soon" rows. |
 | `/account/profile` | Built | |
-| `/account/appearance` | Built | |
-| `/account/notifications` | Built | Email preferences. |
-| `/account/security` | In progress | It reads your real MFA status. Every button (Resend verification, Enable two factor, Manage sessions) only shows a toast. "2 active sessions" is a hardcoded string. `/api/auth/mfa/enroll` exists but nothing calls it. |
+| `/account/appearance` | Built | Anything an admin locked in Defaults & locks is greyed out here. |
+| `/account/notifications` | Built | Retired: redirects to `/settings/notifications`. |
+| `/account/security` | Built | Reads real MFA + email-verified status and the org policy. Resend verification, Enable/Turn-off two factor (real TOTP enrol + backup codes via `/api/auth/mfa/enroll`) all work. The old hardcoded "2 active sessions" line is gone. |
 
 ## Notifications and reminders
 

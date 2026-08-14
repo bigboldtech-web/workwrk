@@ -29,22 +29,20 @@ The page shows four counters (Departments, Headcount, With head, Vacant head), a
 
 1. Open `/people/departments`.
 2. Click **New department**.
-3. Type a name and confirm.
-
-That is the whole flow today. The create dialog asks for a name only, and the page assigns a color at random.
-
-### What you cannot do from the Departments page yet
-
-Be aware of this before you plan your structure:
-
-- You cannot rename a department.
-- You cannot assign a department head.
-- You cannot set or change a parent department.
-- You cannot delete or merge a department.
-
-The API behind the page supports name, description, color, parent and head (`PUT /api/departments/[id]`), but no button in the product calls it. The tree view will render nesting and the head avatar correctly if those fields get set another way, for example by an import or a seed. Until the edit UI ships, treat the name you type at creation as permanent.
+3. Fill in the dialog: a name, and optionally a description, a colour, a department head and a parent department.
 
 Department names are unique per organization, so a second department with the same name will fail to create.
+
+### Editing a function
+
+The Departments page now does full CRUD, so nothing you set at creation is stuck:
+
+- **Rename** a department, and change its description and colour.
+- **Assign or change the department head** from a member picker.
+- **Re-parent** it, or add a sub department, to build a nested tree.
+- **Delete** it. The server refuses to delete a department that still has members, so reassign people first.
+
+All of this rides the same API the page has always had (`POST /api/departments`, `PUT /api/departments/[id]`, `DELETE /api/departments/[id]`); the buttons that used to be missing are now wired. Merge and archive are the two operations still not offered.
 
 ### Attaching a function to a role
 
@@ -67,7 +65,7 @@ A person's department is set on their profile, not on the role.
 2. Open the edit dialog on their profile.
 3. Set Department, and while you are there, Role, Manager, Office, Status and Access level.
 
-The invite modal does not collect a department, so people who join through an invite land with no department until you set it here. See [People and invites](/admin/people-and-invites).
+The invite modal now collects department, role and manager (all optional), so a hire can arrive already placed rather than unassigned. You can still adjust any of it here on their profile afterwards. See [People and invites](/admin/people-and-invites).
 
 ## Level
 

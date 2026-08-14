@@ -16,17 +16,18 @@ The modal collects:
 - **Access level**. Every level except Super Admin, including Company Admin. See [Functions and levels](/admin/functions-and-levels).
 - **KRAs**, at least one. Required.
 - **SOPs**, at least one. Required.
+- **Department, Role and Manager**, all optional. These place the hire so they do not arrive unassigned. Picking a Role also drives KRA-weight inheritance on accept (see below).
 - **Personal message**, optional, quoted inside the invitation email.
 
 The KRA and SOP requirement is enforced on the server, not just in the form. An invite without one of each is rejected. This is deliberate: nobody joins the workspace without a role definition. If your org has no KRAs or SOPs yet, the modal tells you and you have to create them first.
 
 One request is sent per email address. Successes are counted in the confirmation toast. Failures (already invited, already a member, network error) stay in the chip row so you can fix and retry without retyping the rest.
 
-### What the invite does not collect
+### Placement is optional but built in
 
-The modal has no picker for department, role or manager, even though the underlying API accepts all three. People who join through an invite land with no department, no job title and no manager. You have to set those afterwards on their profile.
+The modal now has pickers for department, role and manager, so a hire can arrive already placed instead of landing unassigned. All three are optional: leave them blank and the person joins with no department, job title or manager, exactly as before, and you set those afterwards on their profile.
 
-Plan for that. Right after someone accepts, open Teams → Directory, open their card, and set Department, Role and Manager. Setting the Role there is also what seeds their KRAs and SOPs from the job title's template. See [Roles, KRAs and KPIs](/admin/roles-kras-kpis).
+Setting the Role at invite time carries through to accept, where it seeds the KRAs and SOPs from the job title's template and inherits the role's KRA weights. If you would rather do it later, open Teams → Directory after they accept, open their card, and set Department, Role and Manager there instead. See [Roles, KRAs and KPIs](/admin/roles-kras-kpis).
 
 ### What happens when they accept
 
