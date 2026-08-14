@@ -59,8 +59,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Build the response filter. We need to join SurveyResponse → User so
   // we can scope by office/department.
+  //
+  // Anonymity guard: office/department segmentation is a de-anonymization
+  // vector on an anonymous survey (narrow a segment to one person and the
+  // "anonymous" responses become attributable). So the segment filters are
+  // honored ONLY on non-anonymous surveys; on anonymous ones they are
+  // ignored entirely, no matter what the caller passes.
+  const allowSegmentFilter = survey.anonymous === false;
   const responseWhere: any = { surveyId: id };
-  if (officeId || departmentId) {
+  if (allowSegmentFilter && (officeId || departmentId)) {
     const userFilter: any = { organizationId: orgId, deletedAt: null };
     if (officeId) userFilter.officeId = officeId;
     if (departmentId) userFilter.departmentId = departmentId;

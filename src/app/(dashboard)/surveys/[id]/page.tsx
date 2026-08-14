@@ -643,13 +643,19 @@ function ResultCard({ q, anonymous }: { q: ResultQuestion; anonymous: boolean })
       </div>
 
       <div className="mt-3">
-        {(q.kind === "rating" || q.kind === "nps") ? (
-          <RatingResult q={q} />
-        ) : (q.kind === "single_choice" || q.kind === "multi_choice" || q.kind === "yes_no") ? (
-          <ChoiceResult options={q.options} total={q.totalAnswered} />
-        ) : (
-          <TextResult responses={q.responses} anonymous={anonymous} />
-        )}
+        {/* switch narrows the discriminated union reliably where a nested
+            ternary did not (TS widened `q` back in the final else). */}
+        {(() => {
+          switch (q.kind) {
+            case "rating":
+            case "nps":
+              return <RatingResult q={q} />;
+            case "text":
+              return <TextResult responses={q.responses} anonymous={anonymous} />;
+            default:
+              return <ChoiceResult options={q.options} total={q.totalAnswered} />;
+          }
+        })()}
       </div>
     </div>
   );

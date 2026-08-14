@@ -59,15 +59,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
   if (!survey) return jsonError("Survey not found", 404);
 
+  // Anonymity guard (mirrors the responses route): segment filters are a
+  // de-anonymization vector, so they are honored only on non-anonymous
+  // surveys and ignored entirely on anonymous ones.
+  const includeUser = survey.anonymous === false;
   const responseWhere: any = { surveyId: id };
-  if (officeId || departmentId) {
+  if (includeUser && (officeId || departmentId)) {
     const userFilter: any = { organizationId: orgId, deletedAt: null };
     if (officeId) userFilter.officeId = officeId;
     if (departmentId) userFilter.departmentId = departmentId;
     responseWhere.user = userFilter;
   }
-
-  const includeUser = survey.anonymous === false;
   const responses = await prisma.surveyResponse.findMany({
     where: responseWhere,
     select: {
