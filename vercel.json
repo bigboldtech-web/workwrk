@@ -49,6 +49,14 @@
     {
       "path": "/api/cron/recurring-tasks",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/email/send-reminders",
+      "schedule": "0 8 * * *"
     }
   ],
   "functions": {
@@ -99,6 +107,12 @@
     },
     "src/app/api/cron/run-due-agents/route.ts": {
       "maxDuration": 300
+    },
+    "src/app/api/cron/reminders/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/email/send-reminders/route.ts": {
+      "maxDuration": 60
     }
   }
 }

@@ -28,17 +28,44 @@ export async function GET(req: Request) {
   const c = await ctx();
   if (!c) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // Optional ?entityType=&entityId= scopes to one entity's reminders (used by
-  // the task Schedule → Reminder tab); no filter = all my pending reminders
-  // (the topbar bell).
+  // the task Schedule → Reminder tab); no filter = all my reminders in the
+  // requested state.
+  //
+  // ?status= selects the lifecycle slice (default PENDING, back-compat):
+  //   PENDING   — upcoming, not yet fired (the bell's Overdue/Today/Upcoming
+  //               groups + the task Reminder tab).
+  //   FIRED     — fired but not yet acted on (the persistent popup + the bell's
+  //               "Fired" section). A fired reminder used to vanish here because
+  //               only PENDING was ever queried.
+  //   DISMISSED — recently done, last 14 days (the bell's read-only history so
+  //               a missed/handled reminder stays findable).
   const url = new URL(req.url);
   const entityType = url.searchParams.get("entityType");
   const entityId = url.searchParams.get("entityId");
+  const entityFilter = entityType && entityId ? { entityType, entityId } : {};
+  const status = (url.searchParams.get("status") || "PENDING").toUpperCase();
+
+  if (status === "FIRED") {
+    const reminders = await prisma.reminder.findMany({
+      where: { userId: c.userId, status: "FIRED", ...entityFilter },
+      orderBy: { firedAt: "desc" },
+      take: 50,
+    });
+    return NextResponse.json({ reminders });
+  }
+
+  if (status === "DISMISSED") {
+    const since = new Date(Date.now() - 14 * 86_400_000);
+    const reminders = await prisma.reminder.findMany({
+      where: { userId: c.userId, status: "DISMISSED", updatedAt: { gte: since }, ...entityFilter },
+      orderBy: { updatedAt: "desc" },
+      take: 50,
+    });
+    return NextResponse.json({ reminders });
+  }
+
   const reminders = await prisma.reminder.findMany({
-    where: {
-      userId: c.userId,
-      status: "PENDING",
-      ...(entityType && entityId ? { entityType, entityId } : {}),
-    },
+    where: { userId: c.userId, status: "PENDING", ...entityFilter },
     orderBy: { remindAt: "asc" },
     take: 100,
   });

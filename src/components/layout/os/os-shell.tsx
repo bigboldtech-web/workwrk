@@ -79,6 +79,10 @@ export function OsShell({ children }: { children: React.ReactNode }) {
     <OsShellProvider>
       <OsToastProvider>
         <ThemeApplier />
+        {/* Reminder firing + the persistent fire popup live ABOVE the
+            settings/non-settings fork, so due reminders still fire and pop
+            while the user is inside the full-screen Settings takeover. */}
+        <ReminderTicker />
         {settingsMode ? (
           <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
             {children}
@@ -108,7 +112,6 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             <MyWorkPanel />
             <NotepadPanel />
             <ReminderPopover />
-            <ReminderTicker />
             <VoiceCapturePopover />
             <TemplateCenterMount />
           </div>

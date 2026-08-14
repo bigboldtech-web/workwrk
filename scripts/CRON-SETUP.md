@@ -34,9 +34,39 @@ For each row below, set:
 | Announcements publish | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/announcements-publish` |
 | Autonomous agents | `*/10 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/run-due-agents` |
 | Recurring tasks spawn | `0 * * * *` (hourly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/recurring-tasks` |
+| Personal reminders fire (closed-app) | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/reminders` |
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.
+
+**Why the reminders row matters.** A user's personal/task reminders fire
+in the browser via `ReminderTicker` only while the app is open. This
+`/api/cron/reminders` job (every 5 min) is what fires them for people
+who have the app **closed** — without it, closed-app reminders never go
+off. The in-app ticker and this cron claim each due reminder atomically,
+so they never double-fire.
+
+## Digest emails — `/api/email/send-reminders`
+
+This one endpoint runs several distinct reminder jobs selected by a
+`type` in the **JSON body**, and it authenticates with
+`Authorization: Bearer $CRON_SECRET` (NOT the `x-cron-secret` header the
+jobs above use). Because a path-only cron (e.g. the reference
+`vercel.json`) can't send a body, register these as separate aaPanel
+rows, one per `type`:
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Tasks due today (in-app notify) | `0 7 * * *` (7 AM daily) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"tasks-due-today"}' https://workwrk.com/api/email/send-reminders` |
+| Overdue SOPs digest (user + manager) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-sops"}' https://workwrk.com/api/email/send-reminders` |
+| Overdue tasks digest (manager) | `0 8 * * 1` (Mon 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"overdue-tasks"}' https://workwrk.com/api/email/send-reminders` |
+| Policy acknowledgment reminders | `0 9 * * 1` (Mon 9 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"policy-ack"}' https://workwrk.com/api/email/send-reminders` |
+| Monthly evaluation reminders | `0 8 1 * *` (1st, 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"monthly-evaluation"}' https://workwrk.com/api/email/send-reminders` |
+| KPI recording reminders | `0 8 1 * *` (1st, 8 AM) | `curl -fsS -X POST -H "Authorization: Bearer $CRON_SECRET" -H "Content-Type: application/json" -d '{"type":"kpi-recording"}' https://workwrk.com/api/email/send-reminders` |
+
+Do **not** register `send-reminders` with an empty body — a bodiless
+POST defaults to `type: "all"`, which would send the monthly evaluation
+and KPI emails **every day** it runs. Always pass one `type` per row.
 
 ## Where the cron secret comes from
 

@@ -1,12 +1,15 @@
 "use client";
 
-// RemindersBell — top-right alarm surface. Shows the current user's PENDING
-// reminders (personal + task-scheduled) proactively, grouped Overdue / Today /
-// Upcoming, with a count badge. Task reminders (entityType BOARD_ITEM) deep-link
-// to the task. Snooze (+1h) or Done (dismiss) per row. Polls every 60s.
-//
-// Firing still happens via ReminderTicker/cron (a due reminder becomes a
-// notification and leaves PENDING); this bell is the "what's coming up" view.
+// RemindersBell — top-right alarm surface. Shows the current user's reminders
+// across their lifecycle so nothing is lost:
+//   • Fired    — already went off, not yet acted on (the missed-reminder view;
+//                these also drive the persistent popup from ReminderTicker).
+//   • Overdue / Today / Upcoming — PENDING reminders, grouped by remindAt.
+//   • Recently done — read-only history of dismissed reminders (last 14 days),
+//                     so a handled/missed reminder stays findable.
+// Task reminders (entityType BOARD_ITEM) deep-link to the task. Snooze (+1h) or
+// Done (dismiss) per row. Polls every 60s and reconciles instantly with the
+// popup via the `workwrk:reminders-changed` broadcast.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,6 +20,8 @@ type Reminder = {
   id: string;
   title: string;
   remindAt: string;
+  firedAt?: string | null;
+  updatedAt?: string | null;
   entityType: string | null;
   entityId: string | null;
 };
@@ -37,28 +42,50 @@ function fmtTime(iso: string): string {
 export function RemindersBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Reminder[]>([]);
+  const [fired, setFired] = useState<Reminder[]>([]);
+  const [history, setHistory] = useState<Reminder[]>([]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/reminders");
-      if (!res.ok) return;
-      const d = await res.json();
-      setItems(Array.isArray(d.reminders) ? d.reminders : []);
+      const [pRes, fRes] = await Promise.all([
+        fetch("/api/reminders", { cache: "no-store" }),
+        fetch("/api/reminders?status=FIRED", { cache: "no-store" }),
+      ]);
+      if (pRes.ok) {
+        const d = await pRes.json();
+        setItems(Array.isArray(d.reminders) ? d.reminders : []);
+      }
+      if (fRes.ok) {
+        const d = await fRes.json();
+        setFired(Array.isArray(d.reminders) ? d.reminders : []);
+      }
     } catch { /* ignore */ }
   }, []);
 
-  // Poll every 60s + on mount.
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/reminders?status=DISMISSED", { cache: "no-store" });
+      if (!res.ok) return;
+      const d = await res.json();
+      setHistory(Array.isArray(d.reminders) ? d.reminders : []);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Poll every 60s + on mount, and reconcile instantly whenever the popup (or
+  // any surface) broadcasts a change.
   useEffect(() => {
     void load();
     const iv = setInterval(load, 60_000);
-    return () => clearInterval(iv);
+    const onChanged = () => void load();
+    window.addEventListener("workwrk:reminders-changed", onChanged);
+    return () => { clearInterval(iv); window.removeEventListener("workwrk:reminders-changed", onChanged); };
   }, [load]);
 
-  // Refetch whenever opened (so it's fresh right when the user looks).
-  useEffect(() => { if (open) void load(); }, [open, load]);
+  // Refetch (incl. history) whenever opened, so it's fresh right when looked at.
+  useEffect(() => { if (open) { void load(); void loadHistory(); } }, [open, load, loadHistory]);
 
   // Anchor the panel below the bell, right-aligned to it.
   useEffect(() => {
@@ -91,8 +118,14 @@ export function RemindersBell() {
 
   const act = async (id: string, body: Record<string, unknown>) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
-    try { await fetch(`/api/reminders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); }
-    finally { void load(); }
+    setFired((prev) => prev.filter((r) => r.id !== id));
+    try {
+      await fetch(`/api/reminders/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } finally {
+      window.dispatchEvent(new CustomEvent("workwrk:reminders-changed"));
+      void load();
+      if (open) void loadHistory();
+    }
   };
 
   const now = Date.now();
@@ -100,10 +133,11 @@ export function RemindersBell() {
   const overdue = items.filter((r) => new Date(r.remindAt).getTime() < now);
   const today = items.filter((r) => { const t = new Date(r.remindAt).getTime(); return t >= now && t < tomorrow; });
   const upcoming = items.filter((r) => new Date(r.remindAt).getTime() >= tomorrow);
-  // Badge = things that want attention now/soon (overdue + today).
-  const badge = overdue.length + today.length;
+  // Badge = things that already went off (fired) + things due now/soon.
+  const badge = fired.length + overdue.length + today.length;
+  const nothing = fired.length === 0 && items.length === 0 && history.length === 0;
 
-  const Group = ({ label, rows }: { label: string; rows: Reminder[] }) =>
+  const Group = ({ label, rows, tone = "amber" }: { label: string; rows: Reminder[]; tone?: "amber" | "brand" }) =>
     rows.length === 0 ? null : (
       <div className="py-1">
         <div className="px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">{label}</div>
@@ -111,9 +145,10 @@ export function RemindersBell() {
           {rows.map((r) => {
             const isTask = r.entityType === "BOARD_ITEM" && r.entityId;
             const Icon = isTask ? CheckSquare : Bell;
+            const iconColor = isTask ? "text-[#0073EA]" : tone === "brand" ? "text-[#0073EA]" : "text-amber-500";
             const inner = (
               <div className="group flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-50">
-                <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${isTask ? "text-blue-500" : "text-amber-500"}`} />
+                <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12.5px] text-zinc-800 truncate">{r.title}</div>
                   <div className="text-[11px] text-zinc-400">{fmtTime(r.remindAt)}</div>
@@ -191,7 +226,7 @@ export function RemindersBell() {
                 </button>
               </div>
               <div className="max-h-[60vh] overflow-y-auto">
-                {items.length === 0 ? (
+                {nothing ? (
                   <div className="px-3 py-8 text-center">
                     <AlarmClock className="w-6 h-6 text-zinc-300 mx-auto mb-2" />
                     <p className="text-[12.5px] text-zinc-500">No reminders</p>
@@ -199,9 +234,26 @@ export function RemindersBell() {
                   </div>
                 ) : (
                   <>
+                    <Group label="Fired" rows={fired} tone="brand" />
                     <Group label="Overdue" rows={overdue} />
                     <Group label="Today" rows={today} />
                     <Group label="Upcoming" rows={upcoming} />
+                    {history.length > 0 ? (
+                      <div className="py-1 border-t border-zinc-100">
+                        <div className="px-3 pt-1.5 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">Recently done</div>
+                        <ul>
+                          {history.map((r) => (
+                            <li key={r.id} className="flex items-center gap-2 px-3 py-1.5">
+                              <Check className="w-3.5 h-3.5 flex-shrink-0 text-zinc-300" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-[12.5px] text-zinc-500 truncate line-through">{r.title}</div>
+                                <div className="text-[11px] text-zinc-400">{fmtTime(r.updatedAt || r.firedAt || r.remindAt)}</div>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                   </>
                 )}
               </div>
