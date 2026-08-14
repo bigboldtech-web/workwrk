@@ -10,12 +10,13 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ShieldCheck, Key, Mail, Hash, CheckCircle2, AlertTriangle, Clock, Building,
+  ShieldCheck, Key, Mail, Hash, CheckCircle2, AlertTriangle, Building,
   Smartphone, Activity, ChevronRight,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { MfaEnrollDialog, MfaDisableDialog } from "./mfa-modal";
 
 type ApiMe = { user?: { id: string; firstName?: string; lastName?: string; email?: string; accessLevel?: string } };
 type SecurityPolicy = { minPasswordLength?: number; requireUppercase?: boolean; requireNumbers?: boolean; sessionTimeout?: number; twoFactorEnabled?: boolean };
@@ -25,7 +26,22 @@ export default function AccountSecurityPage() {
   const [mfa, setMfa] = useState<{ mfaEnabled: boolean; emailVerified: boolean } | null>(null);
   const [orgSec, setOrgSec] = useState<SecurityPolicy | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [enrollOpen, setEnrollOpen] = useState(false);
+  const [disableOpen, setDisableOpen] = useState(false);
   const { toast } = useOsToast();
+
+  async function resendVerification() {
+    try {
+      await fetch("/api/auth/request-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      toast("Verification email sent — check your inbox");
+    } catch {
+      toast("Couldn't send verification email");
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -94,9 +110,8 @@ export default function AccountSecurityPage() {
         <section className="acs__section">
           <header><h2><Key /> Your posture</h2></header>
           <div className="acs__list">
-            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "—"} action={!mfa?.emailVerified && "Resend"} onAction={() => toast("Verification email sent")} Icon={Mail} />
-            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active — backup codes available" : "Not enabled"} action={!mfa?.mfaEnabled ? "Enable" : "Manage"} onAction={() => toast(mfa?.mfaEnabled ? "Open MFA management" : "Open TOTP enrollment")} Icon={Smartphone} />
-            <CheckRow ok={true} title="Active sessions" desc="2 active sessions" action="Manage" onAction={() => toast("Open session list")} Icon={Clock} />
+            <CheckRow ok={!!mfa?.emailVerified} title="Email verified" desc={me?.user?.email ?? "—"} action={!mfa?.emailVerified && "Resend"} onAction={() => void resendVerification()} Icon={Mail} />
+            <CheckRow ok={!!mfa?.mfaEnabled} title="Two-factor auth (TOTP)" desc={mfa?.mfaEnabled ? "Active — backup codes issued" : "Not enabled"} action={mfa ? (mfa.mfaEnabled ? "Turn off" : "Enable") : null} onAction={() => (mfa?.mfaEnabled ? setDisableOpen(true) : setEnrollOpen(true))} Icon={Smartphone} />
             <CheckRow ok={true} title="Access level" desc={me?.user?.accessLevel ?? "EMPLOYEE"} Icon={Building} />
           </div>
         </section>
@@ -112,6 +127,17 @@ export default function AccountSecurityPage() {
           </div>
         </section>
       </div>
+
+      <MfaEnrollDialog
+        open={enrollOpen}
+        onOpenChange={setEnrollOpen}
+        onEnrolled={() => { toast("Two-factor auth enabled"); void load(); }}
+      />
+      <MfaDisableDialog
+        open={disableOpen}
+        onOpenChange={setDisableOpen}
+        onDisabled={() => { toast("Two-factor auth disabled"); void load(); }}
+      />
     </>
   );
 }
