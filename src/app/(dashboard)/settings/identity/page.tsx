@@ -1,192 +1,361 @@
 "use client";
 
-/* Settings · Identity — org identity form (name, logo, fiscal year, timezone, currency).
+/* Settings · Identity & company profile — org name, domain, logo, and the
+ * mission/vision/about profile that grounds AI KRA generation.
  *
- *  GET   /api/settings
- *  PATCH /api/settings
+ * Data plane (all endpoints already exist):
+ *   GET   /api/settings                     → { organization:{name,domain,logo}, settings:{companyProfile} }
+ *   PATCH /api/settings { section:"general", data:{ name, domain } }   ← org name + domain
+ *   PATCH /api/settings { companyProfile:{…} }                         ← mission/vision/about/industry/values
+ *   POST  /api/settings/logo  (FormData: logo)  DELETE /api/settings/logo   ← org logo
+ *
+ * Locale (timezone/currency/fiscal/language) lives on /settings/locale and
+ * is intentionally NOT duplicated here — one writer per field, no drift.
+ *
+ * Admin-gated by the layout (requireOrgAdminOrRedirect); we also mirror the
+ * guard client-side so the controls read-only if a non-admin ever lands here.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Building, Globe, Calendar as CalendarIcon, Coins, Image as ImageIcon,
-  CheckCircle2,
+  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, Loader2,
 } from "lucide-react";
+import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type Identity = {
-  orgName?: string;
-  legalName?: string;
-  logoUrl?: string;
-  domain?: string;
-  timezone?: string;
-  currency?: string;
-  fiscalYearStart?: string;
-  language?: string;
-  industry?: string;
+// Mirror the /api/settings/logo endpoint's server-side validation so we can
+// reject bad files before the round-trip (endpoint allows these + 2MB cap).
+const LOGO_ACCEPT = "image/png,image/jpeg,image/webp,image/svg+xml";
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+const LOGO_MAX = 2 * 1024 * 1024; // 2MB
+
+type IdentityState = {
+  name: string;
+  domain: string;
+  logo: string | null;
+  mission: string;
+  vision: string;
+  about: string;
+  industry: string;
+  values: string; // comma-separated in the UI; stored as string[]
 };
 
-const TIMEZONES = ["UTC", "America/New_York", "America/Los_Angeles", "Europe/London", "Europe/Berlin", "Asia/Kolkata", "Asia/Singapore", "Asia/Tokyo", "Australia/Sydney"];
-const CURRENCIES = ["USD", "EUR", "GBP", "INR", "JPY", "AUD", "CAD", "SGD"];
-const FY_OPTIONS = [
-  { value: "01-01", label: "January (calendar year)" },
-  { value: "04-01", label: "April (UK / India)" },
-  { value: "07-01", label: "July (Australia)" },
-  { value: "10-01", label: "October (US federal)" },
-];
-
 export default function IdentitySettingsPage() {
-  const [data, setData] = useState<Identity | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const { accessLevel } = useRole();
+  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel);
   const { toast } = useOsToast();
+
+  const [state, setState] = useState<IdentityState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/settings");
-      if (!res.ok) { setData({}); return; }
-      const s = await res.json();
-      const id = s?.settings?.identity ?? {};
-      setData({
-        orgName: id.orgName ?? s?.settings?.orgName ?? "",
-        legalName: id.legalName ?? "",
-        logoUrl: id.logoUrl ?? "",
-        domain: id.domain ?? "",
-        timezone: id.timezone ?? "UTC",
-        currency: id.currency ?? "USD",
-        fiscalYearStart: id.fiscalYearStart ?? "01-01",
-        language: id.language ?? "en",
-        industry: id.industry ?? "",
+      if (!res.ok) { setState(blank()); return; }
+      const d = await res.json();
+      const org = d?.organization ?? {};
+      const profile = d?.settings?.companyProfile ?? {};
+      setState({
+        name: typeof org.name === "string" ? org.name : "",
+        domain: typeof org.domain === "string" ? org.domain : "",
+        logo: typeof org.logo === "string" ? org.logo : null,
+        mission: typeof profile.mission === "string" ? profile.mission : "",
+        vision: typeof profile.vision === "string" ? profile.vision : "",
+        about: typeof profile.about === "string" ? profile.about : "",
+        industry: typeof profile.industry === "string" ? profile.industry : "",
+        values: Array.isArray(profile.values) ? profile.values.join(", ") : "",
       });
-    } catch { setData({}); }
+    } catch { setState(blank()); }
   }, []);
   useEffect(() => { void load(); }, [load]);
 
+  const set = <K extends keyof IdentityState>(k: K, v: IdentityState[K]) =>
+    setState((s) => (s ? { ...s, [k]: v } : s));
+
   async function save() {
-    if (!data) return;
+    if (!state || !canEdit) return;
     setSaving(true);
     try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identity: data }),
+      // 1. Org name + domain via the section the API actually accepts.
+      const gen = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: "general",
+          data: { name: state.name.trim(), domain: state.domain.trim() },
+        }),
       });
-      if (!res.ok) { toast(res.status === 403 ? "Admin access required" : "Couldn't save"); return; }
-      setLastSaved(new Date());
+      if (!gen.ok) throw new Error(await errText(gen));
+
+      // 2. Company profile via the top-level branch (runs sequentially so it
+      //    reads the settings the step above just wrote — no lost update).
+      const values = state.values.split(",").map((v) => v.trim()).filter(Boolean);
+      const prof = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyProfile: {
+            mission: state.mission.trim(),
+            vision: state.vision.trim(),
+            about: state.about.trim(),
+            industry: state.industry.trim(),
+            values,
+          },
+        }),
+      });
+      if (!prof.ok) throw new Error(await errText(prof));
+
       toast("Identity saved");
-    } catch { toast("Couldn't save"); }
-    finally { setSaving(false); }
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Couldn't save");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function update<K extends keyof Identity>(k: K, v: Identity[K]) {
-    setData((d) => ({ ...(d ?? {}), [k]: v }));
+  async function onPickLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    if (!LOGO_TYPES.includes(file.type)) { toast("Use a PNG, JPEG, WebP, or SVG"); return; }
+    if (file.size > LOGO_MAX) { toast("Logo must be under 2MB"); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("logo", file);
+      const res = await fetch("/api/settings/logo", { method: "POST", body: fd });
+      if (!res.ok) throw new Error(await errText(res));
+      const d = await res.json();
+      set("logo", typeof d?.logo === "string" ? d.logo : null);
+      toast("Logo updated");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removeLogo() {
+    if (!canEdit) return;
+    setUploading(true);
+    try {
+      const res = await fetch("/api/settings/logo", { method: "DELETE" });
+      if (!res.ok) throw new Error(await errText(res));
+      set("logo", null);
+      toast("Logo removed");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't remove logo");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
-    <>
-      {/* Plain settings header (ClickUp pages carry no icon tiles/gradients);
-          Save is the shipped dark pill with ClickUp's copy. */}
-      <div className="flex items-start justify-between px-6 pb-2 pt-6">
-        <div>
-          <h1 className="text-[16px] font-bold text-zinc-900">Workspace identity</h1>
-          <p className="mt-0.5 text-[12px] text-zinc-500">
-            {data?.orgName ? `${data.orgName}${lastSaved ? ` · saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}` : "Name, logo, locale, and fiscal year."}
-          </p>
+    <div className="px-6 pt-6">
+      <header className="mb-1 flex items-center gap-2">
+        <Building2 className="h-5 w-5 text-zinc-700" />
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">
+          Identity &amp; company profile
+        </h1>
+      </header>
+      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+        Your organization&apos;s name, logo, and the mission/vision that grounds AI.
+        Timezone, currency and fiscal year live under{" "}
+        <a href="/settings/locale" className="text-[var(--os-brand,#0073EA)] hover:underline">Locale &amp; finance</a>.
+        {canEdit ? "" : " You need admin access to change these."}
+      </p>
+
+      {state === null ? (
+        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
         </div>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || data === null}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-zinc-900 px-3.5 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save changes"}
-        </button>
-      </div>
+      ) : (
+        <>
+          {/* Brand -------------------------------------------------------- */}
+          <section className="max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
+            <SectionHead icon={<Building2 className="h-4 w-4 text-zinc-500" />} title="Brand" />
 
-      <div className="idn">
-        {data === null ? (
-          <div className="idn__loading">Loading…</div>
-        ) : (
-          <>
-            <section className="idn__section">
-              <header><h2><Building /> Brand</h2></header>
-              <div className="idn__grid">
-                <Field label="Org name" hint="Shown in the sidebar and notifications.">
-                  <input type="text" value={data.orgName ?? ""} onChange={(e) => update("orgName", e.target.value)} placeholder="Acme Inc." />
-                </Field>
-                <Field label="Legal name" hint="Used on contracts and invoices.">
-                  <input type="text" value={data.legalName ?? ""} onChange={(e) => update("legalName", e.target.value)} placeholder="Acme Inc., LLC" />
-                </Field>
-                <Field label="Domain" hint="Primary domain. Restricts auth.">
-                  <input type="text" value={data.domain ?? ""} onChange={(e) => update("domain", e.target.value)} placeholder="acme.com" />
-                </Field>
-                <Field label="Industry">
-                  <input type="text" value={data.industry ?? ""} onChange={(e) => update("industry", e.target.value)} placeholder="e.g. SaaS / Manufacturing" />
-                </Field>
-                <Field label="Logo URL" hint="Use a square PNG/SVG.">
-                  <input type="text" value={data.logoUrl ?? ""} onChange={(e) => update("logoUrl", e.target.value)} placeholder="https://…/logo.png" />
-                </Field>
-              </div>
-              {data.logoUrl && (
-                <div className="idn__preview">
-                  <span className="idn__preview-label"><ImageIcon /> Preview</span>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={data.logoUrl} alt="logo preview" />
+            {/* Logo */}
+            <div>
+              <label className="mb-1.5 block text-[12px] font-medium text-zinc-700">Organization logo</label>
+              <div className="flex items-center gap-3">
+                <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
+                  {state.logo ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={state.logo} alt="Organization logo" className="h-full w-full object-contain" />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-zinc-300" />
+                  )}
                 </div>
-              )}
-            </section>
-
-            <section className="idn__section">
-              <header><h2><Globe /> Locale</h2></header>
-              <div className="idn__grid">
-                <Field label="Timezone" hint="Used for scheduling and reports.">
-                  <select value={data.timezone ?? "UTC"} onChange={(e) => update("timezone", e.target.value)}>
-                    {TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-                  </select>
-                </Field>
-                <Field label="Currency" hint="Primary display currency.">
-                  <select value={data.currency ?? "USD"} onChange={(e) => update("currency", e.target.value)}>
-                    {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </Field>
-                <Field label="Fiscal year start" hint="Drives the accounting calendar.">
-                  <select value={data.fiscalYearStart ?? "01-01"} onChange={(e) => update("fiscalYearStart", e.target.value)}>
-                    {FY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Default language">
-                  <select value={data.language ?? "en"} onChange={(e) => update("language", e.target.value)}>
-                    <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
-                    <option value="hi">Hindi</option>
-                    <option value="ja">Japanese</option>
-                  </select>
-                </Field>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={!canEdit || uploading}
+                    onClick={() => fileRef.current?.click()}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
+                  >
+                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    {state.logo ? "Replace" : "Upload"}
+                  </button>
+                  {state.logo && (
+                    <button
+                      type="button"
+                      disabled={!canEdit || uploading}
+                      onClick={removeLogo}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-[#E2445C] hover:bg-zinc-50 disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /> Remove
+                    </button>
+                  )}
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept={LOGO_ACCEPT}
+                    className="hidden"
+                    onChange={onPickLogo}
+                  />
+                </div>
               </div>
-            </section>
+              <p className="mt-1.5 text-[11px] text-zinc-400">PNG, JPEG, WebP or SVG · up to 2MB · saved instantly.</p>
+            </div>
 
-            <section className="idn__section idn__section--summary">
-              <header><h2><CheckCircle2 /> Summary</h2></header>
-              <div className="idn__summary">
-                <div className="idn__summary-row"><Building /> <strong>{data.orgName || "Untitled"}</strong>{data.legalName && <span>· {data.legalName}</span>}</div>
-                <div className="idn__summary-row"><Globe /> {data.timezone ?? "UTC"} · {data.language ?? "en"}</div>
-                <div className="idn__summary-row"><Coins /> {data.currency ?? "USD"}</div>
-                <div className="idn__summary-row"><CalendarIcon /> Fiscal year: {FY_OPTIONS.find((o) => o.value === data.fiscalYearStart)?.label ?? "—"}</div>
-              </div>
-            </section>
-          </>
-        )}
-      </div>
-    </>
+            <TextField
+              label="Organization name" value={state.name} disabled={!canEdit}
+              placeholder="Acme Inc."
+              hint="Shown in the sidebar and notifications."
+              onChange={(v) => set("name", v)}
+            />
+            <TextField
+              label="Primary domain" value={state.domain} disabled={!canEdit}
+              placeholder="acme.com"
+              hint="Used to match teammates signing in with a company email."
+              onChange={(v) => set("domain", v)}
+              icon={<Globe className="h-3.5 w-3.5 text-zinc-400" />}
+            />
+          </section>
+
+          {/* Company profile --------------------------------------------- */}
+          <section className="mt-5 max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
+            <SectionHead
+              icon={<Sparkles className="h-4 w-4 text-zinc-500" />}
+              title="Company profile"
+            />
+            <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[11.5px] text-zinc-600">
+              <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
+              <span>This profile feeds AI KRA &amp; KPI generation. The richer it is, the more relevant the suggested accountabilities.</span>
+            </div>
+
+            <TextField
+              label="Industry" value={state.industry} disabled={!canEdit}
+              placeholder="e.g. SaaS · Manufacturing · Healthcare"
+              onChange={(v) => set("industry", v)}
+            />
+            <AreaField
+              label="Mission" value={state.mission} disabled={!canEdit}
+              placeholder="Why the company exists — the change you're here to make."
+              onChange={(v) => set("mission", v)}
+            />
+            <AreaField
+              label="Vision" value={state.vision} disabled={!canEdit}
+              placeholder="Where the company is headed over the next few years."
+              onChange={(v) => set("vision", v)}
+            />
+            <AreaField
+              label="About" value={state.about} disabled={!canEdit}
+              placeholder="What the company does, who it serves, and how."
+              onChange={(v) => set("about", v)}
+            />
+            <TextField
+              label="Core values" value={state.values} disabled={!canEdit}
+              placeholder="Ownership, Craft, Candor"
+              hint="Comma-separated. Used as context for AI-generated KRAs."
+              onChange={(v) => set("values", v)}
+            />
+          </section>
+
+          <div className="mt-5 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={save}
+              disabled={!canEdit || saving}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+            >
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Save changes
+            </button>
+          </div>
+        </>
+      )}
+      <div className="h-10" />
+    </div>
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+/* -------------------------------------------------------------------------- */
+
+function blank(): IdentityState {
+  return { name: "", domain: "", logo: null, mission: "", vision: "", about: "", industry: "", values: "" };
+}
+
+async function errText(res: Response): Promise<string> {
+  if (res.status === 403) return "Admin access required";
+  const d = await res.json().catch(() => null);
+  return (d && typeof d.error === "string" && d.error) || "Couldn't save";
+}
+
+function SectionHead({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
-    <label className="idn__field">
-      <span className="idn__field-label">{label}</span>
-      {children}
-      {hint && <span className="idn__field-hint">{hint}</span>}
-    </label>
+    <div className="flex items-center gap-1.5">
+      {icon}
+      <h2 className="text-[13px] font-semibold text-zinc-800">{title}</h2>
+    </div>
+  );
+}
+
+function TextField({
+  label, value, onChange, placeholder, hint, disabled, icon,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; hint?: string; disabled?: boolean; icon?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[12px] font-medium text-zinc-700">{label}</label>
+      <div className="relative">
+        {icon && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">{icon}</span>}
+        <input
+          type="text"
+          value={value}
+          disabled={disabled}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+          className={`h-8 w-full rounded-md border border-zinc-200 bg-white ${icon ? "pl-8" : "px-2.5"} pr-2.5 text-[12.5px] text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60`}
+        />
+      </div>
+      {hint && <p className="mt-1 text-[11px] text-zinc-400">{hint}</p>}
+    </div>
+  );
+}
+
+function AreaField({
+  label, value, onChange, placeholder, disabled,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  placeholder?: string; disabled?: boolean;
+}) {
+  return (
+    <div>
+      <label className="mb-1 block text-[12px] font-medium text-zinc-700">{label}</label>
+      <textarea
+        value={value}
+        disabled={disabled}
+        placeholder={placeholder}
+        rows={2}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full resize-y rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60"
+      />
+    </div>
   );
 }
