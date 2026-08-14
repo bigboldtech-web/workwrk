@@ -1,0 +1,288 @@
+---
+title: Core concepts
+description: The two structures that hold WorkwrK together: the work hierarchy (Spaces, Folders, Lists, tasks, views) and the alignment chain (Role, KRA, KPI, person, goals).
+---
+
+# Core concepts
+
+WorkwrK has two structures. Learn both and the rest of the product explains itself.
+
+- **The work hierarchy** answers "where does this task live".
+- **The alignment chain** answers "whose job is this, and how do we know it went well".
+
+They are separate trees that meet at specific, deliberate joints.
+
+---
+
+## Part 1: the work hierarchy
+
+```
+Space
+ └── Folder            (can nest inside another Folder, up to 6 levels)
+      └── List         (a board: the container tasks actually live in)
+           └── Task    (an Item; can have subtasks, which are Tasks too)
+```
+
+### Space
+
+A Space is the top container: a team, a department, a client, a product line. Spaces are listed in the left sidebar and open at `/spaces/<slug>`. A Space has a name, an icon, a colour, an owner, and a visibility setting.
+
+A Space's visibility is one of three values:
+
+- **Private**: only explicit members can see it.
+- **Workspace** (the default): visible to Space members plus org admins.
+- **Org**: visible to everyone in the organization.
+
+Visibility is set with a "make private" toggle when you create the Space, and can be changed to any of the three from the Space's Share dialog afterwards. Membership is per-Space. Org admins reach every Space without needing a membership row.
+
+The data model also allows a Space to sit inside a parent Space, and the API accepts it, but nothing in the UI creates a sub-Space today.
+
+### Folder
+
+Folders sit inside a Space and group Lists. A Folder can contain other Folders; the app caps that nesting at 6 levels (the database would allow deeper, but the sidebar does not render past 6). A Folder can be made private, in which case only its owner and org admins see it and its Lists.
+
+Folders are optional. A List can hang directly off a Space with no Folder at all.
+
+### List
+
+A **List** is where tasks live. Internally the model is called a Board, which is why URLs read `/boards/<slug>` and some menus say "Board" while the sidebar says "List". Same object.
+
+Each List carries:
+
+- **Its own set of statuses.** A List can define its own status options (value, label, colour, and a group of Active, Done, or Closed). If it defines none, it uses the default trio.
+- **Its own field shelf.** Custom fields are defined per List and stored on the List's schema; each task holds the values.
+- **Its own views.** See below.
+- **Its own visibility**, layered on top of the Space's: Workspace defers to the Space entirely, Private restricts to explicit List members plus the List owner, Space owners and org admins, and Org opens it to everyone regardless of Space membership.
+
+### Task
+
+A task is an Item. It has a title, a status, an owner, a priority (Urgent, High, Normal, Low, or none), a start date and a due date, a position for manual ordering, arbitrary custom-field values, and an optional parent task, which is how subtasks work. Deleting a parent deletes its subtree.
+
+Tasks also support:
+
+- **Comments and an activity log.** Comments are rich text; the activity log is written automatically when a task is created, patched, or archived, so a status change shows as "changed status from To Do to In Progress".
+- **Time tracking.** Timer sessions are per-user, so two people can run timers on the same task without conflict.
+- **Checklists and subtasks** inside the task detail panel.
+- **Recurrence.** A series anchor task carries a repeat rule and a next-spawn date. A scheduled job (`/api/cron/recurring-tasks`) claims due anchors, clones the task and its subtask tree as a fresh open task, and advances the anchor. Spawned copies never become anchors themselves, so a series cannot run away. Whether the spawning actually happens depends on that cron being registered on the deployment you are using; verify it before relying on recurrence in production.
+- **An alignment tag.** The create-task modal and the task detail panel both carry a control that stamps a KRA or a KPI onto the task. This is the first joint between the two structures.
+
+A task opens in a side drawer from a List, or full page at `/item/<id>`, which is the shareable URL. `/everything` shows every task you can read across every List in the org, grouped by status.
+
+### Views
+
+A View is a saved way of looking at one List. WorkwrK ships 17 view types, each with its own renderer:
+
+| View | What it is for |
+| --- | --- |
+| Table | The spreadsheet grid |
+| Board (Kanban) | Columns by status or any group key |
+| Calendar | Tasks on a month grid by date |
+| Gantt | Dependencies and bars over time |
+| Timeline | The lighter sibling of Gantt |
+| Workload | Capacity per person |
+| Cards | Gallery of cards |
+| Hierarchy | Expand and collapse tree |
+| Pivot | Two-axis cross-tab |
+| Chart | Aggregate reporting |
+| Dashboard | Composed widgets |
+| Form | Intake form that creates tasks |
+| Doc | A document view |
+| Whiteboard | Freeform canvas |
+| File gallery | Attachments as a gallery |
+| Map | Tasks with a location field |
+| Activity | Chronological feed for the List |
+
+Views are created from the "+ View" control on a List. Two tiles in that picker are variants rather than distinct renderers: "Team" is a Workload view with a config flag, and "Mind Map" rides the Whiteboard canvas.
+
+**Honest note on custom fields.** The field catalog defines roughly 40 types. The ones that actually render and edit today are text, long text, number, money, percent, date, datetime, checkbox, dropdown, t-shirt size, multi-select, labels, rating, KRA, linked doc, linked SOP, relationship, user, people, manual progress, location, voting and files. Anything else in the catalog, including formula, rollup, the AI-typed fields, button and signature, renders as a placeholder dash on a List until it is wired.
+
+---
+
+## Part 2: the alignment chain
+
+This is the part of WorkwrK that is not in ClickUp or Monday.
+
+```
+Function (Department)
+        │
+        ▼
+     Role  ──────────────►  person  (User.roleId)
+   (job title)                 │
+        │                      │ holding the Role seeds
+        │ owns                 │ the KRAs, at the Role's weights
+        ▼                      ▼
+      KRA  (weight %)  ───►  KRAAssignment (weightage %, per person)
+        │
+        │ measured by
+        ▼
+      KPI  (permanent gauge, OWNED or SHARED)
+        │
+        │ readings recorded per person, per period
+        ▼
+   KPIRecord  ──────────────►  can drive a Key Result
+                                        │
+                                        ▼
+                                Goal (OKR)
+                            one accountable owner (a person)
+                            many contributors (people, departments, roles)
+```
+
+### Function (Department)
+
+A **Function** is a Department. The Departments page calls them departments; the Role definition page calls the same field "Function". A department has a name, an optional description, colour, an optional parent department (so functions nest), an optional head, and members.
+
+Departments are found at **People → Departments**, reachable from the Roles page header.
+
+### Role (job title)
+
+A **Role** is a job title, not a permission. It has a title, a description used as the mission line, an access **Level** from the fixed ladder, and an optional Function. Roles are the library at **People → Roles**, and each one opens its own definition page at `/people/roles/<id>`.
+
+A Role's definition page is where the alignment template lives: its mission, its function, its level, its KRAs and the KPIs under them, its ownership boundary, its thresholds, the people who currently hold it, and its instances.
+
+The page also shows, next to each holder, how many of the Role's template KRAs that person is missing, with an amber chip when they have drifted from the template.
+
+#### The rest of the Role definition page
+
+Three cards on the Role page belong to a wider "operating core" model. They are real, they save, and you will see them, so here is what they do and where they stop.
+
+**Ownership boundary.** Three columns: what this role **Owns**, what it **Can request** from another role, and what it **Cannot touch**. The principle is one concept, one owner, one place: you raise a request to the owner rather than editing someone else's area. Owned areas are created inline; can-request and cannot-touch rows point at an area another role owns.
+
+*Honest note:* the "Request" button on a can-request row currently only shows a confirmation toast naming the owning role. It does not create a tracked work item or notify anyone.
+
+**Thresholds.** Tunable numbers stored as rows rather than constants, with a label, a trigger, a value, a unit, and a business-hours-only flag. Example: "Unclaimed to nudge" = 45 minutes. The intent is that automation reads these instead of hard-coding.
+
+*Honest note:* thresholds are stored and displayed, and nothing reads them yet. Adding one changes no behaviour today.
+
+**Instances.** A Role crossed with a Scope, held by a person: "Support Lead, Region West". A Scope is a shard dimension you define (territory, pool, region, shift, client, product line). Instances are created and deleted from the Instances tab, and each Role and Scope pair is unique.
+
+*Honest note:* instances exist as records so comparable slices of the same role can be named. They do not yet drive separate metrics, queues or dashboards.
+
+### KRA (Key Result Area), and why it carries a weight
+
+A **KRA** is a permanent area of responsibility. It has no number and no date. "Vendor quality" is a KRA. "Get vendor quality to 95% by March" is not, that is a goal.
+
+**A KRA belongs to a job title, not to a person.** This is the single design decision that makes the rest of the chain work. Because the result area is attached to the Role:
+
+- Every holder of that job title inherits it. Assigning someone to a Role seeds their KRA assignments from that Role's templates, automatically.
+- Adding a KRA to a Role later reaches everyone who already holds the title, not just future hires. Without this, a KRA added in month three would silently apply to nobody.
+- Two people with the same job title are comparable, because they are being measured against the same list.
+- When someone changes job title, their new accountabilities arrive with the title instead of having to be typed out again.
+
+**The weight says what share of the job this area is.** A KRA carries a role-level weight from 0 to 100. When a person is seeded into the Role, that weight becomes the starting `weightage` on their personal KRA assignment, and it stays editable per person from there. Weights are how you say that "Delivery" is 50% of this job and "Documentation" is 10%, rather than pretending five areas matter equally.
+
+The convention is that a Role's KRA weights should total 100. The Role page shows a running "weight N% of 100" chip that turns red past 100.
+
+**Honest note:** the total is a convention, not a rule. Each individual weight is validated to be a finite number between 0 and 100. Nothing on the server refuses a Role whose weights sum to 80 or 130.
+
+### KPI (the gauge)
+
+A **KPI** is a permanent running gauge that sits under a KRA. The editor on the Role page gives you a name, an optional definition ("what exactly is counted, and where does the number come from?"), a unit, a target, a baseline, a direction, a Shared toggle and a north-star toggle.
+
+**Direction** is one of higher is better, lower is better, or hold the line (maintain at the target). Grading treats "hold the line" differently from "higher is better", which is why it is a separate option rather than a flag.
+
+If you leave the target blank, the gauge honestly reads "no baseline yet" instead of showing a made-up number.
+
+Two properties matter when reading a person's numbers:
+
+- **Ownership.** An **Owned** KPI is one the role actually controls, and it is graded. A **Shared** KPI is one the role influences but does not control, and it is reviewed rather than graded. The Role page labels each gauge Owned or Shared.
+- **North star.** A gauge can be flagged as the north star for its KRA, and it renders with a star ahead of the others. The convention is one per KRA, but nothing enforces that; you can flag several.
+
+Readings are recorded per person, per period, as KPI records. A person records their own numbers from their career home at **People → My Profile → Record my numbers**; a manager records or reviews a report's numbers from the same page on that person's profile, or in bulk at **KRAs & KPIs → Review**. A record carries the actual value, the target for that period, notes, optional evidence, and a status of Pending, Submitted, Approved or Rejected.
+
+**Honest notes on KPIs:**
+
+- A KPI carries a **frequency** (daily, weekly, monthly, quarterly, annually) in the data model, and the recorder uses it to convert a target defined at one cadence into the target for the period you are actually recording (a weekly target of 40 recorded monthly shows as roughly 174). But the KPI editor on the Role page does **not** expose a frequency control, so every KPI created there is monthly. Changing it requires the API.
+- A KPI can be typed Quantitative or Qualitative, but recording is numeric in both cases.
+
+### Where KRAs and KPIs are managed
+
+**KRAs & KPIs** in the sidebar (`/kra-kpi`) is a **job-title picker, not a flat wall of KRAs.** Each row is a job title with its headcount and its "N KRAs · M KPIs" count; clicking one opens that Role's definition page, which is where the template is actually edited.
+
+KRAs that belong to no job title are not hidden or auto-assigned. They are surfaced in a separate "Needs a job title" section so an admin can attach them.
+
+### Goals attach to a person
+
+A **Goal** (an OKR in the schema) is temporary and time-boxed, and it is the opposite of a KRA in every respect: it has a number, it has an end date, and **it attaches to a person, not to a job title.**
+
+- **One owner.** `ownerId` is the single accountable person, the DRI. One neck.
+- **Many contributors.** The contributors list is an audience, and each entry is exactly one of a person, a department, or a role. Many hands.
+- **Contributors resolve at read time.** A department or role contributor is stored as the department or the role, never as a frozen list of names. Membership is recalculated on every read, so a new hire inherits their team's goals and a leaver drops out automatically. Only active, non-deleted users ever resolve.
+- **One shared progress number.** Everyone looking at the goal sees the same number.
+
+Goals have a level (Company, Department, Individual), a quarter, a check-in cadence (weekly, biweekly, monthly), and can nest under a parent goal.
+
+### How goal progress is calculated
+
+Progress is **derived on read, never trusted from the stored column**, so the same goal cannot show two numbers on two screens:
+
+- A **leaf goal** takes the mean of its Key Results' live progress.
+- A **parent goal** takes the mean of its own Key Results plus each measured child's effective progress, recursively.
+- A goal with **nothing measurable** reports honestly. The API returns a `progressSource` of `ROLLUP`, `MANUAL` (someone hand-set a number) or `NONE`, and the UI renders a dash for `NONE` rather than a fake 0% that reads as "behind".
+
+Unmeasured children contribute nothing to their parent, so three empty sub-goals cannot drag a measured sibling's 60% down to 15%.
+
+Key Result progress is direction-aware. A "reduce it" Key Result, where the target is below the start value, makes progress rise as the number falls, so hitting the target reads as roughly 100% rather than 0%.
+
+### The joint: a Key Result measured by a KPI
+
+A Key Result can point up at a role-level KPI. When it does, its current value is **derived at read time from the KPI's latest reading for the goal owner**, and the derived number is never written back onto the Key Result row. The hand-typed value stays on the row untouched, it is simply not what the UI reads while the link exists.
+
+Checking in by hand on a linked Key Result is refused with a 409 and an explanation: record the KPI reading instead. That refusal is the point. It stops the quarterly target and the permanent gauge from drifting apart.
+
+**Honest note:** there is no picker in the UI that creates this link today. The API accepts `kpiId` when creating or updating a Key Result, the goal detail page renders "measured by KPI · <name>" on linked targets, and the check-in route enforces the rule correctly. But to create the link you currently have to call the API.
+
+---
+
+## Part 3: who sees what
+
+Visibility on alignment data is a three-door ladder, enforced server-side in every alignment API. Hiding a nav link is never the permission.
+
+| Door | Levels | Scope |
+| --- | --- | --- |
+| 1 | Employee, Agent | Themselves only |
+| 2 | Team Lead, Manager | Themselves plus their recursive report tree |
+| 3 | Director, VP, C-Level, HR, Company Admin, Super Admin | The whole organization |
+
+Director and above sit in door 3 for alignment data, so they do not need to be in your reporting line to see it.
+
+The report tree is computed from `managerId` with a recursive query, so it includes indirect reports at any depth.
+
+Two extra rules narrow specific actions:
+
+- **Deleting a goal** is tighter than editing one. The org-wide door narrows to Company Admin and Super Admin: a Director can edit a goal but cannot wipe it. The owner and a tree-manager of the owner may delete. The UI only shows the Delete control when the API will honour it.
+- **Employment fields** (status, department, role, manager, office) are a management decision. An employee editing their own profile is limited to personal fields, name, phone, avatar, date of birth, and gets a "Ask your manager to change: ..." error otherwise.
+
+Company Admin cannot be demoted if they are the last one.
+
+Manager-tier pages redirect employees rather than erroring. Hitting `/team`, `/organization`, `/people/departments`, `/people/roles` or `/kra-kpi/review` as an Employee sends you to `/people/me`, your own career home.
+
+### The person page has three modes
+
+`/people/<id>` renders one of three ways, decided server-side before the page loads:
+
+- **Self**: your own career home. Your job title, your inherited KRAs with your KPI readings, the control to record your own numbers, your goals, your reviews, your assets.
+- **Manage**: what a manager in your line, or an org-wide level, sees. The same narrative plus the manage actions: Edit profile, manage alignment, record numbers on the person's behalf.
+- **Peer**: a minimal directory card, name, title, department and manager. Never KPI readings, reviews or scores.
+
+`/people/me` is the stable URL to your own page; it resolves your session and forwards to `/people/<your id>` in self mode.
+
+### Level is not the same as Role
+
+**Level** is the fixed access ladder and it lives on the person (`User.accessLevel`), with a copy on the Role as the default for that title. It is an enum: you cannot invent a new level. Company Admin and Super Admin are deliberately excluded from the Role and invite dropdowns, because handing out admin from a job-title picker would be a footgun; they are granted deliberately.
+
+**Role** is the job title. It carries KRAs, a function, and a mission. Two people can share a Level and hold completely different Roles.
+
+---
+
+## Terminology map
+
+| You will see | It means |
+| --- | --- |
+| Function | Department |
+| Level | The fixed access ladder: Agent, Employee, Team Lead, Manager, Director, VP, C-Level, HR, plus Company Admin and Super Admin |
+| Role | Job title |
+| List / Board | The container tasks live in (same object; URL says `boards`) |
+| Task / Item | A row in a List |
+| Target | A Key Result on a goal |
+| Goal / OKR | A time-boxed objective owned by one person |
+| Gauge | A KPI |
