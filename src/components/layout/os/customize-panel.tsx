@@ -58,7 +58,7 @@ const ACCENT_OPTIONS: Array<{ key: string; label: string; swatch: string }> = [
   // so the base --os-brand tokens (#0073EA) apply untouched.
   { key: "workwrk", label: "WorkwrK", swatch: "#0073EA" },
   { key: "black",  label: "Black",  swatch: "#1f2024" },
-  { key: "purple", label: "Purple", swatch: "#7c3aed" },
+  { key: "grape",  label: "Purple", swatch: "#7c3aed" },
   { key: "blue",   label: "Blue",   swatch: "#3b82f6" },
   { key: "pink",   label: "Pink",   swatch: "#ec4899" },
   { key: "violet", label: "Violet", swatch: "#a855f7" },

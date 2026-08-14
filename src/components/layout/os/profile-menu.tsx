@@ -30,7 +30,7 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 import {
   SmilePlus, BellOff, Bell, ChevronRight, Settings, Palette, Command,
   HelpCircle, Trash2, LogOut, Pin, PinOff, CircleUser,
@@ -47,6 +47,14 @@ type Props = {
 export function ProfileMenu({ open, onClose, anchorRef }: Props) {
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // The signed-in user's own identity — this header used to hardcode the
+  // founder's name, so every user in every org saw "Ibrahim Surya".
+  const { data: session } = useSession();
+  const su = session?.user as { firstName?: string; lastName?: string; name?: string | null } | undefined;
+  const displayName = [su?.firstName, su?.lastName].filter(Boolean).join(" ") || su?.name || "My account";
+  const initials =
+    `${su?.firstName?.[0] ?? ""}${su?.lastName?.[0] ?? ""}`.toUpperCase() ||
+    (su?.name ?? "?").slice(0, 1).toUpperCase();
   const {
     presenceStatus, openStatusModal,
     mutedNotifications, setMutedNotifications,
@@ -100,7 +108,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
       ref={panelRef}
       role="menu"
       aria-label="Account menu"
-      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-zinc-900 text-white rounded-xl shadow-2xl border border-zinc-800 overflow-hidden text-[13px]"
+      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-white text-zinc-900 rounded-xl shadow-xl border border-zinc-200 overflow-hidden text-[13px]"
     >
       {/* User header */}
       <div className="px-3 py-3 flex items-center gap-2.5">
@@ -109,12 +117,12 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
             className="w-9 h-9 rounded-full text-white flex items-center justify-center text-[12px] font-semibold"
             style={{ background: "var(--os-brand)" }}
           >
-            IS
+            {initials}
           </span>
-          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-zinc-900" />
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-white" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-white truncate">Ibrahim Surya</div>
+          <div className="font-semibold text-zinc-900 truncate">{displayName}</div>
           <div className="text-zinc-400 text-[11.5px] truncate flex items-center gap-1">
             {presenceStatus.emoji ? <span>{presenceStatus.emoji}</span> : null}
             <span>{statusLabel}</span>
@@ -127,18 +135,18 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
         <button
           type="button"
           onClick={handleSetStatus}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800 text-left"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left"
           role="menuitem"
         >
-          <span className="w-7 h-7 rounded-md bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-            <SmilePlus className="w-3.5 h-3.5 text-zinc-300" />
+          <span className="w-7 h-7 rounded-md bg-zinc-100 border border-zinc-200 flex items-center justify-center">
+            <SmilePlus className="w-3.5 h-3.5 text-zinc-500" />
           </span>
-          <span className="text-zinc-300 flex-1">Set status</span>
+          <span className="text-zinc-700 flex-1">Set status</span>
         </button>
         <button
           type="button"
           onClick={() => setMutedNotifications(!mutedNotifications)}
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800 text-left"
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left"
           role="menuitemcheckbox"
           aria-checked={mutedNotifications}
         >
@@ -147,7 +155,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
           ) : (
             <Bell className="w-4 h-4 text-zinc-400" />
           )}
-          <span className="text-zinc-300 flex-1">
+          <span className="text-zinc-700 flex-1">
             {mutedNotifications ? "Notifications muted" : "Mute notifications"}
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
@@ -175,7 +183,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
             return (
               <div
                 key={tool.key}
-                className="w-full flex items-center gap-2 px-2 py-1 rounded-md hover:bg-zinc-800 group"
+                className="w-full flex items-center gap-2 px-2 py-1 rounded-md hover:bg-zinc-50 group"
               >
                 <button
                   type="button"
@@ -184,7 +192,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
                   role="menuitem"
                 >
                   <tool.Icon className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-                  <span className="text-zinc-300 truncate">{tool.label}</span>
+                  <span className="text-zinc-700 truncate">{tool.label}</span>
                 </button>
                 <button
                   type="button"
@@ -192,7 +200,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
                   className={`p-1 rounded-md transition-opacity ${
                     pinned
                       ? "text-amber-400 opacity-100"
-                      : "text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-zinc-300"
+                      : "text-zinc-500 opacity-0 group-hover:opacity-100 hover:text-zinc-700"
                   }`}
                   aria-label={pinned ? `Unpin ${tool.label}` : `Pin ${tool.label}`}
                   title={pinned ? `Unpin from top bar` : `Pin to top bar`}
@@ -216,7 +224,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
 }
 
 function Divider() {
-  return <div className="border-t border-zinc-800" />;
+  return <div className="border-t border-zinc-200" />;
 }
 
 function MenuRow({
@@ -230,11 +238,11 @@ function MenuRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-800 text-left"
+      className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left"
       role="menuitem"
     >
       <Icon className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
-      <span className="text-zinc-300 flex-1">{label}</span>
+      <span className="text-zinc-700 flex-1">{label}</span>
     </button>
   );
 }

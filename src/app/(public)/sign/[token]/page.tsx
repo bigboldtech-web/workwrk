@@ -90,7 +90,7 @@ export default function SignPage() {
     if (!mine) return <div key={f.id} className="rounded border border-dashed border-zinc-200 bg-zinc-50/40" style={base} />;
     if (f.type === "signature" || f.type === "initials") {
       return (
-        <button key={f.id} type="button" onClick={() => setPadFor(f.id)} className="flex items-center justify-center overflow-hidden rounded border-2 border-dashed border-violet-400 bg-violet-50 text-[11px] font-medium text-violet-700 hover:bg-violet-100" style={base}>
+        <button key={f.id} type="button" onClick={() => setPadFor(f.id)} className="flex items-center justify-center overflow-hidden rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] text-[11px] font-medium text-[#0060B9] hover:bg-[#d8e9fa]" style={base}>
           {val ? <img src={val} alt="signature" className="max-h-full max-w-full object-contain" /> : <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> {f.type === "initials" ? "Initials" : "Sign"}</span>}
         </button>
       );
@@ -99,7 +99,7 @@ export default function SignPage() {
       const checked = val === "true";
       return (
         <button key={f.id} type="button" onClick={() => setValues((v) => ({ ...v, [f.id]: checked ? "" : "true" }))}
-          className={`flex items-center justify-center rounded border-2 ${checked ? "border-violet-500 bg-violet-500 text-white" : "border-dashed border-violet-400 bg-violet-50"}`} style={base}>
+          className={`flex items-center justify-center rounded border-2 ${checked ? "border-[#0073EA] bg-[#0073EA] text-white" : "border-dashed border-[#0073EA]/50 bg-[#E6F1FB]"}`} style={base}>
           {checked ? "✓" : ""}
         </button>
       );
@@ -107,7 +107,7 @@ export default function SignPage() {
     if (f.type === "dropdown") {
       return (
         <select key={f.id} value={val || f.defaultValue || ""} onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
-          className="rounded border-2 border-dashed border-violet-400 bg-violet-50 px-1 text-[12px] text-zinc-800 outline-none" style={base}>
+          className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1 text-[12px] text-zinc-800 outline-none" style={base}>
           <option value="">{f.label || "Select…"}</option>
           {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -117,7 +117,7 @@ export default function SignPage() {
       <input key={f.id} type={f.type === "date" ? "date" : f.type === "email" ? "email" : "text"} value={val}
         onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
         placeholder={f.type === "date" ? "" : (f.label || (f.type === "email" ? "Email" : "Text"))}
-        className="rounded border-2 border-dashed border-violet-400 bg-violet-50 px-1.5 text-[12px] text-zinc-800 outline-none" style={base} />
+        className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1.5 text-[12px] text-zinc-800 outline-none" style={base} />
     );
   }
 
@@ -129,7 +129,7 @@ export default function SignPage() {
           <div className="truncate text-[12px] text-zinc-500">Signing as {data.party.name} · {remaining === 0 ? "all fields complete" : `${remaining} field${remaining === 1 ? "" : "s"} left`}</div>
         </div>
         <button type="button" onClick={finish} disabled={submitting || remaining > 0}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-violet-600 px-4 text-[13px] font-medium text-white hover:bg-violet-500 disabled:opacity-50">
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Finish &amp; sign
         </button>
       </header>
@@ -230,7 +230,7 @@ function SignaturePad({ onDone, onCancel }: { onDone: (dataUrl: string) => void;
         </div>
         <div className="flex justify-end gap-2 border-t border-zinc-100 px-4 py-3">
           <button type="button" onClick={onCancel} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
-          <button type="button" onClick={done} className="inline-flex h-8 items-center rounded-md bg-violet-600 px-3 text-[13px] font-medium text-white hover:bg-violet-500">Apply</button>
+          <button type="button" onClick={done} className="inline-flex h-8 items-center rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]">Apply</button>
         </div>
       </div>
     </div>

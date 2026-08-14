@@ -72,7 +72,12 @@ export function ThemeApplier() {
   useEffect(() => {
     if (!prefs) return;
     const root = document.documentElement;
-    root.setAttribute("data-accent", prefs.theme.accent || "workwrk");
+    // "purple" was the accidental DEFAULT accent for months, so a stored
+    // "purple" is almost always the leaked default, not a choice — normalize
+    // it to the brand. A deliberate purple pick now stores "grape" (same
+    // swatch, new key), which passes through untouched.
+    const accent = prefs.theme.accent === "purple" ? "workwrk" : (prefs.theme.accent || "workwrk");
+    root.setAttribute("data-accent", accent);
     root.setAttribute("data-density", prefs.density || "cozy");
   }, [prefs]);
 

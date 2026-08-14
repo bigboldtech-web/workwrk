@@ -258,6 +258,11 @@ function FunctionPicker({ roleId, current }: { roleId: string; current: DeptOpti
                   {depts.map((d) => (
                     <MenuItem key={d.id} label={d.name} selected={dept?.id === d.id} onClick={() => void pick(d)} />
                   ))}
+                  <MenuSeparator />
+                  {/* Discoverability: "how do I add a function?" — right here. */}
+                  <Link href="/people/departments" onClick={() => setOpen(false)}>
+                    <MenuItem label={<span className="text-[var(--os-brand)]">Manage functions…</span>} />
+                  </Link>
                 </>
               )}
             </MenuList>
@@ -277,10 +282,12 @@ const ROLE_LEVEL_OPTIONS = ACCESS_LEVELS.filter((o) => o.value !== "AGENT");
 
 function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
   const { call, busy } = useApi();
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
   const [level, setLevel] = useState(current);
-  const known = ROLE_LEVEL_OPTIONS.some((o) => o.value === level);
 
   const pick = async (next: string) => {
+    setOpen(false);
     if (next === level) return;
     const prev = level;
     setLevel(next); // optimistic; refresh re-pulls bundle + header chip
@@ -288,20 +295,39 @@ function LevelSelect({ roleId, current }: { roleId: string; current: string }) {
     if (!ok) setLevel(prev);
   };
 
+  // Same MenuList picker as Function above — a native <select> here rendered
+  // as a visibly different control right next to it (the inconsistency the
+  // user screenshotted), and its popup ignored the design system entirely.
   return (
     <div>
-      <select
-        value={level}
+      <button
+        ref={anchorRef}
+        type="button"
         disabled={busy}
-        onChange={(e) => void pick(e.target.value)}
+        onClick={() => setOpen((v) => !v)}
         aria-label="Access level"
-        className="h-7 text-[12.5px] rounded-md border border-zinc-200 bg-white px-1.5 text-zinc-700 outline-none focus:border-[var(--os-brand)] disabled:opacity-50"
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-[13px] hover:bg-zinc-50 disabled:opacity-50"
       >
-        {!known ? <option value={level}>{labelForAccessLevel(level)}</option> : null}
-        {ROLE_LEVEL_OPTIONS.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}{o.hint ? ` (${o.hint})` : ""}</option>
-        ))}
-      </select>
+        <span className="text-zinc-700">{labelForAccessLevel(level)}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} aria-hidden />
+          <MorePortal anchorRef={anchorRef} width={250} open={open} placement="below">
+            <MenuList>
+              {ROLE_LEVEL_OPTIONS.map((o) => (
+                <MenuItem
+                  key={o.value}
+                  label={o.hint ? `${o.label} (${o.hint})` : o.label}
+                  selected={level === o.value}
+                  onClick={() => void pick(o.value)}
+                />
+              ))}
+            </MenuList>
+          </MorePortal>
+        </>
+      ) : null}
       <p className="text-[11px] text-zinc-400 mt-1">
         Access tier: decides what holders of this title can see, from their own work up to team and org-wide surfaces.
       </p>

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bell, Loader2 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { Switch } from "@/components/ui/switch";
 
 // The five boolean preferences returned by /api/email-preferences, in the
 // order they render. Keys match the API field names exactly so we can PATCH
@@ -30,40 +31,6 @@ const ROWS: Array<{ key: PrefKey; label: string; sub: string }> = [
   { key: "kudosNotifications", label: "Kudos received", sub: "When a teammate recognizes you" },
   { key: "dailyDigest", label: "Daily digest email", sub: "One summary email each morning" },
 ];
-
-/** Toggle switch built as a <button> so it survives the `.workwrk-os`
- *  input reset. Rounded-full track + sliding knob; on = bg-zinc-900. */
-function Toggle({
-  on,
-  disabled,
-  onClick,
-  label,
-}: {
-  on: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-        on ? "bg-zinc-900" : "bg-zinc-200"
-      }`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-          on ? "translate-x-[18px]" : "translate-x-0.5"
-        }`}
-      />
-    </button>
-  );
-}
 
 export default function NotificationsPage() {
   const { toast } = useOsToast();
@@ -147,11 +114,11 @@ export default function NotificationsPage() {
                 <div className="text-[13.5px] font-medium text-zinc-900">{row.label}</div>
                 <div className="text-[12px] text-zinc-500">{row.sub}</div>
               </div>
-              <Toggle
-                on={prefs[row.key]}
+              <Switch
+                checked={prefs[row.key]}
                 disabled={saving === row.key}
-                onClick={() => void toggle(row.key)}
-                label={row.label}
+                onChange={() => void toggle(row.key)}
+                aria-label={row.label}
               />
             </div>
           ))}
