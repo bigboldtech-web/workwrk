@@ -18,6 +18,7 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SurveyBuilder } from "./_components/survey-builder";
 
 type SrStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 
@@ -58,6 +59,7 @@ export default function SurveysPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | SrStatus>("ALL");
+  const [builderOpen, setBuilderOpen] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -75,23 +77,6 @@ export default function SurveysPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("surveys");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  async function quickAdd() {
-    try {
-      const res = await fetch("/api/pulse-surveys", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: "Untitled pulse",
-          questions: [{ id: "q1", text: "How was your week?", type: "rating" }],
-          audienceType: "ALL",
-          anonymous: true,
-        }),
-      });
-      if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
-      toast("Draft created");
-      void load();
-    } catch { toast("Couldn't create"); }
-  }
 
   async function launch(id: string) {
     try {
@@ -156,7 +141,7 @@ export default function SurveysPage() {
           <div className="srv__head-actions">
             <Link href="/candor" className="srv__nav-link"><Lock /> Candor</Link>
             <Link href="/people" className="srv__nav-link"><Users /> People</Link>
-            <button type="button" className="srv__btn-primary" onClick={quickAdd}>
+            <button type="button" className="srv__btn-primary" onClick={() => setBuilderOpen(true)}>
               <Plus /> New pulse
             </button>
           </div>
@@ -207,6 +192,7 @@ export default function SurveysPage() {
             subtitle="Launch your first pulse. Anonymous by default so people speak freely."
             chips={["Rating", "NPS", "Free text", "Multiple choice"]}
             cta="New pulse"
+            onCta={() => setBuilderOpen(true)}
           />
         ) : grouped.length === 0 ? (
           <div className="srv__no-match"><AlertTriangle /> No surveys match.</div>
@@ -228,6 +214,13 @@ export default function SurveysPage() {
           })
         )}
       </div>
+
+      <SurveyBuilder
+        open={builderOpen}
+        mode="create"
+        onClose={() => setBuilderOpen(false)}
+        onSaved={(msg) => { toast(msg); void load(); }}
+      />
     </>
   );
 }

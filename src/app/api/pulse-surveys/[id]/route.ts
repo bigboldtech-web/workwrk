@@ -1,10 +1,93 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS"]);
 const STATUSES = new Set(["DRAFT", "ACTIVE", "CLOSED"]);
 const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
+
+/**
+ * Single-survey load for the respond / results detail page.
+ *
+ * Org-scoped (organizationId filter — no cross-org id resolution) and
+ * authorized: only a member in the survey's audience, or a manager, may
+ * read it. Returns the questions + the caller's OWN prior answers (for
+ * editing) — never anyone else's response and never a respondent roster,
+ * so the anonymity promise on an anonymous survey holds here too.
+ */
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+
+  const orgId = getOrgId(session);
+  const userId = getUserId(session);
+  const { id } = await params;
+
+  const survey = await prisma.pulseSurvey.findFirst({
+    where: { id, organizationId: orgId },
+  });
+  if (!survey) return jsonError("Survey not found", 404);
+
+  const viewer = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { officeId: true, departmentId: true },
+  });
+  const manager = isManager(session);
+
+  const inAudience =
+    survey.audienceType === "ALL" ? true :
+    survey.audienceType === "OFFICES" ? (!!viewer?.officeId && survey.officeIds.includes(viewer.officeId)) :
+    survey.audienceType === "DEPARTMENTS" ? (!!viewer?.departmentId && survey.departmentIds.includes(viewer.departmentId)) :
+    survey.audienceType === "USERS" ? survey.userIds.includes(userId) :
+    false;
+
+  // Only the audience or a manager may see a survey's contents.
+  if (!inAudience && !manager) return jsonError("You don't have access to this survey", 403);
+
+  let audienceSize: number;
+  if (survey.audienceType === "ALL") {
+    audienceSize = await prisma.user.count({ where: { organizationId: orgId, deletedAt: null } });
+  } else {
+    const where: Prisma.UserWhereInput = { organizationId: orgId, deletedAt: null };
+    if (survey.audienceType === "OFFICES") where.officeId = { in: survey.officeIds };
+    if (survey.audienceType === "DEPARTMENTS") where.departmentId = { in: survey.departmentIds };
+    if (survey.audienceType === "USERS") where.id = { in: survey.userIds };
+    audienceSize = await prisma.user.count({ where });
+  }
+
+  const totalResponses = await prisma.surveyResponse.count({ where: { surveyId: id } });
+  const myResponse = await prisma.surveyResponse.findUnique({
+    where: { surveyId_userId: { surveyId: id, userId } },
+    select: { answers: true },
+  });
+
+  return jsonSuccess({
+    survey: {
+      id: survey.id,
+      title: survey.title,
+      questions: survey.questions,
+      status: survey.status,
+      anonymous: survey.anonymous,
+      audienceType: survey.audienceType,
+      // Audience-target ids are only needed by the manager-only editor;
+      // don't hand org-targeting metadata to rank-and-file respondents.
+      officeIds: manager ? survey.officeIds : undefined,
+      departmentIds: manager ? survey.departmentIds : undefined,
+      frequency: survey.frequency,
+      closesAt: survey.closesAt,
+      closedAt: survey.closedAt,
+      createdAt: survey.createdAt,
+    },
+    viewer: { inAudience, isManager: manager, hasResponded: !!myResponse },
+    myAnswers: myResponse ? myResponse.answers : null,
+    stats: {
+      audienceSize,
+      totalResponses,
+      responseRate: audienceSize > 0 ? Math.round((totalResponses / audienceSize) * 100) : 0,
+    },
+  });
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -21,14 +104,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return jsonError("Survey not found", 404);
 
   const body = await req.json();
-  const data: any = {};
+  const data: Prisma.PulseSurveyUpdateInput = {};
 
   if (typeof body.title === "string" && body.title.trim()) data.title = body.title.trim();
 
   if (Array.isArray(body.questions)) {
-    const cleaned = body.questions.filter((q: any) => q && typeof q.text === "string" && q.text.trim());
+    const cleaned = (body.questions as unknown[]).filter((q) => {
+      if (!q || typeof q !== "object") return false;
+      const text = (q as { text?: unknown }).text;
+      return typeof text === "string" && text.trim().length > 0;
+    });
     if (cleaned.length === 0) return jsonError("At least one question is required");
-    data.questions = cleaned;
+    data.questions = cleaned as Prisma.InputJsonValue;
   }
 
   if (typeof body.frequency === "string" || body.frequency === null) {

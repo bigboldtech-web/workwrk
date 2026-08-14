@@ -2,7 +2,7 @@
 
 /* Topbar Surveys popover.
  * Shows the surveys this user is in audience for + has not yet responded to.
- * Click any → /surveys (full page) to actually take it.
+ * Click any → /surveys/[id] to take it (or update an already-taken one).
  *
  * GET /api/pulse-surveys  (returns hasResponded, inAudience per survey)
  */
@@ -147,7 +147,7 @@ function SurveysSection({
         {rows.map((s) => (
           <li key={s.id}>
             <Link
-              href={`/surveys`}
+              href={`/surveys/${s.id}`}
               className="flex items-start gap-2.5 px-2 py-2 rounded-md hover:bg-zinc-50 group"
             >
               <span

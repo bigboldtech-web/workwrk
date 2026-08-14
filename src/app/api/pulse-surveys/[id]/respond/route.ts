@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
@@ -21,7 +22,9 @@ export async function POST(
     select: { audienceType: true, officeIds: true, departmentIds: true, userIds: true, status: true },
   });
   if (!survey) return jsonError("Survey not found", 404);
+  // Only an open (launched, not-yet-closed) survey accepts responses.
   if (survey.status === "CLOSED") return jsonError("Survey is closed", 400);
+  if (survey.status !== "ACTIVE") return jsonError("Survey is not open for responses", 400);
 
   if (survey.audienceType !== "ALL") {
     const viewer = await prisma.user.findUnique({
@@ -37,8 +40,8 @@ export async function POST(
 
   const response = await prisma.surveyResponse.upsert({
     where: { surveyId_userId: { surveyId, userId } },
-    create: { surveyId, userId, answers: answers as any },
-    update: { answers: answers as any },
+    create: { surveyId, userId, answers: answers as Prisma.InputJsonValue },
+    update: { answers: answers as Prisma.InputJsonValue },
   });
 
   return jsonSuccess(response);
