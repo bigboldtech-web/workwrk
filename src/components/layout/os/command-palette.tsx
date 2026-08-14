@@ -313,7 +313,10 @@ export function OsCommandPalette() {
         const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
         if (!res.ok) return;
         const d = await res.json();
-        const hits = (d?.data ?? []) as ServerHit[];
+        // /api/search returns a BARE array (jsonSuccess(results)), not a
+        // {data:[...]} envelope — reading d.data alone left every query
+        // empty, so live entity search silently returned nothing.
+        const hits = (Array.isArray(d) ? d : d?.data ?? []) as ServerHit[];
         setLive(hits.map((h): Item | null => {
           if (h.type === "note" || h.type === "sop") {
             return { kind: "doc", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: h.type === "sop" ? (h.subtitle ?? "SOP") : (h.subtitle ?? "") } as DocItem;
