@@ -340,10 +340,11 @@ export default function DefaultsPage() {
             <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-[#0073EA]/20 bg-[#0073EA]/[0.04] p-3.5">
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#0073EA]" />
               <p className="text-[12.5px] leading-relaxed text-zinc-600">
-                <span className="font-semibold text-zinc-800">A lock freezes a control for every member.</span>{" "}
-                While locked, that setting always resolves to the org default above — the matching control is
-                disabled in each member&apos;s Appearance page and Customize panel, and any value they had is
-                overridden. Unlock to hand the choice back.
+                <span className="font-semibold text-zinc-800">A lock freezes a setting for every member.</span>{" "}
+                While locked, that setting always resolves to the org default above: a member&apos;s own value is
+                overridden on every load, so their change never sticks. The Theme and Home locks also visibly
+                disable the matching control in the Customize panel; Density and Sidebar are enforced the same
+                way but their controls are not greyed out yet. Unlock to hand the choice back.
               </p>
             </div>
 
@@ -386,7 +387,7 @@ export default function DefaultsPage() {
               <Link href="/account/appearance" className="text-[#0073EA] hover:underline">
                 Appearance
               </Link>{" "}
-              (Personal door) — anything you lock here is greyed out there.
+              (Personal door). A locked setting there always reverts to the org default above.
             </p>
           </section>
         </div>
