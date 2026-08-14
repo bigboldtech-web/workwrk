@@ -1,0 +1,110 @@
+---
+title: People and invites
+description: Invite someone into the workspace, find them in the directory and org chart, and remove them cleanly when they leave.
+---
+
+## Invite someone
+
+The Invite people modal opens from two places:
+
+- The **Invite** button at the bottom of the app rail.
+- Settings → Members, the invite button in the header.
+
+The modal collects:
+
+- **Email addresses**. It is a chip input, so you can paste or type several separated by commas, spaces or Enter. Anything that is not a valid email is flagged instead of silently dropped.
+- **Access level**. Every level except Super Admin, including Company Admin. See [Functions and levels](/admin/functions-and-levels).
+- **KRAs**, at least one. Required.
+- **SOPs**, at least one. Required.
+- **Personal message**, optional, quoted inside the invitation email.
+
+The KRA and SOP requirement is enforced on the server, not just in the form. An invite without one of each is rejected. This is deliberate: nobody joins the workspace without a role definition. If your org has no KRAs or SOPs yet, the modal tells you and you have to create them first.
+
+One request is sent per email address. Successes are counted in the confirmation toast. Failures (already invited, already a member, network error) stay in the chip row so you can fix and retry without retyping the rest.
+
+### What the invite does not collect
+
+The modal has no picker for department, role or manager, even though the underlying API accepts all three. People who join through an invite land with no department, no job title and no manager. You have to set those afterwards on their profile.
+
+Plan for that. Right after someone accepts, open Teams → Directory, open their card, and set Department, Role and Manager. Setting the Role there is also what seeds their KRAs and SOPs from the job title's template. See [Roles, KRAs and KPIs](/admin/roles-kras-kpis).
+
+### What happens when they accept
+
+The invite link is `/register?token=…` and it is valid for 7 days.
+
+On accept, in a single transaction, WorkwrK:
+
+1. Creates the user with the access level from the invite, plus whatever department, role, manager or office the invite carried.
+2. Creates a KRA assignment for each KRA on the invite. The weight is that KRA's role level weight when it is above zero, otherwise the picked KRAs split 100% evenly.
+3. Creates a SOP assignment for each SOP on the invite, marked mandatory.
+
+Because it is one transaction, a partial signup can never leave someone without their role definition.
+
+### Managing pending invites
+
+Settings → Members lists pending invitations under the member table, with the email, access level and how long ago it was sent. Each row has a revoke action. Accepted invitations cannot be revoked.
+
+Every invite is written to the audit log as `user.invited`, with the email, access level and the counts of KRAs and SOPs attached.
+
+## The directory
+
+Teams → Directory (`/people`) is the who's who. It is a manager tier page. Employees and Agents are sent to their own career home at `/people/me` instead.
+
+The page gives you:
+
+- Stat tiles for headcount, departments, and joiners in the last 90 days.
+- Search across name, email, job title and department.
+- Status tabs: All, Active, New, Former.
+- Department chips, derived from the people themselves rather than from the departments list.
+- Cards grouped by department, showing avatar, name, job title, department and office chips, manager, and tenure.
+
+What you see is scoped by your level. Company Admin, Super Admin, C-Level, VP, Director and HR see the whole organization. Team Leads and Managers see themselves plus their recursive report tree, and the server enforces that regardless of what the page asks for.
+
+Removed people never appear in headcount, department chips or the grouped grid. They live only in the **Former** tab, sorted by removal date, each with a one click **Restore**.
+
+Open a person's card to reach their profile. From there a manager can edit their first and last name, phone, date of birth, status, department, role, office, manager and access level, and open **Manage alignment** to adjust their KRAs, weights and SOPs.
+
+Two guardrails on that edit:
+
+- Only Company Admin and Super Admin can change an access level, and the last remaining Company Admin cannot be demoted.
+- Everyone else can only edit themselves or someone inside their report tree. Employees editing their own row are limited to personal fields, so nobody can promote themselves or reassign their own manager.
+
+## The org chart
+
+Teams → Org chart (`/organization`) draws the reporting hierarchy from each person's manager.
+
+It is scoped the same way as the directory. Org wide levels get the full company hierarchy. Managers and Team Leads get their own tree, and the subtitle says which one you are looking at.
+
+Levels deeper than two start collapsed and expand on click, all the way down. Above the chart are counters for people, departments, offices, roles, how many people have a manager, and the size of the top layer. People with no manager are listed separately rather than being hidden, which makes an unplaced hire easy to spot.
+
+## Offboarding
+
+Removing someone is done from their profile. It opens a confirm dialog that does real work before it asks you to confirm.
+
+**Step 1: what they still hold.** The dialog loads a handover summary and lists their open tasks, live goals, KRA assignments, assigned company assets and direct reports, with names, capped at five per bucket. If nothing is outstanding it says so plainly.
+
+**Step 2: reassign, optionally.** If they hold open tasks or have direct reports, you get a **Reassign open work to** picker. Choosing someone moves their open items and their direct reports to that person before removal. Completed and closed work is never touched, so history stays credited to the person who did it. The recipient is excluded from the reporting move so you cannot create a self managing loop.
+
+If they have direct reports and you do not pick anyone, the dialog warns you that those people will have no manager until you set one.
+
+**Step 3: remove.** Confirm and the person is removed.
+
+### What removal actually does
+
+Removal is a soft delete. It sets `deletedAt` and flips their status to Inactive. Concretely:
+
+- They cannot sign in. Login is refused for anyone removed or inactive, and the refusal is deliberately generic so it cannot be used to probe which emails exist.
+- An already open session stops working within five minutes. Their token is re checked against the database on that interval, and once it comes back removed the session is treated as signed out everywhere.
+- All their history survives: tasks, docs, reviews, KPI records, kudos. Nothing is deleted.
+- They disappear from headcount, the directory grid and department chips, and appear in the **Former** tab.
+- They stop inheriting anything. Role KRA fan out only reaches Active holders, and goal audiences skip them.
+
+The action is logged as `user_removed` with the actor.
+
+### Restoring
+
+From Teams → Directory, the **Former** tab, click **Restore** on their row. That clears `deletedAt` and sets their status back to Active, and is logged as `user_restored`. Their old assignments and history are still attached.
+
+### Who can remove whom
+
+Removal is stricter than editing. Company Admin and Super Admin can remove anyone in the org. Every other manager tier can only remove people inside their own reporting line. Nobody can remove themselves.

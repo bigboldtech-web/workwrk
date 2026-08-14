@@ -1,0 +1,132 @@
+---
+title: Roles, KRAs and KPIs
+description: Build a job title, hang weighted KRAs off it, add KPI gauges, and understand exactly what a person inherits when you give them that role.
+---
+
+WorkwrK's alignment chain runs Role → KRA → KPI → person. A Role is a job title. A KRA is a permanent area of responsibility inside that job title. A KPI is a running gauge underneath a KRA. A person holds one role and inherits its KRAs.
+
+You build the template once on the role. Everyone who holds the role inherits it.
+
+## Create a role
+
+1. Go to Teams → Roles (`/people/roles`).
+2. Click **New role**.
+3. Type the title and confirm.
+
+The create prompt asks for a title only, and creates the role at level Employee. It then takes you straight to the Role Definition page, which is where the real setup happens. Do not leave it at the default: set the Function and Level before you move on.
+
+Role titles are unique per organization.
+
+The Roles page groups roles by level, shows headcount per role, and flags roles with zero holders as **Open position**. The **Unfilled only** checkbox filters to those.
+
+Two gaps to plan around: there is no rename control and no delete control for a role anywhere in the product. The API supports both (delete is refused while anyone still holds the role), but nothing calls them. Get the title right at creation.
+
+## The Role Definition page
+
+Opening a role gives you two tabs.
+
+**Overview** carries five cards:
+
+- **Identity & scope**: Mission (one line on what the role must ensure), Function, Level, and a count of people holding the title. See [Functions and levels](/admin/functions-and-levels).
+- **Ownership boundary**: three columns, Owns, Can request, Cannot touch. One concept, one owner. Adding an owned area creates it; the Can request and Cannot touch columns link the role to areas owned elsewhere. The **Request** action on a Can request row currently only shows a confirmation toast naming the owner. It does not yet create a tracked request.
+- **KRAs & KPIs**: the template. Covered below.
+- **Escalation thresholds**: label, trigger, value and unit, for example "Unclaimed → nudge" at 45 min. These are stored on the role. They are configuration for automation, not something that fires on its own today.
+- **SOPs**: read only. It lists every SOP attached to this role's KRAs, with the KRA name and the SOP status. You attach a SOP to a KRA from the SOPs module, not from here.
+
+**Instances** is the Role by Scope view. An instance is this role held in a particular scope, for example "Dispatch Executive, Pool 1". Each instance can carry a person, and **Apply definition** seeds that person from this role's templates.
+
+## Add KRAs and set weights
+
+On the **KRAs & KPIs** card, click **Add KRA**. The dialog asks for:
+
+- **Job title**: locked to the role you are on.
+- **Name**, for example "Pipeline generation".
+- **Description**, optional: what outcome this area owns.
+- **Weight %**, 0 to 100.
+
+The weight is the share of the job title this area carries. Every holder inherits it as their starting weightage.
+
+The card header shows a running total: **weight N% of 100**. Aim for 100 across a job title's KRAs. The number turns red above 100.
+
+Be clear on what that indicator is and is not. It is a visual aid. The server validates each individual weight is between 0 and 100, but it does not enforce that a role's KRAs sum to 100. You can save a role at 60% or at 140%. Nothing blocks it, so check the number yourself before you walk away.
+
+To reuse an existing KRA, use the **Attach existing** picker next to the Add KRA button. It lists KRAs not already on this role and re homes the one you pick.
+
+### The KRA row menu
+
+Each KRA heading has a "…" menu:
+
+- **Edit KRA**: name, description, weight, and which job title it belongs to.
+- **Add KPI**: opens the KPI dialog for that KRA.
+- **Detach from job title**: the KRA moves to the "Needs a job title" list on the KRA and KPI page. People already assigned keep their assignment and history. New holders of this title stop inheriting it until it is re attached.
+- **Delete KRA**: removes everyone's assignment to it and detaches its KPI gauges from the job title. Recorded readings on those gauges survive. This cannot be undone.
+
+## Add KPIs under a KRA
+
+Click **Add KPI** on a KRA, either from the row menu or the button at the bottom of the KRA block. The dialog collects:
+
+- **Name**, for example "Qualified demos booked".
+- **Unit**, free text: %, currency, "deals".
+- **Direction**: Higher is better, Lower is better, or Hold the line.
+- **Healthy line** (target) and **Baseline**, both optional numbers.
+- **Shared gauge** toggle.
+- **North star** toggle.
+
+Leave the healthy line blank until you actually have a baseline. The gauge then reads "no baseline yet" instead of showing an invented number. That is deliberate: WorkwrK never fabricates a target for you.
+
+**Owned vs Shared** is the accountability switch. Owned means the role controls the number, and it is graded. Shared means the role influences the number, and it is reviewed but not graded. The row shows the badge either way.
+
+North star gauges sort to the top of the KRA and show a star.
+
+A KPI is a permanent running gauge. It has no deadline and no per person number on this page. People record their own readings against it, and those readings feed reviews and can drive goal key results.
+
+## What happens when you assign someone the role
+
+This is the part worth reading twice, because inheritance fires at specific moments.
+
+**When you change a person's role.** Setting a person's role on their profile seeds their KRA assignments from that role's KRA templates. Each assignment starts at that KRA's role level weight. SOPs sitting under those KRAs are assigned at the same time, as optional rather than mandatory. Only SOPs whose status is Published are seeded, so anything not published reaches nobody. The seed is idempotent, so re running it never duplicates and never disturbs a weight you already adjusted.
+
+**When you add a KRA to a role.** Everyone who already holds that job title and is Active inherits the new KRA immediately, at the role level weight. Re homing an existing KRA onto a job title does the same. This is what stops a role and its holders drifting apart.
+
+**When someone accepts an invite.** The KRAs picked in the invite are assigned on signup. Each uses that KRA's role level weight when it is set above zero, otherwise the picked KRAs split 100% evenly between them. The SOPs picked in the invite are assigned as mandatory. See [People and invites](/admin/people-and-invites).
+
+**What does not happen.** Changing a KRA's weight later does not rewrite the weightage of people already assigned. Existing per person weights stay exactly where they are. Only new seeds pick up the new default. If you rebalance a role and want current holders updated, you have to adjust them per person, or remove and re seed.
+
+## Seed drift and the Seed button
+
+At the bottom of the KRAs & KPIs card there is a **People with this job title** row, one chip per holder.
+
+Seeding fires at specific moments, and it can miss people. The fan out when you add a KRA to a role only covers holders whose status is Active, so anyone inactive or on leave at that moment is skipped. Holders who predate a template, and any seed that failed quietly, drift the same way. The page detects all of it.
+
+A drifted holder's chip turns amber and reads **missing N of M**, meaning they are missing N of this job title's M template KRA assignments. Next to it is a **Seed** button.
+
+Clicking **Seed** backfills only the missing KRA assignments from this job title's templates, at the role level weights, plus any published SOPs under those KRAs. It is idempotent and it does not touch assignments the person already has, including weights you have overridden.
+
+The same action exists as **Apply definition** on the Instances tab, and as **Seed from role** inside the person's Manage alignment dialog.
+
+## Per person weight overrides
+
+The role sets the starting weights. Real people drift from the template, and that is fine.
+
+1. Go to Teams → Directory and open the person.
+2. Open **Manage alignment**.
+
+The dialog lists their KRAs with an editable weight box on each row, their assigned SOPs, and a **Seed from role** button in the header.
+
+- Edit a weight inline. It commits on blur or Enter, and Escape reverts.
+- The header shows the person's running total, in red above 100%.
+- The server enforces the person level cap: a weight must be between 1 and 100, and the person's total across active assignments in the same period must not exceed 100. If it would, the save is rejected with an error naming the exact totals, for example "Total weightage would be 115%. Others: 95%, this: 20%."
+
+Note the asymmetry. The 100% cap is enforced for a person, but not for a role. A role can be built to 140% and you will only find out when the third holder's weight save gets rejected.
+
+The dialog also lets you add a KRA outside the person's role template (the picker flags KRAs with no job title), remove a KRA, and add or remove SOP assignments.
+
+## Where else this lives
+
+Teams → KRAs & KPIs (`/kra-kpi`) is a job title first index. It lists every role with its headcount and KRA and KPI counts, and clicking one opens the same Role Definition page. It also surfaces a **Needs a job title** section for legacy KRAs that belong to no role, so an admin can attach them. Orphan KRAs are never deleted or auto assigned.
+
+## Who can do what
+
+The Roles, KRAs & KPIs and Departments pages are manager tier and above. Employees and Agents are redirected to their own career home, where they read their own role's definition and their inherited KRAs.
+
+The write APIs additionally check the `kras` module in the permission matrix for create, edit and delete. See [Settings](/admin/settings).
