@@ -1,32 +1,33 @@
-// /api/inbox/count — lightweight unread/pending count for the topbar
-// badge. Counts the user's "owe-me-attention" items: open tasks +
-// pending SOP acknowledgements. Cheap aggregate query, no list
-// fetch — keeps the topbar render snappy.
+// /api/inbox/count — lightweight unread-notification count for the topbar
+// bell badge. Counts the signed-in user's unread Notification rows,
+// honoring the same snooze visibility filter the notifications panel uses
+// so the badge and the panel never disagree. Cheap COUNT on the
+// @@index([userId, read]) — no list fetch, so the topbar poll stays snappy.
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { resolveSuiteContext } from "@/lib/suites/auth";
+import { getSessionOrFail, getUserId } from "@/lib/api-helpers";
 
 export async function GET() {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
 
-  const [openTasks, pendingSops] = await Promise.all([
-    prisma.task.count({
-      where: {
-        organizationId: ctx.orgId,
-        assigneeId: ctx.userId,
-        status: { not: "COMPLETED" },
-      },
-    }),
-    prisma.sOPAssignment.count({
-      where: {
-        sop: { organizationId: ctx.orgId },
-        userId: ctx.userId,
-        completedAt: null,
-      },
-    }),
-  ]);
+  const userId = getUserId(session);
+  const now = new Date();
 
-  return NextResponse.json({ total: openTasks + pendingSops, openTasks, pendingSops });
+  // Visible = not snoozed, or snooze window has elapsed. Mirrors
+  // /api/notifications so the badge count matches the panel's unreadCount.
+  const unread = await prisma.notification.count({
+    where: {
+      userId,
+      read: false,
+      OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+    },
+  });
+
+  // `total` is the badge number; `unread` is an explicit alias for clarity.
+  return NextResponse.json(
+    { total: unread, unread },
+    { headers: { "Cache-Control": "private, max-age=10" } },
+  );
 }

@@ -28,11 +28,29 @@ import { PROFILE_TOOL_MAP, type ToolAction } from "./profile-tools";
 import { useOsToast } from "./toast";
 import { ActiveTimerPill } from "./active-timer-pill";
 import { RemindersBell } from "./reminders-bell";
+import { NotificationsBell } from "./notifications-popover";
 
 // Initials for the active workspace badge, e.g. "Test 2" -> "T2".
 function orgInitials(name: string): string {
   const parts = name.trim().split(/\s+/).slice(0, 2);
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?";
+}
+
+// Initials for the signed-in user's avatar, e.g. "Ada Lovelace" -> "AL".
+// Mirrors profile-menu.tsx: prefer first+last, fall back to the display
+// name's first letter. (This used to be a hardcoded "IS" — every user in
+// every org saw the founder's initials.)
+function userInitials(u: { firstName?: string; lastName?: string; name?: string | null } | undefined): string {
+  const fl = `${u?.firstName?.[0] ?? ""}${u?.lastName?.[0] ?? ""}`.toUpperCase();
+  if (fl) return fl;
+  return (u?.name ?? "?").slice(0, 1).toUpperCase();
+}
+
+// Presence dot color derived from the user's set status, instead of a
+// hardcoded green. Online = emerald; any explicit status (meeting, focus,
+// sick, vacation, …) = amber "away/busy".
+function presenceDotColor(label: string): string {
+  return label === "Online" ? "#22C55E" : "#F59E0B";
 }
 
 
@@ -42,6 +60,8 @@ export function ClickTopbar() {
   const router = useRouter();
   const { data: session } = useSession();
   const orgName = session?.user?.organizationName ?? "Workspace";
+  const su = session?.user as { firstName?: string; lastName?: string; name?: string | null } | undefined;
+  const initials = userInitials(su);
   const [menuOpen, setMenuOpen] = useState(false);
 
   async function createQuickDoc() {
@@ -143,6 +163,7 @@ export function ClickTopbar() {
           {pinnedTools.length > 0 ? (
             <span aria-hidden className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           ) : null}
+          <NotificationsBell muted={mutedNotifications} />
           <RemindersBell />
           <Link
             href="/inbox"
@@ -165,9 +186,12 @@ export function ClickTopbar() {
             aria-expanded={profileOpen}
             title={`${presenceStatus.label}${mutedNotifications ? " · muted" : ""}`}
           >
-            IS
+            {initials}
           </button>
-          <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-white" />
+          <span
+            className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white"
+            style={{ background: presenceDotColor(presenceStatus.label) }}
+          />
           <ProfileMenu open={profileOpen} onClose={() => setProfileOpen(false)} anchorRef={profileBtnRef} />
         </div>
       </div>
