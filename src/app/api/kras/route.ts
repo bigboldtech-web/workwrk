@@ -8,6 +8,34 @@ import { logActivity } from "@/lib/activity";
 import { KPI_ORDER } from "@/lib/alignment";
 import type { Prisma } from "@/generated/prisma";
 
+// Soft over-100 signal for a job title's KRA weights. Sums the role-level
+// KRA.weight across every KRA on the role and flags a breach WITHOUT
+// rejecting — an existing >100 role must stay editable so someone can
+// rebalance it. `roleWeightTotal` is the running sum; `weightWarning` is
+// advisory copy the UI can surface. Best-effort: never fails the write.
+async function roleWeightSignal(
+  roleId: string | null | undefined,
+  organizationId: string,
+): Promise<{ roleWeightTotal: number | null; weightWarning: string | null }> {
+  if (!roleId) return { roleWeightTotal: null, weightWarning: null };
+  try {
+    const kras = await prisma.kRA.findMany({
+      where: { roleId, organizationId },
+      select: { weight: true },
+    });
+    const roleWeightTotal = Math.round(kras.reduce((s, k) => s + (k.weight || 0), 0) * 100) / 100;
+    return {
+      roleWeightTotal,
+      weightWarning:
+        roleWeightTotal > 100
+          ? `This job title's KRA weights now total ${roleWeightTotal}% — over the 100% budget. Saved; trim a KRA weight to rebalance.`
+          : null,
+    };
+  } catch {
+    return { roleWeightTotal: null, weightWarning: null };
+  }
+}
+
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -141,7 +169,10 @@ export async function POST(req: NextRequest) {
     metadata: { name, category, roleId },
   });
 
-  return jsonSuccess(kra, 201);
+  // Surface the job title's running weight budget so the UI can nudge a
+  // rebalance when the new KRA pushes the role over 100%.
+  const signal = await roleWeightSignal(roleId, getOrgId(session));
+  return jsonSuccess({ ...kra, ...signal }, 201);
 }
 
 export async function PATCH(req: NextRequest) {
@@ -198,7 +229,10 @@ export async function PATCH(req: NextRequest) {
     }
   }
 
-  return jsonSuccess(kra);
+  // Editing a weight (or re-homing the KRA) can tip the job title over its
+  // 100% budget — surface the running total; never block the save.
+  const signal = await roleWeightSignal(kra.roleId, getOrgId(session));
+  return jsonSuccess({ ...kra, ...signal });
 }
 
 export async function DELETE(req: NextRequest) {

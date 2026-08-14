@@ -28,6 +28,19 @@ import {
   type KpiFrequency,
 } from "@/lib/kpi-utils";
 
+// Qualitative KPIs are captured on a 1..5 rubric rather than a raw metric.
+// The anchors label each rung so a rater picks a described level, not a
+// bare number; the score the record stores is rating / ceiling · 100
+// (so 5/5 = 100%), mirroring resolveKpiLine on the server.
+const QUALITATIVE_SCALE_MAX = 5;
+const RATING_ANCHORS: Record<number, string> = {
+  1: "Well below",
+  2: "Below",
+  3: "Meets",
+  4: "Exceeds",
+  5: "Outstanding",
+};
+
 interface KpiEntry {
   kpiId: string;
   name: string;
@@ -337,6 +350,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                 {kra.kpis.map((kpi) => {
                   const fd = formData[kpi.kpiId] || { actualValue: "", managerNotes: "" };
                   const actual = fd.actualValue ? Number(fd.actualValue) : null;
+                  // Qualitative KPIs skip the numeric cadence math and read
+                  // as a 1..5 rubric rating scored against the scale ceiling
+                  // (or the KPI's own target rating, if it set one).
+                  const isQualitative = kpi.type === "QUALITATIVE";
+                  const qualTarget = kpi.targetValue && kpi.targetValue > 0 ? kpi.targetValue : QUALITATIVE_SCALE_MAX;
                   // The recorder always works in MONTHLY periods, so
                   // adjust the displayed + scoring target if the KPI
                   // was set up at a different cadence (weekly target
@@ -346,7 +364,9 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                     (kpi.frequency ?? "MONTHLY") as KpiFrequency,
                     "MONTHLY",
                   );
-                  const score = calculateScore(actual, adjTarget, kpi.lowerIsBetter);
+                  const score = isQualitative
+                    ? calculateScore(actual, qualTarget, kpi.lowerIsBetter)
+                    : calculateScore(actual, adjTarget, kpi.lowerIsBetter);
                   const isNoteOpen = showNotes.has(kpi.kpiId);
                   const hasExisting = kpi.existingRecord?.actualValue != null;
 
@@ -399,33 +419,73 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                           </div>
                         </div>
 
-                        {/* Target — auto-converted to a monthly figure if
-                            the KPI is defined at a different cadence so the
-                            number you enter under Actual compares apples
-                            to apples. */}
-                        <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
-                          <p className="text-[10px] text-muted-2 uppercase">Target / month</p>
-                          <p className="text-sm font-mono font-bold">
-                            {adjTarget != null ? adjTarget : "—"}
-                          </p>
-                          {targetHint && (
-                            <p className="text-[9px] text-muted-2 leading-tight">
-                              from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
+                        {isQualitative ? (
+                          /* Qualitative — a 1..5 rubric rating. The rung
+                             labels (anchors) tell the rater what each level
+                             means; the record stores rating / ceiling · 100
+                             as its score. */
+                          <div className="min-w-[220px]">
+                            <p className="text-[10px] text-muted-2 uppercase">
+                              Rating
+                              {kpi.targetValue && kpi.targetValue > 0 ? ` · target ${kpi.targetValue}` : ""}
                             </p>
-                          )}
-                        </div>
+                            <div className="flex items-center gap-1 mt-0.5">
+                              {[1, 2, 3, 4, 5].map((n) => {
+                                const selected = actual === n;
+                                return (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() => updateField(kpi.kpiId, "actualValue", selected ? "" : String(n))}
+                                    title={RATING_ANCHORS[n]}
+                                    aria-pressed={selected}
+                                    aria-label={`${n} — ${RATING_ANCHORS[n]}`}
+                                    className={`h-7 w-7 rounded-md text-xs font-medium border transition-colors ${
+                                      selected
+                                        ? "bg-[#0073EA] text-white border-[#0073EA]"
+                                        : "bg-transparent border-border text-muted hover:border-[#0073EA]/50"
+                                    }`}
+                                  >
+                                    {n}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <p className="text-[10px] text-muted-2 mt-0.5 h-3 leading-3">
+                              {actual != null && RATING_ANCHORS[actual] ? RATING_ANCHORS[actual] : " "}
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            {/* Target — auto-converted to a monthly figure if
+                                the KPI is defined at a different cadence so the
+                                number you enter under Actual compares apples
+                                to apples. */}
+                            <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
+                              <p className="text-[10px] text-muted-2 uppercase">Target / month</p>
+                              <p className="text-sm font-mono font-bold">
+                                {adjTarget != null ? adjTarget : "—"}
+                              </p>
+                              {targetHint && (
+                                <p className="text-[9px] text-muted-2 leading-tight">
+                                  from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
+                                </p>
+                              )}
+                            </div>
 
-                        {/* Actual Value Input */}
-                        <div className="min-w-[100px]">
-                          <p className="text-[10px] text-muted-2 uppercase">Actual</p>
-                          <Input
-                            type="number"
-                            value={fd.actualValue}
-                            onChange={(e) => updateField(kpi.kpiId, "actualValue", e.target.value)}
-                            placeholder="0"
-                            className="h-8 text-sm bg-transparent border-border w-full"
-                          />
-                        </div>
+                            {/* Actual Value Input */}
+                            <div className="min-w-[100px]">
+                              <p className="text-[10px] text-muted-2 uppercase">Actual</p>
+                              <Input
+                                type="number"
+                                value={fd.actualValue}
+                                onChange={(e) => updateField(kpi.kpiId, "actualValue", e.target.value)}
+                                placeholder="0"
+                                className="h-8 text-sm bg-transparent border-border w-full"
+                              />
+                            </div>
+                          </>
+                        )}
 
                         {/* Score */}
                         <div className="text-center min-w-[60px]">

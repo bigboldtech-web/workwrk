@@ -12,7 +12,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { scoreKpiRecord } from "@/lib/kpi-record";
+import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
     include: {
       kra: {
         select: {
-          kpis: { select: { id: true, targetValue: true, direction: true, lowerIsBetter: true } },
+          kpis: { select: { id: true, type: true, targetValue: true, direction: true, lowerIsBetter: true } },
         },
       },
     },
@@ -57,8 +57,14 @@ export async function POST(req: NextRequest) {
       if (!kpi) return null;
 
       const actual = r.actualValue != null ? Number(r.actualValue) : null;
-      // Direction-aware, null-target-safe. Score null when no line exists.
-      const score = scoreKpiRecord(kpi, actual);
+      // Direction-aware, null-target-safe. Score null when no line exists —
+      // except a QUALITATIVE KPI, whose rubric rating scores against the
+      // scale ceiling resolveKpiLine supplies.
+      const target = resolveKpiLine(kpi.type, kpi.targetValue);
+      const score = scoreKpiRecord(
+        { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
+        actual,
+      );
 
       return prisma.kPIRecord.upsert({
         where: { kpiId_userId_period: { kpiId: r.kpiId, userId, period } },
@@ -67,7 +73,7 @@ export async function POST(req: NextRequest) {
           userId,
           period,
           // Non-nullable column: 0 is only the "no baseline yet" sentinel.
-          targetValue: kpi.targetValue ?? 0,
+          targetValue: target ?? 0,
           actualValue: actual,
           score,
           notes: r.notes || null,
@@ -76,7 +82,7 @@ export async function POST(req: NextRequest) {
         },
         update: {
           actualValue: actual,
-          targetValue: kpi.targetValue ?? 0,
+          targetValue: target ?? 0,
           score,
           notes: r.notes || null,
           evidence: r.evidence || null,

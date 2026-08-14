@@ -8,6 +8,20 @@ import { getTeamUserIds } from "@/lib/team";
 // report tree. Mirrors the scope logic on GET /api/kras.
 const ORG_WIDE_ASSIGNERS = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
 
+// Soft over-100 signal attached to a saved assignment. `weightTotal` is
+// the person's running KRA-weight sum after the write; `weightWarning` is
+// non-null only when that sum breaches 100 — advisory copy the UI can
+// surface. We never reject: an existing >100 state must stay fixable.
+function weightSignal(weightTotal: number): { weightTotal: number; weightWarning: string | null } {
+  return {
+    weightTotal,
+    weightWarning:
+      weightTotal > 100
+        ? `KRA weights now total ${weightTotal}% for this person — over the 100% budget. Saved; trim another KRA to rebalance.`
+        : null,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -171,16 +185,16 @@ export async function POST(req: NextRequest) {
   });
 
   if (existing) {
-    // Update weightage if already assigned
+    // Update weightage if already assigned. Over-100 is SURFACED, not
+    // blocked: a hard reject would trap a person already sitting above
+    // 100% (from role-seed defaults or legacy data) — they could never
+    // save the very edit that rebalances them. We save and warn instead,
+    // handing back the running total so the UI can nudge a trim.
     const otherAssignments = await prisma.kRAAssignment.findMany({
       where: { userId, status: { not: "ARCHIVED" }, id: { not: existing.id } },
     });
     const othersTotal = otherAssignments.reduce((sum, a) => sum + a.weightage, 0);
-    if (othersTotal + weightage > 100) {
-      return jsonError(
-        `Total weightage would be ${othersTotal + weightage}%. Others: ${othersTotal}%, this: ${weightage}%. Must not exceed 100%.`
-      );
-    }
+    const weightTotal = othersTotal + weightage;
 
     const assignment = await prisma.kRAAssignment.update({
       where: { id: existing.id },
@@ -190,19 +204,16 @@ export async function POST(req: NextRequest) {
         user: { select: { id: true, firstName: true, lastName: true } },
       },
     });
-    return jsonSuccess(assignment);
+    return jsonSuccess({ ...assignment, ...weightSignal(weightTotal) });
   }
 
-  // Check total weightage for this user won't exceed 100%
+  // Running total across the person's active KRAs after this add. Over
+  // 100 is warned, never blocked (see the update branch above).
   const existingAssignments = await prisma.kRAAssignment.findMany({
     where: { userId, status: { not: "ARCHIVED" } },
   });
   const currentTotal = existingAssignments.reduce((sum, a) => sum + a.weightage, 0);
-  if (currentTotal + weightage > 100) {
-    return jsonError(
-      `Total weightage would be ${currentTotal + weightage}%. Current: ${currentTotal}%, adding: ${weightage}%. Must not exceed 100%.`
-    );
-  }
+  const weightTotal = currentTotal + weightage;
 
   const assignment = await prisma.kRAAssignment.create({
     data: {
@@ -229,5 +240,5 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  return jsonSuccess(assignment, 201);
+  return jsonSuccess({ ...assignment, ...weightSignal(weightTotal) }, 201);
 }

@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment, visibleAlignmentUserIds } from "@/lib/alignment-scope";
-import { scoreKpiRecord } from "@/lib/kpi-record";
+import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 
 export async function GET(req: NextRequest) {
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
   const kpi = await prisma.kPI.findFirst({
     where: { id: kpiId, organizationId: orgId },
-    select: { targetValue: true, direction: true, lowerIsBetter: true, organizationId: true },
+    select: { type: true, targetValue: true, direction: true, lowerIsBetter: true, organizationId: true },
   });
   if (!kpi) return jsonError("KPI not found", 404);
 
@@ -84,7 +84,13 @@ export async function POST(req: NextRequest) {
   // NULL means "no baseline yet" — the actual is stored with score null
   // (health derives as no_target); we never invent a line. The record
   // column is non-nullable, so 0 is stored purely as the empty sentinel.
-  const target = kpi.targetValue ?? (manualTarget != null ? Number(manualTarget) : null);
+  // A QUALITATIVE KPI is the exception: its actual is a rubric rating, so
+  // resolveKpiLine substitutes the scale ceiling and the rating always
+  // scores (rating / ceiling · 100).
+  const target = resolveKpiLine(
+    kpi.type,
+    kpi.targetValue ?? (manualTarget != null ? Number(manualTarget) : null),
+  );
   const actual = actualValue != null ? Number(actualValue) : null;
   const score = scoreKpiRecord(
     { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },

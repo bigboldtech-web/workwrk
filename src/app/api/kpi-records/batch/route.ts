@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canTouchUserAlignment } from "@/lib/alignment-scope";
-import { scoreKpiRecord } from "@/lib/kpi-record";
+import { scoreKpiRecord, resolveKpiLine } from "@/lib/kpi-record";
 import { triggerRecalculation } from "@/services/performanceScoreService";
 
 export async function POST(req: NextRequest) {
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   const kpiIds = rows.map((r) => r.kpiId);
   const kpis = await prisma.kPI.findMany({
     where: { id: { in: kpiIds }, organizationId: orgId },
-    select: { id: true, targetValue: true, direction: true, lowerIsBetter: true },
+    select: { id: true, type: true, targetValue: true, direction: true, lowerIsBetter: true },
   });
   const kpiMap = new Map(kpis.map((k) => [k.id, k]));
 
@@ -53,8 +53,13 @@ export async function POST(req: NextRequest) {
     if (!kpi) return null;
 
     // NULL target = "no baseline yet": actual is stored, score stays null
-    // (0 in the non-nullable column is only the empty sentinel).
-    const target = kpi.targetValue ?? (r.targetValue != null ? Number(r.targetValue) : null);
+    // (0 in the non-nullable column is only the empty sentinel). A
+    // QUALITATIVE KPI instead scores its rubric rating against the scale
+    // ceiling, so resolveKpiLine hands back a real line.
+    const target = resolveKpiLine(
+      kpi.type,
+      kpi.targetValue ?? (r.targetValue != null ? Number(r.targetValue) : null),
+    );
     const actual = r.actualValue != null ? Number(r.actualValue) : null;
     const score = scoreKpiRecord(
       { targetValue: target, direction: kpi.direction, lowerIsBetter: kpi.lowerIsBetter },
