@@ -8,10 +8,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   Users2, Plus, Star, Award, AlertTriangle, Heart, Briefcase,
   TrendingUp, ChevronRight, Activity, Target, Calendar,
+  X, Wand2, Loader2, Search,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
@@ -32,6 +32,20 @@ type ApiAssessment = {
   updatedAt: string;
   user?: { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null; department?: { name?: string | null } | null; role?: { title?: string | null } | null } | null;
 };
+
+type UserOpt = {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  role?: { title?: string | null } | null;
+  department?: { name?: string | null } | null;
+};
+
+// Talent + performance scores use a "YYYY-MM" period key (the perf engine
+// writes that shape), so a new manual placement lands in the same snapshot.
+function currentPeriod() {
+  return new Date().toISOString().slice(0, 7);
+}
 
 const BOX_LABELS: Record<string, string> = {
   "3-3": "Stars", "3-2": "High perf", "3-1": "Workhorses",
@@ -72,7 +86,6 @@ const GRID_ORDER: { pot: 1 | 2 | 3; perf: 1 | 2 | 3; key: string }[] = [
 ];
 
 export default function TalentPage() {
-  const router = useRouter();
   const [assessments, setAssessments] = useState<ApiAssessment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedBox, setSelectedBox] = useState<string | null>(null);
@@ -82,6 +95,13 @@ export default function TalentPage() {
   const [periodTouched, setPeriodTouched] = useState(false);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
+
+  // Placement modal — closes the circular gap: manual 9-box placement that
+  // POSTs /api/talent-assessment, plus an auto-place-from-scores path.
+  const [placeOpen, setPlaceOpen] = useState(false);
+  const [placeSeed, setPlaceSeed] = useState<{ userId?: string; performance?: 1 | 2 | 3; potential?: 1 | 2 | 3; action?: string; notes?: string } | null>(null);
+  const [users, setUsers] = useState<UserOpt[]>([]);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -98,6 +118,51 @@ export default function TalentPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("talent");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
+
+  // Assessable people for the placement picker. /api/users self-scopes
+  // (org-wide levels see everyone, line managers see their team), which
+  // matches the talent-assessment POST authority.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/users?limit=500");
+        if (!res.ok) return;
+        const data = await res.json();
+        const list: UserOpt[] = Array.isArray(data) ? data : data.data ?? data.users ?? [];
+        if (!cancelled) setUsers(list);
+      } catch { /* picker just stays empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const openPlace = useCallback((seed?: typeof placeSeed) => { setPlaceSeed(seed ?? null); setPlaceOpen(true); }, []);
+
+  // After a successful placement, jump the grid to that period so the new
+  // row is visible in one coherent snapshot, then refetch.
+  const handlePlaced = useCallback((period: string) => {
+    setPeriodTouched(true);
+    setSelectedPeriod(period);
+    void load();
+  }, [load]);
+
+  // Auto-place (?auto=true): the route seeds a placement for every unassessed
+  // person who has a performance score, mapping score → box. Cheap bulk seed.
+  const handleAutoPlace = useCallback(async (period: string) => {
+    setAutoBusy(true);
+    try {
+      const res = await fetch(`/api/talent-assessment?auto=true&period=${encodeURIComponent(period)}`);
+      if (!res.ok) { toast("Couldn't auto-place from scores"); return; }
+      const data = await res.json();
+      const list: ApiAssessment[] = data?.data ?? (Array.isArray(data) ? data : []);
+      setAssessments(list);
+      setPeriodTouched(true);
+      setSelectedPeriod(period);
+      toast(`Auto-placed from performance scores · ${period}`);
+    } catch {
+      toast("Couldn't auto-place from scores");
+    } finally { setAutoBusy(false); }
+  }, [toast]);
 
   // Distinct periods, newest first (works for "YYYY-Qn" and "YYYY-MM").
   const periods = useMemo(
@@ -148,7 +213,7 @@ export default function TalentPage() {
           <div className="tal__head-actions">
             <Link href="/people" className="tal__nav-link"><Briefcase /> People</Link>
             <Link href="/reviews" className="tal__nav-link"><Award /> Reviews</Link>
-            <button type="button" className="tal__btn-primary" onClick={() => toast("Use the review cycle to add assessments — opens the 9-box during calibration")}>
+            <button type="button" className="tal__btn-primary" onClick={() => openPlace()}>
               <Plus /> New assessment
             </button>
           </div>
@@ -172,10 +237,10 @@ export default function TalentPage() {
             Icon={Users2}
             iconGradient={GRAD.greenTeal}
             title="No talent assessments yet"
-            subtitle="Use the 9-box during calibration to map each person on performance × potential. Sets up succession planning and development conversations."
+            subtitle="Place each person on the 9-box by performance × potential. Sets up succession planning and development conversations. Or auto-place everyone from their latest performance scores."
             chips={["Stars", "Future leaders", "Core players", "At risk"]}
-            cta="Run calibration"
-            onCta={() => router.push("/reviews")}
+            cta="Place first person"
+            onCta={() => openPlace()}
           />
         ) : (
           <div className="tal__grid-wrap">
@@ -192,13 +257,32 @@ export default function TalentPage() {
                   {periods.map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
                 <span style={{ fontSize: 11.5, color: "var(--os-ink-3)" }}>{stats.total} assessed</span>
+                <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleAutoPlace(selectedPeriod ?? currentPeriod())}
+                    disabled={autoBusy}
+                    title="Seed placements for anyone with a performance score but no assessment yet"
+                    style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid var(--os-line)", background: "var(--os-surface, #fff)", color: "var(--os-ink)", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, cursor: autoBusy ? "default" : "pointer" }}
+                  >
+                    {autoBusy ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Wand2 style={{ width: 13, height: 13 }} />}
+                    Auto-place from scores
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openPlace()}
+                    style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "none", background: "#0073EA", color: "#fff", fontSize: 12, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                  >
+                    <Plus style={{ width: 13, height: 13 }} /> New
+                  </button>
+                </div>
               </div>
             )}
             {/* 9-box grid */}
             <section className="tal__box">
               <header className="tal__box-head">
                 <h2><Target /> 9-box matrix</h2>
-                <span className="tal__box-sub">click a cell to see who's there</span>
+                <span className="tal__box-sub">click a cell to see who&apos;s there</span>
               </header>
               <div className="tal__box-area">
                 <div className="tal__axis-y">
@@ -264,6 +348,14 @@ export default function TalentPage() {
                           {a.action && <div className="tal__person-action"><Activity /> {a.action}</div>}
                         </div>
                         <span className="tal__person-period">{a.period}</span>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); openPlace({ userId: a.userId, performance: a.performance, potential: a.potential, action: a.action ?? undefined, notes: a.notes ?? undefined }); }}
+                          title="Re-place this person"
+                          style={{ marginRight: 6, height: 24, padding: "0 8px", borderRadius: 5, border: "1px solid var(--os-line)", background: "var(--os-surface, #fff)", color: "var(--os-ink-2, var(--os-ink))", fontSize: 11.5, cursor: "pointer" }}
+                        >
+                          Reassess
+                        </button>
                         <ChevronRight className="tal__person-arrow" />
                       </Link>
                     ))}
@@ -274,7 +366,223 @@ export default function TalentPage() {
           </div>
         )}
       </div>
+
+      {placeOpen && (
+        <PlaceModal
+          users={users}
+          seed={placeSeed}
+          defaultPeriod={selectedPeriod ?? currentPeriod()}
+          onClose={() => { setPlaceOpen(false); setPlaceSeed(null); }}
+          onPlaced={(period) => { setPlaceOpen(false); setPlaceSeed(null); handlePlaced(period); }}
+        />
+      )}
     </>
+  );
+}
+
+/* ── Placement modal — writes a TalentAssessment via POST /api/talent-assessment.
+ *  Click a cell in the mini 9-box to set performance × potential, pick the
+ *  person, add an action + notes. Upsert-backed, so re-placing overwrites. */
+function PlaceModal({
+  users, seed, defaultPeriod, onClose, onPlaced,
+}: {
+  users: UserOpt[];
+  seed: { userId?: string; performance?: 1 | 2 | 3; potential?: 1 | 2 | 3; action?: string; notes?: string } | null;
+  defaultPeriod: string;
+  onClose: () => void;
+  onPlaced: (period: string) => void;
+}) {
+  const [userId, setUserId] = useState(seed?.userId ?? "");
+  const [period, setPeriod] = useState(defaultPeriod);
+  const [performance, setPerformance] = useState<1 | 2 | 3 | null>(seed?.performance ?? null);
+  const [potential, setPotential] = useState<1 | 2 | 3 | null>(seed?.potential ?? null);
+  const [action, setAction] = useState(seed?.action ?? "");
+  const [notes, setNotes] = useState(seed?.notes ?? "");
+  const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const boxKey = performance && potential ? `${performance}-${potential}` : null;
+  const filteredUsers = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) => `${u.firstName ?? ""} ${u.lastName ?? ""}`.toLowerCase().includes(q));
+  }, [users, query]);
+  const canSave = !!userId && !!period.trim() && !!performance && !!potential && !saving;
+
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/talent-assessment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, period: period.trim(), performance, potential, action: action.trim() || null, notes: notes.trim() || null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(res.status === 403 ? "Only managers can place people on the 9-box." : data?.error || "Couldn't save the placement.");
+        return;
+      }
+      onPlaced(period.trim());
+    } catch {
+      setError("Couldn't save the placement.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 pt-[10vh] px-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Place person on 9-box"
+        className="w-full max-w-[560px] bg-white dark:bg-[#14171D] rounded-xl shadow-2xl border border-zinc-200 dark:border-[#2A2F38] overflow-hidden max-h-[86vh] flex flex-col"
+      >
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-zinc-100 dark:border-[#2A2F38]">
+          <h2 className="text-[15px] font-semibold" style={{ color: "var(--os-ink)" }}>Place on 9-box</h2>
+          <button type="button" onClick={onClose} className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-[#20242C]" aria-label="Close">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-4 overflow-y-auto">
+          {/* Person */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Person</label>
+            <div className="flex items-center gap-2 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8">
+              <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <input
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter people…"
+                className="flex-1 bg-transparent text-[13px] focus:outline-none"
+                style={{ color: "var(--os-ink)" }}
+              />
+            </div>
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              size={4}
+              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[13px] p-1 bg-white dark:bg-[#14171D]"
+              style={{ color: "var(--os-ink)" }}
+            >
+              {filteredUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {`${u.firstName ?? ""} ${u.lastName ?? ""}`.trim()}{u.role?.title ? ` · ${u.role.title}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Mini 9-box placement */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Placement · click a box</label>
+            <div className="flex gap-2">
+              <div className="flex flex-col items-center justify-between py-1 text-[9px] font-semibold text-zinc-400" style={{ writingMode: "vertical-rl" as const }}>
+                <span>HIGH</span><span>POTENTIAL</span><span>LOW</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 flex-1">
+                {GRID_ORDER.map(({ key, perf, pot }) => {
+                  const selected = boxKey === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => { setPerformance(perf); setPotential(pot); }}
+                      className="rounded-md border text-left px-2 py-2 transition-colors"
+                      style={{
+                        borderColor: selected ? BOX_COLORS[key] : "var(--os-line, #e4e4e7)",
+                        background: selected ? BOX_COLORS[key] : "transparent",
+                        color: selected ? "#fff" : "var(--os-ink-2, #52525b)",
+                        boxShadow: selected ? `0 0 0 1px ${BOX_COLORS[key]}` : "none",
+                      }}
+                    >
+                      <div className="text-[11px] font-semibold leading-tight">{BOX_LABELS[key]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="flex justify-between text-[9px] font-semibold text-zinc-400 pl-6 pr-1">
+              <span>LOW</span><span>PERFORMANCE</span><span>HIGH</span>
+            </div>
+            {boxKey && (
+              <p className="text-[11.5px] text-zinc-500">Selected: <span style={{ color: BOX_COLORS[boxKey], fontWeight: 600 }}>{BOX_LABELS[boxKey]}</span> · {BOX_LONG[boxKey]}</p>
+            )}
+          </div>
+
+          {/* Period */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[11px] uppercase tracking-wide text-zinc-400">Period</label>
+              <input
+                type="text"
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+                placeholder="2026-08"
+                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
+                style={{ color: "var(--os-ink)" }}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] uppercase tracking-wide text-zinc-400">Action (optional)</label>
+              <input
+                type="text"
+                value={action}
+                onChange={(e) => setAction(e.target.value)}
+                placeholder="e.g. Promote, Develop, Coach"
+                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
+                style={{ color: "var(--os-ink)" }}
+              />
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Notes (optional)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Calibration rationale, development focus…"
+              rows={3}
+              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 py-2 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA] resize-none"
+              style={{ color: "var(--os-ink)" }}
+            />
+          </div>
+
+          {error && <p className="text-[12px] text-[#E2445C]">{error}</p>}
+        </div>
+
+        <div className="border-t border-zinc-100 dark:border-[#2A2F38] px-5 py-3 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="px-3 h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[12.5px] font-medium" style={{ color: "var(--os-ink)" }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={!canSave}
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-white text-[12.5px] font-medium"
+            style={{ background: canSave ? "#0073EA" : "#9dbfe8", cursor: canSave ? "pointer" : "default" }}
+          >
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {saving ? "Placing…" : "Place person"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, Star, Users, CheckCircle, BarChart3, Send, AlertTriangle,
-  UserPlus, TrendingUp, Shield, Cloud, CloudOff, Rocket,
+  UserPlus, TrendingUp, Shield, Cloud, CloudOff, Rocket, FileText, Download, Loader2,
 } from "lucide-react";
 import { useAutosave } from "@/hooks/use-autosave";
 
@@ -131,6 +131,34 @@ type CalibrationPayload = {
 
 type UserOpt = { id: string; firstName: string; lastName: string };
 
+// Shape returned by GET /api/reviews/[reviewId]/appraisal-letter.
+type AppraisalLetter = {
+  companyName: string;
+  employeeName: string;
+  employeeEmail?: string | null;
+  department?: string;
+  role?: string;
+  joinDate?: string | null;
+  cycleName: string;
+  cycleType: string;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  reviewerName?: string;
+  reviewerRole?: string;
+  overallScore: number;
+  performanceBand: string;
+  outcome?: string | null;
+  compositeScore?: number | null;
+  hikeRecommendation: { min: number; max: number; label: string };
+  managerComments?: string;
+  recommendation?: string;
+  kraRatings?: { kraName?: string; rating?: number; comments?: string }[];
+  behavioralRatings?: Record<string, number>;
+  selfReflection?: Reflection;
+  generatedAt: string;
+  reviewId: string;
+};
+
 function getScoreColor(score: number) {
   if (score >= 90) return "text-green-400";
   if (score >= 70) return "text-[color:var(--accent-strong)]";
@@ -158,6 +186,57 @@ function getOutcomeBadge(outcome: string) {
     case "EXIT_RECOMMENDATION": return <Badge variant="destructive">Exit Recommendation</Badge>;
     default: return null;
   }
+}
+
+function fmtDate(d?: string | null) {
+  if (!d) return "—";
+  const dt = new Date(d);
+  return isNaN(dt.getTime()) ? "—" : dt.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+}
+
+const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
+
+// Self-contained printable letter — the "download" side of the appraisal
+// button. Opens as a standalone .html the user can save or print to PDF.
+function buildLetterHtml(l: AppraisalLetter): string {
+  const kraRows = (l.kraRatings ?? [])
+    .map((k) => `<tr><td>${esc(k.kraName || "—")}</td><td style="text-align:center">${esc(k.rating ?? "—")}/5</td><td>${esc(k.comments || "")}</td></tr>`)
+    .join("");
+  const behavioral = Object.entries(l.behavioralRatings ?? {})
+    .map(([k, v]) => `<li>${esc(k)}: <strong>${esc(v)}/5</strong></li>`)
+    .join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Appraisal Letter — ${esc(l.employeeName)}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#18181b;max-width:720px;margin:40px auto;padding:0 24px;line-height:1.55}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:#71717a;margin:24px 0 8px;border-bottom:1px solid #e4e4e7;padding-bottom:4px}
+.muted{color:#71717a;font-size:13px}.score{font-size:32px;font-weight:700;color:#0073EA}.band{display:inline-block;padding:2px 10px;border-radius:999px;background:#eef4ff;color:#0073EA;font-weight:600;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{border:1px solid #e4e4e7;padding:6px 8px;text-align:left}th{background:#fafafa}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:13px}</style></head><body>
+<h1>${esc(l.companyName)}</h1><p class="muted">Performance Appraisal Letter · ${esc(l.cycleName)}</p>
+<h2>Employee</h2>
+<div class="grid"><div><strong>${esc(l.employeeName)}</strong></div><div>${esc(l.role || "")}</div>
+<div class="muted">${esc(l.department || "")}</div><div class="muted">${esc(l.employeeEmail || "")}</div>
+<div class="muted">Joined ${esc(fmtDate(l.joinDate))}</div><div class="muted">Reviewer: ${esc(l.reviewerName || "—")}</div></div>
+<h2>Review period</h2><p class="muted">${esc(fmtDate(l.periodStart))} → ${esc(fmtDate(l.periodEnd))} · ${esc(l.cycleType)}</p>
+<h2>Overall outcome</h2><p><span class="score">${esc(l.overallScore)}</span> &nbsp; <span class="band">${esc(l.performanceBand)}</span></p>
+<p class="muted">Recommended increment: <strong>${esc(l.hikeRecommendation?.label || "—")}</strong>${l.outcome ? ` · Outcome: ${esc(l.outcome.replace(/_/g, " "))}` : ""}</p>
+${kraRows ? `<h2>KRA ratings</h2><table><thead><tr><th>KRA</th><th>Rating</th><th>Comments</th></tr></thead><tbody>${kraRows}</tbody></table>` : ""}
+${behavioral ? `<h2>Behavioral</h2><ul>${behavioral}</ul>` : ""}
+${l.managerComments ? `<h2>Manager comments</h2><p>${esc(l.managerComments)}</p>` : ""}
+${l.recommendation ? `<h2>Recommendation</h2><p>${esc(l.recommendation)}</p>` : ""}
+<p class="muted" style="margin-top:32px">Generated ${esc(fmtDate(l.generatedAt))}</p>
+</body></html>`;
+}
+
+function downloadLetter(l: AppraisalLetter) {
+  const blob = new Blob([buildLetterHtml(l)], { type: "text/html" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `appraisal-${l.employeeName.replace(/\s+/g, "-").toLowerCase()}-${l.cycleName.replace(/\s+/g, "-").toLowerCase()}.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // Mirror of the API's isManager() tier (lib/api-helpers) — POST /launch
@@ -225,6 +304,13 @@ export default function ReviewCycleDetailPage() {
 
   // Finalize state
   const [savingFinalize, setSavingFinalize] = useState(false);
+
+  // Appraisal letter state — GET /api/reviews/[reviewId]/appraisal-letter
+  // (only valid once the review is COMPLETED/finalized).
+  const [letter, setLetter] = useState<AppraisalLetter | null>(null);
+  const [letterOpen, setLetterOpen] = useState(false);
+  const [letterLoadingId, setLetterLoadingId] = useState<string | null>(null);
+  const [letterError, setLetterError] = useState<string | null>(null);
 
   // Launch state (DRAFT cycles — the cron notification lands here, so
   // this page must carry the launch control, not just the list).
@@ -489,6 +575,29 @@ export default function ReviewCycleDetailPage() {
       setLaunchError("Couldn't launch the cycle.");
     } finally {
       setLaunching(false);
+    }
+  };
+
+  // Generate the appraisal letter for a single finalized review. The route
+  // key is the REVIEW id (not the cycle id) and 400s unless COMPLETED.
+  const handleGenerateLetter = async (reviewId: string) => {
+    setLetterLoadingId(reviewId);
+    setLetterError(null);
+    try {
+      const res = await fetch(`/api/reviews/${reviewId}/appraisal-letter`);
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        setLetterError(data?.error || "Couldn't generate the appraisal letter.");
+        setLetterOpen(true);
+        return;
+      }
+      setLetter(data as AppraisalLetter);
+      setLetterOpen(true);
+    } catch {
+      setLetterError("Couldn't generate the appraisal letter.");
+      setLetterOpen(true);
+    } finally {
+      setLetterLoadingId(null);
     }
   };
 
@@ -803,6 +912,18 @@ export default function ReviewCycleDetailPage() {
                         <p className="text-sm">{myReview.managerComments}</p>
                       </div>
                     )}
+                    <div className="mt-4 border-t border-zinc-200 pt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => handleGenerateLetter(myReview.id)}
+                        disabled={letterLoadingId === myReview.id}
+                      >
+                        {letterLoadingId === myReview.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                        Generate appraisal letter
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -853,6 +974,18 @@ export default function ReviewCycleDetailPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {getStatusBadge(review.status)}
+                      {review.status === "COMPLETED" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          title="Generate appraisal letter"
+                          onClick={(e) => { e.stopPropagation(); void handleGenerateLetter(review.id); }}
+                          disabled={letterLoadingId === review.id}
+                        >
+                          {letterLoadingId === review.id ? <Loader2 size={14} className="animate-spin text-zinc-500" /> : <FileText size={14} className="text-zinc-500" />}
+                        </Button>
+                      )}
                       <Button variant="ghost" size="sm" className="h-7 px-2" onClick={(e) => { e.stopPropagation(); setShowAssignPeersDialog(review); }}>
                         <UserPlus size={14} className="text-zinc-500" />
                       </Button>
@@ -1288,6 +1421,89 @@ export default function ReviewCycleDetailPage() {
             <Button onClick={handleCalibrationSave} disabled={savingCalib}>
               {savingCalib ? "Saving..." : "Save Adjustment"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Appraisal Letter Dialog */}
+      <Dialog open={letterOpen} onOpenChange={(open) => { if (!open) { setLetterOpen(false); setLetter(null); setLetterError(null); } }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FileText size={16} /> Appraisal Letter</DialogTitle>
+          </DialogHeader>
+          {letterError ? (
+            <div className="py-6 text-center">
+              <AlertTriangle size={20} className="mx-auto mb-2 text-orange-400" />
+              <p className="text-sm text-zinc-500">{letterError}</p>
+            </div>
+          ) : !letter ? (
+            <div className="py-8 text-center text-sm text-zinc-500">Generating…</div>
+          ) : (
+            <div className="space-y-4 py-2">
+              <div>
+                <h3 className="text-base font-semibold">{letter.companyName}</h3>
+                <p className="text-xs text-zinc-500">Performance Appraisal · {letter.cycleName}</p>
+              </div>
+              <div className="rounded-lg border border-zinc-200 p-3">
+                <p className="text-sm font-medium">{letter.employeeName}</p>
+                <p className="text-xs text-zinc-500">
+                  {[letter.role, letter.department].filter(Boolean).join(" · ") || "—"}
+                </p>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  Period {fmtDate(letter.periodStart)} → {fmtDate(letter.periodEnd)} · Reviewer {letter.reviewerName || "—"}
+                </p>
+              </div>
+              <div className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3">
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase">Overall</p>
+                  <p className={`text-3xl font-bold font-mono ${getScoreColor(letter.overallScore)}`}>{letter.overallScore}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase">Band</p>
+                  <Badge className="bg-blue-500/15 text-blue-500">{letter.performanceBand}</Badge>
+                </div>
+                <div>
+                  <p className="text-[10px] text-zinc-500 uppercase">Recommended increment</p>
+                  <p className="text-sm font-semibold">{letter.hikeRecommendation?.label || "—"}</p>
+                </div>
+                {letter.outcome && (
+                  <div className="ml-auto">{getOutcomeBadge(letter.outcome)}</div>
+                )}
+              </div>
+              {(letter.kraRatings?.length ?? 0) > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-zinc-500 mb-1">KRA ratings</p>
+                  <div className="space-y-1">
+                    {letter.kraRatings?.map((k, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs border-b border-zinc-100 py-1">
+                        <span>{k.kraName || "—"}</span>
+                        <span className="font-mono">{k.rating ?? "—"}/5</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {letter.managerComments && (
+                <div>
+                  <p className="text-xs font-medium text-zinc-500 mb-1">Manager comments</p>
+                  <p className="text-sm">{letter.managerComments}</p>
+                </div>
+              )}
+              {letter.recommendation && (
+                <div>
+                  <p className="text-xs font-medium text-zinc-500 mb-1">Recommendation</p>
+                  <p className="text-sm">{letter.recommendation}</p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setLetterOpen(false); setLetter(null); setLetterError(null); }}>Close</Button>
+            {letter && (
+              <Button className="gap-2" onClick={() => downloadLetter(letter)}>
+                <Download size={14} /> Download
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
