@@ -85,18 +85,21 @@ The command palette opens with **Cmd + K** (**Ctrl + K** on Windows and Linux) o
 - Ideas
 - Legacy tasks (the older task table, not board tasks)
 
+The query also still runs against four tables left over from removed finance modules: vendors, purchase orders, GL accounts and budget plans. If your database has rows in those, they will appear in results and their links go to `/procurement`, `/financials` and `/planning`, none of which exist any more. Those hits are dead ends.
+
 **What search does not cover today:**
 
 - **Tasks on Lists.** This is the big one. Board tasks are not in the search index, so searching a task title finds nothing. Use **Everything** or the List's own search box instead.
 - Spaces, Folders and Lists
 - Whiteboards, files and tables
 
-Two more things to know about the palette, so you do not mistake decoration for data:
+Three more things to know about the palette, so you do not mistake decoration for data:
 
 - With an **empty query**, the sections show **placeholder sample content** (invented tasks, documents, people and Spaces) as a layout demonstration. Several of those rows link to routes that do not exist. Ignore them and type your query.
-- The **Actions** rows in the palette (Create task, New doc, Schedule meeting, and the rest) are decorative. Clicking one closes the palette and does nothing.
+- The **Actions** rows in the palette (Create task, New doc, Schedule meeting) are decorative. They carry neither a link nor a handler, so clicking one just closes the palette.
+- The **Command** rows are a mixed bag. Most are real links (Open Planner, Open My Work, Go to Inbox, Go to Docs home, Go to Goals, Go to Timesheets, Create new Doc, Create new Task, Connect apps). Two point at routes that do not exist: **Go to Pulse** and **Create new Notepad**. Seven have no link and no handler at all, so they do nothing: **Show Favorites**, **Show Tray**, **Show Recent Activity**, **Set status**, **Update Slack status**, **Download Diagnostics** and **Feature Trace**.
 
-The **Navigate** and **Command** rows, by contrast, are real links to real pages.
+The **Navigate** rows are all real links to real pages.
 
 ### Other keyboard shortcuts
 

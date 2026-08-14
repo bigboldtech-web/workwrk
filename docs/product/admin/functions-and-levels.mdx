@@ -95,7 +95,11 @@ These do not sync. Setting a role's level to Director does not promote the peopl
 | Person access level | Teams → Directory → open person → edit, or Settings → Members | Company Admin and Super Admin only |
 | Invited person's starting level | The Invite people modal, Access level dropdown | Whoever can send invites |
 
-The two pickers do not offer the same list. The Role Definition level picker offers seven options and deliberately leaves out Agent and both admin tiers. The invite modal and the Members page offer every level except Super Admin, which includes Company Admin.
+The three pickers do not offer the same list.
+
+- The **Role Definition** level picker offers seven options and deliberately leaves out Agent and both admin tiers.
+- The **invite modal** offers every level except Super Admin, which includes Company Admin.
+- **Settings → Members** offers the full ladder, Super Admin included, and the API places no ceiling on what an admin can set. A Company Admin can promote someone to Super Admin from that dropdown.
 
 Settings → Members refuses to demote the last remaining Company Admin, so you cannot lock yourself out.
 
@@ -122,7 +126,7 @@ Access is a three door model. It is enforced on the server in every page gate an
 | VP | 2 and 3 | Same as Director. |
 | C-Level | 2 and 3 | Same as Director. Can also save org settings. |
 | Company Admin | all | Full access. Cannot be restricted in the permission matrix. Can change other people's access levels. |
-| Super Admin | all | Full access, granted outside the product. Never offered in the invite dropdown. |
+| Super Admin | all | Full access. Never offered in the invite dropdown, but it is offered in the Settings → Members level dropdown, so an existing admin can grant it. |
 
 Two extra rules worth knowing:
 

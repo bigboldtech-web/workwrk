@@ -134,7 +134,7 @@ These are the gaps that matter most, because each one looks like it should exist
 
 **Four surfaces still read the legacy `Task` table, not `Item`.** Tasks you create on a List are `Item` rows. These do not see them:
 
-- Global search and the command palette (`/api/search`) index User, legacy Task, SOP, Doc, Department, Meeting and OKR. Items, Boards, Spaces and Whiteboards are not searchable.
+- Global search and the command palette (`/api/search`) index User, legacy Task, SOP, Doc, Department, Meeting, OKR, Idea, Policy and Announcement, plus four leftovers from removed finance modules (Vendor, PurchaseOrder, GlAccount, BudgetPlan) whose result links point at `/procurement`, `/financials` and `/planning` and therefore 404. Items, Boards, Spaces and Whiteboards are not searchable.
 - `/analytics` reads `/api/tasks`.
 - The performance score's task component counts legacy Task rows.
 - `/api/tasks/workload` reads legacy Task. The `/team/workload` page does not use it, it queries `Item` directly.

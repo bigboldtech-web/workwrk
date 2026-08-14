@@ -21,17 +21,18 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Tasks (Items) | any List | Built | Create, edit, assign, subtasks, checklists, comments, priority, tags, custom fields, time tracking. Written to the `Item` table. |
 | View types | board view tabs | Built | 17 renderers exist: List/Table, Board/Kanban, Calendar, Gantt, Timeline, Workload, Cards, Hierarchy, Pivot, Chart, Dashboard, Form, Doc, Whiteboard, File gallery, Map, Activity. |
 | Board title row buttons | any board header | In progress | Filter, Reader mode, Automate, Ask and Share are rendered with no click handler. They do nothing. |
-| Global search and command palette | search box, keyboard shortcut | In progress | Indexes People, legacy Tasks, SOPs, Docs, Departments, Meetings and Goals. **Items, Boards, Spaces and Whiteboards are not searchable.** |
+| Global search and command palette | search box, keyboard shortcut | In progress | Indexes People, legacy Tasks, SOPs, Docs, Departments, Meetings, Goals, Policies, Announcements and Ideas, plus four dead finance tables whose result links 404. **Items, Boards, Spaces and Whiteboards are not searchable.** Most palette Command rows are real links; nine are dead. |
 | Planner | `/planner` | In progress | The week grid refuses to render until you connect Google Calendar, even though the events API serves local tasks fine. |
 | Docs | `/docs`, `/library` | Built | Create, edit, save and delete via `/api/docs`. |
 | Whiteboards | `/whiteboards`, `/library` | Built | Create, edit, save and delete via `/api/whiteboards`. |
+| Tables | `/tables`, `/library` | Built | Spreadsheet-shaped data grids, with formula columns and the relational link, lookup and rollup trio, saved named views, CSV import and export. The header **Public** toggle really does publish: it opens an unauthenticated read-only page at `/embed/tables/<id>`. |
 | Files | `/files`, `/library` | Built | Upload, folder, and link based external attachments. |
 | Dashboards | `/dashboards` | Built | Create and configure dashboards with widget cards. |
 | Forms | `/forms` | Built | Builder, AI generation from a prompt, a respond page, an embeddable version at `/embed/forms/<id>`, and submissions. |
 | Timesheets | `/timesheets` | Built | Weekly sheets, entries, submit and approve. Card timers on board items log automatically. |
 | Team workload | `/team/workload` | Built | Manager only, and only if you have reports. Reads live Items. |
 | Inbox | `/inbox` | Built | Reads real notification rows, mark read, preferences. See the caveat under Notifications below. |
-| Trash | `/trash` | Built | Org wide recycle bin, HR admin tier. |
+| Trash | `/trash` | Built | Org wide recycle bin, 60 day window. The rail only shows it to the HR admin tier, but the page has no server gate and `/api/trash` is manager tier, so any manager who types the URL can use it. Archived tasks do not land here. |
 
 ## Alignment layer
 
@@ -64,7 +65,7 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | Invite a person | invite modal | In progress | The API accepts department, role and manager but the modal collects none of them, so every new hire lands unplaced. Accept-invite also seeds flat even KRA weights instead of the role template weights. |
 | Candor | `/candor` | **Coming soon** | You can create a candor round. Employees cannot respond and nobody can see results: `/candor/[id]` does not exist and the respond and results endpoints have zero callers. |
 | Surveys | `/surveys` | **Coming soon** | Same shape. You can create a survey. `/surveys/[id]` does not exist, and the respond and responses endpoints have zero callers. |
-| Announcements | `/announcements` | In progress | You can read announcements. The Acknowledge button posts to `/api/announcements/<id>/ack` while the route is `/acknowledge`, so acknowledging always fails. There is no composer. |
+| Announcements | `/announcements` | In progress | You can read announcements. The Acknowledge button posts to `/api/announcements/<id>/ack` while the route is `/acknowledge`, so acknowledging always fails. **New announcement** does post a real row, but it is a quick add that writes a fixed placeholder titled "Untitled announcement": there is no composer and no way to edit the text afterwards. |
 | Kudos | `/kudos` | In progress | Giving and reacting work and feed the performance score. The leaderboard API has no interface. |
 | Assets | `/assets` | **Coming soon** | The list reads real data. "Add asset" is a button with no handler, and create, edit and delete are unreachable. |
 | Tools and subscriptions | `/tools` | Built | Reads and writes real data. |
@@ -73,9 +74,9 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 
 | Module | Where | Status | What you need to know |
 | --- | --- | --- | --- |
-| SOPs | `/sops` | Built | Create (blank, text, checklist, AI generated, recorded), version, publish, assign, track progress and compliance. Folder based visibility with inheritance. |
+| SOPs | `/sops` | Built | Create in one of three types (Written, Checklist, Click-capture), version with rollback, publish, archive, assign, track progress and compliance. Folder based visibility with inheritance. AI generation is not a create option: it is an in-editor action on a checklist SOP that drafts steps from the title and description. |
 | SOP folders and tags admin | none | **Coming soon** | The folder manager and the tags manager components are fully written and imported by nothing. You cannot rename or merge a tag today. |
-| SOP review and approval flow | `/sops/[id]` | In progress | Five statuses exist (Draft, In review, Approved, Published, Archived) and you can filter by them. The detail page only offers Publish and Archive. There is no assigned reviewer, no approve action and no notification, so "In review" and "Approved" are labels you set, not a workflow. |
+| SOP review and approval flow | `/sops/[id]` | In progress | Five statuses exist (Draft, In review, Approved, Published, Archived) and you can filter by them. The only status transitions the detail page offers are Publish and Archive (the same menu also carries Assign and Run, which are not status changes). There is no assigned reviewer, no approve action and no notification, so "In review" and "Approved" are labels you set, not a workflow. |
 | Process runs | `/process-runs` | Built | Run history, plus a public share link at `/run/<token>`. |
 | Policies | `/policies` | Built | Create, assign, acknowledge, compliance view, ledger export. |
 | Contracts and agreements | `/agreements` | Built | Create, templates, parties, send, signing at `/sign/<token>`. |
@@ -98,11 +99,11 @@ Last verified against the codebase on 2026-08-14. Ordered by area.
 | --- | --- | --- |
 | `/settings/members` | Built | Members and invitations. |
 | `/settings/scoring` | In progress | Cadences, bands and anchors save correctly. The weight sliders edit KPI, SOP compliance, Behavioral and Peer, but the scoring engine reads KPI, Manager, Peer, Self and SOP compliance. Behavioral is ignored, and Manager and Self always use defaults. |
-| `/settings/permissions` | In progress | The matrix saves, but only 12 of 439 API routes consult it. Everything else uses hardcoded Level ladders. |
+| `/settings/permissions` | In progress | The matrix saves, but only 10 of 439 API route files consult it, covering five of the sixteen modules (`kras`, `sops`, `assets`, `policies`, `announcements`). Everything else uses hardcoded Level ladders. |
 | `/settings/hierarchy` | In progress | Read only. It renders the reporting structure from the user list. You cannot change a reporting line here. |
 | `/settings/locale` | Built | Saves to org settings. |
 | `/settings/tags` | In progress | Create only. The tag update and delete endpoints exist but this page never calls them. |
-| `/settings/task-types` | Built | Full create, edit and delete. |
+| `/settings/task-types` | In progress | Create, delete and set default all work. There is no edit control: the only field the page patches is the default flag, so a type's name and icon are fixed at creation. |
 | `/settings/modules` | Built | Saves to org settings. |
 | `/settings/notifications` | In progress | There are two notification settings pages with different storage. This one saves to `/api/preferences`; `/account/notifications` saves to `/api/email-preferences`. They are not the same settings and neither one covers everything. |
 | `/settings/billing` | Built | Opens a real Stripe customer portal, and returns a clear "Stripe not configured" error when billing keys are absent. Org admin only. |

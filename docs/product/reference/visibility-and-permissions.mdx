@@ -9,7 +9,12 @@ WorkwrK decides visibility with a fixed ladder of **Levels**, not with editable 
 
 From the top down: `SUPER_ADMIN`, `COMPANY_ADMIN`, `C_LEVEL`, `VP`, `DIRECTOR`, `MANAGER`, `TEAM_LEAD`, `HR`, `EMPLOYEE`, `AGENT`.
 
-`SUPER_ADMIN` and `COMPANY_ADMIN` are deliberately missing from the Level picker in the interface (`src/lib/access-levels.ts`). They are granted by hand, not from a dropdown, so nobody can promote themselves through a Role edit.
+There are two Level lists in the code and they are not the same, which matters if you are reasoning about who can hand out admin.
+
+- `src/lib/access-levels.ts` is the **Role** level list. It deliberately omits `SUPER_ADMIN` and `COMPANY_ADMIN`, so nobody can promote themselves through a Role edit. The Role Definition picker also drops `AGENT`, leaving seven options.
+- `src/lib/permissions.ts` is the **person** level list, and it contains every level. The invite modal filters out `SUPER_ADMIN` and offers the other nine, `COMPANY_ADMIN` included. Settings → Members offers all ten, `SUPER_ADMIN` included, and `PATCH /api/users/[id]` puts no ceiling on the value an admin may set.
+
+So "granted by hand, not from a dropdown" is true of Super Admin only if nobody with Company Admin uses the Members dropdown. Company Admin is straightforwardly grantable from the invite modal and from Members.
 
 Note that `HR` sits below `TEAM_LEAD` in the seniority list but is treated as an org wide tier for people data. It is a scope, not a rank.
 
@@ -128,9 +133,11 @@ Goals, the people directory, KRAs and the alignment scope helpers use the first.
 
 `/settings/permissions` presents a matrix of 16 modules with per action toggles per Level, stored on `Organization.settings.permissions`.
 
-Only 12 of 439 API route files actually consult it: KRAs, KRA assignments, KPIs, announcements, tag assignments, policies, candor, SOPs, assets. Everything else is governed by the hardcoded Level ladders described above.
+Only 10 of 439 API route files actually call `requirePermission`, and between them they cover five modules: `kras` (the KRA, KRA assignment, KPI and orphan routes all check this one key), `sops`, `assets`, `policies` and `announcements`. Everything else is governed by the hardcoded Level ladders described above.
 
-Treat the matrix as authoritative for those modules and decorative everywhere else. Trimming it to what is enforced is on the plan.
+Two more files import or mention the helper without ever calling it, so do not count them: `src/app/api/candor/route.ts` imports `requirePermission` and never invokes it, and `src/app/api/tag-assignments/route.ts` only names it in a comment. The `candor` and `tags` rows in the matrix are therefore decorative like the rest.
+
+Treat the matrix as authoritative for those five modules and decorative everywhere else. Trimming it to what is enforced is on the plan.
 
 `SUPER_ADMIN` and `COMPANY_ADMIN` always pass `checkPermission` regardless of the matrix, so an admin cannot lock themselves out.
 

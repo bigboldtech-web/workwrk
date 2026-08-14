@@ -72,7 +72,7 @@ Not built yet: Favorite, Move to.
 
 **Archive and Delete are not the same thing, and the difference is not obvious from the dialogs.**
 
-- **Delete** snapshots the task and its subtasks into Trash and removes it. It is recoverable from `/trash` for 60 days. That page is manager-only.
+- **Delete** snapshots the task and its subtasks into Trash and removes it. It is recoverable from `/trash` for 60 days. The rail only shows Trash to the HR admin tier, but the page has no gate of its own and its API is manager tier, so any manager who types `/trash` can restore from it.
 - **Archive** marks the task archived and hides it from the board. It does **not** appear in Trash, and there is no button anywhere today that un-archives a task. The confirmation dialog says you can restore it from Trash; that copy is wrong. Treat Archive as "hide it and move on", and use Delete when you actually want a recoverable removal.
 
 ---

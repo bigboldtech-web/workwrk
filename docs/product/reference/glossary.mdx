@@ -17,9 +17,9 @@ Today the Departments page can only create. Rename, head assignment, re-parent a
 ### Level
 Your position on a fixed access ladder, stored on your user record. The full ladder, top down: Super Admin, Company Admin, C-Level, VP, Director, Manager, Team Lead, HR, Employee, Agent.
 
-Levels are an enum in the code. You cannot invent a new one, and you cannot edit what a Level can do beyond the permission matrix (which only 12 API routes actually consult). Super Admin and Company Admin are deliberately absent from the Level picker so nobody can promote themselves.
+Levels are an enum in the code. You cannot invent a new one, and you cannot edit what a Level can do beyond the permission matrix (which only 10 API route files actually consult, covering five modules). Super Admin and Company Admin are absent from the **Role** level picker so nobody can promote themselves through a job title, but Company Admin is offered in the invite modal and both are offered on Settings → Members.
 
-Level drives the three-door visibility model. See [Visibility and permissions](./visibility-and-permissions).
+Level drives the three-door visibility model. See [Visibility and permissions](/reference/visibility-and-permissions).
 
 ### Role
 Your job title. "Head of Customer Success", "Backend Engineer". Roles live at **People → Roles** (`/people/roles`).

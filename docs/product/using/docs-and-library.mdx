@@ -110,4 +110,6 @@ A table is a spreadsheet-shaped data grid, separate from Lists. It is for refere
 - **Saved views** are named and persist on the table: grid, kanban, calendar and gallery. A table always keeps at least one view.
 - **Import** takes a CSV and creates rows, adding columns it does not recognise. **Export** downloads the current table as CSV.
 
-There is a **Public** toggle in the header. Be precise about what it does: it marks the table readable through an unauthenticated read-only data endpoint. There is **no public web page** for a table yet, so there is nothing to hand a non-user to look at. Treat the toggle as an API switch, not a share link.
+There is a **Public** toggle in the header, and it does exactly what it says. Turning it on marks the table readable through an unauthenticated endpoint (`/api/public/tables/<id>`) and publishes a read-only web page at `/embed/tables/<id>` that anyone with the link can open without signing in. A second button then appears that copies an `<iframe>` snippet pointing at that page.
+
+Treat it as a real publish action, not a flag. Every row and column becomes visible to anyone who has or guesses the link. Turning the toggle back off makes the endpoint 404 again.

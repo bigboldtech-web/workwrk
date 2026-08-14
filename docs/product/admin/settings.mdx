@@ -43,7 +43,7 @@ The permission matrix: access levels down one axis, modules and actions across t
 
 Know what you are actually editing. The matrix advertises 16 modules: people, organization, KRAs & KPIs, SOPs, reviews, OKRs, tasks, meetings, policies, announcements, assets, surveys, ideas, analytics, tools and settings.
 
-**Six of them are consulted by API routes today**: `kras`, `sops`, `assets`, `people`, `policies` and `announcements`. The rest of the product is governed by the access level ladder and the three door model instead, not by this matrix. Toggling a checkbox for, say, `meetings` changes a stored value and nothing else.
+**Five of them are consulted by API routes today**: `kras`, `sops`, `assets`, `policies` and `announcements`. Ten route files out of 439 call the check. The rest of the product, `people` included, is governed by the access level ladder and the three door model instead, not by this matrix. Toggling a checkbox for, say, `meetings` or `people` changes a stored value and nothing else.
 
 See [Functions and levels](/admin/functions-and-levels) for the ladder that actually governs most of the product.
 
@@ -75,11 +75,11 @@ Until it is fixed, change the organization name and domain through another path.
 
 ### Tags & labels
 
-Real. Reads and writes the shared tag taxonomy used across boards, tasks and SOPs.
+**Create only.** It lists the shared tag taxonomy used across boards, tasks and SOPs, and it can add a tag. It cannot rename, recolour, archive or delete one: the page never calls the update or delete endpoints, which do exist. Get the tag name right when you create it.
 
 ### Task types
 
-Real. Creates, edits, deletes and sets the default item type, so tasks can present as Milestones, Bugs, Deals and so on.
+**Create, delete and set default.** You can add a custom item type, remove one, and choose which type new tasks default to, so tasks can present as Milestones, Bugs, Deals and so on. There is no control for editing an existing type's name, icon or description; the only field this page ever patches is the default flag.
 
 ### Locale & finance
 
@@ -145,12 +145,12 @@ Use `/settings/notifications`.
 | --- | --- |
 | Members | Works |
 | Hierarchy | Works, read only by design |
-| Roles & permissions | Saves, but only 6 of 16 modules are enforced |
+| Roles & permissions | Saves, but only 5 of 16 modules are enforced |
 | Audit log | Fake data, real backend not wired |
 | Enabled modules | Saves, but nothing reads it |
 | Identity & profile | Save is broken |
-| Tags & labels | Works |
-| Task types | Works |
+| Tags & labels | Create only, no rename or delete |
+| Task types | Create, delete and set default; no edit |
 | Locale & finance | Works |
 | Plan & billing | Works |
 | API keys | Entirely fake, do not use |

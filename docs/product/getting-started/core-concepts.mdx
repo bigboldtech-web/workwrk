@@ -94,7 +94,7 @@ A View is a saved way of looking at one List. WorkwrK ships 17 view types, each 
 
 Views are created from the "+ View" control on a List. Two tiles in that picker are variants rather than distinct renderers: "Team" is a Workload view with a config flag, and "Mind Map" rides the Whiteboard canvas.
 
-**Honest note on custom fields.** The field catalog defines roughly 40 types. The ones that actually render and edit today are text, long text, number, money, percent, date, datetime, checkbox, dropdown, t-shirt size, multi-select, labels, rating, KRA, linked doc, linked SOP, relationship, user, people, manual progress, location, voting and files. Anything else in the catalog, including formula, rollup, the AI-typed fields, button and signature, renders as a placeholder dash on a List until it is wired.
+**Honest note on custom fields.** The field catalog defines 38 types. The 26 that actually render and edit today are text, URL, email, phone, long text, number, money, percent, date, datetime, checkbox, dropdown, t-shirt size, multi-select, labels, rating, KRA, linked doc, linked SOP, relationship, user, people, manual progress, location, voting and files. The other 12, including formula, rollup, auto progress, action items, the four AI-typed fields, the two custom-AI fields, button and signature, render as a placeholder dash on a List until they are wired.
 
 ---
 
@@ -268,7 +268,9 @@ Manager-tier pages redirect employees rather than erroring. Hitting `/team`, `/o
 
 ### Level is not the same as Role
 
-**Level** is the fixed access ladder and it lives on the person (`User.accessLevel`), with a copy on the Role as the default for that title. It is an enum: you cannot invent a new level. Company Admin and Super Admin are deliberately excluded from the Role and invite dropdowns, because handing out admin from a job-title picker would be a footgun; they are granted deliberately.
+**Level** is the fixed access ladder and it lives on the person (`User.accessLevel`), with a copy on the Role as the default for that title. It is an enum: you cannot invent a new level.
+
+Company Admin and Super Admin are deliberately excluded from the **Role** level picker, because handing out admin from a job-title picker would be a footgun. They are not excluded everywhere: the invite modal offers every level except Super Admin, so Company Admin can be granted at invite time, and Settings → Members offers the full ladder including Super Admin to anyone who is already Company Admin or Super Admin.
 
 **Role** is the job title. It carries KRAs, a function, and a mission. Two people can share a Level and hold completely different Roles.
 
