@@ -1,8 +1,15 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import type { Prisma } from "@/generated/prisma";
+
+// Enum allowlists — the register UI now writes these directly, so reject a
+// bad value with a 400 rather than letting Prisma throw a 500.
+const ASSET_TYPES = new Set(["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM", "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER"]);
+const ASSET_CONDITIONS = new Set(["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"]);
+const ASSET_STATUSES = new Set(["AVAILABLE", "ASSIGNED", "IN_REPAIR", "RETIRED", "LOST"]);
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
@@ -35,7 +42,23 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const existing = await prisma.asset.findFirst({ where: { id, organizationId: orgId } });
   if (!existing) return jsonError("Asset not found", 404);
 
-  const data: any = {};
+  // Validate enums the UI can set directly.
+  if (body.type !== undefined && !ASSET_TYPES.has(body.type)) return jsonError("Invalid asset type");
+  if (body.condition !== undefined && !ASSET_CONDITIONS.has(body.condition)) return jsonError("Invalid condition");
+  if (body.status !== undefined && body.status && !ASSET_STATUSES.has(body.status)) return jsonError("Invalid status");
+
+  // Cross-org guard: a client-supplied assignee id must belong to THIS org,
+  // or an attacker could point one org's asset at another org's user (and
+  // trigger a notification + email to them). Same IDOR lesson as before.
+  if (body.assignedToId) {
+    const assignee = await prisma.user.findFirst({
+      where: { id: body.assignedToId, organizationId: orgId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!assignee) return jsonError("Assignee not found in your organization", 400);
+  }
+
+  const data: Prisma.AssetUncheckedUpdateInput = {};
   if (body.name !== undefined) data.name = body.name;
   if (body.type !== undefined) data.type = body.type;
   if (body.brand !== undefined) data.brand = body.brand || null;

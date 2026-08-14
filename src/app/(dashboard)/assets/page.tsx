@@ -2,54 +2,35 @@
 
 /* Asset register — finance lens.
  *
- * Different from /itsm/cmdb (IT configuration items). This is the
- * org's fixed-asset register: every physical thing the org owns, with
+ * The org's fixed-asset register: every physical thing the org owns, with
  * purchase cost, depreciation lens, warranty state, current owner.
  *
  * Top: 4 stat tiles (Total value · Assigned % · Warranty expiring ·
- * In repair/lost). Below: filter chips by status, then a dense table.
+ * In repair/lost). Below: filter chips by status, then a dense table with
+ * a per-row "…" actions menu (edit / assign / status / delete).
  *
- * GET /api/assets
+ * GET /api/assets · POST /api/assets · PATCH+DELETE /api/assets/[id]
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Box, Search, AlertTriangle, Plus, Calendar, Hash, Server } from "lucide-react";
+import { Box, Search, AlertTriangle, Plus, Calendar, Hash } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
-
-type AssetCondition = "NEW" | "GOOD" | "FAIR" | "POOR" | "DAMAGED";
-type AssetStatus = "AVAILABLE" | "ASSIGNED" | "IN_REPAIR" | "RETIRED" | "LOST";
-
-type ApiAsset = {
-  id: string; name: string; type: string;
-  brand?: string | null; model?: string | null; serialNumber?: string | null;
-  purchaseDate?: string | null; purchaseCost?: number | null;
-  warrantyExpiry?: string | null;
-  condition: AssetCondition; status: AssetStatus;
-  notes?: string | null;
-  assignedTo?: { id: string; firstName?: string | null; lastName?: string | null } | null;
-};
-
-const STATUS_HUE: Record<AssetStatus, string> = {
-  AVAILABLE: "var(--os-c-green)", ASSIGNED: "var(--os-c-blue)",
-  IN_REPAIR: "var(--os-c-orange)", RETIRED: "var(--os-c-darkgray)", LOST: "var(--os-c-red)",
-};
-const STATUS_LABEL: Record<AssetStatus, string> = {
-  AVAILABLE: "Available", ASSIGNED: "Assigned", IN_REPAIR: "In repair", RETIRED: "Retired", LOST: "Lost",
-};
-const CONDITION_HUE: Record<AssetCondition, string> = {
-  NEW: "var(--os-c-green)", GOOD: "var(--os-c-teal)",
-  FAIR: "var(--os-c-orange)", POOR: "var(--os-c-red)", DAMAGED: "var(--os-c-red)",
-};
+import {
+  STATUS_HUE, STATUS_LABEL, CONDITION_HUE, typeLabel, personName,
+  type ApiAsset, type AssetStatus,
+} from "./types";
+import { AssetFormDialog } from "./asset-form-dialog";
+import { AssignDialog } from "./assign-dialog";
+import { AssetRowMenu } from "./asset-row-menu";
 
 function fmtMoney(n: number, ccy = "USD"): string {
   if (n >= 1_000_000) return `${ccy} ${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${ccy} ${(n / 1_000).toFixed(1)}k`;
   return `${ccy} ${n.toFixed(0)}`;
 }
-function typeLabel(t: string) { return t.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase()); }
 
 const MS_DAY = 86_400_000;
 function warrantyDays(iso?: string | null): number | null {
@@ -65,6 +46,12 @@ export default function AssetsPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterKey>("all");
   const { rowVersion } = useOsShell();
+
+  // Page-owned dialog state — the row menu asks the page to open these so
+  // the dialogs don't live inside the (portalled) menu panel.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<ApiAsset | null>(null);
+  const [assigning, setAssigning] = useState<ApiAsset | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -124,11 +111,28 @@ export default function AssetsPage() {
       actions={
         <div className="ast__head-actions">
           <Link href="/settings" className="ast__nav-link"><Hash /> Settings</Link>
-          <Link href="/itsm/cmdb" className="ast__nav-link"><Server /> CMDB view</Link>
-          <button type="button" className="ast__btn-primary"><Plus /> Add asset</button>
+          <button type="button" className="ast__btn-primary" onClick={() => setCreateOpen(true)}><Plus /> Add asset</button>
         </div>
       }
     />
+
+    {/* Actions column + row-menu styling. Scoped to this page's table via the
+        higher-specificity `.ast__table--actions` selector so it overrides the
+        base grid in os.css without editing that shared file. */}
+    <style>{`
+      .ast__table--actions .ast__row { grid-template-columns: 1fr 100px 140px 100px 80px 120px 90px 36px; }
+      .ast__row-actions { display: flex; align-items: center; justify-content: flex-end; }
+      .ast__more { position: relative; display: inline-flex; }
+      .ast__more-btn { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 6px; color: var(--os-ink-3); background: transparent; cursor: pointer; transition: background .12s, color .12s; }
+      .ast__more-btn:hover { background: var(--os-surface-1); color: var(--os-ink); }
+      .ast__more-btn:disabled { opacity: .5; cursor: default; }
+      .ast__more-btn svg { width: 15px; height: 15px; }
+      .ast__status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+      .ast__soon { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--os-ink-3); background: var(--os-surface-1); border: 1px solid var(--os-line); padding: 1px 5px; border-radius: 4px; }
+      @media (max-width: 1100px) {
+        .ast__table--actions .ast__row { grid-template-columns: 1fr; }
+      }
+    `}</style>
 
     <div className="ast">
 
@@ -185,7 +189,7 @@ export default function AssetsPage() {
               </div>
             </div>
           ) : (
-            <div className="ast__table">
+            <div className="ast__table ast__table--actions">
               <div className="ast__row ast__row--head">
                 <span>Asset</span>
                 <span>Type</span>
@@ -194,6 +198,7 @@ export default function AssetsPage() {
                 <span>Condition</span>
                 <span>Warranty</span>
                 <span>Value</span>
+                <span aria-hidden="true" />
               </div>
               {filtered.map((a) => {
                 const wDays = warrantyDays(a.warrantyExpiry);
@@ -206,7 +211,7 @@ export default function AssetsPage() {
                     </div>
                     <span className="ast__type">{typeLabel(a.type)}</span>
                     <span className="ast__owner">
-                      {a.assignedTo ? [a.assignedTo.firstName, a.assignedTo.lastName].filter(Boolean).join(" ") : <em style={{ color: "var(--os-ink-3)" }}>unassigned</em>}
+                      {a.assignedTo ? (personName(a.assignedTo) || "assigned") : <em style={{ color: "var(--os-ink-3)" }}>unassigned</em>}
                     </span>
                     <span className="ast__status" style={{ background: STATUS_HUE[a.status] }}>{STATUS_LABEL[a.status]}</span>
                     <span className="ast__cond" style={{ color: CONDITION_HUE[a.condition] }}>{a.condition.toLowerCase()}</span>
@@ -214,6 +219,14 @@ export default function AssetsPage() {
                       {wState === "none" ? "—" : wState === "expired" ? `expired ${-wDays!}d ago` : wState === "warn" ? `${wDays}d left` : <span><Calendar style={{ width: 11, height: 11 }} /> {wDays}d</span>}
                     </span>
                     <span className="ast__value">{a.purchaseCost != null ? fmtMoney(a.purchaseCost) : "—"}</span>
+                    <div className="ast__row-actions">
+                      <AssetRowMenu
+                        asset={a}
+                        onEdit={(x) => setEditing(x)}
+                        onAssign={(x) => setAssigning(x)}
+                        onChanged={() => void load()}
+                      />
+                    </div>
                   </div>
                 );
               })}
@@ -222,5 +235,23 @@ export default function AssetsPage() {
         </>
       )}
     </div>
+
+    <AssetFormDialog
+      open={createOpen}
+      onOpenChange={setCreateOpen}
+      onSaved={() => void load()}
+    />
+    <AssetFormDialog
+      open={editing !== null}
+      onOpenChange={(o) => { if (!o) setEditing(null); }}
+      asset={editing}
+      onSaved={() => void load()}
+    />
+    <AssignDialog
+      open={assigning !== null}
+      onOpenChange={(o) => { if (!o) setAssigning(null); }}
+      asset={assigning}
+      onSaved={() => void load()}
+    />
   </>);
 }

@@ -3,6 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { getTeamUserIds } from "@/lib/team";
 import { logActivity } from "@/lib/activity";
+import type { Prisma, AssetStatus, AssetType } from "@/generated/prisma";
+
+// Enum allowlists — the register UI is now a live caller, so reject bad
+// values with a 400 instead of letting Prisma throw a 500.
+const ASSET_TYPES = new Set(["LAPTOP", "DESKTOP", "MONITOR", "PHONE", "TABLET", "KEYBOARD", "MOUSE", "HEADSET", "WEBCAM", "CHAIR", "DESK", "ID_CARD", "ACCESS_CARD", "VEHICLE", "OTHER"]);
+const ASSET_CONDITIONS = new Set(["NEW", "GOOD", "FAIR", "POOR", "DAMAGED"]);
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -19,7 +25,7 @@ export async function GET(req: NextRequest) {
   // so an employee browsing /assets only sees what's assigned to them.
   const requestedScope = searchParams.get("scope");
 
-  const callerLevel = (session.user as any).accessLevel as string;
+  const callerLevel = (session.user as { accessLevel?: string }).accessLevel ?? "";
   const orgWideRoles = new Set(["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "HR"]);
   const isOrgWide = orgWideRoles.has(callerLevel);
   const isManagerLevel = isManager(session);
@@ -29,9 +35,9 @@ export async function GET(req: NextRequest) {
       ? "team"
       : "own";
 
-  const where: any = { organizationId: orgId };
-  if (status) where.status = status;
-  if (type) where.type = type;
+  const where: Prisma.AssetWhereInput = { organizationId: orgId };
+  if (status) where.status = status as AssetStatus;
+  if (type) where.type = type as AssetType;
   if (assignedToId) where.assignedToId = assignedToId;
 
   if (effectiveScope !== "all" && !assignedToId) {
@@ -73,6 +79,18 @@ export async function POST(req: NextRequest) {
   const { name, type, brand, model, serialNumber, imeiNumber, purchaseDate, purchaseCost, warrantyExpiry, condition, notes, assignedToId } = body;
 
   if (!name?.trim() || !type) return jsonError("Name and type are required");
+  if (!ASSET_TYPES.has(type)) return jsonError("Invalid asset type");
+  if (condition && !ASSET_CONDITIONS.has(condition)) return jsonError("Invalid condition");
+
+  // Cross-org guard: an assignee id must belong to THIS org (the same
+  // IDOR lesson as the appraisal letter). Never trust a client-supplied id.
+  if (assignedToId) {
+    const assignee = await prisma.user.findFirst({
+      where: { id: assignedToId, organizationId: orgId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!assignee) return jsonError("Assignee not found in your organization", 400);
+  }
 
   const asset = await prisma.asset.create({
     data: {
