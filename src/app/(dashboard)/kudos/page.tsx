@@ -147,9 +147,9 @@ export default function KudosPage() {
 
       <div className="kud">
         <div className="kud__kpis">
-          <KpiTile accent="var(--os-c-pink)"   Icon={Heart}      label="Kudos given"  value={`${stats.total}`}    sub="all time" />
+          <KpiTile accent="var(--os-c-red)"   Icon={Heart}      label="Kudos given"  value={`${stats.total}`}    sub="all time" />
           <KpiTile accent="var(--os-c-orange)" Icon={Sparkles}   label="This week"    value={`${stats.week}`}      sub={`${stats.month} this month`} />
-          <KpiTile accent="var(--os-c-purple)" Icon={TrendingUp} label="Reactions"    value={`${stats.totalReactions}`} sub="cumulative" />
+          <KpiTile accent="var(--os-c-orange)" Icon={TrendingUp} label="Reactions"    value={`${stats.totalReactions}`} sub="cumulative" />
           <KpiTile accent="var(--os-c-green)"  Icon={Trophy}     label="Top receiver" value={stats.topReceivers[0]?.name.split(" ")[0] ?? "—"} sub={`${stats.topReceivers[0]?.n ?? 0} kudos`} />
         </div>
 
@@ -235,7 +235,7 @@ export default function KudosPage() {
 function KudosCard({ k }: { k: ApiKudos }) {
   const giverColor = k.giver ? avColor(k.giver.id) : "var(--os-ink-3)";
   const receiverColor = k.receiver ? avColor(k.receiver.id) : "var(--os-ink-3)";
-  const vColor = k.companyValue ? valueColor(k.companyValue) : "var(--os-c-pink)";
+  const vColor = k.companyValue ? valueColor(k.companyValue) : "var(--os-c-red)";
   return (
     <article className="kud__card" style={{ ["--c-c" as unknown as string]: vColor }}>
       <header className="kud__card-head">

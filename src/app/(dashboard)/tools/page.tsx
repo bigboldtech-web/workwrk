@@ -154,7 +154,7 @@ export default function ToolsPage() {
       <div className="tls">
         <div className="tls__kpis">
           <KpiTile accent="var(--os-c-brown)"  Icon={Wrench}    label="Tools"        value={`${stats.total}`}      sub="in catalog" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Layers}    label="Categories"   value={`${stats.categories}`} sub="organized" />
+          <KpiTile accent="var(--os-brand)" Icon={Layers}    label="Categories"   value={`${stats.categories}`} sub="organized" />
           <KpiTile accent="var(--os-c-orange)" Icon={Users}     label="With creds"   value={`${stats.withCreds}`}  sub="shared access" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Activity}  label="Shared to me" value={`${stats.sharedToMe}`} sub="you have access" />
         </div>

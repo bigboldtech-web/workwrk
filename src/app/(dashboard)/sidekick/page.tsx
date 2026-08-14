@@ -30,12 +30,12 @@ type Message = {
 };
 
 const STARTERS = [
-  { tag: "FORM",    color: "var(--os-c-purple)", text: "Create a customer feedback form with 5 fields." },
+  { tag: "FORM",    color: "var(--os-brand)", text: "Create a customer feedback form with 5 fields." },
   { tag: "TABLE",   color: "var(--os-c-teal)",   text: "Make a table to track our top 10 competitors." },
   { tag: "DOC",     color: "var(--os-c-blue)",   text: "Draft a Q3 OKRs planning doc for the engineering team." },
   { tag: "TASK",    color: "var(--os-c-green)",  text: "Capture a task to follow up with Acme on renewal." },
   { tag: "ANALYZE", color: "var(--os-c-orange)", text: "Summarize this week's wins, losses, and risks." },
-  { tag: "PLAN",    color: "var(--os-c-pink)",   text: "Plan my week — pick the 3 things that matter most." },
+  { tag: "PLAN",    color: "var(--os-c-red)",   text: "Plan my week — pick the 3 things that matter most." },
 ];
 
 function fmtRelative(iso: string) {
@@ -460,8 +460,8 @@ function SessionRow({
 // Per-tool visual: Lucide icon + color + human verb. Falls back to a
 // generic wrench/indigo for tools we haven't customised yet.
 const TOOL_VISUAL: Record<string, { Icon: typeof Wrench; color: string; verb: string }> = {
-  create_form:        { Icon: Wrench, color: "var(--os-c-purple)", verb: "Created form" },
-  list_forms:         { Icon: Wrench, color: "var(--os-c-purple)", verb: "Looked up forms" },
+  create_form:        { Icon: Wrench, color: "var(--os-brand)", verb: "Created form" },
+  list_forms:         { Icon: Wrench, color: "var(--os-brand)", verb: "Looked up forms" },
   create_data_table:  { Icon: Wrench, color: "var(--os-c-teal)",   verb: "Created table" },
   list_data_tables:   { Icon: Wrench, color: "var(--os-c-teal)",   verb: "Looked up tables" },
   create_doc:         { Icon: Wrench, color: "var(--os-c-blue)",   verb: "Created doc" },
@@ -470,15 +470,15 @@ const TOOL_VISUAL: Record<string, { Icon: typeof Wrench; color: string; verb: st
   create_lead:        { Icon: Wrench, color: "var(--os-c-green)",  verb: "Created lead" },
   search_leads:       { Icon: Wrench, color: "var(--os-c-green)",  verb: "Searched leads" },
   create_ticket:      { Icon: Wrench, color: "var(--os-c-orange)", verb: "Created ticket" },
-  create_meeting:     { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Created meeting" },
-  create_studio_item: { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Added board row" },
-  list_studio_boards: { Icon: Wrench, color: "var(--os-c-indigo)", verb: "Looked up boards" },
-  send_kudos:         { Icon: Wrench, color: "var(--os-c-pink)",   verb: "Sent kudos" },
-  search_employees:   { Icon: Wrench, color: "var(--os-c-pink)",   verb: "Searched people" },
+  create_meeting:     { Icon: Wrench, color: "var(--os-c-blue)", verb: "Created meeting" },
+  create_studio_item: { Icon: Wrench, color: "var(--os-c-blue)", verb: "Added board row" },
+  list_studio_boards: { Icon: Wrench, color: "var(--os-c-blue)", verb: "Looked up boards" },
+  send_kudos:         { Icon: Wrench, color: "var(--os-c-red)",   verb: "Sent kudos" },
+  search_employees:   { Icon: Wrench, color: "var(--os-c-red)",   verb: "Searched people" },
 };
 
 function toolVisualFor(name: string) {
-  return TOOL_VISUAL[name] ?? { Icon: Wrench, color: "var(--os-c-indigo)", verb: `Ran ${name.replace(/_/g, " ")}` };
+  return TOOL_VISUAL[name] ?? { Icon: Wrench, color: "var(--os-c-blue)", verb: `Ran ${name.replace(/_/g, " ")}` };
 }
 
 function toolInputPreview(input: Record<string, unknown>): string {
@@ -505,7 +505,7 @@ function MessageRow({ m, streaming = false }: { m: Message; streaming?: boolean 
     <div className="os-msg">
       <div
         className={`os-msg__av ${isUser ? "" : "os-msg__av--ai"}`}
-        style={isUser ? { background: "var(--os-c-purple)" } : undefined}
+        style={isUser ? { background: "var(--os-brand)" } : undefined}
       >
         {isUser ? "BB" : <Sparkles />}
       </div>

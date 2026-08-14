@@ -7,15 +7,15 @@ import { Breadcrumbs, type BreadcrumbItem } from "@/components/ui/breadcrumbs";
 type Tone = "violet" | "blue" | "amber" | "pink" | "emerald" | "lime";
 
 const toneHex: Record<Tone, string> = {
-  violet: "#7c3aed",
+  violet: "#0073EA",
   blue: "#4a9eff",
   amber: "#ff9933",
-  pink: "#ff3d8a",
+  pink: "#E2445C",
   emerald: "#22c55e",
   // Legacy: existing pages still pass `kickerTone="lime"`. The CSS now
-  // renders this as the violet bento mark so untouched callers inherit
+  // renders this as the brand-blue bento mark so untouched callers inherit
   // the new accent without a code change.
-  lime: "#7c3aed",
+  lime: "#0073EA",
 };
 
 type HeaderAction = {

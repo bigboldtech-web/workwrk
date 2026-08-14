@@ -5,8 +5,25 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Cake, PartyPopper, Gift, Calendar } from "lucide-react";
 
+type BirthdayUser = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  avatar?: string | null;
+  daysUntil?: number;
+  department?: { name?: string | null } | null;
+  role?: { title?: string | null } | null;
+};
+
+type BirthdayData = {
+  todayBirthdays: BirthdayUser[];
+  upcoming: BirthdayUser[];
+  isMyBirthday: boolean;
+  companyName: string;
+};
+
 export function BirthdayCard() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<BirthdayData | null>(null);
 
   useEffect(() => {
     fetch("/api/birthdays")
@@ -25,11 +42,11 @@ export function BirthdayCard() {
   // Show special card if it's the current user's birthday
   if (isMyBirthday) {
     return (
-      <Card className="border-[rgba(255,61,138,0.3)] bg-gradient-to-r from-[rgba(255,61,138,0.08)] via-[rgba(255,153,51,0.06)] to-[rgba(212,255,46,0.06)] overflow-hidden relative">
+      <Card className="border-[rgba(253,171,61,0.35)] bg-gradient-to-r from-[rgba(253,171,61,0.08)] via-[rgba(255,153,51,0.06)] to-[rgba(0,200,117,0.06)] overflow-hidden relative">
         <CardContent className="p-6 text-center relative z-10">
           <div className="flex justify-center gap-2 mb-3">
             <PartyPopper size={28} className="text-[#ff9933]" />
-            <Cake size={28} className="text-[#ff3d8a]" />
+            <Cake size={28} className="text-[#E2445C]" />
             <Gift size={28} className="text-[color:var(--accent-strong)]" />
           </div>
           <h2 className="text-xl font-bold mb-2 text-foreground">Happy Birthday! 🎂</h2>
@@ -46,21 +63,21 @@ export function BirthdayCard() {
   }
 
   return (
-    <Card className="border-pink-500/20">
+    <Card className="border-amber-500/20">
       <CardContent className="p-4">
         {/* Today's Birthdays */}
         {todayBirthdays.length > 0 && (
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-2">
-              <Cake size={16} className="text-pink-400" />
+              <Cake size={16} className="text-amber-400" />
               <span className="text-sm font-semibold">Today&apos;s Birthdays</span>
             </div>
             <div className="flex flex-wrap gap-3">
-              {todayBirthdays.map((u: any) => (
-                <div key={u.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-pink-500/5 border border-pink-500/10">
+              {todayBirthdays.map((u) => (
+                <div key={u.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/10">
                   <Avatar className="h-8 w-8">
                     {u.avatar ? <AvatarImage src={u.avatar} alt="" /> : null}
-                    <AvatarFallback className="text-xs bg-pink-500/20 text-pink-400">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
+                    <AvatarFallback className="text-xs bg-amber-500/20 text-amber-400">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{u.firstName} {u.lastName} 🎂</p>
@@ -80,7 +97,7 @@ export function BirthdayCard() {
               <span className="text-xs text-muted">Upcoming this week</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {upcoming.map((u: any) => (
+              {upcoming.map((u) => (
                 <div key={u.id} className="flex items-center gap-1.5 text-xs text-muted">
                   <span className="font-medium text-foreground">{u.firstName} {u.lastName}</span>
                   <span>in {u.daysUntil} day{u.daysUntil !== 1 ? "s" : ""}</span>

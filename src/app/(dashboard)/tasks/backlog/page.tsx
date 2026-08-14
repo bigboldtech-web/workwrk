@@ -61,7 +61,7 @@ const fmtAge = (iso?: string) => {
 type SortKey = "priority" | "title" | "estimate" | "age" | "assignee";
 type SortDir = "asc" | "desc";
 
-const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+const AV_PALETTE = ["var(--os-brand)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-yellow)", "var(--os-c-teal)", "var(--os-c-brown)", "var(--os-c-blue)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initialsFor(f?: string | null, l?: string | null) {
   return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
@@ -234,7 +234,7 @@ export default function BacklogPage() {
           {/* Stat strip */}
           {sorted.length > 0 && (
             <div className="bklg__stats">
-              <Stat Icon={ListChecks} label="Items" value={`${stats.total}`} color="var(--os-c-indigo)" />
+              <Stat Icon={ListChecks} label="Items" value={`${stats.total}`} color="var(--os-brand)" />
               <Stat Icon={Hourglass} label="Hours estimated" value={`${stats.hours.toFixed(0)}h`} color="var(--os-c-blue)" />
               <Stat Icon={AlertOctagon} label="P0 urgent" value={`${stats.p0}`} color="var(--os-c-red)" highlight={stats.p0 > 0} />
               <Stat Icon={UserMinus} label="Unassigned" value={`${stats.unassigned}`} color="var(--os-c-orange)" highlight={stats.unassigned > 0} />

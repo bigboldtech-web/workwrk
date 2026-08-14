@@ -106,8 +106,8 @@ export default function IntegrationsPage() {
       <div className="ing">
         <div className="ing__kpis">
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Installed"  value={`${stats.installed}`} sub="connected to your org" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Globe}        label="Available"  value={`${stats.available}`} sub="not yet installed" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Sparkles}     label="Total"      value={`${stats.total}`}     sub="in marketplace" />
+          <KpiTile accent="var(--os-c-blue)" Icon={Globe}        label="Available"  value={`${stats.available}`} sub="not yet installed" />
+          <KpiTile accent="var(--os-brand)" Icon={Sparkles}     label="Total"      value={`${stats.total}`}     sub="in marketplace" />
           <KpiTile accent="var(--os-c-orange)" Icon={Hash}         label="Categories" value={`${cats.length - 1}`} sub="organized" />
         </div>
 

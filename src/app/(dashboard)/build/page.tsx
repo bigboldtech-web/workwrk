@@ -36,7 +36,7 @@ const STATUS_LABEL: Record<AppStatus, string> = {
   DRAFT: "Draft", PUBLISHED: "Published", ARCHIVED: "Archived",
 };
 const STATUS_HUE: Record<AppStatus, string> = {
-  DRAFT: "var(--os-c-indigo)", PUBLISHED: "var(--os-c-green)", ARCHIVED: "var(--os-ink-3)",
+  DRAFT: "var(--os-c-darkgray)", PUBLISHED: "var(--os-c-green)", ARCHIVED: "var(--os-ink-3)",
 };
 const STATUS_ICON: Record<AppStatus, typeof Edit3> = {
   DRAFT: Edit3, PUBLISHED: CheckCircle2, ARCHIVED: Activity,
@@ -111,10 +111,10 @@ export default function BuildPage() {
 
       <div className="bld">
         <div className="bld__kpis">
-          <KpiTile accent="var(--os-c-purple)" Icon={Hammer}      label="Apps"      value={`${stats.total}`}            sub="generated" />
+          <KpiTile accent="var(--os-brand)" Icon={Hammer}      label="Apps"      value={`${stats.total}`}            sub="generated" />
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Published" value={`${stats.counts.PUBLISHED}`} sub="live in catalog" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Edit3}        label="Drafts"    value={`${stats.counts.DRAFT}`}     sub="not yet live" />
-          <KpiTile accent="var(--os-c-pink)"   Icon={Sparkles}     label="Templates" value="—"                            sub="coming soon" />
+          <KpiTile accent="var(--os-c-darkgray)" Icon={Edit3}        label="Drafts"    value={`${stats.counts.DRAFT}`}     sub="not yet live" />
+          <KpiTile accent="var(--os-c-teal)"   Icon={Sparkles}     label="Templates" value="—"                            sub="coming soon" />
         </div>
 
         <div className="bld__toolbar">

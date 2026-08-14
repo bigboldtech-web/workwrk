@@ -42,43 +42,47 @@ import type { Column, TableGroup } from "./main-table";
 import type { KColumn } from "./kanban";
 
 // ─── Color helpers (Monday palette) ─────────────────────────
+// NOTE: purple/pink/indigo/lime are LEGACY ALIASES kept so existing call
+// sites keep compiling — they resolve to design-system hues (brand blue,
+// signal red, deep blue, sage). No banned hues render from this map.
 export const C = {
   green:  "var(--os-c-green)",
   orange: "var(--os-c-orange)",
   red:    "var(--os-c-red)",
   blue:   "var(--os-c-blue)",
-  purple: "var(--os-c-purple)",
-  pink:   "var(--os-c-pink)",
-  indigo: "var(--os-c-indigo)",
+  purple: "var(--os-brand)",
+  pink:   "var(--os-c-red)",
+  indigo: "var(--os-brand-deep)",
   teal:   "var(--os-c-teal)",
-  lime:   "var(--os-c-lime)",
+  lime:   "var(--os-c-sage)",
   brown:  "var(--os-c-brown)",
   yellow: "var(--os-c-yellow)",
   sage:   "var(--os-c-sage)",
   gray:   "var(--os-c-gray)",
 };
 
+// Same deal: gradient keys are legacy names; values are design-system only.
 export const GRAD = {
-  orangePink:  "linear-gradient(135deg, var(--os-c-orange), var(--os-c-pink))",
-  pinkPurple:  "linear-gradient(135deg, var(--os-c-pink), var(--os-c-purple))",
-  bluePurple:  "linear-gradient(135deg, var(--os-c-blue), var(--os-c-purple))",
+  orangePink:  "linear-gradient(135deg, var(--os-c-orange), var(--os-c-red))",
+  pinkPurple:  "linear-gradient(135deg, var(--os-brand), var(--os-brand-deep))",
+  bluePurple:  "linear-gradient(135deg, var(--os-c-blue), var(--os-brand-deep))",
   greenTeal:   "linear-gradient(135deg, var(--os-c-green), var(--os-c-teal))",
-  indigoBlue:  "linear-gradient(135deg, var(--os-c-indigo), var(--os-c-blue))",
-  redPink:     "linear-gradient(135deg, var(--os-c-red), var(--os-c-pink))",
+  indigoBlue:  "linear-gradient(135deg, var(--os-brand), var(--os-c-blue))",
+  redPink:     "linear-gradient(135deg, var(--os-c-red), #C62D42)",
   brownOrange: "linear-gradient(135deg, var(--os-c-brown), var(--os-c-orange))",
-  purpleIndigo:"linear-gradient(135deg, var(--os-c-purple), var(--os-c-indigo))",
+  purpleIndigo:"linear-gradient(135deg, var(--os-brand), var(--os-brand-deep))",
   tealGreen:   "linear-gradient(135deg, var(--os-c-teal), var(--os-c-green))",
   yellowOrange:"linear-gradient(135deg, var(--os-c-yellow), var(--os-c-orange))",
 };
 
 // ─── Sample people pool ─────────────────────────────────────
 export const PEOPLE = {
-  bb: { initials: "BB", color: C.purple },
+  bb: { initials: "BB", color: C.brown },
   sc: { initials: "SC", color: C.green },
   ak: { initials: "AK", color: C.orange },
-  pr: { initials: "PR", color: C.pink },
+  pr: { initials: "PR", color: C.yellow },
   mk: { initials: "MK", color: C.teal },
-  vn: { initials: "VN", color: C.indigo },
+  vn: { initials: "VN", color: C.sage },
   rj: { initials: "RJ", color: C.blue },
   an: { initials: "AN", color: C.red },
 };
@@ -148,7 +152,7 @@ const TASKS_GROUPS: TableGroup[] = [
     rows: [
       { id: "t1", name: "Ship onboarding email sequence", cells: {
         status: { value: "working" }, owner: [PEOPLE.bb, PEOPLE.sc], due: { iso: new Date().toISOString(), state: "today" },
-        prio: { value: "high" }, tags: [{ label: "Growth", color: "green" }, { label: "Q3", color: "indigo" }],
+        prio: { value: "high" }, tags: [{ label: "Growth", color: "green" }, { label: "Q3", color: "blue" }],
         prog: { pct: 60, color: "warning" }, updates: { count: 5, hasNew: true },
       } },
       { id: "t2", name: "Fix dashboard layout collapse on mobile", cells: {
@@ -158,7 +162,7 @@ const TASKS_GROUPS: TableGroup[] = [
       } },
       { id: "t3", name: "Draft Q3 board update doc", cells: {
         status: { value: "progress" }, owner: [PEOPLE.bb], due: { iso: new Date(Date.now() + 2*86400000).toISOString() },
-        prio: { value: "medium" }, tags: [{ label: "Exec", color: "purple" }],
+        prio: { value: "medium" }, tags: [{ label: "Exec", color: "teal" }],
         prog: { pct: 30, color: "blue" }, updates: { count: 2 },
       } },
       { id: "t4", name: "Review Sprint Q3 retro notes", cells: {
@@ -175,7 +179,7 @@ const TASKS_GROUPS: TableGroup[] = [
     rows: [
       { id: "t5", name: "Roll out new app rail design", cells: {
         status: { value: "planning" }, owner: [PEOPLE.mk], due: { iso: new Date(Date.now() + 8*86400000).toISOString() },
-        prio: { value: "high" }, tags: [{ label: "Design", color: "purple" }, { label: "Rollout", color: "orange" }],
+        prio: { value: "high" }, tags: [{ label: "Design", color: "teal" }, { label: "Rollout", color: "orange" }],
         prog: { pct: 10, color: "blue" }, updates: { count: 0 },
       } },
       { id: "t6", name: "Plan customer advisory board meeting", cells: {
@@ -197,12 +201,12 @@ const TASKS_GROUPS: TableGroup[] = [
     rows: [
       { id: "t8", name: "Launch v2 design system tokens", done: true, cells: {
         status: { value: "done" }, owner: [PEOPLE.bb], due: { iso: new Date(Date.now() - 6*86400000).toISOString(), state: "done" },
-        prio: { value: "high" }, tags: [{ label: "Design", color: "purple" }, { label: "Shipped", color: "green" }],
+        prio: { value: "high" }, tags: [{ label: "Design", color: "teal" }, { label: "Shipped", color: "green" }],
         prog: { pct: 100 }, updates: { count: 18 },
       } },
       { id: "t9", name: "Migrate workspace-level scoping", done: true, cells: {
         status: { value: "done" }, owner: [PEOPLE.ak, PEOPLE.rj], due: { iso: new Date(Date.now() - 8*86400000).toISOString(), state: "done" },
-        prio: { value: "high" }, tags: [{ label: "Infra", color: "indigo" }],
+        prio: { value: "high" }, tags: [{ label: "Infra", color: "blue" }],
         prog: { pct: 100 }, updates: { count: 24 },
       } },
     ],
@@ -216,7 +220,7 @@ const TASKS_KANBAN: KColumn[] = [
   ] },
   { id: "in-progress", title: "In progress", color: C.blue, cards: [
     { id: "t1", title: "Ship onboarding email sequence", refId: "TSK-141", labels: [{ label: "Growth", color: "green" }], people: [PEOPLE.bb, PEOPLE.sc], date: { iso: new Date().toISOString(), state: "today" } },
-    { id: "t3", title: "Draft Q3 board update doc", refId: "TSK-143", labels: [{ label: "Exec", color: "purple" }], people: [PEOPLE.bb], date: { iso: new Date(Date.now() + 2*86400000).toISOString() } },
+    { id: "t3", title: "Draft Q3 board update doc", refId: "TSK-143", labels: [{ label: "Exec", color: "teal" }], people: [PEOPLE.bb], date: { iso: new Date(Date.now() + 2*86400000).toISOString() } },
   ] },
   { id: "review", title: "Review", color: C.purple, cards: [
     { id: "t4", title: "Review Sprint Q3 retro notes", refId: "TSK-144", labels: [{ label: "Engineering", color: "blue" }], people: [PEOPLE.pr, PEOPLE.bb], date: { iso: new Date(Date.now() + 4*86400000).toISOString() } },
@@ -226,7 +230,7 @@ const TASKS_KANBAN: KColumn[] = [
   ] },
   { id: "done", title: "Done", color: C.green, cards: [
     { id: "t8", title: "Launch v2 design system tokens", refId: "TSK-138", labels: [{ label: "Shipped", color: "green" }], people: [PEOPLE.bb] },
-    { id: "t9", title: "Migrate workspace-level scoping", refId: "TSK-139", labels: [{ label: "Infra", color: "indigo" }], people: [PEOPLE.ak, PEOPLE.rj] },
+    { id: "t9", title: "Migrate workspace-level scoping", refId: "TSK-139", labels: [{ label: "Infra", color: "blue" }], people: [PEOPLE.ak, PEOPLE.rj] },
   ] },
 ];
 
@@ -254,7 +258,7 @@ const CRM_GROUPS: TableGroup[] = [
       { id: "d2", name: "Lumen Labs — Q3 expansion", cells: {
         stage: { value: "working", label: "Proposal" }, owner: [PEOPLE.pr], value: 320000,
         close: { iso: new Date(Date.now() + 4*86400000).toISOString() },
-        tags: [{ label: "Referral", color: "purple" }], prob: { pct: 60, color: "warning" }, updates: { count: 8 },
+        tags: [{ label: "Referral", color: "teal" }], prob: { pct: 60, color: "warning" }, updates: { count: 8 },
       } },
     ],
   },
@@ -271,7 +275,7 @@ const CRM_GROUPS: TableGroup[] = [
       { id: "d4", name: "Helio Co. — annual contract", cells: {
         stage: { value: "progress", label: "Discovery" }, owner: [PEOPLE.mk], value: 540000,
         close: { iso: new Date(Date.now() + 30*86400000).toISOString() },
-        tags: [{ label: "Event", color: "pink" }], prob: { pct: 30, color: "blue" }, updates: { count: 2 },
+        tags: [{ label: "Event", color: "orange" }], prob: { pct: 30, color: "blue" }, updates: { count: 2 },
       } },
     ],
   },
@@ -283,7 +287,7 @@ const CRM_GROUPS: TableGroup[] = [
       { id: "d5", name: "Spark Co — 12-mo contract", done: true, cells: {
         stage: { value: "done", label: "Closed Won" }, owner: [PEOPLE.bb], value: 420000,
         close: { iso: new Date(Date.now() - 12*86400000).toISOString(), state: "done" },
-        tags: [{ label: "Inbound", color: "green" }, { label: "ROI", color: "lime" }], prob: { pct: 100 }, updates: { count: 22 },
+        tags: [{ label: "Inbound", color: "green" }, { label: "ROI", color: "green" }], prob: { pct: 100 }, updates: { count: 22 },
       } },
     ],
   },
@@ -292,14 +296,14 @@ const CRM_GROUPS: TableGroup[] = [
 const CRM_KANBAN: KColumn[] = [
   { id: "lead", title: "Lead", color: C.gray, cards: [
     { id: "l1", title: "Tata Steel — initial outreach", refId: "DEAL-201", labels: [{ label: "Outbound", color: "blue" }], people: [PEOPLE.ak] },
-    { id: "l2", title: "Reliance — referral from CEO", refId: "DEAL-202", labels: [{ label: "Referral", color: "purple" }], people: [PEOPLE.bb] },
+    { id: "l2", title: "Reliance — referral from CEO", refId: "DEAL-202", labels: [{ label: "Referral", color: "teal" }], people: [PEOPLE.bb] },
   ] },
   { id: "qualified", title: "Qualified", color: C.blue, cards: [
     { id: "d3", title: "NorthStar Tech — pilot", refId: "DEAL-198", labels: [{ label: "Outbound", color: "blue" }], people: [PEOPLE.ak], date: { iso: new Date(Date.now() + 21*86400000).toISOString() } },
-    { id: "d4", title: "Helio Co. — annual", refId: "DEAL-199", labels: [{ label: "Event", color: "pink" }], people: [PEOPLE.mk], date: { iso: new Date(Date.now() + 30*86400000).toISOString() } },
+    { id: "d4", title: "Helio Co. — annual", refId: "DEAL-199", labels: [{ label: "Event", color: "orange" }], people: [PEOPLE.mk], date: { iso: new Date(Date.now() + 30*86400000).toISOString() } },
   ] },
   { id: "proposal", title: "Proposal", color: C.orange, cards: [
-    { id: "d2", title: "Lumen Labs — Q3 expansion", refId: "DEAL-195", labels: [{ label: "Referral", color: "purple" }], people: [PEOPLE.pr], date: { iso: new Date(Date.now() + 4*86400000).toISOString() } },
+    { id: "d2", title: "Lumen Labs — Q3 expansion", refId: "DEAL-195", labels: [{ label: "Referral", color: "teal" }], people: [PEOPLE.pr], date: { iso: new Date(Date.now() + 4*86400000).toISOString() } },
   ] },
   { id: "negotiation", title: "Negotiation", color: C.purple, cards: [
     { id: "d1", title: "Acme Corp — Enterprise renewal", refId: "DEAL-190", labels: [{ label: "Inbound", color: "green" }], people: [PEOPLE.bb, PEOPLE.sc], date: { iso: new Date(Date.now() + 7*86400000).toISOString() } },
@@ -319,17 +323,17 @@ const PEOPLE_COLUMNS: Column[] = [
 ];
 const PEOPLE_GROUPS: TableGroup[] = [
   { id: "leadership", title: "Leadership team", color: C.purple, rows: [
-    { id: "p1", name: "BigBold Tech (You)", cells: { role: "CEO", dept: [{ label: "Executive", color: "purple" }], status: { value: "done", label: "Active" }, joined: { iso: "2023-01-15", state: "done" }, location: "Mumbai" } },
+    { id: "p1", name: "BigBold Tech (You)", cells: { role: "CEO", dept: [{ label: "Executive", color: "teal" }], status: { value: "done", label: "Active" }, joined: { iso: "2023-01-15", state: "done" }, location: "Mumbai" } },
     { id: "p2", name: "Sarah Cohen", cells: { role: "VP Engineering", dept: [{ label: "Engineering", color: "blue" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.bb], joined: { iso: "2023-03-22", state: "done" }, location: "Bangalore" } },
   ] },
   { id: "engineering", title: "Engineering", color: C.blue, rows: [
     { id: "p3", name: "Arjun Kumar", cells: { role: "Senior Engineer", dept: [{ label: "Engineering", color: "blue" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.sc], joined: { iso: "2023-06-01", state: "done" }, location: "Bangalore" } },
-    { id: "p4", name: "Rajesh Joshi", cells: { role: "Frontend Lead", dept: [{ label: "Engineering", color: "blue" }, { label: "Design", color: "purple" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.sc], joined: { iso: "2024-02-10", state: "done" }, location: "Pune" } },
+    { id: "p4", name: "Rajesh Joshi", cells: { role: "Frontend Lead", dept: [{ label: "Engineering", color: "blue" }, { label: "Design", color: "teal" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.sc], joined: { iso: "2024-02-10", state: "done" }, location: "Pune" } },
     { id: "p5", name: "Vikram Nair", cells: { role: "DevOps", dept: [{ label: "Engineering", color: "blue" }], status: { value: "pending", label: "On leave" }, manager: [PEOPLE.sc], joined: { iso: "2024-05-20", state: "done" }, location: "Remote" } },
   ] },
   { id: "growth", title: "Growth & Operations", color: C.green, rows: [
     { id: "p6", name: "Priya Rao", cells: { role: "Head of Sales", dept: [{ label: "Sales", color: "green" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.bb], joined: { iso: "2023-09-12", state: "done" }, location: "Delhi" } },
-    { id: "p7", name: "Maya Kapoor", cells: { role: "HR Lead", dept: [{ label: "People", color: "pink" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.bb], joined: { iso: "2024-01-08", state: "done" }, location: "Mumbai" } },
+    { id: "p7", name: "Maya Kapoor", cells: { role: "HR Lead", dept: [{ label: "People", color: "orange" }], status: { value: "done", label: "Active" }, manager: [PEOPLE.bb], joined: { iso: "2024-01-08", state: "done" }, location: "Mumbai" } },
     { id: "p8", name: "Anika Nair", cells: { role: "Marketing", dept: [{ label: "Marketing", color: "orange" }], status: { value: "working", label: "Onboarding" }, manager: [PEOPLE.bb], joined: { iso: new Date(Date.now() - 5*86400000).toISOString() }, location: "Remote" } },
   ] },
 ];
@@ -392,14 +396,14 @@ function genericGroups(prefix: string): TableGroup[] {
       { id: `${prefix}-2`, name: `${prefix} item — needs review`, cells: {
         status: { value: "review" }, owner: [PEOPLE.pr],
         due: { iso: new Date(Date.now() + 5*86400000).toISOString() },
-        tags: [{ label: "Review", color: "purple" }], updates: { count: 7, hasNew: true },
+        tags: [{ label: "Review", color: "teal" }], updates: { count: 7, hasNew: true },
       } },
     ] },
     { id: `${prefix}-planning`, title: "Planning", color: C.indigo, rows: [
       { id: `${prefix}-3`, name: `${prefix} item — pending kick-off`, cells: {
         status: { value: "planning" }, owner: [PEOPLE.mk],
         due: { iso: new Date(Date.now() + 12*86400000).toISOString() },
-        tags: [{ label: "Q3", color: "indigo" }], updates: { count: 1 },
+        tags: [{ label: "Q3", color: "blue" }], updates: { count: 1 },
       } },
     ] },
     { id: `${prefix}-done`, title: "Done", color: C.green, rows: [
@@ -434,7 +438,7 @@ const MODULES: ModuleDef[] = [
     ],
     groups: [
       { id: "today", title: "Today", color: C.orange, rows: [
-        { id: "m1", name: "Sprint retro — Engineering", cells: { status: { value: "working", label: "Live now" }, host: [PEOPLE.sc], date: { iso: new Date().toISOString(), state: "today" }, tags: [{ label: "Retro", color: "purple" }], updates: { count: 4 } } },
+        { id: "m1", name: "Sprint retro — Engineering", cells: { status: { value: "working", label: "Live now" }, host: [PEOPLE.sc], date: { iso: new Date().toISOString(), state: "today" }, tags: [{ label: "Retro", color: "teal" }], updates: { count: 4 } } },
         { id: "m2", name: "1:1 with Sarah", cells: { status: { value: "pending", label: "In 25 min" }, host: [PEOPLE.bb, PEOPLE.sc], date: { iso: new Date().toISOString(), state: "today" }, tags: [{ label: "1:1", color: "blue" }], updates: { count: 0 } } },
       ] },
       { id: "this-week", title: "This week", color: C.blue, rows: [
@@ -542,7 +546,7 @@ const MODULES: ModuleDef[] = [
     columns: simpleStatusColumns, groups: genericGroups("Ticket"),
     kanban: [
       { id: "new",      title: "New",      color: C.gray,   cards: [{ id: "i1", title: "VPN slow for remote team", refId: "INC-501", labels: [{ label: "Network", color: "blue" }], people: [PEOPLE.vn] }] },
-      { id: "triage",   title: "Triage",   color: C.yellow, cards: [{ id: "i2", title: "Slack workspace not loading", refId: "INC-502", labels: [{ label: "SaaS", color: "purple" }], people: [PEOPLE.ak] }] },
+      { id: "triage",   title: "Triage",   color: C.yellow, cards: [{ id: "i2", title: "Slack workspace not loading", refId: "INC-502", labels: [{ label: "SaaS", color: "teal" }], people: [PEOPLE.ak] }] },
       { id: "active",   title: "Active",   color: C.orange, cards: [{ id: "i3", title: "Auth bug — production", refId: "INC-498", labels: [{ label: "SEV-2", color: "red" }], people: [PEOPLE.sc, PEOPLE.ak] }] },
       { id: "resolved", title: "Resolved", color: C.green,  cards: [{ id: "i4", title: "Office Wi-Fi outage", refId: "INC-490", labels: [{ label: "Hardware", color: "brown" }], people: [PEOPLE.vn] }] },
     ],
@@ -562,8 +566,8 @@ const MODULES: ModuleDef[] = [
     columns: simpleStatusColumns, groups: genericGroups("Sprint"),
     kanban: [
       { id: "backlog", title: "Backlog", color: C.gray, cards: [{ id: "b1", title: "Refactor auth middleware", refId: "ENG-301", labels: [{ label: "Tech debt", color: "brown" }], people: [PEOPLE.sc] }] },
-      { id: "in-progress", title: "In progress", color: C.blue, cards: [{ id: "b2", title: "Ship new app rail", refId: "ENG-298", labels: [{ label: "Design", color: "purple" }], people: [PEOPLE.rj] }] },
-      { id: "review", title: "Review", color: C.purple, cards: [{ id: "b3", title: "Tasks API pagination", refId: "ENG-295", labels: [{ label: "API", color: "indigo" }], people: [PEOPLE.ak] }] },
+      { id: "in-progress", title: "In progress", color: C.blue, cards: [{ id: "b2", title: "Ship new app rail", refId: "ENG-298", labels: [{ label: "Design", color: "teal" }], people: [PEOPLE.rj] }] },
+      { id: "review", title: "Review", color: C.purple, cards: [{ id: "b3", title: "Tasks API pagination", refId: "ENG-295", labels: [{ label: "API", color: "blue" }], people: [PEOPLE.ak] }] },
       { id: "done", title: "Done", color: C.green, cards: [{ id: "b4", title: "Workspace scoping rollout", refId: "ENG-290", labels: [{ label: "Shipped", color: "green" }], people: [PEOPLE.sc, PEOPLE.ak] }] },
     ],
   }),
@@ -594,8 +598,8 @@ const MODULES: ModuleDef[] = [
     kanban: [
       { id: "new", title: "New", color: C.gray, cards: [{ id: "h1", title: "Cannot log in — Acme Corp", refId: "SUP-801", labels: [{ label: "Login", color: "red" }], people: [PEOPLE.pr] }] },
       { id: "open", title: "Open", color: C.blue, cards: [{ id: "h2", title: "Billing question — Spark Co", refId: "SUP-798", labels: [{ label: "Billing", color: "teal" }], people: [PEOPLE.bb] }] },
-      { id: "pending", title: "Pending customer", color: C.yellow, cards: [{ id: "h3", title: "Export feature request", refId: "SUP-790", labels: [{ label: "Feature", color: "purple" }], people: [PEOPLE.mk] }] },
-      { id: "resolved", title: "Resolved", color: C.green, cards: [{ id: "h4", title: "SSO setup help", refId: "SUP-780", labels: [{ label: "Setup", color: "lime" }], people: [PEOPLE.sc] }] },
+      { id: "pending", title: "Pending customer", color: C.yellow, cards: [{ id: "h3", title: "Export feature request", refId: "SUP-790", labels: [{ label: "Feature", color: "teal" }], people: [PEOPLE.mk] }] },
+      { id: "resolved", title: "Resolved", color: C.green, cards: [{ id: "h4", title: "SSO setup help", refId: "SUP-780", labels: [{ label: "Setup", color: "green" }], people: [PEOPLE.sc] }] },
     ],
   }),
 

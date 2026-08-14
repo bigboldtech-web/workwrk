@@ -47,12 +47,12 @@ const STATUS_LABEL: Record<IdeaStatus, string> = {
   REJECTED: "Rejected", IMPLEMENTED: "Implemented", REWARDED: "Rewarded",
 };
 const STATUS_HUE: Record<IdeaStatus, string> = {
-  SUBMITTED: "var(--os-c-indigo)", UNDER_REVIEW: "var(--os-c-orange)",
+  SUBMITTED: "var(--os-c-blue)", UNDER_REVIEW: "var(--os-c-orange)",
   APPROVED: "var(--os-c-blue)", IMPLEMENTED: "var(--os-c-green)",
-  REJECTED: "var(--os-c-red)", REWARDED: "var(--os-c-pink)",
+  REJECTED: "var(--os-c-red)", REWARDED: "var(--os-c-yellow)",
 };
 
-const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+const AV_PALETTE = ["var(--os-brand)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-yellow)", "var(--os-c-teal)", "var(--os-c-brown)", "var(--os-c-blue)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
 

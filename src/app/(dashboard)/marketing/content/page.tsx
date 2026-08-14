@@ -29,9 +29,9 @@ type ApiContent = {
 };
 
 const STATUS_HUE: Record<Status, string> = {
-  IDEA: "var(--os-c-indigo)", BRIEFED: "var(--os-c-blue)",
-  IN_PRODUCTION: "var(--os-c-orange)", REVIEW: "var(--os-c-purple)",
-  SCHEDULED: "var(--os-c-pink)", PUBLISHED: "var(--os-c-green)", ARCHIVED: "var(--os-c-darkgray)",
+  IDEA: "var(--os-c-darkgray)", BRIEFED: "var(--os-c-blue)",
+  IN_PRODUCTION: "var(--os-c-orange)", REVIEW: "var(--os-c-teal)",
+  SCHEDULED: "var(--os-c-yellow)", PUBLISHED: "var(--os-c-green)", ARCHIVED: "var(--os-c-darkgray)",
 };
 const STATUS_LABEL: Record<Status, string> = {
   IDEA: "Idea", BRIEFED: "Briefed", IN_PRODUCTION: "In production",
@@ -111,7 +111,7 @@ export default function ContentLibrary() {
     <div className="lib">
       <header className="lib__head">
         <div className="lib__head-l">
-          <div className="lib__icon" style={{ background: "linear-gradient(135deg, var(--os-c-pink), var(--os-c-purple))" }}><FileText /></div>
+          <div className="lib__icon" style={{ background: "linear-gradient(135deg, var(--os-brand), var(--os-brand-deep))" }}><FileText /></div>
           <div>
             <h1 className="lib__title">Content library</h1>
             <div className="lib__sub">

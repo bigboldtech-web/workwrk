@@ -55,8 +55,8 @@ function fileIcon(mime: string): React.ComponentType<{ className?: string }> {
   return FileIcon;
 }
 function fileHue(mime: string): string {
-  if (mime.startsWith("image/")) return "var(--os-c-purple)";
-  if (mime.startsWith("video/")) return "var(--os-c-pink)";
+  if (mime.startsWith("image/")) return "var(--os-c-teal)";
+  if (mime.startsWith("video/")) return "var(--os-c-red)";
   if (mime.startsWith("audio/")) return "var(--os-c-orange)";
   if (mime.includes("pdf")) return "var(--os-c-red)";
   if (mime.startsWith("text/") || mime.includes("document")) return "var(--os-c-blue)";

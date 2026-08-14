@@ -994,19 +994,19 @@ function LinkCell({ value, linked, onChange }: { value: unknown; linked: LinkedT
   return (
     <span style={{ position: "relative", display: "inline-flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
       {chosen.map((r) => (
-        <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#eef2ff", color: "#4f46e5", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 500 }}>
+        <span key={r.id} style={{ display: "inline-flex", alignItems: "center", gap: 3, background: "#E6F1FB", color: "#0073EA", borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 500 }}>
           {rowTitle(r, linked.titleColId)}
-          <button type="button" onClick={() => toggle(r.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#6366f1", lineHeight: 0, padding: 0 }}>×</button>
+          <button type="button" onClick={() => toggle(r.id)} style={{ background: "none", border: 0, cursor: "pointer", color: "#0073EA", lineHeight: 0, padding: 0 }}>×</button>
         </span>
       ))}
-      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #c7d2fe", borderRadius: 4, color: "#6366f1", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>+ link</button>
+      <button type="button" onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "1px dashed #A8CDF5", borderRadius: 4, color: "#0073EA", cursor: "pointer", fontSize: 11, padding: "1px 6px" }}>+ link</button>
       {open ? (
         <div style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 20, minWidth: 240, maxHeight: 280, overflowY: "auto", background: "white", border: "1px solid #e4e4e7", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 4 }} onMouseLeave={() => setOpen(false)}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${linked.name}…`} autoFocus style={{ width: "100%", height: 28, padding: "0 8px", border: "1px solid #e4e4e7", borderRadius: 6, fontSize: 12, marginBottom: 4 }} />
           {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No records.</div> : candidates.slice(0, 100).map((r) => (
             <button key={r.id} type="button" onClick={() => toggle(r.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }} onMouseEnter={(e) => (e.currentTarget.style.background = "#f4f4f5")} onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
               <span style={{ flex: 1 }}>{rowTitle(r, linked.titleColId)}</span>
-              {ids.includes(r.id) ? <Check style={{ width: 14, height: 14, color: "#6366f1" }} /> : null}
+              {ids.includes(r.id) ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null}
             </button>
           ))}
         </div>
@@ -1074,7 +1074,7 @@ function PersonCell({ value, users, onChange }: { value: unknown; users: OrgUser
           {candidates.length === 0 ? <div style={{ padding: 8, fontSize: 12, color: "#a1a1aa" }}>No people.</div> : candidates.slice(0, 100).map((u) => (
             <button key={u.id} type="button" onClick={() => toggle(u.id)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 8px", border: 0, background: "none", cursor: "pointer", fontSize: 13, borderRadius: 6 }}>
               <span style={{ flex: 1 }}>{userName(u)}</span>
-              {ids.includes(u.id) ? <Check style={{ width: 14, height: 14, color: "#6366f1" }} /> : null}
+              {ids.includes(u.id) ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null}
             </button>
           ))}
         </div>

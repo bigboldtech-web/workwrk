@@ -18,15 +18,37 @@ function getScoreColor(score: number) {
   return "text-red-400";
 }
 
-function getScoreBg(score: number) {
-  if (score >= 90) return "bg-green-500";
-  if (score >= 70) return "bg-violet-600";
-  if (score >= 50) return "bg-orange-500";
-  return "bg-red-500";
-}
+type TeamMember = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role?: string | null;
+  kpiTotal: number;
+  kpiCompleted: number;
+  compositeScore?: number | null;
+  avgKpiScore: number;
+};
+
+type PendingApproval = {
+  id: string;
+  actualValue?: number | string | null;
+  kpi?: { name?: string | null; unit?: string | null } | null;
+  user?: { firstName?: string | null; lastName?: string | null } | null;
+};
+
+type TeamDashboardData = {
+  teamMembers: TeamMember[];
+  pendingApprovals?: PendingApproval[];
+  stats: {
+    teamSize: number;
+    avgTeamScore: number;
+    teamCompletionRate: number;
+    pendingApprovalCount: number;
+  };
+};
 
 export function ManagerTeamDashboard() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<TeamDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -95,7 +117,7 @@ export function ManagerTeamDashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {teamMembers.map((member: any) => {
+          {teamMembers.map((member) => {
             const completionPct = member.kpiTotal > 0 ? Math.round((member.kpiCompleted / member.kpiTotal) * 100) : 0;
             return (
               <Link key={member.id} href={`/people/${member.id}`}>
@@ -139,7 +161,7 @@ export function ManagerTeamDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {pendingApprovals.slice(0, 10).map((record: any) => (
+            {pendingApprovals.slice(0, 10).map((record) => (
               <div key={record.id} className="flex items-center justify-between p-2 rounded-lg border border-border">
                 <div>
                   <p className="text-sm">{record.kpi?.name}</p>

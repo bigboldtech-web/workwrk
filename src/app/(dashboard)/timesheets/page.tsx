@@ -147,7 +147,7 @@ export default function TimesheetsPage() {
 
       <div className="tsh">
         <div className="tsh__kpis">
-          <KpiTile accent="var(--os-c-indigo)" Icon={Play}         label="Drafts"    value={`${stats.draft}`}     sub="in progress" />
+          <KpiTile accent="var(--os-c-blue)" Icon={Play}         label="Drafts"    value={`${stats.draft}`}     sub="in progress" />
           <KpiTile accent="var(--os-c-yellow)" Icon={Loader2}      label="Submitted" value={`${stats.submitted}`} sub="awaiting approval" />
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Approved"  value={`${stats.approved}`}  sub="finalised" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Clock}        label="Hours logged" value={`${stats.totalHours}`} sub="across all sheets" />

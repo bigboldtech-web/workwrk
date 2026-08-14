@@ -189,7 +189,7 @@ export default function MarketingPage() {
         {/* KPI strip */}
         <div className="mkt__kpis">
           <KpiTile accent="var(--os-c-orange)" Icon={Activity}      label="Active"   value={`${stats.active.length}`} sub={`${stats.planning.length} in planning`} />
-          <KpiTile accent="var(--os-c-purple)" Icon={DollarSign}    label="Budget"   value={fmtMoney(stats.totalBudget)} sub={`across ${stats.total} campaign${stats.total === 1 ? "" : "s"}`} />
+          <KpiTile accent="var(--os-brand)" Icon={DollarSign}    label="Budget"   value={fmtMoney(stats.totalBudget)} sub={`across ${stats.total} campaign${stats.total === 1 ? "" : "s"}`} />
           <KpiTile accent="var(--os-c-red)"    Icon={DollarSign}    label="Spent"    value={fmtMoney(stats.totalSpent)} sub={`${stats.budgetUsage}% of budget`} progress={stats.budgetUsage} />
           <KpiTile accent="var(--os-c-green)"  Icon={Target}        label="Goal hit" value={`${stats.goalCompletion}%`} sub="avg across goals" progress={stats.goalCompletion} />
         </div>

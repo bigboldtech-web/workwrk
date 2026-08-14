@@ -192,7 +192,7 @@ export default function NotetakerPage() {
           {/* ── Right: result ────────────────────────────── */}
           <section className="ntk-pane ntk-pane--output">
             <header className="ntk-pane__head">
-              <h2><Sparkles style={{ color: "var(--os-c-pink)" }} /> AI extraction</h2>
+              <h2><Sparkles style={{ color: "var(--os-brand)" }} /> AI extraction</h2>
               {extracted && <span className="ntk-pane__count">Editable</span>}
             </header>
 
@@ -279,7 +279,7 @@ export default function NotetakerPage() {
                 )}
 
                 {/* Attendees */}
-                <SectionHeader Icon={Users} label="Attendees" count={extracted.attendees?.length ?? 0} color="var(--os-c-purple)" />
+                <SectionHeader Icon={Users} label="Attendees" count={extracted.attendees?.length ?? 0} color="var(--os-c-blue)" />
                 {(extracted.attendees?.length ?? 0) === 0 ? (
                   <p className="ntk__list-empty">No attendees identified.</p>
                 ) : (

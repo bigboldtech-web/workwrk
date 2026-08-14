@@ -226,7 +226,7 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={BarChart3}
-        iconClassName="text-violet-500"
+        iconClassName="text-sky-500"
         label="Dashboard"
         onClick={stub("Dashboard")}
       />
@@ -249,7 +249,7 @@ function SpaceCreateMenu({
       <MenuItem
         variant="inset"
         icon={ClipboardCheck}
-        iconClassName="text-indigo-500"
+        iconClassName="text-teal-500"
         label="Form"
         onClick={stub("Form")}
       />

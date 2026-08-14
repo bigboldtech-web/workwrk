@@ -47,10 +47,10 @@ export function DeptWorkspaceBanner() {
   return (
     <Link
       href={home.href}
-      className="block rounded-xl border border-violet-200 dark:border-violet-900/40 bg-violet-50/50 dark:bg-violet-950/20 hover:bg-violet-50 dark:hover:bg-violet-950/30 transition-colors p-4 group"
+      className="block rounded-xl border border-blue-200 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors p-4 group"
     >
       <div className="flex items-center gap-3">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300">
+        <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">
           <Briefcase size={16} />
         </span>
         <div className="flex-1 min-w-0">
@@ -59,7 +59,7 @@ export function DeptWorkspaceBanner() {
             {deptName ? `Your ${deptName} workspace — ${home.blurb}` : home.blurb}
           </p>
         </div>
-        <ArrowRight size={16} className="text-violet-600 dark:text-violet-300 group-hover:translate-x-0.5 transition-transform" />
+        <ArrowRight size={16} className="text-blue-600 dark:text-blue-300 group-hover:translate-x-0.5 transition-transform" />
       </div>
     </Link>
   );

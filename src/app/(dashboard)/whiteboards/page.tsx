@@ -46,9 +46,9 @@ const SLUG_LABEL: Record<string, string> = {
 };
 const SLUG_HUE: Record<string, string> = {
   crm: "var(--os-c-green)", tasks: "var(--os-c-blue)", itsm: "var(--os-c-red)",
-  helpdesk: "var(--os-c-orange)", recruiting: "var(--os-c-purple)",
-  marketing: "var(--os-c-pink)", procurement: "var(--os-c-brown)",
-  finance: "var(--os-c-teal)", general: "var(--os-c-indigo)",
+  helpdesk: "var(--os-c-orange)", recruiting: "var(--os-c-sage)",
+  marketing: "var(--os-c-red)", procurement: "var(--os-c-brown)",
+  finance: "var(--os-c-teal)", general: "var(--os-brand)",
 };
 
 function relTime(iso?: string | null): string {

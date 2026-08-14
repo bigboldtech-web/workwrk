@@ -42,7 +42,7 @@ const STATUS_LABEL: Record<SrStatus, string> = {
   DRAFT: "Draft", ACTIVE: "Active", CLOSED: "Closed",
 };
 const STATUS_HUE: Record<SrStatus, string> = {
-  DRAFT: "var(--os-c-indigo)", ACTIVE: "var(--os-c-orange)", CLOSED: "var(--os-c-green)",
+  DRAFT: "var(--os-c-darkgray)", ACTIVE: "var(--os-c-orange)", CLOSED: "var(--os-c-green)",
 };
 const STATUS_ICON: Record<SrStatus, typeof Edit3> = {
   DRAFT: Edit3, ACTIVE: Activity, CLOSED: CheckCircle2,
@@ -166,7 +166,7 @@ export default function SurveysPage() {
       <div className="srv">
         <div className="srv__kpis">
           <KpiTile accent="var(--os-c-orange)" Icon={Activity}     label="Active"      value={`${stats.counts.ACTIVE}`}  sub="collecting" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Edit3}        label="Drafts"      value={`${stats.counts.DRAFT}`}   sub="not yet launched" />
+          <KpiTile accent="var(--os-c-darkgray)" Icon={Edit3}        label="Drafts"      value={`${stats.counts.DRAFT}`}   sub="not yet launched" />
           <KpiTile accent="var(--os-c-blue)"   Icon={MessageCircle} label="Responses"  value={`${stats.totalResponses}`} sub="across surveys" />
           <KpiTile accent={stats.avgRate >= 70 ? "var(--os-c-green)" : stats.avgRate >= 40 ? "var(--os-c-orange)" : "var(--os-c-red)"} Icon={BarChart} label="Avg rate" value={`${stats.avgRate}%`} sub="participation" />
         </div>

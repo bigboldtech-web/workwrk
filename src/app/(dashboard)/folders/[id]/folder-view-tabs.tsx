@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 
 const VIEW_TABS: { key: string; label: string; Icon: LucideIcon; tile: string }[] = [
-  { key: "overview", label: "Overview", Icon: LayoutDashboard, tile: "#6366F1" },
+  { key: "overview", label: "Overview", Icon: LayoutDashboard, tile: "#0073EA" },
   { key: "list", label: "List", Icon: ListIcon, tile: "#6B7280" },
 ];
 

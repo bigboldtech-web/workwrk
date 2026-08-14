@@ -89,7 +89,7 @@ export function CustomFieldsPanel({ entityType, entityId, onSaved, showEmptyStat
         <p className="text-xs text-muted-2 mb-2">No custom fields defined for {entityType.toLowerCase()} yet.</p>
         <Link
           href="/studio"
-          className="inline-flex items-center gap-1 text-xs font-medium text-violet-600 hover:text-violet-700"
+          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
         >
           <Plus size={11} /> Add custom fields in Studio
         </Link>
@@ -131,7 +131,7 @@ function FieldRowEditor({
     <div className="flex items-center gap-2 mb-1">
       <label className="text-xs font-medium text-muted-2">
         {field.label}
-        {field.required && <span className="text-rose-500 ml-0.5">*</span>}
+        {field.required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
       {justSaved && <span className="text-[10px] text-emerald-600 inline-flex items-center gap-0.5"><Save size={9} /> Saved</span>}
@@ -186,7 +186,7 @@ function FieldRowEditor({
           />
           <label htmlFor={`cf-${field.definitionId}`} className="text-xs font-medium text-muted-2">
             {field.label}
-            {field.required && <span className="text-rose-500 ml-0.5">*</span>}
+            {field.required && <span className="text-red-500 ml-0.5">*</span>}
           </label>
           {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
           {justSaved && <span className="text-[10px] text-emerald-600">Saved</span>}
@@ -232,7 +232,7 @@ function FieldRowEditor({
                   className={
                     "text-xs px-2 py-1 rounded-md border transition-colors " +
                     (selected
-                      ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700"
+                      ? "bg-blue-100 dark:bg-blue-950/40 border-blue-300 text-blue-700"
                       : "bg-surface border-border text-muted hover:border-muted-2")
                   }
                 >

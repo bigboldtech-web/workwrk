@@ -59,7 +59,7 @@ const PRIO_OPTIONS: PickerOption[] = [
 ];
 
 const STATUS_META = {
-  PLANNED:     { label: "Planned",     color: "var(--os-c-indigo)" },
+  PLANNED:     { label: "Planned",     color: "var(--os-brand-deep)" },
   IN_PROGRESS: { label: "In progress", color: "var(--os-c-orange)" },
   COMPLETED:   { label: "Done",        color: "var(--os-c-green)"  },
 };
@@ -67,7 +67,7 @@ const PRIO_META = {
   LOW:    { label: "Low",      color: "var(--os-c-teal)"   },
   NORMAL: { label: "Medium",   color: "var(--os-c-yellow)" },
   HIGH:   { label: "High",     color: "var(--os-c-red)"    },
-  URGENT: { label: "Critical", color: "var(--os-c-pink)"   },
+  URGENT: { label: "Critical", color: "#C62D42"          },
 };
 
 function fmtDate(iso?: string | null) {
@@ -399,7 +399,7 @@ export default function TaskDetailPage() {
                   <button
                     type="button"
                     className="tdt__pill"
-                    style={{ background: prioMeta.color, color: prioMeta.color === "var(--os-c-yellow)" ? "var(--os-c-indigo)" : "white" }}
+                    style={{ background: prioMeta.color, color: prioMeta.color === "var(--os-c-yellow)" ? "var(--os-ink)" : "white" }}
                     onClick={(e) => setPicker({ rect: (e.currentTarget as HTMLElement).getBoundingClientRect(), type: "priority" })}
                   >
                     {prioMeta.label}
@@ -429,7 +429,7 @@ export default function TaskDetailPage() {
                   <Prop label="Labels" Icon={Tag} stacked>
                     <div className="tdt__tags">
                       {task.labels.map((l) => (
-                        <span key={l.label.id} className="tdt__tag" style={{ background: l.label.color || "var(--os-c-indigo)" }}>
+                        <span key={l.label.id} className="tdt__tag" style={{ background: l.label.color || "var(--os-brand)" }}>
                           {l.label.name}
                         </span>
                       ))}

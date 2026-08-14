@@ -30,7 +30,7 @@ const PROVIDER_INFO: Record<Provider, { label: string; hue: string }> = {
   outlook: { label: "Outlook / Microsoft 365", hue: "var(--os-c-blue)" },
   icloud:  { label: "iCloud", hue: "var(--os-ink-2)" },
   fastmail:{ label: "Fastmail", hue: "var(--os-c-orange)" },
-  ics:     { label: "ICS feed", hue: "var(--os-c-purple)" },
+  ics:     { label: "ICS feed", hue: "var(--os-c-teal)" },
 };
 
 const SAMPLE: Connection[] = [

@@ -30,7 +30,7 @@ const TYPE_ICON: Record<SopType, React.ComponentType<{ className?: string }>> = 
   WRITTEN: FileText, CHECKLIST: ListChecks, RECORDED: Video,
 };
 const TYPE_HUE: Record<SopType, string> = {
-  WRITTEN: "var(--os-c-teal)", CHECKLIST: "var(--os-c-blue)", RECORDED: "var(--os-c-pink)",
+  WRITTEN: "var(--os-c-teal)", CHECKLIST: "var(--os-c-blue)", RECORDED: "var(--os-c-orange)",
 };
 const TYPE_LABEL: Record<SopType, string> = {
   WRITTEN: "Written", CHECKLIST: "Checklist", RECORDED: "Screen recording",

@@ -265,9 +265,9 @@ export default function EventsLibrary() {
 
         {/* KPI strip */}
         <div className="evts__kpis">
-          <KpiTile accent="var(--os-c-indigo)" Icon={CalendarDays} label="Total"          value={`${stats.total}`}                    sub="all events" />
+          <KpiTile accent="var(--os-c-blue)" Icon={CalendarDays} label="Total"          value={`${stats.total}`}                    sub="all events" />
           <KpiTile accent="var(--os-c-orange)" Icon={Sparkles}     label="Upcoming"       value={`${stats.upcoming.length}`}          sub={`${stats.thisMonth.length} this month`} />
-          <KpiTile accent="var(--os-c-purple)" Icon={UsersIcon}    label="Registered"     value={stats.totalReg.toLocaleString()}     sub="across all events" />
+          <KpiTile accent="var(--os-brand)" Icon={UsersIcon}    label="Registered"     value={stats.totalReg.toLocaleString()}     sub="across all events" />
           <KpiTile accent="var(--os-c-green)"  Icon={MapPin}       label="Spent"          value={fmtMoney(stats.totalSpent)}          sub="event budget YTD" />
         </div>
 
@@ -446,7 +446,7 @@ function EventRow({ event: e }: { event: ApiEvent }) {
         {cap > 0 && (
           <div className="evts__row-stat">
             <div className="evts__row-stat-head"><UsersIcon /> <span>Registered</span> <strong>{regPct}%</strong></div>
-            <div className="evts__row-stat-bar"><div className="evts__row-stat-fill" style={{ width: `${regPct}%`, background: "var(--os-c-purple)" }} /></div>
+            <div className="evts__row-stat-bar"><div className="evts__row-stat-fill" style={{ width: `${regPct}%`, background: "var(--os-brand)" }} /></div>
             <div className="evts__row-stat-sub">{reg} / {cap}</div>
           </div>
         )}

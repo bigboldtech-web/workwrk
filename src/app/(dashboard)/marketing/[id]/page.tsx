@@ -329,7 +329,7 @@ export default function MarketingDetail() {
             progress={budget > 0 ? spentPct : undefined}
           />
           <ScoreTile
-            accent="var(--os-c-purple)"
+            accent="var(--os-brand)"
             Icon={TrendingUp}
             label="Efficiency"
             value={efficiency === null ? "—" : !isFinite(efficiency) ? "Free" : `${efficiency.toFixed(2)}×`}

@@ -162,7 +162,7 @@ export default function AutopilotPage() {
         <div className="auto__kpis">
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Active rules" value={`${stats.active}`}   sub={`${stats.total} total`} />
           <KpiTile accent="var(--os-c-blue)"   Icon={Activity}     label="Runs / week" value={`${stats.runs}`}     sub="across rules" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Zap}          label="Saved"       value={`${stats.savedHrs.toFixed(1)}h`} sub="per week" />
+          <KpiTile accent="var(--os-brand)" Icon={Zap}          label="Saved"       value={`${stats.savedHrs.toFixed(1)}h`} sub="per week" />
           <KpiTile accent={stats.errored > 0 ? "var(--os-c-red)" : "var(--os-c-orange)"} Icon={AlertTriangle} label="Needs attention" value={`${stats.errored + stats.paused}`} sub={`${stats.errored} error · ${stats.paused} paused`} />
         </div>
 

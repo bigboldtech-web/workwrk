@@ -35,7 +35,7 @@ type ApiTask = {
 
 const MS_DAY = 86_400_000;
 const STATUS_COLOR: Record<ApiStatus, string> = {
-  PLANNED: "var(--os-c-indigo)", IN_PROGRESS: "var(--os-c-orange)", COMPLETED: "var(--os-c-green)",
+  PLANNED: "var(--os-brand-deep)", IN_PROGRESS: "var(--os-c-orange)", COMPLETED: "var(--os-c-green)",
 };
 const STATUS_LABEL: Record<ApiStatus, string> = {
   PLANNED: "Planned", IN_PROGRESS: "In progress", COMPLETED: "Completed",
@@ -58,7 +58,7 @@ function gridDays(month: Date): Date[] {
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+const AV_PALETTE = ["var(--os-brand)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-yellow)", "var(--os-c-teal)", "var(--os-c-brown)", "var(--os-c-blue)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) {
   return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?";
@@ -174,7 +174,7 @@ export default function TaskCalendarPage() {
           {/* Stat strip */}
           {stats.total > 0 && (
             <div className="tcal__stats">
-              <Stat Icon={Hourglass} label="Planned" value={stats.planned} color="var(--os-c-indigo)" />
+              <Stat Icon={Hourglass} label="Planned" value={stats.planned} color="var(--os-brand-deep)" />
               <Stat Icon={Activity} label="In progress" value={stats.inProgress} color="var(--os-c-orange)" />
               <Stat Icon={CheckSquare} label="Completed" value={stats.completed} color="var(--os-c-green)" />
               <Stat Icon={AlertOctagon} label="Late" value={stats.late} color="var(--os-c-red)" highlight={stats.late > 0} />

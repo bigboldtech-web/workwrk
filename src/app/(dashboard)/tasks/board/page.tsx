@@ -38,7 +38,7 @@ const MS_DAY = 86_400_000;
 const startOfDay = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
 
 const COLS: { id: ApiStatus; label: string; sub: string; hue: string }[] = [
-  { id: "PLANNED",     label: "Planned",     sub: "ready to start",      hue: "var(--os-c-indigo)" },
+  { id: "PLANNED",     label: "Planned",     sub: "ready to start",      hue: "var(--os-brand-deep)" },
   { id: "IN_PROGRESS", label: "In progress", sub: "in flight right now", hue: "var(--os-c-orange)" },
   { id: "COMPLETED",   label: "Completed",   sub: "done this sprint",    hue: "var(--os-c-green)" },
 ];
@@ -48,7 +48,7 @@ const PRIO_HUE: Record<ApiPrio, string> = {
   NORMAL: "var(--os-c-blue)", LOW: "var(--os-c-darkgray)",
 };
 
-const AV_PALETTE = ["var(--os-c-purple)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-pink)", "var(--os-c-teal)", "var(--os-c-indigo)", "var(--os-c-blue)", "var(--os-c-red)"];
+const AV_PALETTE = ["var(--os-brand)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-yellow)", "var(--os-c-teal)", "var(--os-c-brown)", "var(--os-c-blue)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
 

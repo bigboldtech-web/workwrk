@@ -129,9 +129,9 @@ export default function AuditLogPage() {
       <div className="adt">
         <div className="adt__kpis">
           <KpiTile accent="var(--os-c-orange)" Icon={Activity}    label="Today"       value={`${stats.today}`}    sub="last 24h" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Key}          label="Auth events" value={`${stats.auth}`}     sub="logins / MFA" />
+          <KpiTile accent="var(--os-brand)" Icon={Key}          label="Auth events" value={`${stats.auth}`}     sub="logins / MFA" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Edit3}        label="Mutations"   value={`${stats.changes}`}  sub="C/U/D actions" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Hash}         label="Total"       value={`${stats.total}`}    sub="all time visible" />
+          <KpiTile accent="var(--os-c-blue)" Icon={Hash}         label="Total"       value={`${stats.total}`}    sub="all time visible" />
         </div>
 
         <div className="adt__toolbar">

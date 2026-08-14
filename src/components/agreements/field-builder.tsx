@@ -145,7 +145,7 @@ export function AgreementFieldBuilder({
         key={f.id}
         onMouseDown={(e) => startMove(e, f)}
         onClick={(e) => { e.stopPropagation(); setSelectedField(f.id); }}
-        className={`group absolute flex cursor-move items-center justify-center rounded text-[11px] font-medium ${isSel ? "ring-2 ring-violet-400" : ""}`}
+        className={`group absolute flex cursor-move items-center justify-center rounded text-[11px] font-medium ${isSel ? "ring-2 ring-blue-400" : ""}`}
         style={{ left: f.x, top: f.y, width: f.w, height: f.h, border: `1.5px dashed ${color}`, background: `${color}22`, color: "#3f3f46" }}
       >
         <span className="pointer-events-none flex items-center gap-1 truncate px-1">
@@ -181,7 +181,7 @@ export function AgreementFieldBuilder({
                       </div>
                     ))}
                   </div>
-                  <button type="button" onClick={() => setOpts([...opts, `Option ${opts.length + 1}`])} className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-violet-600 hover:text-violet-700"><Plus className="h-3 w-3" /> Add option</button>
+                  <button type="button" onClick={() => setOpts([...opts, `Option ${opts.length + 1}`])} className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-blue-600 hover:text-blue-700"><Plus className="h-3 w-3" /> Add option</button>
                 </div>
               );
             })()}
@@ -189,7 +189,7 @@ export function AgreementFieldBuilder({
             <label className="flex cursor-pointer items-center justify-between gap-2 text-[12px] text-zinc-700">
               Required
               <button type="button" role="switch" aria-checked={!!f.required} onClick={() => patchField(f.id, { required: !f.required })}
-                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${f.required ? "bg-violet-600" : "bg-zinc-300"}`}>
+                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${f.required ? "bg-blue-600" : "bg-zinc-300"}`}>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.required ? "left-3.5" : "left-0.5"}`} />
               </button>
             </label>
@@ -249,15 +249,15 @@ export function AgreementFieldBuilder({
                 <div key={p.id}
                   onClick={() => { if (!editing) setActiveParty(p.id); }}
                   onDoubleClick={() => { setEditParty(p.id); setDraftName(p.name); }}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors ${on ? "border-violet-300 bg-violet-50/40" : "border-zinc-200 hover:bg-zinc-50"}`}>
+                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors ${on ? "border-blue-300 bg-blue-50/40" : "border-zinc-200 hover:bg-zinc-50"}`}>
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-white" style={{ background: color }}><UserPlus className="h-3.5 w-3.5" /></span>
                   {editing ? (
                     <>
                       <input autoFocus value={draftName} onClick={(e) => e.stopPropagation()}
                         onChange={(e) => setDraftName(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditParty(null); }}
-                        className="min-w-0 flex-1 rounded border border-violet-300 px-2 py-1 text-[13px] font-medium text-zinc-800 outline-none" />
-                      <button type="button" onClick={(e) => { e.stopPropagation(); commit(); }} className="rounded-md bg-violet-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-violet-500">Save</button>
+                        className="min-w-0 flex-1 rounded border border-blue-300 px-2 py-1 text-[13px] font-medium text-zinc-800 outline-none" />
+                      <button type="button" onClick={(e) => { e.stopPropagation(); commit(); }} className="rounded-md bg-blue-600 px-2.5 py-1 text-[12px] font-medium text-white hover:bg-blue-500">Save</button>
                     </>
                   ) : (
                     <>
@@ -270,7 +270,7 @@ export function AgreementFieldBuilder({
               );
             })}
           </div>
-          <button type="button" onClick={onAddParty} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-violet-300 px-2 py-1.5 text-[13px] font-medium text-violet-600 hover:bg-violet-50">
+          <button type="button" onClick={onAddParty} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-300 px-2 py-1.5 text-[13px] font-medium text-blue-600 hover:bg-blue-50">
             <Plus className="h-3.5 w-3.5" /> Add new party
           </button>
         </div>
@@ -281,12 +281,12 @@ export function AgreementFieldBuilder({
       <div className="min-w-0 flex-1">
         {isPdf ? (
           <PdfPages url={pdfUrl!} width={760} renderPage={(i) => (
-            <div {...pageDropProps(i)} className={`absolute inset-0 ${dragType ? "ring-2 ring-inset ring-violet-300" : ""}`}>
+            <div {...pageDropProps(i)} className={`absolute inset-0 ${dragType ? "ring-2 ring-inset ring-blue-300" : ""}`}>
               {fields.filter((f) => (f.page ?? 0) === i).map(renderField)}
             </div>
           )} />
         ) : (
-          <div {...pageDropProps(0)} className={`relative mx-auto w-[760px] max-w-full rounded-xl border bg-white px-10 py-7 ${dragType ? "border-violet-400 ring-2 ring-violet-200" : "border-zinc-200"}`}>
+          <div {...pageDropProps(0)} className={`relative mx-auto w-[760px] max-w-full rounded-xl border bg-white px-10 py-7 ${dragType ? "border-blue-400 ring-2 ring-blue-200" : "border-zinc-200"}`}>
             <div className="pointer-events-none select-none">
               <BlockNoteCanvas key={`${agreementId}-build`} initialBnDoc={null} legacyBlocks={null} initialHtml={content || ""} readonly onChange={() => { /* readonly */ }} entity={{ type: "agreement", id: agreementId }} />
             </div>
@@ -309,7 +309,7 @@ export function AgreementFieldBuilder({
                 draggable={!!selected}
                 onDragStart={(e) => { e.dataTransfer.setData("fieldType", t.type); e.dataTransfer.effectAllowed = "copy"; setDragType(t.type); }}
                 onDragEnd={() => setDragType(null)}
-                className={`flex items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-2 text-[13px] text-zinc-700 ${selected ? "cursor-grab hover:border-violet-300 hover:bg-violet-50 active:cursor-grabbing" : "cursor-not-allowed opacity-50"}`}
+                className={`flex items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-2 text-[13px] text-zinc-700 ${selected ? "cursor-grab hover:border-blue-300 hover:bg-blue-50 active:cursor-grabbing" : "cursor-not-allowed opacity-50"}`}
                 title={selected ? "Drag onto the document" : "Select a party first"}>
                 <t.Icon className="h-4 w-4 text-zinc-400" /> {t.label}
               </div>

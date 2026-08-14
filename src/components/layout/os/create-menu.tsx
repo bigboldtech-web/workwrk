@@ -90,7 +90,7 @@ const BUILD_META: Record<BuildKind, {
   form: {
     label: "Form",
     Icon: ClipboardCheck,
-    iconClassName: "text-violet-500",
+    iconClassName: "text-sky-500",
     placeholder: "Form name",
     hasLocation: false,
     endpoint: "/api/forms",
@@ -102,7 +102,7 @@ const BUILD_META: Record<BuildKind, {
   dashboard: {
     label: "Dashboard",
     Icon: LayoutDashboard,
-    iconClassName: "text-purple-500",
+    iconClassName: "text-teal-500",
     placeholder: "Dashboard name",
     hasLocation: true,
     endpoint: "/api/dashboards",
@@ -343,7 +343,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   variant="inset"
                   icon={Sparkles}
                   label="Create with AI"
-                  iconClassName="text-fuchsia-500"
+                  iconClassName="text-orange-500"
                   onClick={() => run(() => router.push("/sidekick"))}
                 />
                 <MenuItem
@@ -373,7 +373,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   variant="inset"
                   icon={ClipboardCheck}
                   label="Form"
-                  iconClassName="text-violet-500"
+                  iconClassName="text-sky-500"
                   submenu
                   onClick={() => setBuildKind("form")}
                 />
@@ -381,7 +381,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   variant="inset"
                   icon={LayoutDashboard}
                   label="Dashboard"
-                  iconClassName="text-purple-500"
+                  iconClassName="text-teal-500"
                   submenu
                   onClick={() => setBuildKind("dashboard")}
                 />

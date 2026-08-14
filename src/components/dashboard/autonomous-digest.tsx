@@ -67,9 +67,9 @@ export function AutonomousDigest() {
     return (
       <Link
         href="/agents"
-        className="group rounded-2xl border border-dashed border-violet-300/40 dark:border-violet-700/40 bg-gradient-to-br from-violet-50/40 to-transparent dark:from-violet-950/20 p-4 flex items-start gap-3 hover:border-violet-400 transition-colors"
+        className="group rounded-2xl border border-dashed border-blue-300/40 dark:border-blue-700/40 bg-gradient-to-br from-blue-50/40 to-transparent dark:from-blue-950/20 p-4 flex items-start gap-3 hover:border-blue-400 transition-colors"
       >
-        <div className="w-10 h-10 rounded-xl bg-violet-100 dark:bg-violet-950/30 text-violet-600 flex items-center justify-center flex-shrink-0">
+        <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-950/30 text-blue-600 flex items-center justify-center flex-shrink-0">
           <Zap size={16} />
         </div>
         <div className="flex-1 min-w-0">
@@ -78,7 +78,7 @@ export function AutonomousDigest() {
             Schedule any installed agent to run on its own — they&rsquo;ll crunch numbers and flag issues here while you focus on other work.
           </p>
         </div>
-        <span className="text-xs text-violet-600 font-medium inline-flex items-center gap-1 mt-1 group-hover:translate-x-0.5 transition-transform">
+        <span className="text-xs text-blue-600 font-medium inline-flex items-center gap-1 mt-1 group-hover:translate-x-0.5 transition-transform">
           Configure <ChevronRight size={11} />
         </span>
       </Link>
@@ -89,7 +89,7 @@ export function AutonomousDigest() {
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
         <div className="inline-flex items-center gap-2">
-          <Sparkles size={13} className="text-violet-600" />
+          <Sparkles size={13} className="text-blue-600" />
           <h2 className="text-sm font-semibold">What your agents got done</h2>
           {!loading && (
             <span className="text-[10px] text-muted-2 tabular-nums">
@@ -130,8 +130,8 @@ export function AutonomousDigest() {
                   <div
                     className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${
                       isFail
-                        ? "bg-rose-100 dark:bg-rose-950/30 text-rose-600"
-                        : "bg-violet-100 dark:bg-violet-950/30 text-violet-600"
+                        ? "bg-red-100 dark:bg-red-950/30 text-red-600"
+                        : "bg-blue-100 dark:bg-blue-950/30 text-blue-600"
                     }`}
                   >
                     {isFail ? <AlertTriangle size={13} /> : <Zap size={13} />}
@@ -149,7 +149,7 @@ export function AutonomousDigest() {
                     <p
                       className={
                         "text-xs " +
-                        (isFail ? "text-rose-700 dark:text-rose-400" : "text-muted-2") +
+                        (isFail ? "text-red-700 dark:text-red-400" : "text-muted-2") +
                         (open ? " whitespace-pre-wrap" : " line-clamp-2")
                       }
                     >

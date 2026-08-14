@@ -860,9 +860,9 @@ function FolderAddTrigger({
           <MenuSectionLabel>Create</MenuSectionLabel>
           <MenuItem icon={ListChecks}      iconClassName="text-emerald-500" label="List" onClick={createList} />
           <MenuItem icon={FileText}        iconClassName="text-blue-500"    label="Doc" onClick={createDoc} />
-          <MenuItem icon={BarChart3}       iconClassName="text-violet-500"  label="Dashboard" onClick={() => soon("Dashboard")} />
+          <MenuItem icon={BarChart3}       iconClassName="text-sky-500"  label="Dashboard" onClick={() => soon("Dashboard")} />
           <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Whiteboard" onClick={createWhiteboard} />
-          <MenuItem icon={ClipboardCheck}  iconClassName="text-indigo-500"  label="Form" onClick={() => soon("Form")} />
+          <MenuItem icon={ClipboardCheck}  iconClassName="text-teal-500"  label="Form" onClick={() => soon("Form")} />
           <MenuItem icon={FolderIcon}      iconClassName="text-amber-500"   label="Folder" onClick={createSubFolder} />
           <MenuSeparator />
           <MenuItem icon={Download} label="Imports" onClick={() => soon("Imports")} />

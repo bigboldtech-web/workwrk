@@ -40,7 +40,7 @@ const STATUS_LABEL: Record<CandorStatus, string> = {
   DRAFT: "Draft", ACTIVE: "Active", CLOSED: "Closed",
 };
 const STATUS_HUE: Record<CandorStatus, string> = {
-  DRAFT: "var(--os-c-indigo)", ACTIVE: "var(--os-c-orange)", CLOSED: "var(--os-c-green)",
+  DRAFT: "var(--os-c-darkgray)", ACTIVE: "var(--os-c-orange)", CLOSED: "var(--os-c-green)",
 };
 const STATUS_ICON: Record<CandorStatus, typeof Edit3> = {
   DRAFT: Edit3, ACTIVE: Activity, CLOSED: CheckCircle2,
@@ -148,9 +148,9 @@ export default function CandorPage() {
       <div className="cnd">
         <div className="cnd__kpis">
           <KpiTile accent="var(--os-c-orange)" Icon={Activity}     label="Active sessions" value={`${stats.counts.ACTIVE}`} sub="collecting feedback" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={Edit3}         label="Drafts"          value={`${stats.counts.DRAFT}`}  sub="not yet launched" />
+          <KpiTile accent="var(--os-c-darkgray)" Icon={Edit3}         label="Drafts"          value={`${stats.counts.DRAFT}`}  sub="not yet launched" />
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2}  label="Closed"          value={`${stats.counts.CLOSED}`} sub="archived" />
-          <KpiTile accent="var(--os-c-pink)"   Icon={MessageCircle} label="Responses"       value={`${stats.responses}`}     sub="100% anonymous" />
+          <KpiTile accent="var(--os-brand)"   Icon={MessageCircle} label="Responses"       value={`${stats.responses}`}     sub="100% anonymous" />
         </div>
 
         <div className="cnd__privacy-banner">

@@ -169,7 +169,7 @@ export default function AnnouncementsPage() {
         <div className="ann__kpis">
           <KpiTile accent="var(--os-c-red)"    Icon={AlertTriangle} label="Urgent"      value={`${stats.urgent}`}    sub="needs attention" />
           <KpiTile accent="var(--os-c-orange)" Icon={Bell}          label="Ack pending" value={`${stats.ackPending}`} sub="from you" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Pin}           label="Pinned"      value={`${stats.pinned}`}    sub="always on top" />
+          <KpiTile accent="var(--os-brand)" Icon={Pin}           label="Pinned"      value={`${stats.pinned}`}    sub="always on top" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Megaphone}     label="Total"       value={`${stats.total}`}     sub="org-wide" />
         </div>
 

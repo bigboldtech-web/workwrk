@@ -144,15 +144,15 @@ type Item = TaskItem | DocItem | PersonItem | SpaceItem | ActionItem | NavItem |
 
 const SUGGESTED: SuggestedItem[] = [
   { kind: "suggested", id: "sug-today",   label: "Open my today's plan",                Icon: Home,         color: "var(--os-c-orange)", href: "/today",      hint: "Start your day" },
-  { kind: "suggested", id: "sug-review",  label: "Submit this week's weekly review",    Icon: CheckSquare,  color: "var(--os-c-purple)", href: "/me/weekly-review", hint: "Due Friday" },
+  { kind: "suggested", id: "sug-review",  label: "Submit this week's weekly review",    Icon: CheckSquare,  color: "var(--os-brand)", href: "/me/weekly-review", hint: "Due Friday" },
   { kind: "suggested", id: "sug-stalled", label: "Show me what's stalled in my space",  Icon: TrendingUp,   color: "var(--os-c-red)",    href: "/spaces",     hint: "AI summary" },
 ];
 
 const TASKS: TaskItem[] = [
   { kind: "task", id: "t-budget",   label: "Finalize Q3 budget review",        status: "in_progress", due: "Tomorrow",  assignee: { name: "Ria",    color: "var(--os-c-orange)" } },
-  { kind: "task", id: "t-jd",       label: "Review open job descriptions",     status: "todo",        due: "Fri Jun 06",assignee: { name: "Priya",  color: "var(--os-c-purple)" } },
+  { kind: "task", id: "t-jd",       label: "Review open job descriptions",     status: "todo",        due: "Fri Jun 06",assignee: { name: "Priya",  color: "var(--os-brand)" } },
   { kind: "task", id: "t-renewal",  label: "Acme renewal — send proposal",     status: "in_progress", due: "Today",     assignee: { name: "Aman",   color: "var(--os-c-blue)" } },
-  { kind: "task", id: "t-onboard",  label: "Wrap onboarding for 2 new hires",  status: "blocked",     due: "Mon",       assignee: { name: "Priya",  color: "var(--os-c-purple)" } },
+  { kind: "task", id: "t-onboard",  label: "Wrap onboarding for 2 new hires",  status: "blocked",     due: "Mon",       assignee: { name: "Priya",  color: "var(--os-brand)" } },
   { kind: "task", id: "t-mtg-notes",label: "Share weekly all-hands recap",     status: "todo",                          assignee: { name: "Maya",   color: "var(--os-c-green)" } },
 ];
 
@@ -166,16 +166,16 @@ const DOCS: DocItem[] = [
 
 const PEOPLE: PersonItem[] = [
   { kind: "person", id: "p-ria",     label: "Ria Patel",     role: "SDR Agent",       isAgent: true,  initials: "R", color: "var(--os-c-orange)", href: "/agents/ria" },
-  { kind: "person", id: "p-priya",   label: "Priya Shah",    role: "HR Operations",                   initials: "P", color: "var(--os-c-purple)", href: "/people/priya" },
+  { kind: "person", id: "p-priya",   label: "Priya Shah",    role: "HR Operations",                   initials: "P", color: "var(--os-brand)", href: "/people/priya" },
   { kind: "person", id: "p-aman",    label: "Aman Kapoor",   role: "Account Exec",                    initials: "A", color: "var(--os-c-blue)",   href: "/people/aman" },
   { kind: "person", id: "p-maya",    label: "Maya Iyer",     role: "Product Manager",                 initials: "M", color: "var(--os-c-green)",  href: "/people/maya" },
-  { kind: "person", id: "p-ibrahim", label: "Ibrahim Surya", role: "You · CEO",                       initials: "I", color: "var(--os-c-pink)",   href: "/me" },
+  { kind: "person", id: "p-ibrahim", label: "Ibrahim Surya", role: "You · CEO",                       initials: "I", color: "var(--os-c-orange)",   href: "/me" },
 ];
 
 const SPACES: SpaceItem[] = [
   { kind: "space", id: "s-sales",  label: "Sales",        Icon: BarChart3,        color: "var(--os-c-green)",  members: 12, href: "/crm" },
   { kind: "space", id: "s-eng",    label: "Engineering",  Icon: Code2,            color: "var(--os-c-blue)",   members: 8,  href: "/dev" },
-  { kind: "space", id: "s-people", label: "People & HR",  Icon: Users2,           color: "var(--os-c-pink)",   members: 6,  href: "/people" },
+  { kind: "space", id: "s-people", label: "People & HR",  Icon: Users2,           color: "var(--os-c-orange)",   members: 6,  href: "/people" },
   { kind: "space", id: "s-fin",    label: "Finance",      Icon: CircleDollarSign, color: "var(--os-c-teal)",   members: 4,  href: "/financials" },
   { kind: "space", id: "s-supp",   label: "Support",      Icon: Headphones,       color: "var(--os-c-orange)", members: 5,  href: "/helpdesk" },
 ];
@@ -183,11 +183,11 @@ const SPACES: SpaceItem[] = [
 const ACTIONS: ActionItem[] = [
   { kind: "action", id: "a-task",     label: "Create task",             Icon: CheckSquare,       color: "var(--os-c-green)",  shortcut: "⌘ N",     hint: "Quick capture" },
   { kind: "action", id: "a-doc",      label: "New doc",                 Icon: FileText,          color: "var(--os-c-teal)",   shortcut: "⌘ ⇧ D" },
-  { kind: "action", id: "a-meet",     label: "Schedule meeting",        Icon: CalendarDays,      color: "var(--os-c-pink)",   shortcut: "⌘ M" },
+  { kind: "action", id: "a-meet",     label: "Schedule meeting",        Icon: CalendarDays,      color: "var(--os-c-orange)",   shortcut: "⌘ M" },
   { kind: "action", id: "a-announce", label: "Send announcement",       Icon: Megaphone,         color: "var(--os-c-red)" },
   { kind: "action", id: "a-kudos",    label: "Give kudos",              Icon: ThumbsUp,          color: "var(--os-c-yellow)" },
-  { kind: "action", id: "a-time",     label: "Start time tracker",      Icon: Clock,             color: "var(--os-c-indigo)" },
-  { kind: "action", id: "a-clip",     label: "Record a clip",           Icon: Video,             color: "var(--os-c-purple)" },
+  { kind: "action", id: "a-time",     label: "Start time tracker",      Icon: Clock,             color: "var(--os-c-blue)" },
+  { kind: "action", id: "a-clip",     label: "Record a clip",           Icon: Video,             color: "var(--os-brand)" },
   { kind: "action", id: "a-survey",   label: "Send a survey",           Icon: FileSpreadsheet,   color: "var(--os-c-brown)" },
   { kind: "action", id: "a-candor",   label: "Open Candor 1-on-1",      Icon: MessageSquare,     color: "var(--os-c-orange)" },
 ];
@@ -195,10 +195,10 @@ const ACTIONS: ActionItem[] = [
 const NAVIGATE: NavItem[] = [
   { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",    shortcut: "G T" },
   { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",    shortcut: "G I" },
-  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-c-purple)", href: "/tasks",    shortcut: "G K" },
-  { kind: "navigate", id: "n-meet",   label: "Meetings",    Icon: CalendarDays, color: "var(--os-c-pink)",   href: "/planner",  shortcut: "G M" },
-  { kind: "navigate", id: "n-okrs",   label: "OKRs",        Icon: Target,       color: "var(--os-c-indigo)", href: "/okrs" },
-  { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-indigo)", href: "/store" },
+  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)", href: "/tasks",    shortcut: "G K" },
+  { kind: "navigate", id: "n-meet",   label: "Meetings",    Icon: CalendarDays, color: "var(--os-c-orange)",   href: "/planner",  shortcut: "G M" },
+  { kind: "navigate", id: "n-okrs",   label: "OKRs",        Icon: Target,       color: "var(--os-c-blue)", href: "/okrs" },
+  { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-blue)", href: "/store" },
   { kind: "navigate", id: "n-set",    label: "Workspace settings", Icon: Settings, color: "var(--os-c-brown)", href: "/settings" },
 ];
 
@@ -370,7 +370,7 @@ export function OsCommandPalette() {
           }
           if (h.type === "person") {
             const initials = h.title.split(" ").map((s) => s[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
-            return { kind: "person", id: `live-person-${h.id}`, label: h.title, href: h.href, role: h.subtitle ?? "", initials, color: "var(--os-c-indigo)" } as PersonItem;
+            return { kind: "person", id: `live-person-${h.id}`, label: h.title, href: h.href, role: h.subtitle ?? "", initials, color: "var(--os-c-blue)" } as PersonItem;
           }
           // Fall through: any other server type renders as a generic navigation row.
           return h.href
@@ -798,7 +798,7 @@ export function OsCommandPalette() {
                 {!isUnconnected && sourceKey === s.key ? (
                   <span
                     className="absolute left-0 right-0 -bottom-0.5 h-[2px] rounded-full"
-                    style={{ background: "var(--os-c-pink)" }}
+                    style={{ background: "var(--os-c-orange)" }}
                   />
                 ) : null}
               </button>

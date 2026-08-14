@@ -47,7 +47,7 @@ export const TEMPLATES: WorkspaceTemplate[] = [
     tagline: "Ship code, manage incidents, run sprints",
     description: "Bootstrap your engineering workspace with a sprint planning doc, a bug-report intake form, and a tracker for open incidents.",
     iconKey: "code",
-    gradient: "linear-gradient(135deg, #5559DF, #579BFC)",
+    gradient: "linear-gradient(135deg, #0073EA, #579BFC)",
     doc: {
       title: "Engineering · Sprint Plan",
       blocks: [
@@ -140,7 +140,7 @@ export const TEMPLATES: WorkspaceTemplate[] = [
     tagline: "Campaigns, content calendar, events",
     description: "A content-strategy doc, a content-request intake form, and a content calendar tracker.",
     iconKey: "megaphone",
-    gradient: "linear-gradient(135deg, #FDAB3D, #FF158A)",
+    gradient: "linear-gradient(135deg, #FDAB3D, #E2445C)",
     doc: {
       title: "Marketing · Content Strategy",
       blocks: [
@@ -186,7 +186,7 @@ export const TEMPLATES: WorkspaceTemplate[] = [
     tagline: "Hiring, onboarding, policies",
     description: "An employee handbook doc, a candidate application form, and an open-roles tracker.",
     iconKey: "users",
-    gradient: "linear-gradient(135deg, #FF158A, #A25DDC)",
+    gradient: "linear-gradient(135deg, #0073EA, #1F76C2)",
     doc: {
       title: "People · Handbook",
       blocks: [

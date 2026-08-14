@@ -158,8 +158,8 @@ export default function TalentPage() {
       <div className="tal">
         <div className="tal__kpis">
           <KpiTile accent="var(--os-c-green)"  Icon={Star}          label="Stars"          value={`${stats.stars}`}         sub="3·3 perf × potential" />
-          <KpiTile accent="var(--os-c-indigo)" Icon={TrendingUp}    label="Future leaders" value={`${stats.futureLeaders}`} sub="high potential" />
-          <KpiTile accent="var(--os-c-purple)" Icon={Heart}         label="Core players"   value={`${stats.core}`}          sub="solid middle" />
+          <KpiTile accent="var(--os-c-blue)" Icon={TrendingUp}    label="Future leaders" value={`${stats.futureLeaders}`} sub="high potential" />
+          <KpiTile accent="var(--os-brand)" Icon={Heart}         label="Core players"   value={`${stats.core}`}          sub="solid middle" />
           <KpiTile accent="var(--os-c-red)"    Icon={AlertTriangle} label="At risk"        value={`${stats.atRisk}`}        sub="needs attention" />
         </div>
 
