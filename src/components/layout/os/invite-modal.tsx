@@ -36,6 +36,28 @@ interface SopOption {
   title: string;
 }
 
+interface DeptOption {
+  id: string;
+  name: string;
+}
+
+interface RoleOption {
+  id: string;
+  title: string;
+}
+
+interface PersonOption {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+}
+
+function personLabel(p: PersonOption): string {
+  const name = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
+  return name || p.email;
+}
+
 interface Props {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -60,6 +82,16 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const [sops, setSops] = useState<SopOption[] | null>(null);
   const [kraIds, setKraIds] = useState<Set<string>>(new Set());
   const [sopIds, setSopIds] = useState<Set<string>>(new Set());
+  // Placement — all optional. The Invitation model + POST /api/invitations
+  // carry departmentId / roleId / managerId, so a hire can land in the
+  // right seat instead of arriving unplaced. Picking a role also lets
+  // accept-invite seed KRA weightage from the role's weights.
+  const [depts, setDepts] = useState<DeptOption[] | null>(null);
+  const [roles, setRoles] = useState<RoleOption[] | null>(null);
+  const [people, setPeople] = useState<PersonOption[] | null>(null);
+  const [departmentId, setDepartmentId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [managerId, setManagerId] = useState("");
   const [sending, setSending] = useState(false);
 
   // Load the KRA / SOP catalogs once per open.
@@ -73,6 +105,20 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setSops((d?.data as SopOption[]) ?? []))
       .catch(() => setSops([]));
+    // Placement catalogs. /api/departments and /api/roles return arrays
+    // directly; /api/users wraps rows in { data }.
+    fetch("/api/departments")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDepts(Array.isArray(d) ? (d as DeptOption[]) : []))
+      .catch(() => setDepts([]));
+    fetch("/api/roles")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setRoles(Array.isArray(d) ? (d as RoleOption[]) : []))
+      .catch(() => setRoles([]));
+    fetch("/api/users?scope=all&limit=200")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPeople((d?.data as PersonOption[]) ?? []))
+      .catch(() => setPeople([]));
   }, [open]);
 
   const reset = useCallback(() => {
@@ -83,6 +129,9 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
     setMessage("");
     setKraIds(new Set());
     setSopIds(new Set());
+    setDepartmentId("");
+    setRoleId("");
+    setManagerId("");
     setSending(false);
   }, []);
 
@@ -153,6 +202,9 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           body: JSON.stringify({
             email,
             accessLevel,
+            departmentId: departmentId || undefined,
+            roleId: roleId || undefined,
+            managerId: managerId || undefined,
             kraIds: Array.from(kraIds),
             sopIds: Array.from(sopIds),
             message: message.trim() || undefined,
@@ -255,6 +307,64 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             {INVITE_LEVELS.map((l) => (
               <option key={l.value} value={l.value}>
                 {l.label} — {l.description}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Placement — optional. Department / Role / Manager are carried
+            on the Invitation so the hire lands in their seat, not
+            unplaced. Picking a Role also drives KRA-weight inheritance
+            at accept-invite time. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+              Department <span className="font-normal normal-case text-zinc-400">(optional)</span>
+            </label>
+            <select
+              value={departmentId}
+              onChange={(e) => setDepartmentId(e.target.value)}
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            >
+              <option value="">No department</option>
+              {(depts ?? []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+              Role <span className="font-normal normal-case text-zinc-400">(optional)</span>
+            </label>
+            <select
+              value={roleId}
+              onChange={(e) => setRoleId(e.target.value)}
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            >
+              <option value="">No role</option>
+              {(roles ?? []).map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            Reporting manager <span className="font-normal normal-case text-zinc-400">(optional)</span>
+          </label>
+          <select
+            value={managerId}
+            onChange={(e) => setManagerId(e.target.value)}
+            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+          >
+            <option value="">No manager</option>
+            {(people ?? []).map((p) => (
+              <option key={p.id} value={p.id}>
+                {personLabel(p)}
               </option>
             ))}
           </select>
