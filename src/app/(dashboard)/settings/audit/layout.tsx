@@ -1,9 +1,11 @@
-import { requireManagerOrRedirect } from "@/lib/route-guard";
+import { requireOrgAdminOrRedirect } from "@/lib/route-guard";
 
-// Audit trail is manager+. Senior managers and HR look here when
-// answering compliance questions; org admins see the same view
-// (no extra restrictions in v1).
+// Audit log lives behind the Admin door (org configuration). Only the
+// two protected admin tiers (SUPER_ADMIN / COMPANY_ADMIN) reach it —
+// matching the export route, which is admin-only, and the two-door
+// settings split. Regular managers see the operational surfaces, not
+// the org-wide audit trail.
 export default async function AuditLayout({ children }: { children: React.ReactNode }) {
-  await requireManagerOrRedirect();
+  await requireOrgAdminOrRedirect();
   return <>{children}</>;
 }
