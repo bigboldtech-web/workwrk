@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { ArrowLeft, Trash2, Loader2 } from "lucide-react";
+import { ArrowLeft, Trash2, Loader2, SearchX } from "lucide-react";
 import { BoardItemDetail, type DetailPatch } from "@/components/board-view/board-item-detail";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -98,7 +98,23 @@ export default function ItemDetailPage() {
         {loading && !item ? (
           <div className="flex items-center gap-2 text-sm text-zinc-400 py-10"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
         ) : error ? (
-          <div className="text-sm text-red-500 py-10">{error}</div>
+          <div className="flex flex-col items-center text-center py-16 max-w-sm mx-auto">
+            <span className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-white/5 flex items-center justify-center mb-4">
+              <SearchX className="w-6 h-6 text-zinc-400" />
+            </span>
+            <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">{error}</div>
+            <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-1.5">
+              This task may have been deleted or moved to Trash. The link that brought you here is no longer available.
+            </p>
+            <div className="flex items-center gap-2 mt-5">
+              <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[13px] text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/5">
+                <ArrowLeft className="w-4 h-4" /> Go back
+              </button>
+              <Link href="/today" className="inline-flex items-center h-9 px-3.5 rounded-lg text-[13px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]">
+                Go to Today
+              </Link>
+            </div>
+          </div>
         ) : item ? (
           <BoardItemDetail
             item={item}

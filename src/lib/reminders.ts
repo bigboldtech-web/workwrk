@@ -36,12 +36,18 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
   let message = r.title;
   let link = "/today";
   if (r.entityType === "BOARD_ITEM" && r.entityId) {
-    link = `/item/${r.entityId}`;
     const item = await prisma.item.findUnique({
       where: { id: r.entityId },
-      select: { title: true, dueAt: true },
+      select: { title: true, dueAt: true, archivedAt: true },
     });
-    if (item) {
+    // Only deep-link to a LIVE task. A missing (hard-deleted) or archived
+    // (trashed) item would dead-end on /item/[id] as "Task not found", so
+    // the reminder degrades to a personal one that opens /today instead of
+    // a broken link. NB: the link is set INSIDE this guard — it used to be
+    // set unconditionally above the lookup, which is exactly what stranded
+    // fired reminders on deleted tasks.
+    if (item && !item.archivedAt) {
+      link = `/item/${r.entityId}`;
       title = item.title || r.title;
       message = item.dueAt ? `Reminder: due ${fmtDue(item.dueAt)}` : `Reminder: ${r.title}`;
     }
