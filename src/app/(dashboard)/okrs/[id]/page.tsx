@@ -27,7 +27,6 @@ import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalDetailMenu } from "./goal-detail-menu";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
-import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -432,13 +431,9 @@ export default async function OkrDetailPage(
           </div>
         </section>
 
-        {/* Custom fields */}
-        <section className="okrd-card">
-          <header><h2>Custom fields</h2></header>
-          <div className="okrd-card__cf">
-            <CustomFieldsPanel entityType="OKR" entityId={okr.id} showEmptyState />
-          </div>
-        </section>
+        {/* Custom fields intentionally omitted: the only way to DEFINE a field
+            is Studio, which isn't built yet, so the panel's empty state would
+            dead-end on /studio. Re-add this section once Studio ships. */}
       </div>
     </div>
   );

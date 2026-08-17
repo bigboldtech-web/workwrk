@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Target, Plus, TrendingUp, AlertTriangle, CheckCircle2, Trophy,
-  Building2, Users, User as UserIcon, X,
+  Building2, Users, User as UserIcon, X, Clock,
   type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -80,6 +80,21 @@ const LEVEL_META: Record<OkrLevel, { label: string; chip: string; sub: string; I
 
 const LEVEL_ORDER: OkrLevel[] = ["COMPANY", "DEPARTMENT", "INDIVIDUAL"];
 
+// Row status pill (mirrors the goal-detail header) + cadence label, so the
+// list line carries the same at-a-glance signals as the detail page.
+const STATUS_META: Record<OkrStatus, { label: string; color: string }> = {
+  ON_TRACK: { label: "On track", color: "#16a34a" },
+  AT_RISK: { label: "At risk", color: "#f59e0b" },
+  BEHIND: { label: "Behind", color: "#e2445c" },
+  COMPLETED: { label: "Completed", color: "#0073ea" },
+};
+const CADENCE_LABEL: Record<string, string> = {
+  WEEKLY: "weekly check-ins",
+  BIWEEKLY: "biweekly check-ins",
+  MONTHLY: "monthly check-ins",
+  NONE: "no check-ins",
+};
+
 function fmtDate(iso?: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -94,6 +109,9 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
   const router = useRouter();
   const [okrs, setOkrs] = useState<ApiOkr[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // "Need attention" stat card toggles this — narrows the grid to at-risk /
+  // behind goals so the count is one click from the list behind it.
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const [creating, setCreating] = useState<OkrLevel | null>(initialNew ? "INDIVIDUAL" : null);
   // ?new=1 opened the modal — closing it cleans the param off the URL so a
   // refresh doesn't resurrect the modal the user just dismissed.
@@ -170,9 +188,12 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
   const grouped = useMemo(() => {
     const m = new Map<OkrLevel, ApiOkr[]>();
     for (const l of LEVEL_ORDER) m.set(l, []);
-    for (const o of okrs ?? []) m.get(o.level)?.push(o);
+    const src = attentionOnly
+      ? (okrs ?? []).filter((o) => o.status === "AT_RISK" || o.status === "BEHIND")
+      : (okrs ?? []);
+    for (const o of src) m.get(o.level)?.push(o);
     return m;
-  }, [okrs]);
+  }, [okrs, attentionOnly]);
 
   return (
     <>
@@ -231,7 +252,9 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
               value={`${stats.atRisk}`}
               accent="#f59e0b"
               Icon={AlertTriangle}
-              hint={stats.atRisk > 0 ? "at risk or behind" : "all clear"}
+              hint={stats.atRisk > 0 ? (attentionOnly ? "showing these · click to clear" : "at risk or behind · click to filter") : "all clear"}
+              onClick={stats.atRisk > 0 ? () => setAttentionOnly((v) => !v) : undefined}
+              active={attentionOnly}
             />
             <StatTile
               label="Completed"
@@ -246,8 +269,9 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
           {LEVEL_ORDER.map((level) => {
             const meta = LEVEL_META[level];
             const items = grouped.get(level) ?? [];
-            // In "mine" view a level you carry nothing in is noise — hide it.
-            if (mine && items.length === 0) return null;
+            // In "mine" view — or while the attention filter is on — a level
+            // you carry nothing in is noise, so hide the empty section.
+            if ((mine || attentionOnly) && items.length === 0) return null;
             return (
               <section key={level} className="okrs__level">
                 <header className="okrs__level-head" title={meta.sub}>
@@ -337,9 +361,24 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
   );
 }
 
-function StatTile({ label, value, accent, Icon, hint, bar }: { label: string; value: string; accent: string; Icon: LucideIcon; hint: string; bar?: number }) {
+function StatTile({ label, value, accent, Icon, hint, bar, onClick, active }: { label: string; value: string; accent: string; Icon: LucideIcon; hint: string; bar?: number; onClick?: () => void; active?: boolean }) {
+  // Kept as a div (not a button) so the .okrs-stat styling is untouched;
+  // clickability is layered on with role/keyboard when onClick is provided.
+  const style = {
+    ["--stat-color" as string]: accent,
+    ...(onClick ? { cursor: "pointer" } : null),
+    ...(active ? { boxShadow: `inset 0 0 0 2px ${accent}` } : null),
+  } as React.CSSProperties;
   return (
-    <div className="okrs-stat" style={{ ["--stat-color" as string]: accent }}>
+    <div
+      className="okrs-stat"
+      style={style}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-pressed={onClick ? active : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+    >
       <div className="okrs-stat__head">
         <span className="okrs-stat__label">{label}</span>
         <Icon />
@@ -391,7 +430,23 @@ function GoalRow({ okr, showLevelChip, onDeleted, onEdit }: {
         <span className="okr-row__name">{okr.title}</span>
         <span className="okr-row__spacer" />
         {showLevelChip && <span className="okr-row__chip">{LEVEL_META[okr.level].chip}</span>}
+        {okr.status && (
+          <span
+            title={`Status: ${STATUS_META[okr.status].label}`}
+            style={{ fontSize: 11, fontWeight: 500, padding: "2px 8px", borderRadius: 9999, whiteSpace: "nowrap", color: STATUS_META[okr.status].color, background: `${STATUS_META[okr.status].color}1a` }}
+          >
+            {STATUS_META[okr.status].label}
+          </span>
+        )}
         {due && <span className="okr-row__date">{due}</span>}
+        {okr.checkInCadence && CADENCE_LABEL[okr.checkInCadence] && (
+          <span
+            title={`Check-in cadence: ${CADENCE_LABEL[okr.checkInCadence]}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, whiteSpace: "nowrap", color: "var(--os-ink-3, #a1a1aa)" }}
+          >
+            <Clock style={{ width: 11, height: 11 }} /> {CADENCE_LABEL[okr.checkInCadence]}
+          </span>
+        )}
         {/* Resolved audience — one shared goal, many contributors. */}
         {okr.audience && okr.audience.assigneeCount > 0 && okr.audience.totalMembers > 0 && (
           <MemberAvatarStack members={okr.audience.members} total={okr.audience.totalMembers} size={20} />
