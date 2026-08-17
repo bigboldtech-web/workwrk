@@ -15967,8 +15967,8 @@ table.os-tbl {
    around whatever block is node-selected (.ProseMirror-selectednode) — the
    blue rectangle around sub-page links, images, tables, etc. the moment you
    click one. Removed everywhere per design: node selection still works, it's
-   just not outlined. These match BlockNote's own selectors (in
-   @blocknote/*/style.css); !important wins regardless of CSS import order. */
+   just not outlined. These match BlockNote's own selectors from its bundled
+   stylesheet; the important flag wins regardless of CSS import order. */
 .bn-block-content.ProseMirror-selectednode > *,
 .ProseMirror-selectednode > .bn-block-content > * {
   outline: none !important;
