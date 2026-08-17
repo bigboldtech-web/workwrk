@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Users, Search, Briefcase, MapPin,
-  Building2, Sparkles, Network, RotateCcw,
+  Building2, Sparkles, Network, RotateCcw, Tag as TagIcon,
 } from "lucide-react";
 import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -39,6 +39,7 @@ type ApiUser = {
   department?: { id: string; name: string } | null;
   office?: { id: string; name?: string | null; city?: string | null } | null;
   _count?: { directReports?: number };
+  tags?: { id: string; name: string; color?: string | null }[];
 };
 
 function fullName(u: ApiUser): string {
@@ -74,6 +75,7 @@ export default function PeopleDirectoryPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeDept, setActiveDept] = useState<string | null>(null);
+  const [activeTags, setActiveTags] = useState<Set<string>>(() => new Set());
   const [filter, setFilter] = useState<Filter>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [restoringId, setRestoringId] = useState<string | null>(null);
@@ -129,22 +131,38 @@ export default function PeopleDirectoryPage() {
     return Array.from(m.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   }, [users]);
 
+  // ─── Tags (auto-derived from loaded people, like departments) ────
+  const allTags = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; color?: string | null; count: number }>();
+    for (const u of users ?? []) {
+      for (const t of u.tags ?? []) {
+        if (!m.has(t.id)) m.set(t.id, { id: t.id, name: t.name, color: t.color, count: 0 });
+        m.get(t.id)!.count += 1;
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [users]);
+
   // ─── Filter ──────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = users ?? [];
     if (filter === "new") list = list.filter((u) => u.joinDate && (Date.now() - new Date(u.joinDate).getTime()) < 90 * MS_DAY);
     if (filter === "active") list = list.filter((u) => u.status === "ACTIVE" || !u.status);
     if (activeDept) list = list.filter((u) => (u.department?.id ?? "__none") === activeDept);
+    // Tag filter: keep people carrying ANY selected tag (union), matching the
+    // /api/users?tagIds= server semantics.
+    if (activeTags.size > 0) list = list.filter((u) => (u.tags ?? []).some((t) => activeTags.has(t.id)));
     const q = search.trim().toLowerCase();
     if (q) {
       list = list.filter((u) =>
         fullName(u).toLowerCase().includes(q) ||
         (u.email ?? "").toLowerCase().includes(q) ||
         (u.role?.title ?? "").toLowerCase().includes(q) ||
+        (u.tags ?? []).some((t) => t.name.toLowerCase().includes(q)) ||
         (u.department?.name ?? "").toLowerCase().includes(q));
     }
     return list;
-  }, [users, filter, activeDept, search]);
+  }, [users, filter, activeDept, activeTags, search]);
 
   // ─── Group (only when no specific dept active) ───────────
   const grouped = useMemo(() => {
@@ -251,6 +269,43 @@ export default function PeopleDirectoryPage() {
           </div>
         ) : null}
 
+        {/* Tag filter row — auto-derived from people's tags. Click to segment the
+            directory by tag (union). Hidden on Former and when no tags exist. */}
+        {filter !== "former" && allTags.length > 0 ? (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-400 font-semibold mr-0.5">
+              <TagIcon className="w-3 h-3" /> Tags
+            </span>
+            {allTags.map((t) => {
+              const on = activeTags.has(t.id);
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() =>
+                    setActiveTags((prev) => {
+                      const n = new Set(prev);
+                      if (n.has(t.id)) n.delete(t.id); else n.add(t.id);
+                      return n;
+                    })
+                  }
+                  className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border transition ${on ? "border-transparent text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+                  style={on ? { background: t.color ?? "#18181b" } : t.color ? { color: t.color } : undefined}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ background: on ? "rgba(255,255,255,0.85)" : (t.color ?? "#a1a1aa") }} />
+                  {t.name}
+                  <span className="opacity-60">{t.count}</span>
+                </button>
+              );
+            })}
+            {activeTags.size > 0 ? (
+              <button type="button" onClick={() => setActiveTags(new Set())} className="text-[11.5px] text-zinc-500 hover:text-zinc-800 ml-1">
+                Clear tags
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* Body */}
         {loadError ? (
           <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-sm text-zinc-500">Couldn&rsquo;t load people — {loadError}</div>
@@ -278,7 +333,7 @@ export default function PeopleDirectoryPage() {
         ) : filtered.length === 0 ? (
           <div className="border border-zinc-200 rounded-xl px-6 py-10 text-center text-sm text-zinc-500">
             No one matches these filters.
-            <button type="button" className="text-[var(--os-brand)] hover:underline ml-1.5" onClick={() => { setActiveDept(null); setFilter("all"); setSearch(""); }}>Clear</button>
+            <button type="button" className="text-[var(--os-brand)] hover:underline ml-1.5" onClick={() => { setActiveDept(null); setFilter("all"); setSearch(""); setActiveTags(new Set()); }}>Clear</button>
           </div>
         ) : activeDept ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -378,6 +433,21 @@ function PersonCard({ user: u }: { user: ApiUser }) {
         {u.office?.city ? <span className="inline-flex items-center gap-1 text-zinc-500"><MapPin className="w-3 h-3" />{u.office.city}</span> : null}
         <span className="text-zinc-400 tabular-nums ml-auto">{tenure(u.joinDate)}{reports > 0 ? ` · ${reports} report${reports === 1 ? "" : "s"}` : ""}</span>
       </div>
+      {u.tags && u.tags.length > 0 ? (
+        <div className="mt-1.5 flex items-center gap-1 flex-wrap">
+          {u.tags.slice(0, 4).map((t) => (
+            <span
+              key={t.id}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px]"
+              style={t.color ? { background: `${t.color}1a`, color: t.color } : { background: "#f4f4f5", color: "#52525b" }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ background: t.color ?? "#a1a1aa" }} />
+              {t.name}
+            </span>
+          ))}
+          {u.tags.length > 4 ? <span className="text-[10.5px] text-zinc-400">+{u.tags.length - 4}</span> : null}
+        </div>
+      ) : null}
       {u.manager ? (
         <div className="mt-1.5 text-[11px] text-zinc-400 truncate flex items-center gap-1">
           <Briefcase className="w-3 h-3 shrink-0" /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ") || "Manager"}

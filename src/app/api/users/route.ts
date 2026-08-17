@@ -8,6 +8,7 @@ import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/paginati
 import { getTeamUserIds } from "@/lib/team";
 import { ORG_WIDE_ALIGNMENT_LEVELS } from "@/lib/alignment-scope";
 import { seedAlignmentForUser } from "@/lib/alignment-assign";
+import { getUserTagsMap, resolveUserIdsByTags } from "@/lib/user-tags";
 import type { Prisma, UserStatus, AccessLevel } from "@/generated/prisma";
 
 export async function GET(req: NextRequest) {
@@ -25,6 +26,10 @@ export async function GET(req: NextRequest) {
   // The door is ORG_WIDE_ALIGNMENT_LEVELS — the same ladder the rest of
   // Teams uses — so a Director/VP/HR sees the same org here as elsewhere.
   const requestedScope = searchParams.get("scope");
+  // ?tagIds=a,b — narrow to people carrying ANY of these person-tags. Resolved
+  // live from TagAssignment, ANDed with the scope/other filters below.
+  const tagIdsParam = searchParams.get("tagIds");
+  const tagIds = tagIdsParam ? tagIdsParam.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const pagination = parsePaginationParams(req);
 
   const orgId = getOrgId(session);
@@ -53,6 +58,16 @@ export async function GET(req: NextRequest) {
       { lastName: { contains: pagination.search, mode: "insensitive" } },
       { email: { contains: pagination.search, mode: "insensitive" } },
     ];
+  }
+
+  // Tag filter — ANDed with scope via `AND` so it composes with the existing
+  // `where.id` (team scope) instead of clobbering it. An empty resolved set
+  // (a tag nobody has) correctly yields no rows.
+  if (tagIds.length > 0) {
+    const taggedIds = await resolveUserIdsByTags(orgId, tagIds);
+    const andClause = (where.AND as Prisma.UserWhereInput[] | undefined) ?? [];
+    andClause.push({ id: { in: taggedIds } });
+    where.AND = andClause;
   }
 
   const orderBy: Prisma.UserOrderByWithRelationInput = pagination.sortBy
@@ -86,7 +101,12 @@ export async function GET(req: NextRequest) {
     prisma.user.count({ where }),
   ]);
 
-  return jsonSuccess(paginatedResult(users, total, pagination));
+  // Attach each person's tags (one batched query) so the directory can show
+  // and filter by them without an N+1.
+  const tagsByUser = await getUserTagsMap(orgId, users.map((u) => u.id));
+  const usersWithTags = users.map((u) => ({ ...u, tags: tagsByUser.get(u.id) ?? [] }));
+
+  return jsonSuccess(paginatedResult(usersWithTags, total, pagination));
 }
 
 export async function POST(req: NextRequest) {
