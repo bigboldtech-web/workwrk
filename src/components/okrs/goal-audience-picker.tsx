@@ -13,11 +13,11 @@
 // a "+N" overflow chip used on the goals list and goal detail.
 
 import { useEffect, useRef, useState } from "react";
-import { Briefcase, Building2, ChevronDown, Search, UsersRound, X } from "lucide-react";
+import { Briefcase, Building2, ChevronDown, Search, Tag, UsersRound, X } from "lucide-react";
 import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 
-export type AudienceType = "USER" | "DEPARTMENT" | "ROLE";
+export type AudienceType = "USER" | "DEPARTMENT" | "ROLE" | "TAG";
 
 export interface AudienceEntry {
   type: AudienceType;
@@ -86,6 +86,7 @@ interface UserRow {
 }
 interface DeptRow { id: string; name: string }
 interface RoleRow { id: string; title: string }
+interface TagRow { id: string; name: string; color?: string | null }
 
 function userLabel(u: UserRow): string {
   return `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || "Unknown";
@@ -110,6 +111,7 @@ export function GoalAudiencePicker({
   const [users, setUsers] = useState<UserRow[] | null>(null);
   const [depts, setDepts] = useState<DeptRow[] | null>(null);
   const [roles, setRoles] = useState<RoleRow[] | null>(null);
+  const [tags, setTags] = useState<TagRow[] | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -139,6 +141,10 @@ export function GoalAudiencePicker({
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setRoles(Array.isArray(d) ? d : (d?.data ?? [])))
       .catch(() => setRoles([]));
+    fetch("/api/tags", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setTags(Array.isArray(d) ? d : (d?.data ?? [])))
+      .catch(() => setTags([]));
   }, [open, depts]);
 
   useEffect(() => {
@@ -168,6 +174,7 @@ export function GoalAudiencePicker({
   const q = query.trim().toLowerCase();
   const filteredDepts = (depts ?? []).filter((d) => !q || d.name.toLowerCase().includes(q));
   const filteredRoles = (roles ?? []).filter((r) => !q || r.title.toLowerCase().includes(q));
+  const filteredTags = (tags ?? []).filter((t) => !q || t.name.toLowerCase().includes(q));
 
   const summary =
     value.length === 0
@@ -271,6 +278,31 @@ export function GoalAudiencePicker({
                   label={r.title}
                   selected={isSelected("ROLE", r.id)}
                   onClick={() => toggle({ type: "ROLE", id: r.id, label: r.title })}
+                />
+              ))
+            )}
+
+            <MenuSeparator />
+            <MenuSectionLabel>Tags</MenuSectionLabel>
+            {tags === null ? (
+              <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+            ) : filteredTags.length === 0 ? (
+              <div className="px-3 py-2 text-[12px] text-zinc-400">No tags found</div>
+            ) : (
+              filteredTags.map((t) => (
+                <MenuItem
+                  key={t.id}
+                  leading={
+                    <span
+                      className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md"
+                      style={t.color ? { background: `${t.color}1a` } : { background: "#f4f4f5" }}
+                    >
+                      <Tag className="h-3.5 w-3.5" style={{ color: t.color ?? "#71717a" }} />
+                    </span>
+                  }
+                  label={t.name}
+                  selected={isSelected("TAG", t.id)}
+                  onClick={() => toggle({ type: "TAG", id: t.id, label: t.name })}
                 />
               ))
             )}

@@ -20,6 +20,7 @@ import {
   validateGoalAssignees,
   type GoalAudienceRef,
 } from "@/lib/goal-audience";
+import { getUserTagIds } from "@/lib/user-tags";
 import { logActivity } from "@/lib/activity";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
@@ -67,6 +68,8 @@ export async function GET(req: NextRequest) {
         select: { departmentId: true, roleId: true },
       })
     : null;
+  // The caller's own person-tags — goals targeting any of them are visible.
+  const myTagIds = !orgWide || mineOnly ? await getUserTagIds(orgId, callerId) : [];
 
   // Three-door visibility. OKRs attach to PEOPLE, so an individual goal
   // is not org-public: everyone sees COMPANY objectives and their own
@@ -82,7 +85,7 @@ export async function GET(req: NextRequest) {
       { ownerId: callerId },
     ];
     if (me?.departmentId) visible.push({ level: "DEPARTMENT", departmentId: me.departmentId });
-    visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId }));
+    visible.push(...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
     if (isManager(session)) {
       const teamIds = await getTeamUserIds(orgId, callerId);
       visible.push({ ownerId: { in: teamIds } });
@@ -95,7 +98,7 @@ export async function GET(req: NextRequest) {
     and.push({
       OR: [
         { ownerId: callerId },
-        ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId }),
+        ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }),
       ],
     });
   }

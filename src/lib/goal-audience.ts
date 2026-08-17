@@ -18,7 +18,7 @@ import { isOrgWideAlignment } from "@/lib/alignment-scope";
 import { getTeamUserIds } from "@/lib/team";
 import type { Prisma } from "@/generated/prisma";
 
-export const GOAL_AUDIENCE_TYPES = ["USER", "DEPARTMENT", "ROLE"] as const;
+export const GOAL_AUDIENCE_TYPES = ["USER", "DEPARTMENT", "ROLE", "TAG"] as const;
 export type GoalAudienceType = (typeof GOAL_AUDIENCE_TYPES)[number];
 
 /** One audience entry as the API accepts/returns it: `{ type, id }`. */
@@ -57,10 +57,11 @@ const ACTIVE_USER = { status: "ACTIVE", deletedAt: null } as const;
 
 const keyOf = (e: GoalAudienceRef) => `${e.type}:${e.id}`;
 
-function rowKey(r: { userId: string | null; departmentId: string | null; roleId: string | null }): string {
+function rowKey(r: { userId: string | null; departmentId: string | null; roleId: string | null; tagId: string | null }): string {
   if (r.userId) return `USER:${r.userId}`;
   if (r.departmentId) return `DEPARTMENT:${r.departmentId}`;
-  return `ROLE:${r.roleId}`;
+  if (r.roleId) return `ROLE:${r.roleId}`;
+  return `TAG:${r.tagId}`;
 }
 
 /** GoalAssignee create payload for one entry — exactly one subject set. */
@@ -70,6 +71,7 @@ function rowFor(okrId: string, e: GoalAudienceRef) {
     userId: e.type === "USER" ? e.id : null,
     departmentId: e.type === "DEPARTMENT" ? e.id : null,
     roleId: e.type === "ROLE" ? e.id : null,
+    tagId: e.type === "TAG" ? e.id : null,
   };
 }
 
@@ -90,17 +92,35 @@ export async function resolveGoalMembersBatch(
 
   const rows = await prisma.goalAssignee.findMany({
     where: { okrId: { in: okrs.map((o) => o.id) } },
-    select: { okrId: true, userId: true, departmentId: true, roleId: true },
+    select: { okrId: true, userId: true, departmentId: true, roleId: true, tagId: true },
     orderBy: { createdAt: "asc" },
   });
 
   const userIds = new Set<string>(okrs.map((o) => o.ownerId).filter((x): x is string => !!x));
   const deptIds = new Set<string>();
   const roleIds = new Set<string>();
+  const tagIds = new Set<string>();
   for (const r of rows) {
     if (r.userId) userIds.add(r.userId);
     if (r.departmentId) deptIds.add(r.departmentId);
     if (r.roleId) roleIds.add(r.roleId);
+    if (r.tagId) tagIds.add(r.tagId);
+  }
+
+  // Resolve each targeted tag to its current holders (entityType USER) and add
+  // them to the id set so their details load in the single user query below.
+  const tagHolders = new Map<string, string[]>();
+  if (tagIds.size > 0) {
+    const holderRows = await prisma.tagAssignment.findMany({
+      where: { organizationId: orgId, entityType: "USER", tagId: { in: [...tagIds] }, tag: { archived: false } },
+      select: { tagId: true, entityId: true },
+    });
+    for (const h of holderRows) {
+      const list = tagHolders.get(h.tagId);
+      if (list) list.push(h.entityId);
+      else tagHolders.set(h.tagId, [h.entityId]);
+      userIds.add(h.entityId);
+    }
   }
 
   const or: Prisma.UserWhereInput[] = [];
@@ -131,6 +151,14 @@ export async function resolveGoalMembersBatch(
       byRole.get(u.roleId)!.push(u);
     }
   }
+  // tagId → resolved holder users (active ones that survived the main query).
+  const byTag = new Map<string, typeof users>();
+  for (const [tagId, holderIds] of tagHolders) {
+    const members = holderIds
+      .map((id) => byId.get(id))
+      .filter((u): u is (typeof users)[number] => !!u);
+    if (members.length > 0) byTag.set(tagId, members);
+  }
 
   const rowsByOkr = new Map<string, typeof rows>();
   for (const r of rows) {
@@ -155,6 +183,7 @@ export async function resolveGoalMembersBatch(
       if (r.userId) push(byId.get(r.userId));
       else if (r.departmentId) (byDept.get(r.departmentId) ?? []).forEach(push);
       else if (r.roleId) (byRole.get(r.roleId) ?? []).forEach(push);
+      else if (r.tagId) (byTag.get(r.tagId) ?? []).forEach(push);
     }
     result.set(o.id, members);
   }
@@ -253,10 +282,14 @@ export function memberVisibilityOr(me: {
   id: string;
   departmentId?: string | null;
   roleId?: string | null;
+  /** The viewer's own person-tag ids — goals targeting any of them are visible.
+   *  Fetch with getUserTagIds(orgId, me.id) at the call site. */
+  tagIds?: string[] | null;
 }): Prisma.OKRWhereInput[] {
   const or: Prisma.OKRWhereInput[] = [{ assignees: { some: { userId: me.id } } }];
   if (me.departmentId) or.push({ assignees: { some: { departmentId: me.departmentId } } });
   if (me.roleId) or.push({ assignees: { some: { roleId: me.roleId } } });
+  if (me.tagIds && me.tagIds.length > 0) or.push({ assignees: { some: { tagId: { in: me.tagIds } } } });
   return or;
 }
 
@@ -278,6 +311,15 @@ export async function teamAudienceVisibilityOr(
   const roleIds = [...new Set(rows.map((r) => r.roleId).filter((x): x is string => !!x))];
   if (deptIds.length > 0) or.push({ assignees: { some: { departmentId: { in: deptIds } } } });
   if (roleIds.length > 0) or.push({ assignees: { some: { roleId: { in: roleIds } } } });
+  // Person-tags any team member carries — goals targeting those tags are
+  // team-visible too (resolved live from TagAssignment).
+  const tagRows = await prisma.tagAssignment.findMany({
+    where: { entityType: "USER", entityId: { in: teamIds }, tag: { archived: false } },
+    select: { tagId: true },
+    distinct: ["tagId"],
+  });
+  const tagIds = tagRows.map((t) => t.tagId);
+  if (tagIds.length > 0) or.push({ assignees: { some: { tagId: { in: tagIds } } } });
   return or;
 }
 
@@ -312,8 +354,8 @@ export async function validateGoalAssignees(
       return { ok: false, error: "Each assignee must be an object of shape { type, id }" };
     }
     const { type, id } = raw as { type?: unknown; id?: unknown };
-    if (type !== "USER" && type !== "DEPARTMENT" && type !== "ROLE") {
-      return { ok: false, error: "Assignee type must be USER, DEPARTMENT or ROLE" };
+    if (type !== "USER" && type !== "DEPARTMENT" && type !== "ROLE" && type !== "TAG") {
+      return { ok: false, error: "Assignee type must be USER, DEPARTMENT, ROLE or TAG" };
     }
     if (typeof id !== "string" || id.trim().length === 0) {
       return { ok: false, error: "Each assignee needs a non-empty id" };
@@ -327,8 +369,8 @@ export async function validateGoalAssignees(
 
   // Cross-org guard: every id must exist inside the caller's organization.
   const idsFor = (t: GoalAudienceType) => entries.filter((e) => e.type === t).map((e) => e.id);
-  const [userIds, deptIds, roleIds] = [idsFor("USER"), idsFor("DEPARTMENT"), idsFor("ROLE")];
-  const [users, depts, roles] = await Promise.all([
+  const [userIds, deptIds, roleIds, tagIds] = [idsFor("USER"), idsFor("DEPARTMENT"), idsFor("ROLE"), idsFor("TAG")];
+  const [users, depts, roles, tags] = await Promise.all([
     userIds.length > 0
       ? prisma.user.findMany({
           where: { id: { in: userIds }, organizationId: orgId, deletedAt: null },
@@ -347,11 +389,18 @@ export async function validateGoalAssignees(
           select: { id: true },
         })
       : Promise.resolve([]),
+    tagIds.length > 0
+      ? prisma.tag.findMany({
+          where: { id: { in: tagIds }, organizationId: orgId, archived: false },
+          select: { id: true },
+        })
+      : Promise.resolve([]),
   ]);
   const valid = new Set<string>([
     ...users.map((u) => `USER:${u.id}`),
     ...depts.map((d) => `DEPARTMENT:${d.id}`),
     ...roles.map((r) => `ROLE:${r.id}`),
+    ...tags.map((t) => `TAG:${t.id}`),
   ]);
   const bad = entries.filter((e) => !valid.has(keyOf(e)));
   if (bad.length > 0) {
@@ -383,7 +432,9 @@ export async function removeGoalAssignees(okrId: string, entries: GoalAudienceRe
       ? { userId: e.id }
       : e.type === "DEPARTMENT"
         ? { departmentId: e.id }
-        : { roleId: e.id },
+        : e.type === "ROLE"
+          ? { roleId: e.id }
+          : { tagId: e.id },
   );
   const res = await prisma.goalAssignee.deleteMany({ where: { okrId, OR: or } });
   return res.count;
@@ -397,7 +448,7 @@ export async function removeGoalAssignees(okrId: string, entries: GoalAudienceRe
 export async function syncGoalAssignees(okrId: string, entries: GoalAudienceRef[]): Promise<void> {
   const existing = await prisma.goalAssignee.findMany({
     where: { okrId },
-    select: { id: true, userId: true, departmentId: true, roleId: true },
+    select: { id: true, userId: true, departmentId: true, roleId: true, tagId: true },
   });
   const want = new Set(entries.map(keyOf));
   const have = new Set(existing.map(rowKey));
@@ -417,9 +468,11 @@ export async function listGoalAssigneeEntries(okrId: string): Promise<GoalAudien
       userId: true,
       departmentId: true,
       roleId: true,
+      tagId: true,
       user: { select: { firstName: true, lastName: true, avatar: true } },
       department: { select: { name: true } },
       role: { select: { title: true } },
+      tag: { select: { name: true } },
     },
     orderBy: { createdAt: "asc" },
   });
@@ -435,6 +488,9 @@ export async function listGoalAssigneeEntries(okrId: string): Promise<GoalAudien
     if (r.departmentId) {
       return { type: "DEPARTMENT", id: r.departmentId, label: r.department?.name ?? "Department" };
     }
-    return { type: "ROLE", id: r.roleId!, label: r.role?.title ?? "Role" };
+    if (r.roleId) {
+      return { type: "ROLE", id: r.roleId, label: r.role?.title ?? "Role" };
+    }
+    return { type: "TAG", id: r.tagId!, label: r.tag?.name ?? "Tag" };
   });
 }

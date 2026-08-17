@@ -2611,12 +2611,15 @@ model GoalAssignee {
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   roleId       String?
   role         Role?       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  tagId        String?
+  tag          Tag?        @relation(fields: [tagId], references: [id], onDelete: Cascade)
   createdAt    DateTime    @default(now())
 
   @@index([okrId])
   @@index([userId])
   @@index([departmentId])
   @@index([roleId])
+  @@index([tagId])
 }
 
 model KeyResult {
@@ -2692,10 +2695,11 @@ model PulseSurvey {
   questions      Json // [{id, text, type: "rating"|"text"|"nps"}]
   status         String           @default("DRAFT") // DRAFT, ACTIVE, CLOSED
   frequency      String? // WEEKLY, MONTHLY, QUARTERLY
-  audienceType   String           @default("ALL") // ALL, OFFICES, DEPARTMENTS, USERS
+  audienceType   String           @default("ALL") // ALL, OFFICES, DEPARTMENTS, USERS, TAGS
   officeIds      String[]         @default([])
   departmentIds  String[]         @default([])
   userIds        String[]         @default([])
+  tagIds         String[]         @default([])
   // When true, responses are visible to managers in aggregate only — no
   // respondent name, no individual attribution. Default true to preserve
   // existing survey trust assumptions. Managers can opt a survey into
@@ -3086,7 +3090,8 @@ model Tag {
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  assignments TagAssignment[]
+  assignments   TagAssignment[]
+  goalAssignees GoalAssignee[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

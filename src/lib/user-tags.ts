@@ -42,6 +42,16 @@ export async function getUserTagsMap(
   return map;
 }
 
+/** The (non-archived) person-tag ids a single user carries. Used to decide
+ *  which tag-targeted goals/surveys that person can see. */
+export async function getUserTagIds(orgId: string, userId: string): Promise<string[]> {
+  const rows = await prisma.tagAssignment.findMany({
+    where: { organizationId: orgId, entityType: "USER", entityId: userId, tag: { archived: false } },
+    select: { tagId: true },
+  });
+  return rows.map((r) => r.tagId);
+}
+
 /**
  * Every userId in the org that carries ANY of the given tags (entityType
  * USER). The membership is resolved live, so a person tagged after a survey

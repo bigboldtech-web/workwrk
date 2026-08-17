@@ -45,7 +45,7 @@ function parseRemovalEntries(input: unknown): GoalAudienceRef[] | null {
   const out: GoalAudienceRef[] = [];
   for (const raw of input) {
     const { type, id } = (raw ?? {}) as { type?: unknown; id?: unknown };
-    if (type !== "USER" && type !== "DEPARTMENT" && type !== "ROLE") return null;
+    if (type !== "USER" && type !== "DEPARTMENT" && type !== "ROLE" && type !== "TAG") return null;
     if (typeof id !== "string" || id.trim().length === 0) return null;
     out.push({ type, id: id.trim() });
   }

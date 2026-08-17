@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonSuccess } from "@/lib/api-helpers";
 import { computeGoalRollups, enrichKeyResultGroups, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import { memberVisibilityOr } from "@/lib/goal-audience";
+import { getUserTagIds } from "@/lib/user-tags";
 import type { Prisma } from "@/generated/prisma";
 
 /**
@@ -45,7 +46,8 @@ export async function GET(req: Request) {
     or.push({ level: "DEPARTMENT", departmentId: me.departmentId });
   }
   // Resolved membership: goals assigned to me, my department, or my role.
-  or.push(...memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId }));
+  const myTagIds = await getUserTagIds(orgId, userId);
+  or.push(...memberVisibilityOr({ id: userId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }));
   const where: Prisma.OKRWhereInput = { organizationId: orgId, quarter, OR: or };
 
   const okrs = await prisma.oKR.findMany({
