@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { parseAnnouncementAudience, resolveAnnouncementAudienceUserIds } from "@/lib/announcement-audience";
 
 /**
  * Cron — fires the notification + email fan-out for announcements
@@ -44,6 +45,7 @@ export async function POST(req: NextRequest) {
       priority: true,
       authorId: true,
       organizationId: true,
+      targetAudience: true,
     },
     take: 100, // bound per-run so a backlog never holds the cron open
   });
@@ -53,10 +55,18 @@ export async function POST(req: NextRequest) {
 
   for (const a of due) {
     try {
-      const users = await prisma.user.findMany({
-        where: { organizationId: a.organizationId, deletedAt: null, id: { not: a.authorId } },
-        select: { id: true, email: true, firstName: true },
-      });
+      // Notify only the resolved audience (ALL, or the targeted depts /
+      // offices / people / tags), never the whole org for a targeted post.
+      const audienceIds = (await resolveAnnouncementAudienceUserIds(
+        a.organizationId,
+        parseAnnouncementAudience(a.targetAudience),
+      )).filter((id) => id !== a.authorId);
+      const users = audienceIds.length > 0
+        ? await prisma.user.findMany({
+            where: { id: { in: audienceIds } },
+            select: { id: true, email: true, firstName: true },
+          })
+        : [];
 
       if (users.length > 0) {
         await prisma.notification.createMany({

@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { processEmailQueue } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
 import { logActivity } from "@/lib/activity";
+import { getUserTagIds } from "@/lib/user-tags";
+import {
+  parseAnnouncementAudience,
+  validateAnnouncementAudience,
+  resolveAnnouncementAudienceUserIds,
+  viewerInAnnouncementAudience,
+} from "@/lib/announcement-audience";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -30,13 +38,29 @@ export async function GET() {
     // client doesn't need a second round-trip to render the
     // "Acknowledge"/"You've acked" affordance. Cheap: one query
     // scoped to the user, bounded by `take` above.
+    // Audience filter: a person sees an announcement only if it targets them
+    // (ALL, or their department / office / user row / tag). The author always
+    // sees their own, and managers see everything for oversight — mirrors how
+    // pulse surveys gate visibility.
+    const viewer = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, departmentId: true, officeId: true },
+    });
+    const manager = isManager(session);
+    const viewerTagIds = manager ? [] : await getUserTagIds(orgId, userId);
+    const visible = announcements.filter((a) => {
+      if (manager || a.authorId === userId) return true;
+      if (!viewer) return false;
+      return viewerInAnnouncementAudience(parseAnnouncementAudience(a.targetAudience), viewer, viewerTagIds);
+    });
+
     const acks = await prisma.announcementAcknowledgment.findMany({
-      where: { userId, announcementId: { in: announcements.map((a) => a.id) } },
+      where: { userId, announcementId: { in: visible.map((a) => a.id) } },
       select: { announcementId: true, acknowledgedAt: true },
     });
     const ackMap = new Map(acks.map((a) => [a.announcementId, a.acknowledgedAt] as const));
 
-    const enriched = announcements.map((a) => ({
+    const enriched = visible.map((a) => ({
       ...a,
       ackedByMe: ackMap.has(a.id),
       ackedAt: ackMap.get(a.id) ?? null,
@@ -84,6 +108,11 @@ export async function POST(req: NextRequest) {
     return jsonError("Publish time must be before the expiry date");
   }
 
+  // Normalize + validate the audience ({ type, ids }); legacy/omitted → ALL.
+  const audience = parseAnnouncementAudience(targetAudience);
+  const audCheck = await validateAnnouncementAudience(orgId, audience);
+  if (!audCheck.ok) return jsonError(audCheck.error);
+
   try {
   const announcement = await prisma.announcement.create({
     data: {
@@ -99,7 +128,7 @@ export async function POST(req: NextRequest) {
       // NULL until the cron fires.
       notificationsSentAt: isScheduled ? null : new Date(),
       expiresAt: expiryDate,
-      targetAudience: targetAudience || undefined,
+      targetAudience: audience as unknown as Prisma.InputJsonValue,
       authorId: userId,
       organizationId: orgId,
     },
@@ -132,10 +161,15 @@ export async function POST(req: NextRequest) {
   // Notify all org users (skip the author). Errors here must NOT roll back
   // the announcement — it's already persisted. Log and move on.
   try {
-    const users = await prisma.user.findMany({
-      where: { organizationId: orgId, deletedAt: null, id: { not: userId } },
-      select: { id: true, email: true, firstName: true },
-    });
+    // Only notify the resolved audience (never the whole org for a targeted
+    // post), and skip the author.
+    const audienceIds = (await resolveAnnouncementAudienceUserIds(orgId, audience)).filter((id) => id !== userId);
+    const users = audienceIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: audienceIds } },
+          select: { id: true, email: true, firstName: true },
+        })
+      : [];
     if (users.length > 0) {
       await prisma.notification.createMany({
         data: users.map((u) => ({

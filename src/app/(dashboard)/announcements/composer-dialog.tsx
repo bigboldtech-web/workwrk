@@ -12,8 +12,8 @@
  * targeting as Coming soon rather than faking a selector the backend ignores.
  */
 
-import { useState } from "react";
-import { AlertTriangle, CalendarRange, Info, PartyPopper, ShieldCheck, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AlertTriangle, CalendarRange, Info, PartyPopper, ShieldCheck, Loader2, Check } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -21,6 +21,15 @@ import { Switch } from "@/components/ui/switch";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+type AudienceType = "ALL" | "DEPARTMENTS" | "OFFICES" | "USERS" | "TAGS";
+
+const AUDIENCE_OPTS: { value: AudienceType; label: string }[] = [
+  { value: "ALL", label: "Everyone" },
+  { value: "DEPARTMENTS", label: "Departments" },
+  { value: "OFFICES", label: "Offices" },
+  { value: "USERS", label: "People" },
+  { value: "TAGS", label: "Tags" },
+];
 
 const TYPE_OPTS: { value: AnnType; label: string; Icon: typeof Info }[] = [
   { value: "INFO", label: "Info", Icon: Info },
@@ -61,13 +70,50 @@ export function AnnouncementComposer({
   const [scheduleOn, setScheduleOn] = useState(false);
   const [publishedAt, setPublishedAt] = useState("");
   const [expiresAt, setExpiresAt] = useState(dateInputValue(30));
+  const [audienceType, setAudienceType] = useState<AudienceType>("ALL");
+  const [audienceIds, setAudienceIds] = useState<string[]>([]);
+  const [audOptions, setAudOptions] = useState<{ id: string; name: string }[]>([]);
+  const [audLoading, setAudLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Load the id list for the chosen audience type (once per switch to a
+  // non-ALL type). People come from the org-wide user search; the rest are
+  // small lookup lists.
+  useEffect(() => {
+    if (!open || audienceType === "ALL") { setAudOptions([]); return; }
+    let active = true;
+    setAudLoading(true);
+    const url =
+      audienceType === "DEPARTMENTS" ? "/api/departments" :
+      audienceType === "OFFICES" ? "/api/offices" :
+      audienceType === "TAGS" ? "/api/tags" :
+      "/api/users?scope=all&limit=500";
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => {
+        if (!active) return;
+        const raw = Array.isArray(d) ? d : (d?.data?.items ?? d?.data ?? []);
+        setAudOptions(
+          (raw as Record<string, unknown>[]).map((o) => ({
+            id: String(o.id),
+            name:
+              audienceType === "USERS"
+                ? (`${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || String(o.email ?? "Unknown"))
+                : String(o.name ?? (audienceType === "OFFICES" ? "Office" : audienceType === "TAGS" ? "Tag" : "Department")),
+          })),
+        );
+      })
+      .catch(() => { if (active) setAudOptions([]); })
+      .finally(() => { if (active) setAudLoading(false); });
+    return () => { active = false; };
+  }, [open, audienceType]);
 
   function reset() {
     setTitle(""); setContent(""); setType("INFO"); setPriority("NORMAL");
     setPinned(false); setMustAcknowledge(false); setScheduleOn(false);
     setPublishedAt(""); setExpiresAt(dateInputValue(30)); setError(null);
+    setAudienceType("ALL"); setAudienceIds([]);
   }
 
   function handleOpenChange(next: boolean) {
@@ -95,6 +141,11 @@ export function AnnouncementComposer({
       if (pubMs > Date.now()) publishIso = new Date(pubMs).toISOString();
     }
 
+    if (audienceType !== "ALL" && audienceIds.length === 0) {
+      setError("Pick at least one target, or choose Everyone.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await fetch("/api/announcements", {
@@ -108,6 +159,7 @@ export function AnnouncementComposer({
           pinned,
           mustAcknowledge,
           expiresAt,
+          targetAudience: { type: audienceType, ids: audienceType === "ALL" ? [] : audienceIds },
           ...(publishIso ? { publishedAt: publishIso } : {}),
         }),
       });
@@ -134,7 +186,7 @@ export function AnnouncementComposer({
       <DialogContent className="workwrk-os os-portal-panel max-w-[560px]">
         <DialogHeader>
           <DialogTitle>New announcement</DialogTitle>
-          <DialogDescription>Broadcast an update to everyone in your organization.</DialogDescription>
+          <DialogDescription>Post an update to everyone, or target specific departments, offices, people or tags.</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-4 py-1">
@@ -161,6 +213,64 @@ export function AnnouncementComposer({
               className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2 text-[13.5px] leading-relaxed text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none resize-y focus:border-[var(--os-brand)]"
             />
           </label>
+
+          {/* Audience — Everyone, or a set of departments / offices / people /
+              tags. Non-ALL targets are resolved to their current members at
+              read time, so the feed + notifications only reach the audience. */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Who sees this</span>
+            <div className="flex flex-wrap gap-1.5">
+              {AUDIENCE_OPTS.map(({ value, label }) => {
+                const active = audienceType === value;
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => { setAudienceType(value); setAudienceIds([]); }}
+                    className={`h-8 px-3 rounded-lg text-[12.5px] border transition-colors ${
+                      active
+                        ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
+                        : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            {audienceType !== "ALL" && (
+              <div className="mt-1 max-h-[168px] overflow-y-auto rounded-lg border border-[var(--os-line)] p-1.5">
+                {audLoading ? (
+                  <div className="px-2 py-3 text-center text-[12px] text-[var(--os-ink-4)]">Loading…</div>
+                ) : audOptions.length === 0 ? (
+                  <div className="px-2 py-3 text-center text-[12px] text-[var(--os-ink-4)]">
+                    {audienceType === "TAGS" ? "No tags yet — create some in Settings → Tags" : "Nothing to pick here"}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1">
+                    {audOptions.map((o) => {
+                      const on = audienceIds.includes(o.id);
+                      return (
+                        <button
+                          key={o.id}
+                          type="button"
+                          onClick={() => setAudienceIds((l) => (on ? l.filter((x) => x !== o.id) : [...l, o.id]))}
+                          className={`flex items-center gap-2 h-8 px-2 rounded-md text-[12.5px] text-left border ${
+                            on ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)]" : "border-transparent hover:bg-[var(--os-surface-1)]"
+                          }`}
+                        >
+                          <span className={`inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${on ? "bg-[var(--os-brand)] border-[var(--os-brand)]" : "border-[var(--os-line)]"}`}>
+                            {on && <Check className="h-2.5 w-2.5 text-white" />}
+                          </span>
+                          <span className="truncate text-[var(--os-ink)]">{o.name}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Type */}
           <div className="flex flex-col gap-1.5">
