@@ -14,7 +14,6 @@ import { useSession } from "next-auth/react";
 import { ChevronDown, Search, UserRound, UserX, X } from "lucide-react";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
-import { useAnchorPos } from "@/components/board-view/use-anchor-pos";
 
 function personName(p: PersonRef): string {
   const n = `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim();
@@ -37,7 +36,6 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
   const [people, setPeople] = useState<PersonRef[] | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuPos = useAnchorPos(ref, open, 280);
 
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
@@ -104,10 +102,16 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
         <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" />
       </button>
 
-      {open && menuPos ? (
+      {open ? (
+        // Absolute (not fixed): the goal modal centres its DialogContent with a
+        // CSS transform, and a position:fixed child anchors to that transformed
+        // box, not the viewport — which flung this popover off-screen (the
+        // "owner/contributors don't work" bug). Absolute anchors to this
+        // relative wrapper, so it stays put inside the dialog AND on the inline
+        // goal-detail usage. Staying a DOM child also keeps the dialog's focus
+        // trap + click-outside working (a body portal would break the search).
         <div
-          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 280 }}
-          className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          className="absolute left-0 top-full z-[200] mt-1 w-[280px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex h-9 items-center gap-2 border-b border-zinc-100 px-3 dark:border-zinc-800">

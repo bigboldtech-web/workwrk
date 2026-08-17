@@ -2,8 +2,9 @@
 
 // GoalAudiencePicker — ONE multi-select for a goal's audience, mixing
 // people, departments and roles in grouped sections. Same popover pattern
-// as board-view/assignee-picker (search on top, MenuItem rows, fixed
-// positioning via useAnchorPos); selection is a list of
+// as board-view/assignee-picker (search on top, MenuItem rows), but
+// absolute-positioned so it survives the goal modal's transformed
+// DialogContent; selection is a list of
 // { type: "USER"|"DEPARTMENT"|"ROLE", id } refs — the API resolves them
 // to people at read time, so a department/role entry follows the org
 // chart instead of freezing a member list.
@@ -15,7 +16,6 @@ import { useEffect, useRef, useState } from "react";
 import { Briefcase, Building2, ChevronDown, Search, UsersRound, X } from "lucide-react";
 import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
-import { useAnchorPos } from "@/components/board-view/use-anchor-pos";
 
 export type AudienceType = "USER" | "DEPARTMENT" | "ROLE";
 
@@ -112,7 +112,6 @@ export function GoalAudiencePicker({
   const [roles, setRoles] = useState<RoleRow[] | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const menuPos = useAnchorPos(ref, open, 300);
 
   useEffect(() => {
     if (!open) return;
@@ -192,10 +191,16 @@ export function GoalAudiencePicker({
         <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" />
       </button>
 
-      {open && menuPos ? (
+      {open ? (
+        // Absolute (not fixed): the goal modal centres its DialogContent with a
+        // CSS transform, and a position:fixed child anchors to that transformed
+        // box, not the viewport — which flung this popover off-screen (the
+        // "owner/contributors don't work" bug). Absolute anchors to this
+        // relative wrapper, so it stays put inside the dialog AND on the inline
+        // goal-detail usage. Staying a DOM child also keeps the dialog's focus
+        // trap + click-outside working (a body portal would break the search).
         <div
-          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 300 }}
-          className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+          className="absolute left-0 top-full z-[200] mt-1 w-[300px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex h-9 items-center gap-2 border-b border-zinc-100 px-3 dark:border-zinc-800">
