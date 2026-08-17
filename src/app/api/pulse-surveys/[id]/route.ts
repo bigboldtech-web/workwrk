@@ -2,8 +2,9 @@ import { NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { resolveUserIdsByTags, getUserTagIds } from "@/lib/user-tags";
 
-const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS"]);
+const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"]);
 const STATUSES = new Set(["DRAFT", "ACTIVE", "CLOSED"]);
 const VALID_FREQUENCIES = new Set(["WEEKLY", "BIWEEKLY", "MONTHLY", "QUARTERLY"]);
 
@@ -34,12 +35,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     select: { officeId: true, departmentId: true },
   });
   const manager = isManager(session);
+  const viewerTagIds = survey.audienceType === "TAGS" ? await getUserTagIds(orgId, userId) : [];
 
   const inAudience =
     survey.audienceType === "ALL" ? true :
     survey.audienceType === "OFFICES" ? (!!viewer?.officeId && survey.officeIds.includes(viewer.officeId)) :
     survey.audienceType === "DEPARTMENTS" ? (!!viewer?.departmentId && survey.departmentIds.includes(viewer.departmentId)) :
     survey.audienceType === "USERS" ? survey.userIds.includes(userId) :
+    survey.audienceType === "TAGS" ? survey.tagIds.some((t) => viewerTagIds.includes(t)) :
     false;
 
   // Only the audience or a manager may see a survey's contents.
@@ -53,6 +56,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (survey.audienceType === "OFFICES") where.officeId = { in: survey.officeIds };
     if (survey.audienceType === "DEPARTMENTS") where.departmentId = { in: survey.departmentIds };
     if (survey.audienceType === "USERS") where.id = { in: survey.userIds };
+    if (survey.audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(orgId, survey.tagIds) };
     audienceSize = await prisma.user.count({ where });
   }
 
@@ -74,6 +78,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       // don't hand org-targeting metadata to rank-and-file respondents.
       officeIds: manager ? survey.officeIds : undefined,
       departmentIds: manager ? survey.departmentIds : undefined,
+      tagIds: manager ? survey.tagIds : undefined,
       frequency: survey.frequency,
       closesAt: survey.closesAt,
       closedAt: survey.closedAt,
@@ -158,10 +163,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ? body.departmentIds.filter((x: unknown) => typeof x === "string") : [];
     const userIds = body.audienceType === "USERS" && Array.isArray(body.userIds)
       ? body.userIds.filter((x: unknown) => typeof x === "string") : [];
+    const tagIds = body.audienceType === "TAGS" && Array.isArray(body.tagIds)
+      ? body.tagIds.filter((x: unknown) => typeof x === "string") : [];
 
     if (body.audienceType === "OFFICES" && officeIds.length === 0) return jsonError("Pick at least one office");
     if (body.audienceType === "DEPARTMENTS" && departmentIds.length === 0) return jsonError("Pick at least one department");
     if (body.audienceType === "USERS" && userIds.length === 0) return jsonError("Pick at least one user");
+    if (body.audienceType === "TAGS" && tagIds.length === 0) return jsonError("Pick at least one tag");
 
     if (officeIds.length > 0) {
       const valid = await prisma.office.findMany({ where: { id: { in: officeIds }, organizationId: orgId }, select: { id: true } });
@@ -175,10 +183,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const valid = await prisma.user.findMany({ where: { id: { in: userIds }, organizationId: orgId, deletedAt: null }, select: { id: true } });
       if (valid.length !== userIds.length) return jsonError("One or more users invalid");
     }
+    if (tagIds.length > 0) {
+      const valid = await prisma.tag.findMany({ where: { id: { in: tagIds }, organizationId: orgId, archived: false }, select: { id: true } });
+      if (valid.length !== tagIds.length) return jsonError("One or more tags invalid");
+    }
 
     data.officeIds = officeIds;
     data.departmentIds = departmentIds;
     data.userIds = userIds;
+    data.tagIds = tagIds;
   }
 
   const updated = await prisma.pulseSurvey.update({ where: { id }, data });

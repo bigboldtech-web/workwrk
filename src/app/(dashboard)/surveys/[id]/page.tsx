@@ -60,6 +60,7 @@ interface DetailResp {
     audienceType: string;
     officeIds?: string[];
     departmentIds?: string[];
+    tagIds?: string[];
     frequency: string | null;
     closesAt: string | null;
     closedAt: string | null;
@@ -163,6 +164,7 @@ export default function SurveyDetailPage() {
     audienceType: survey.audienceType,
     officeIds: survey.officeIds ?? [],
     departmentIds: survey.departmentIds ?? [],
+    tagIds: survey.tagIds ?? [],
     anonymous: survey.anonymous,
     frequency: survey.frequency,
     closesAt: survey.closesAt,

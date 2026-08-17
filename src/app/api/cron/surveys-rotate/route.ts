@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { resolveUserIdsByTags } from "@/lib/user-tags";
 
 /**
  * Survey rotation + reminder cron.
@@ -43,7 +44,10 @@ async function resolveAudienceUserIds(s: {
   officeIds: string[];
   departmentIds: string[];
   userIds: string[];
+  tagIds: string[];
 }): Promise<string[]> {
+  // Tags are polymorphic (no User relation), so resolve them separately.
+  if (s.audienceType === "TAGS") return resolveUserIdsByTags(s.organizationId, s.tagIds);
   const where: any = { organizationId: s.organizationId, deletedAt: null };
   if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
   else if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
@@ -61,6 +65,7 @@ async function rotateOne(survey: {
   officeIds: string[];
   departmentIds: string[];
   userIds: string[];
+  tagIds: string[];
   anonymous: boolean;
   organizationId: string;
   closesAt: Date | null;
@@ -89,6 +94,7 @@ async function rotateOne(survey: {
       officeIds: survey.officeIds,
       departmentIds: survey.departmentIds,
       userIds: survey.userIds,
+      tagIds: survey.tagIds,
       anonymous: survey.anonymous,
       closesAt: nextClose,
       parentSurveyId: survey.id,
@@ -148,6 +154,7 @@ async function sendReminders(survey: {
   officeIds: string[];
   departmentIds: string[];
   userIds: string[];
+  tagIds: string[];
   organizationId: string;
   closesAt: Date | null;
 }): Promise<number> {
@@ -234,7 +241,7 @@ export async function POST(req: NextRequest) {
     where: { status: "ACTIVE", closesAt: { lte: now } },
     select: {
       id: true, title: true, questions: true, frequency: true,
-      audienceType: true, officeIds: true, departmentIds: true, userIds: true,
+      audienceType: true, officeIds: true, departmentIds: true, userIds: true, tagIds: true,
       anonymous: true, organizationId: true, closesAt: true,
     },
   });
@@ -256,7 +263,7 @@ export async function POST(req: NextRequest) {
     },
     select: {
       id: true, title: true, audienceType: true,
-      officeIds: true, departmentIds: true, userIds: true,
+      officeIds: true, departmentIds: true, userIds: true, tagIds: true,
       organizationId: true, closesAt: true,
     },
   });

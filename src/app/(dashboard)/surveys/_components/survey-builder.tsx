@@ -40,12 +40,13 @@ export interface EditableSurvey {
   audienceType: string;
   officeIds: string[];
   departmentIds: string[];
+  tagIds: string[];
   anonymous: boolean;
   frequency: string | null;
   closesAt: string | null;
 }
 
-type AudienceType = "ALL" | "OFFICES" | "DEPARTMENTS" | "USERS";
+type AudienceType = "ALL" | "OFFICES" | "DEPARTMENTS" | "USERS" | "TAGS";
 type Lookup = { id: string; name: string };
 
 const Q_TYPES: { value: QType; label: string; Icon: typeof Star; hasOptions: boolean }[] = [
@@ -107,12 +108,14 @@ export function SurveyBuilder({
   const [audienceType, setAudienceType] = useState<AudienceType>("ALL");
   const [officeIds, setOfficeIds] = useState<string[]>([]);
   const [departmentIds, setDepartmentIds] = useState<string[]>([]);
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [anonymous, setAnonymous] = useState(true);
   const [frequency, setFrequency] = useState("");
   const [closesAt, setClosesAt] = useState("");
 
   const [offices, setOffices] = useState<Lookup[]>([]);
   const [departments, setDepartments] = useState<Lookup[]>([]);
+  const [tags, setTags] = useState<Lookup[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,9 +130,10 @@ export function SurveyBuilder({
           ? survey.questions.map((q) => ({ ...q, id: q.id || newQid() }))
           : [blankQuestion()],
       );
-      setAudienceType((["ALL", "OFFICES", "DEPARTMENTS", "USERS"].includes(survey.audienceType) ? survey.audienceType : "ALL") as AudienceType);
+      setAudienceType((["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"].includes(survey.audienceType) ? survey.audienceType : "ALL") as AudienceType);
       setOfficeIds(survey.officeIds ?? []);
       setDepartmentIds(survey.departmentIds ?? []);
+      setTagIds(survey.tagIds ?? []);
       setAnonymous(survey.anonymous);
       setFrequency(survey.frequency ?? "");
       setClosesAt(futureDateOnly(survey.closesAt));
@@ -139,6 +143,7 @@ export function SurveyBuilder({
       setAudienceType("ALL");
       setOfficeIds([]);
       setDepartmentIds([]);
+      setTagIds([]);
       setAnonymous(true);
       setFrequency("");
       setClosesAt("");
@@ -163,11 +168,18 @@ export function SurveyBuilder({
           if (Array.isArray(data)) setDepartments(data.map((d) => ({ id: String((d as Lookup).id), name: String((d as Lookup).name ?? "Department") })));
         }
       }
+      if (tags.length === 0) {
+        const r = await fetch("/api/tags");
+        if (r.ok) {
+          const data: unknown = await r.json();
+          if (Array.isArray(data)) setTags(data.map((t) => ({ id: String((t as Lookup).id), name: String((t as Lookup).name ?? "Tag") })));
+        }
+      }
     } catch { /* lookups are best-effort; ALL still works */ }
-  }, [offices.length, departments.length]);
+  }, [offices.length, departments.length, tags.length]);
 
   useEffect(() => {
-    if (open && (audienceType === "OFFICES" || audienceType === "DEPARTMENTS")) void loadLookups();
+    if (open && (audienceType === "OFFICES" || audienceType === "DEPARTMENTS" || audienceType === "TAGS")) void loadLookups();
   }, [open, audienceType, loadLookups]);
 
   function handleOpenChange(next: boolean) {
@@ -243,6 +255,7 @@ export function SurveyBuilder({
 
     if (audienceType === "OFFICES" && officeIds.length === 0) { setError("Pick at least one office."); return; }
     if (audienceType === "DEPARTMENTS" && departmentIds.length === 0) { setError("Pick at least one department."); return; }
+    if (audienceType === "TAGS" && tagIds.length === 0) { setError("Pick at least one tag."); return; }
 
     if (closesAt) {
       const ms = new Date(`${closesAt}T23:59:59`).getTime();
@@ -256,6 +269,7 @@ export function SurveyBuilder({
       audienceType,
       officeIds: audienceType === "OFFICES" ? officeIds : [],
       departmentIds: audienceType === "DEPARTMENTS" ? departmentIds : [],
+      tagIds: audienceType === "TAGS" ? tagIds : [],
       anonymous,
       frequency: frequency || null,
       closesAt: closesAt ? new Date(`${closesAt}T23:59:59`).toISOString() : null,
@@ -417,6 +431,7 @@ export function SurveyBuilder({
                 { value: "ALL", label: "Everyone" },
                 { value: "OFFICES", label: "By office" },
                 { value: "DEPARTMENTS", label: "By department" },
+                { value: "TAGS", label: "By tag" },
               ] as { value: AudienceType; label: string }[]).map(({ value, label }) => {
                 const active = audienceType === value;
                 return (
@@ -447,6 +462,9 @@ export function SurveyBuilder({
             ) : null}
             {audienceType === "DEPARTMENTS" ? (
               <PickerGrid items={departments} selected={departmentIds} onToggle={(id) => setDepartmentIds((l) => toggleId(l, id))} empty="No departments found" />
+            ) : null}
+            {audienceType === "TAGS" ? (
+              <PickerGrid items={tags} selected={tagIds} onToggle={(id) => setTagIds((l) => toggleId(l, id))} empty="No tags yet — create some in Settings → Tags" />
             ) : null}
           </div>
 

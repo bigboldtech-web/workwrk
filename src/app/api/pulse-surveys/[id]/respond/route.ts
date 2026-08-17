@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { resolveUserIdsByTags } from "@/lib/user-tags";
 
 export async function POST(
   req: NextRequest,
@@ -19,7 +20,7 @@ export async function POST(
 
   const survey = await prisma.pulseSurvey.findFirst({
     where: { id: surveyId, organizationId: orgId },
-    select: { audienceType: true, officeIds: true, departmentIds: true, userIds: true, status: true },
+    select: { audienceType: true, officeIds: true, departmentIds: true, userIds: true, tagIds: true, status: true },
   });
   if (!survey) return jsonError("Survey not found", 404);
   // Only an open (launched, not-yet-closed) survey accepts responses.
@@ -31,10 +32,15 @@ export async function POST(
       where: { id: userId },
       select: { officeId: true, departmentId: true },
     });
+    const tagMatch =
+      survey.audienceType === "TAGS"
+        ? (await resolveUserIdsByTags(orgId, survey.tagIds)).includes(userId)
+        : false;
     const inAudience =
       (survey.audienceType === "OFFICES" && !!viewer?.officeId && survey.officeIds.includes(viewer.officeId)) ||
       (survey.audienceType === "DEPARTMENTS" && !!viewer?.departmentId && survey.departmentIds.includes(viewer.departmentId)) ||
-      (survey.audienceType === "USERS" && survey.userIds.includes(userId));
+      (survey.audienceType === "USERS" && survey.userIds.includes(userId)) ||
+      tagMatch;
     if (!inAudience) return jsonError("You're not in this survey's audience", 403);
   }
 

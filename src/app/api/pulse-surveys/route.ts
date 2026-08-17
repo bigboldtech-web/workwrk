@@ -3,8 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { sendEmail } from "@/lib/email";
 import { genericNotificationTemplate } from "@/lib/email-templates";
+import { resolveUserIdsByTags, getUserTagIds } from "@/lib/user-tags";
 
-const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS"]);
+const AUDIENCE_TYPES = new Set(["ALL", "OFFICES", "DEPARTMENTS", "USERS", "TAGS"]);
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -18,6 +19,8 @@ export async function GET() {
     select: { id: true, officeId: true, departmentId: true, accessLevel: true },
   });
   const viewerIsManager = isManager(session);
+  // The viewer's own person-tags — decides membership in a TAGS survey.
+  const viewerTagIds = await getUserTagIds(orgId, userId);
 
   const surveys = await prisma.pulseSurvey.findMany({
     where: { organizationId: orgId },
@@ -38,6 +41,7 @@ export async function GET() {
     if (s.audienceType === "OFFICES") where.officeId = { in: s.officeIds };
     if (s.audienceType === "DEPARTMENTS") where.departmentId = { in: s.departmentIds };
     if (s.audienceType === "USERS") where.id = { in: s.userIds };
+    if (s.audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(orgId, s.tagIds) };
     return prisma.user.count({ where });
   }
 
@@ -46,6 +50,7 @@ export async function GET() {
     if (s.audienceType === "OFFICES") return !!viewer?.officeId && s.officeIds.includes(viewer.officeId);
     if (s.audienceType === "DEPARTMENTS") return !!viewer?.departmentId && s.departmentIds.includes(viewer.departmentId);
     if (s.audienceType === "USERS") return s.userIds.includes(userId);
+    if (s.audienceType === "TAGS") return s.tagIds.some((t) => viewerTagIds.includes(t));
     return false;
   }
 
@@ -74,7 +79,7 @@ export async function POST(req: NextRequest) {
 
   const orgId = getOrgId(session);
   const body = await req.json();
-  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, anonymous, closesAt } = body;
+  const { title, questions, frequency, audienceType, officeIds, departmentIds, userIds, tagIds, anonymous, closesAt } = body;
 
   if (!title?.trim() || !Array.isArray(questions) || questions.length === 0) {
     return jsonError("Title and questions required");
@@ -101,10 +106,12 @@ export async function POST(req: NextRequest) {
   const resolvedOfficeIds = resolvedAudienceType === "OFFICES" && Array.isArray(officeIds) ? officeIds.filter((x: unknown) => typeof x === "string") : [];
   const resolvedDepartmentIds = resolvedAudienceType === "DEPARTMENTS" && Array.isArray(departmentIds) ? departmentIds.filter((x: unknown) => typeof x === "string") : [];
   const resolvedUserIds = resolvedAudienceType === "USERS" && Array.isArray(userIds) ? userIds.filter((x: unknown) => typeof x === "string") : [];
+  const resolvedTagIds = resolvedAudienceType === "TAGS" && Array.isArray(tagIds) ? tagIds.filter((x: unknown) => typeof x === "string") : [];
 
   if (resolvedAudienceType === "OFFICES" && resolvedOfficeIds.length === 0) return jsonError("Pick at least one office");
   if (resolvedAudienceType === "DEPARTMENTS" && resolvedDepartmentIds.length === 0) return jsonError("Pick at least one department");
   if (resolvedAudienceType === "USERS" && resolvedUserIds.length === 0) return jsonError("Pick at least one user");
+  if (resolvedAudienceType === "TAGS" && resolvedTagIds.length === 0) return jsonError("Pick at least one tag");
 
   // Validate IDs belong to the org
   if (resolvedOfficeIds.length > 0) {
@@ -119,6 +126,10 @@ export async function POST(req: NextRequest) {
     const valid = await prisma.user.findMany({ where: { id: { in: resolvedUserIds }, organizationId: orgId, deletedAt: null }, select: { id: true } });
     if (valid.length !== resolvedUserIds.length) return jsonError("One or more users invalid", 400);
   }
+  if (resolvedTagIds.length > 0) {
+    const valid = await prisma.tag.findMany({ where: { id: { in: resolvedTagIds }, organizationId: orgId, archived: false }, select: { id: true } });
+    if (valid.length !== resolvedTagIds.length) return jsonError("One or more tags invalid", 400);
+  }
 
   const survey = await prisma.pulseSurvey.create({
     data: {
@@ -130,6 +141,7 @@ export async function POST(req: NextRequest) {
       officeIds: resolvedOfficeIds,
       departmentIds: resolvedDepartmentIds,
       userIds: resolvedUserIds,
+      tagIds: resolvedTagIds,
       // Default anonymous unless the caller explicitly opts out.
       anonymous: anonymous === false ? false : true,
       closesAt: resolvedClosesAt,
@@ -146,6 +158,7 @@ export async function POST(req: NextRequest) {
     resolvedOfficeIds,
     resolvedDepartmentIds,
     resolvedUserIds,
+    resolvedTagIds,
   ).catch((e) => console.error("[Survey] notifyAudience failed:", e));
 
   return jsonSuccess(survey, 201);
@@ -159,11 +172,13 @@ async function notifyAudience(
   officeIds: string[],
   departmentIds: string[],
   userIds: string[],
+  tagIds: string[],
 ) {
   const where: any = { organizationId: orgId, deletedAt: null };
   if (audienceType === "OFFICES") where.officeId = { in: officeIds };
   else if (audienceType === "DEPARTMENTS") where.departmentId = { in: departmentIds };
   else if (audienceType === "USERS") where.id = { in: userIds };
+  else if (audienceType === "TAGS") where.id = { in: await resolveUserIdsByTags(orgId, tagIds) };
   // ALL → no extra filter
 
   const audience = await prisma.user.findMany({
