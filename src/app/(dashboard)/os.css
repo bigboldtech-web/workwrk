@@ -15963,6 +15963,17 @@ table.os-tbl {
 .bdoc-bn .bn-container { background: transparent; }
 .bdoc-bn .bn-editor { padding: 0; }
 
+/* Kill the block-node selection ring. BlockNote draws a 4px #64a0ff outline
+   around whatever block is node-selected (.ProseMirror-selectednode) — the
+   blue rectangle around sub-page links, images, tables, etc. the moment you
+   click one. Removed everywhere per design: node selection still works, it's
+   just not outlined. These match BlockNote's own selectors (in
+   @blocknote/*/style.css); !important wins regardless of CSS import order. */
+.bn-block-content.ProseMirror-selectednode > *,
+.ProseMirror-selectednode > .bn-block-content > * {
+  outline: none !important;
+}
+
 /* ──────────── BN custom block: Sub-page ──────────── */
 .bn-subpage {
   display: flex;
