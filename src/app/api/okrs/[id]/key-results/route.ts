@@ -61,8 +61,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const targetValue = d.targetValue ?? 100;
   // A linked KR is measured by its gauge — a hand-typed currentValue is
   // ignored (derived wins). Unlinked KRs keep the classic manual number.
+  // Default the current to the START, not 0: a target that opens at
+  // start=40 must read 40 (0% of the 40→90 journey), so the first "increase
+  // by 2" check-in lands at 42 — not 2, which is what a 0 default produced.
   const currentValueIgnored = kpiId != null && d.currentValue !== undefined;
-  const currentValue = kpiId == null ? (d.currentValue ?? 0) : 0;
+  const currentValue = kpiId == null ? (d.currentValue ?? startValue) : 0;
   const progress =
     kpiId == null
       ? keyResultProgress(
