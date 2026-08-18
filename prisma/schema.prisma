@@ -2942,7 +2942,8 @@ model ApiKey {
   id                 String        @id @default(cuid())
   // Display name chosen by the admin — e.g. "Production · Backend"
   name               String
-  // First 8 chars of the plaintext key, used for display + lookup hint.
+  // First 12 chars of the plaintext key ("wk_live_" + 4), for display
+  // + lookup hint. See generateApiKey() in src/lib/api-auth.ts.
   // Full key is only shown once at creation time.
   prefix             String
   // SHA-256 hash of the plaintext key. We never store the raw key.
