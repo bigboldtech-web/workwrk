@@ -1,24 +1,28 @@
-# Cron schedule — aaPanel setup
+# Cron schedule — production setup (INSTALLED 2026-08-18)
 
-WorkwrK ships several time-driven jobs as `POST /api/cron/*` endpoints.
-On aaPanel the simplest setup is a shell-script cron per endpoint that
-hits the URL with the shared `CRON_SECRET` header.
+WorkwrK's time-driven jobs are `POST` endpoints fired by curl from root's
+crontab on the aaPanel server — the SAME mechanism the ManagedAd app on this
+host uses, NOT the aaPanel Cron UI. The canonical install is the
+"WorkwrK cron schedule" block in `crontab -l` (21 rows), with the shared
+secret exported from `/etc/profile.d/workwrk.sh` (copied from the app env's
+`CRON_SECRET`). All output appends to `/var/log/workwrk-cron.log`.
 
-The previous `vercel.json` in the repo root is **not used** in this
-deployment — it's there as historical/reference documentation of the
-canonical schedules.
+STATUS: installed and verified end-to-end on 2026-08-18 (daemon-fired runs
+return 200; every endpoint test-fired once). Three older duplicate WorkwrK
+tasks in the aaPanel Cron UI should be deleted there (reminders every-minute,
+recurring-tasks hourly, kpi-reminders daily with a broken literal secret) —
+do NOT touch the aaPanel SSL-renewal task (acme_v2).
 
-## One-time setup
+Editing rules:
+- `crontab -e` on the server; keep the WorkwrK block below the ManagedAd one.
+- cron treats a literal `%` as end-of-command — never use `date +%F`-style
+  format strings inside a crontab line (this bit us during install).
+- `/api/email/process` is deliberately NOT scheduled: it is a legacy
+  duplicate of `/api/cron/email-queue`.
+- Endpoints added since the original doc: `/api/cron/automation-retry`
+  (every 10 min) and `/api/cron/org-hard-delete` (daily 03:30).
 
-You should already have `CRON_SECRET` in your env (.env.production or
-aaPanel Node config). Confirm with `pm2 env workwrk` or the equivalent.
-
-In aaPanel: **Cron** (left sidebar) → **Add Task**.
-
-For each row below, set:
-- Type: **Shell Script**
-- Schedule: per-row
-- Script: per-row (replace `https://workwrk.com` if your prod host is different)
+The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
@@ -34,6 +38,8 @@ For each row below, set:
 | Announcements publish | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/announcements-publish` |
 | Autonomous agents | `*/10 * * * *` | `curl -fsS --max-time 290 -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/run-due-agents` |
 | Recurring tasks spawn | `0 * * * *` (hourly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/recurring-tasks` |
+| Retry failed automation runs | `*/10 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/automation-retry` |
+| Hard-delete cancelled orgs (30-day grace) | `30 3 * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/org-hard-delete` |
 | Personal reminders fire (closed-app) | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/reminders` |
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
