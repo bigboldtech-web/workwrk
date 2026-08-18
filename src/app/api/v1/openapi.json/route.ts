@@ -12,16 +12,20 @@ export async function GET(req: Request) {
   // first, then the configured public URL, and only then the raw origin.
   const h = req.headers;
   const fwdHost = h.get("x-forwarded-host") || h.get("host");
-  const fwdProto = h.get("x-forwarded-proto") || "https";
   const configured = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
   const rawOrigin = new URL(req.url).origin.replace(/\/$/, "");
-  const isLocal = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(u);
+  const isLocalHost = (host: string) => /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(host);
 
   let base: string;
-  if (fwdHost && !isLocal(`${fwdProto}://${fwdHost}`)) base = `${fwdProto}://${fwdHost}`;
-  else if (configured && !isLocal(configured)) base = configured;
-  else if (!isLocal(rawOrigin)) base = rawOrigin;
-  else base = rawOrigin; // genuine local dev — keep localhost so dev tooling works
+  if (fwdHost && !isLocalHost(fwdHost)) {
+    // A public host is always served over TLS here; the proxy's own hop
+    // reports x-forwarded-proto: http, which would publish an http:// URL.
+    base = `https://${fwdHost}`;
+  } else if (configured && !isLocalHost(new URL(configured).host)) {
+    base = configured;
+  } else {
+    base = rawOrigin; // genuine local dev — keep localhost so dev tooling works
+  }
 
   const spec = {
     openapi: "3.1.0",
