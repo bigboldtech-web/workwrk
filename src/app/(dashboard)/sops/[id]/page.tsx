@@ -1508,9 +1508,14 @@ export default function SOPDetailPage() {
                       <X size={14} className="mr-2" /> Turn off public link
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onSelect={() => setWalkthroughOpen(true)}>
-                    <Play size={14} className="mr-2" /> Walk through
-                  </DropdownMenuItem>
+                  {/* Walkthrough plays steps one at a time — prose (written-doc)
+                      SOPs have no steps, so offering it there dead-ends on an
+                      empty modal. */}
+                  {!isWrittenDocContent(sop) && (
+                    <DropdownMenuItem onSelect={() => setWalkthroughOpen(true)}>
+                      <Play size={14} className="mr-2" /> Walk through
+                    </DropdownMenuItem>
+                  )}
                   {(sop.status === "PUBLISHED" || sop.sopType === "CHECKLIST") && sop.status !== "ARCHIVED" && (
                     <DropdownMenuSeparator />
                   )}
