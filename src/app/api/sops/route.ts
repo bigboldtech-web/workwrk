@@ -94,6 +94,27 @@ export async function GET(req: NextRequest) {
   return jsonSuccess(paginatedResult(sops, total, pagination));
 }
 
+const SOP_TYPES = ["WRITTEN", "CHECKLIST", "RECORDED"] as const;
+type SopType = (typeof SOP_TYPES)[number];
+
+// Content `type` tags each sopType may legitimately carry. WRITTEN has
+// accumulated several shapes over time ('steps' list, blocks editor,
+// richtext HTML, plain body) — all stay valid, and a bare { steps: [] }
+// with no type tag (the oldest WRITTEN shape) passes the null-tag path.
+// RECORDED accepts both casings ('recorded' from the extension route,
+// 'RECORDED' from the legacy screen-recording stub).
+const CONTENT_TYPES_BY_SOP_TYPE: Record<SopType, ReadonlySet<string>> = {
+  WRITTEN: new Set(["steps", "blocks", "WRITTEN", "richtext", "process_flow"]),
+  CHECKLIST: new Set(["CHECKLIST"]),
+  RECORDED: new Set(["recorded", "RECORDED"]),
+};
+
+function defaultSOPContent(type: SopType) {
+  if (type === "CHECKLIST") return { type: "CHECKLIST", sections: [] };
+  if (type === "RECORDED") return { type: "recorded", steps: [] };
+  return { type: "WRITTEN", body: "" };
+}
+
 export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
@@ -115,6 +136,23 @@ export async function POST(req: NextRequest) {
   const description = typeof rawDescription === "string" ? rawDescription.trim() : rawDescription;
 
   if (!title) return jsonError("SOP title is required");
+
+  // sopType drives which editor opens and how assignments count steps.
+  // An invalid value used to 500 at the Prisma enum, and a type/content
+  // mismatch (e.g. checklist sections stored on a WRITTEN row) renders
+  // as an empty SOP with no recovery path.
+  const resolvedType = (sopType ?? "WRITTEN") as SopType;
+  if (!SOP_TYPES.includes(resolvedType)) {
+    return jsonError(`Invalid sopType "${sopType}". Expected WRITTEN, CHECKLIST, or RECORDED.`);
+  }
+  const resolvedContent = content || defaultSOPContent(resolvedType);
+  const contentType =
+    typeof resolvedContent === "object" && !Array.isArray(resolvedContent) && typeof (resolvedContent as { type?: unknown }).type === "string"
+      ? ((resolvedContent as { type: string }).type)
+      : null;
+  if (contentType && !CONTENT_TYPES_BY_SOP_TYPE[resolvedType].has(contentType)) {
+    return jsonError(`content.type "${contentType}" doesn't match sopType ${resolvedType}. Omit content to get the right empty shape.`);
+  }
 
   // Validate folder: exists in caller's org AND caller has write access.
   const resolvedFolderId: string | null = folderId || null;
@@ -143,8 +181,8 @@ export async function POST(req: NextRequest) {
       description,
       category,
       subcategory: subcategory || null,
-      sopType: sopType || "WRITTEN",
-      content: content || { steps: [] },
+      sopType: resolvedType,
+      content: resolvedContent,
       folderId: resolvedFolderId,
       tags: cleanTags,
       organizationId: getOrgId(session),

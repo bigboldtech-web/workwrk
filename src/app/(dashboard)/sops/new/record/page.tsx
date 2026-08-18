@@ -5,9 +5,12 @@
  * The actual capture is done by the "WorkwrK SOP Recorder" browser extension
  * (see /extension): every click is captured as a screenshot + a plain-English
  * step, then POSTed to /api/sops/record which creates the SOP. This page is the
- * setup + how-to surface (video screen-recording lives in Clips, not here).
+ * setup surface AND the start trigger: the extension only begins recording when
+ * this page posts the WORKWRK_APP_ORIGIN + WORKWRK_START_RECORDING handshake
+ * (video screen-recording lives in Clips, not here).
  */
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
@@ -23,8 +26,8 @@ const STEPS = [
   },
   {
     Icon: Play,
-    title: "Hit Record",
-    body: "Pin the extension, open the page/app you're documenting, click the extension, and press Record. A subtle dot marks each captured click.",
+    title: "Name it and hit Start recording",
+    body: "Give the SOP a title below and press Start recording. A subtle dot marks each captured click, and a small “WorkwrK Recording” badge shows on every page.",
   },
   {
     Icon: MousePointerClick,
@@ -34,11 +37,64 @@ const STEPS = [
   {
     Icon: CheckCircle2,
     title: "Stop — your SOP is built",
-    body: "Press Stop. The extension creates the SOP from your captured steps and it lands in your library, ready to edit, publish, and assign.",
+    body: "Open the extension popup and press Stop & Save. The extension creates the SOP from your captured steps and it lands in your library, ready to edit, publish, and assign.",
   },
 ];
 
+type StartStatus = "idle" | "starting" | "recording" | "missing";
+
 export default function RecordSopPage() {
+  const [title, setTitle] = useState("");
+  const [installed, setInstalled] = useState(false);
+  const [status, setStatus] = useState<StartStatus>("idle");
+  const ackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // content.js stamps <html data-workwrk-extension> and posts
+    // WORKWRK_EXTENSION_INSTALLED at document_idle — check both, since this
+    // component can mount before or after the content script runs. The
+    // attribute check runs in a task, not the effect body: setState here
+    // would re-render mid-effect (react-hooks/set-state-in-effect).
+    const t = setTimeout(() => {
+      if (document.documentElement.getAttribute("data-workwrk-extension") === "true") {
+        setInstalled(true);
+      }
+    }, 0);
+    function onMessage(e: MessageEvent) {
+      if (e.source !== window || e.origin !== window.location.origin) return;
+      const type = (e.data as { type?: string } | null)?.type;
+      if (type === "WORKWRK_EXTENSION_INSTALLED") setInstalled(true);
+      if (type === "WORKWRK_RECORDING_STARTED") {
+        if (ackTimer.current) clearTimeout(ackTimer.current);
+        setStatus("recording");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("message", onMessage);
+      if (ackTimer.current) clearTimeout(ackTimer.current);
+    };
+  }, []);
+
+  function startRecording() {
+    const sopTitle = title.trim() || `Recorded SOP ${new Date().toLocaleDateString()}`;
+    // Handshake the extension's content script expects: teach it our origin
+    // (it validates event.origin itself), then hand over the SOP metadata.
+    window.postMessage({ type: "WORKWRK_APP_ORIGIN", origin: window.location.origin }, window.location.origin);
+    window.postMessage(
+      { type: "WORKWRK_START_RECORDING", sop: { title: sopTitle, category: "", subcategory: "", description: "" } },
+      window.location.origin,
+    );
+    setStatus("starting");
+    if (ackTimer.current) clearTimeout(ackTimer.current);
+    // No WORKWRK_RECORDING_STARTED ack → the extension isn't there (or its
+    // server URL doesn't trust this origin). Show the fallback hint.
+    ackTimer.current = setTimeout(() => {
+      setStatus((s) => (s === "starting" ? "missing" : s));
+    }, 1500);
+  }
+
   return (
     <>
       <OsTitleBar
@@ -72,6 +128,50 @@ export default function RecordSopPage() {
                 every click — turning a task you just <em>do</em> into a documented, screenshot-by-screenshot SOP.
               </p>
             </div>
+          </div>
+
+          <div className="mb-5 rounded-xl border border-zinc-200 bg-white p-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[14px] font-medium text-zinc-900">Start recording</div>
+              {installed && (
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Extension detected
+                </span>
+              )}
+            </div>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-500">
+              Name the SOP and hit start, then click through your process. Stop from the extension popup when you&apos;re done.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="SOP title, e.g. Approve a leave request"
+                className="h-9 min-w-0 flex-1 rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+              <button
+                type="button"
+                onClick={startRecording}
+                disabled={status === "recording"}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium disabled:opacity-60"
+                style={{ background: "var(--os-brand)", color: "#fff" }}
+              >
+                <Play className="h-3.5 w-3.5" /> {status === "recording" ? "Recording…" : "Start recording"}
+              </button>
+            </div>
+            {status === "recording" && (
+              <p className="mt-2 flex items-start gap-1.5 text-[12.5px] text-emerald-600">
+                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Recording started. Every click is being captured. Open the extension popup and press Stop &amp; Save when you&apos;re done.
+              </p>
+            )}
+            {status === "missing" && (
+              <p className="mt-2 flex items-start gap-1.5 text-[12.5px] text-amber-600">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                Extension not detected. Install the WorkwrK SOP Recorder (step 1 below), reload this page, and try again.
+                If it&apos;s installed, check that its Server URL setting matches this address.
+              </p>
+            )}
           </div>
 
           <ol className="space-y-3">

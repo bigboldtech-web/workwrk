@@ -1,19 +1,22 @@
 "use client";
 
-/* New SOP — type picker. Three first-class SOP types each route to a builder. */
+/* New SOP — type picker. Four first-class SOP kinds each route to a builder.
+ * `?type=WRITTEN|CHECKLIST|RECORDED|STEPS` auto-triggers the matching card
+ * (used by the sidebar "+" menu). STEPS is a UI kind: stored as
+ * sopType WRITTEN with content { type: "steps", steps: [] }. */
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { FileText, ListChecks, MousePointerClick, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
+import { FileText, ListChecks, ListOrdered, MousePointerClick, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 
-type SOPType = "WRITTEN" | "CHECKLIST" | "RECORDED";
+type SOPKind = "WRITTEN" | "STEPS" | "CHECKLIST" | "RECORDED";
 
 const TYPES: {
-  type: SOPType;
+  type: SOPKind;
   Icon: React.ComponentType<{ className?: string }>;
   tile: string; iconColor: string; dot: string;
   label: string; tagline: string; bullets: string[];
@@ -24,6 +27,13 @@ const TYPES: {
     label: "Written SOP",
     tagline: "Long-form procedure with headings, lists, and rich text — reads like a note.",
     bullets: ["Notes-style block editor", "Versioned on every save", "Best for policies, runbooks, processes"],
+  },
+  {
+    type: "STEPS", Icon: ListOrdered,
+    tile: "bg-violet-50", iconColor: "text-violet-600", dot: "bg-violet-400",
+    label: "Step-by-step SOP",
+    tagline: "A numbered sequence of steps with optional details and images per step.",
+    bullets: ["Ordered step list", "Per-step notes + screenshots", "Reads top-to-bottom like a recipe"],
   },
   {
     type: "CHECKLIST", Icon: ListChecks,
@@ -43,11 +53,14 @@ const TYPES: {
 
 export default function NewSopPage() {
   const router = useRouter();
-  const [creating, setCreating] = useState<SOPType | null>(null);
-  const [hovered, setHovered] = useState<SOPType | null>(null);
+  const search = useSearchParams();
+  const [creating, setCreating] = useState<SOPKind | null>(null);
+  const [hovered, setHovered] = useState<SOPKind | null>(null);
   const { toast } = useOsToast();
+  // ?type= fires at most once, even across re-renders / failed creates.
+  const autoFiredRef = useRef(false);
 
-  async function pickType(type: SOPType) {
+  async function pickType(type: SOPKind) {
     // Click-capture SOPs are built by the recorder extension (Scribe flow), so
     // we don't pre-create an empty SOP — just open the setup / how-to page.
     if (type === "RECORDED") {
@@ -56,28 +69,47 @@ export default function NewSopPage() {
     }
     setCreating(type);
     const defaultTitle = type === "WRITTEN" ? "Untitled written SOP"
-      : type === "CHECKLIST" ? "Untitled checklist"
-      : "Untitled screen recording";
+      : type === "STEPS" ? "Untitled step-by-step SOP"
+      : "Untitled checklist";
     const defaultContent =
       type === "WRITTEN" ? { type: "WRITTEN", body: "" }
-      : type === "CHECKLIST" ? { type: "CHECKLIST", sections: [{ title: "Steps", steps: [{ id: "s1", title: "First step" }] }] }
-      : { type: "RECORDED", steps: [], recordings: [] };
+      : type === "STEPS" ? { type: "steps", steps: [] }
+      : { type: "CHECKLIST", sections: [{ title: "Steps", steps: [{ id: "s1", title: "First step" }] }] };
 
     try {
       const res = await fetch("/api/sops", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: defaultTitle, sopType: type, content: defaultContent }),
+        body: JSON.stringify({
+          title: defaultTitle,
+          // STEPS is a presentation of WRITTEN at the DB layer.
+          sopType: type === "STEPS" ? "WRITTEN" : type,
+          content: defaultContent,
+        }),
       });
       if (!res.ok) throw new Error(`POST ${res.status}`);
       const data = await res.json();
       const sop = data.data ?? data;
       if (type === "CHECKLIST") router.push(`/sops/new/checklist?id=${encodeURIComponent(sop.id)}`);
+      else if (type === "STEPS") router.push(`/sops/${encodeURIComponent(sop.id)}?edit=1`);
       else router.push(`/sops/new/text?id=${encodeURIComponent(sop.id)}`);
     } catch {
       toast("Couldn't create SOP");
       setCreating(null);
     }
   }
+
+  // Sidebar / menu deep-link: /sops/new?type=… skips the picker.
+  useEffect(() => {
+    if (autoFiredRef.current) return;
+    const t = search?.get("type");
+    if (t === "WRITTEN" || t === "CHECKLIST" || t === "RECORDED" || t === "STEPS") {
+      autoFiredRef.current = true;
+      void pickType(t);
+    }
+    // pickType is stable enough for a mount-style trigger; re-running on
+    // search change is covered by the ref latch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   return (
     <>
@@ -97,13 +129,13 @@ export default function NewSopPage() {
         }
       />
 
-      <div className="mx-auto max-w-5xl px-6 py-10">
+      <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="mb-7 text-center">
           <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-zinc-900">How do you want to document this?</h2>
-          <p className="mt-1.5 text-[13px] text-zinc-500">SOPs work three different ways. Pick the one that fits how your team will actually consume it.</p>
+          <p className="mt-1.5 text-[13px] text-zinc-500">SOPs work four different ways. Pick the one that fits how your team will actually consume it.</p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
           {TYPES.map((t) => {
             const Icon = t.Icon;
             const busy = creating === t.type;

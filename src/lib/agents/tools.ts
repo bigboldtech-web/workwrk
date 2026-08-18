@@ -1283,6 +1283,17 @@ const createSop: ToolDefinition = {
     required: ["title"],
   },
   handler: async (ctx, input) => {
+    const sopType = ((input.sopType as string) ?? "WRITTEN") as "WRITTEN" | "RECORDED" | "CHECKLIST";
+    if (!["WRITTEN", "RECORDED", "CHECKLIST"].includes(sopType)) {
+      return { error: `Invalid sopType "${input.sopType}". Use WRITTEN, RECORDED, or CHECKLIST.` };
+    }
+    // Empty content must match the sopType — the editors and the
+    // assignment step-counter read type-specific shapes, and a bare
+    // { steps: [] } renders a CHECKLIST/RECORDED SOP as broken.
+    const content =
+      sopType === "CHECKLIST" ? { type: "CHECKLIST", sections: [] }
+      : sopType === "RECORDED" ? { type: "recorded", steps: [] }
+      : { type: "WRITTEN", body: "" };
     const tags = Array.isArray(input.tags)
       ? (input.tags as string[]).map((t) => t.trim()).filter((t) => t.length > 0 && t.length <= 40)
       : [];
@@ -1292,9 +1303,9 @@ const createSop: ToolDefinition = {
         title: (input.title as string).trim(),
         description: (input.description as string) ?? null,
         category: (input.category as string) ?? null,
-        sopType: ((input.sopType as string) ?? "WRITTEN") as "WRITTEN" | "RECORDED" | "CHECKLIST",
+        sopType,
         tags,
-        content: { steps: [] },
+        content,
       },
       select: { id: true, title: true, sopType: true, status: true, category: true, tags: true },
     });

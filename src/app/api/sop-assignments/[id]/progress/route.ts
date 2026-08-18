@@ -81,27 +81,33 @@ export async function PATCH(
     },
   });
 
-  // If completed, also update/create SOPCompliance record for performance reviews
+  // If completed, also update/create the SOPCompliance record that the
+  // dashboard / analytics / review surfaces aggregate. Keyed by
+  // (sopId, userId) via find-then-write — the PK is a cuid, so the old
+  // upsert-on-a-synthetic-id never matched and stacked a duplicate row
+  // per completion.
   if (allDone) {
-    await prisma.sOPCompliance.upsert({
-      where: {
-        id: `${assignment.sopId}_${userId}_current`,
-      },
-      create: {
-        sopId: assignment.sopId,
-        userId,
-        period: new Date().toISOString().slice(0, 7), // YYYY-MM
-        stepsTotal: assignment.stepsTotal,
-        stepsCompleted,
-        score,
-        completedAt: new Date(),
-      },
-      update: {
-        stepsCompleted,
-        score,
-        completedAt: new Date(),
-      },
+    const complianceData = {
+      period: new Date().toISOString().slice(0, 7), // YYYY-MM
+      stepsTotal: assignment.stepsTotal,
+      stepsCompleted,
+      score,
+      completedAt: new Date(),
+    };
+    const existingCompliance = await prisma.sOPCompliance.findFirst({
+      where: { sopId: assignment.sopId, userId },
+      select: { id: true },
     });
+    if (existingCompliance) {
+      await prisma.sOPCompliance.update({
+        where: { id: existingCompliance.id },
+        data: complianceData,
+      });
+    } else {
+      await prisma.sOPCompliance.create({
+        data: { sopId: assignment.sopId, userId, ...complianceData },
+      });
+    }
   }
 
   // Auto-recalculate performance score

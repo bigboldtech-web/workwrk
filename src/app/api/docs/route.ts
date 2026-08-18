@@ -2,6 +2,8 @@
 //
 // A Doc can be standalone (entityType + entityId both null) or pinned
 // to an entity (e.g. a Task description, a board row's Doc cell).
+// NOTEPAD/<userId> anchors are personal sticky notes: owner-only via
+// docAccessible, and hidden from every un-anchored list below.
 // Every create snapshots v1 into DocVersion immediately so the
 // version trail starts at row 1.
 
@@ -36,7 +38,15 @@ export async function GET(req: Request) {
     where: {
       organizationId: ctx.orgId,
       archivedAt: archived ? { not: null } : null,
-      ...(entityType && entityId ? { entityType, entityId } : {}),
+      // Personal Notepad notes are reachable ONLY via an explicit
+      // entityType=NOTEPAD&entityId=<self> query (docAccessible still
+      // gates the pair per-row). Every un-anchored list — /docs tree,
+      // Library, pickers, trash view — excludes them. The OR keeps
+      // entityType:null standalone docs: Prisma `not` on a nullable
+      // column drops NULL rows, which would hide every standalone doc.
+      ...(entityType && entityId
+        ? { entityType, entityId }
+        : { OR: [{ entityType: null }, { entityType: { not: "NOTEPAD" } }] }),
       ...(standaloneOnly ? { entityType: null, entityId: null } : {}),
     },
     select: {

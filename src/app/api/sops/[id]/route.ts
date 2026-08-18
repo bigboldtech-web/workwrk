@@ -84,7 +84,12 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { title: rawTitle, description: rawDescription, category, subcategory, content, status, version, folderId, tags } = body;
+  // `version` is deliberately not read — the server owns version
+  // numbers (bumped below when a snapshot is taken). A client-sent
+  // version let two SOPVersion rows share a number. `sopType` is also
+  // not accepted: changing it post-create would orphan the content
+  // shape.
+  const { title: rawTitle, description: rawDescription, category, subcategory, content, status, folderId, tags, kraId } = body;
 
   // Same trim rule as POST. Treat a whitespace-only string as an
   // intentional blank, which the PUBLISHED guard below will catch.
@@ -97,7 +102,6 @@ export async function PATCH(
   if (category !== undefined) data.category = category;
   if (subcategory !== undefined) data.subcategory = subcategory;
   if (content !== undefined) data.content = content;
-  if (version !== undefined) data.version = version;
   if (tags !== undefined) {
     data.tags = Array.isArray(tags)
       ? Array.from(new Set(
@@ -105,6 +109,21 @@ export async function PATCH(
               .filter((t: string) => t.length > 0 && t.length <= 40),
         ))
       : [];
+  }
+
+  // Link/unlink the owning KRA. `null` clears; a non-null id must be a
+  // KRA in this org so a cross-org id can't be attached.
+  if (kraId !== undefined) {
+    if (kraId === null) {
+      data.kraId = null;
+    } else {
+      const kra = await prisma.kRA.findFirst({
+        where: { id: kraId, organizationId: orgId },
+        select: { id: true },
+      });
+      if (!kra) return jsonError("KRA not found", 404);
+      data.kraId = kraId;
+    }
   }
 
   // Moving between folders requires write access on the target too.
@@ -158,6 +177,9 @@ export async function PATCH(
           publishedBy: getUserId(session),
         },
       });
+      // Snapshot taken under the old number → the live row moves to the
+      // next one, so no two SOPVersion rows ever share a number.
+      data.version = existing.version + 1;
     }
   }
 
@@ -197,6 +219,9 @@ export async function PATCH(
             publishedBy: getUserId(session),
           },
         });
+        // Same rule as the published-edit snapshot above: the snapshot
+        // keeps the old number, the live row advances.
+        data.version = existing.version + 1;
       }
     } else {
       data.status = status;

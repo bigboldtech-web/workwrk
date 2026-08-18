@@ -57,6 +57,16 @@ export async function docAccessible(
     return Boolean(await getSpaceForReader(folder.spaceId, userId, level));
   }
 
+  if (anchor.entityType === "NOTEPAD") {
+    // Personal sticky note (topbar Notepad / voice capture). Owner-only,
+    // regardless of access level — these are private jottings, not org
+    // documents, so even OWNER/ADMIN gets no read-around. This one gate
+    // covers the list GET (per-row), /api/docs/[id] GET/PUT/DELETE, the
+    // POST create gate (can't mint a note anchored to someone else), and
+    // search (which also filters per-row through docAccessible).
+    return anchor.entityId === userId;
+  }
+
   // Unknown anchor type (LEAD, future suite-specific types, etc.) —
   // fall through. Suite-owned types should gate inside their own GETs;
   // this helper covers only the core PPMS primitives.

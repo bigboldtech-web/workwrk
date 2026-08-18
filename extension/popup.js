@@ -52,21 +52,28 @@ document.getElementById("open-app-btn").addEventListener("click", async () => {
   chrome.tabs.create({ url: `${serverUrl}/sops` });
 });
 
-// Stop Recording — auto-save immediately (title already set)
+// Stop Recording — auto-save immediately (title already set).
+// Flipping isRecording in storage stops capture in EVERY tab — content
+// scripts watch storage.onChanged, so no per-tab message is needed.
 document.getElementById("stop-btn").addEventListener("click", async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab) chrome.tabs.sendMessage(tab.id, { action: "stopRecording" });
-
   chrome.storage.local.set({ isRecording: false });
   showState("saving");
 
+  // Drain the background write queue first — a click that landed moments
+  // before Stop may still be queued, and reading steps before it commits
+  // would silently drop the final step.
+  try { await chrome.runtime.sendMessage({ action: "flushSteps" }); } catch { /* worker asleep = queue empty */ }
+
   // Get stored title and steps
-  chrome.storage.local.get(["steps", "sopTitle", "sopCategory", "sopSubcategory", "sopDescription"], async (result) => {
+  chrome.storage.local.get(["steps", "sopTitle", "sopCategory", "sopSubcategory", "sopDescription", "recordingSessionId"], async (result) => {
     const steps = result.steps || [];
     const title = result.sopTitle || sopTitle;
     const category = result.sopCategory || sopCategory;
     const subcategory = result.sopSubcategory || sopSubcategory;
     const description = result.sopDescription || sopDescription;
+    // Idempotency handle generated when recording started — lets the server
+    // dedupe when a retry follows a lost response.
+    const clientSessionId = result.recordingSessionId || null;
     const serverUrl = await getServerUrl();
 
     try {
@@ -75,15 +82,19 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
       // Falls back to inline base64 if the server doesn't have S3
       // configured — existing behavior is preserved on small/dev
       // deployments.
+      const uploadedKeys = {};
       const processedSteps = await Promise.all(
         steps.map(async (s, i) => {
-          let screenshotKey = null;
-          let screenshot = s.screenshot;
-          if (screenshot && screenshot.startsWith("data:image/")) {
+          // A key from an earlier save attempt means the image is already in
+          // S3 — reuse it, never re-upload on retry.
+          let screenshotKey = s.screenshotKey || null;
+          let screenshot = screenshotKey ? null : (s.screenshot || null);
+          if (!screenshotKey && screenshot && screenshot.startsWith("data:image/")) {
             const uploaded = await uploadScreenshotToS3(serverUrl, screenshot);
             if (uploaded) {
               screenshotKey = uploaded;
               screenshot = null; // drop base64 from the POST; S3 has it now
+              if (s.id) uploadedKeys[s.id] = uploaded;
             }
           }
           return {
@@ -99,6 +110,18 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
         }),
       );
 
+      // Persist the keys BEFORE the POST — if the save fails (or its
+      // response is lost) the retry skips re-uploading these screenshots.
+      // Routed through the background write queue so nothing is clobbered.
+      if (Object.keys(uploadedKeys).length > 0) {
+        await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: "setStepScreenshotKeys", keys: uploadedKeys }, () => {
+            void chrome.runtime.lastError;
+            resolve();
+          });
+        });
+      }
+
       const response = await fetch(`${serverUrl}/api/sops/record`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -108,12 +131,23 @@ document.getElementById("stop-btn").addEventListener("click", async () => {
           description: description || null,
           category: category || null,
           subcategory: subcategory || null,
+          clientSessionId,
           steps: processedSteps,
         }),
       });
 
       if (response.ok) {
         chrome.storage.local.set({ steps: [], sopTitle: "", sopCategory: "", sopSubcategory: "", sopDescription: "" });
+        chrome.storage.local.remove(["recordingSessionId"]);
+        // Non-publishers get a DRAFT back (server decides) — say so instead
+        // of implying the SOP is live.
+        const saved = await response.json().catch(() => null);
+        const textEl = document.querySelector("#success-state .text");
+        if (textEl) {
+          textEl.textContent = saved && saved.status === "DRAFT"
+            ? "Saved as a draft — someone with publish rights can make it live."
+            : "View it in your SOPs section.";
+        }
         showState("success");
       } else {
         const data = await response.json().catch(() => ({}));

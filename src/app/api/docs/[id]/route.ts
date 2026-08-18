@@ -111,6 +111,17 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     if (parsed.data.parentId === id) {
       return NextResponse.json({ error: "cannot nest a note under itself" }, { status: 400 });
     }
+    // NOTEPAD anchors are create-only and immutable: re-anchoring TO a
+    // notepad would plant a doc in someone's private note list (or hide an
+    // org doc as the caller's own note), and re-anchoring AWAY would leak a
+    // personal note into /docs. Neither has a legitimate caller.
+    if (
+      parsed.data.entityType === "NOTEPAD" ||
+      (existing.entityType === "NOTEPAD" &&
+        (parsed.data.entityType !== undefined || parsed.data.entityId !== undefined))
+    ) {
+      return NextResponse.json({ error: "notepad notes cannot be re-anchored" }, { status: 400 });
+    }
     const doc = await prisma.doc.update({
       where: { id },
       data: {

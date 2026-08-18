@@ -142,12 +142,29 @@ async function main() {
     )
   );
 
-  // Create SOPs
+  // Create SOPs — content shape must match sopType: WRITTEN reads
+  // { type: "steps" } lists, CHECKLIST reads { type: "CHECKLIST",
+  // sections } (the shape the checklist runner + step-counter expect).
+  const writtenSteps = (titles: string[]) => ({
+    type: "steps",
+    steps: titles.map((title, i) => ({ id: `s${i + 1}`, title })),
+  });
   const sops = [
-    { title: "Client Onboarding Process", category: "Sales", status: "PUBLISHED" as const, content: { steps: ["Initial contact", "Needs assessment", "Proposal", "Onboarding call", "Setup", "Training", "Go-live"] }, version: 3 },
-    { title: "Order Processing Workflow", category: "Operations", status: "PUBLISHED" as const, content: { steps: ["Order received", "Verification", "Processing", "Quality check", "Dispatch", "Confirmation"] }, version: 5 },
-    { title: "Code Review Guidelines", category: "Engineering", status: "PUBLISHED" as const, content: { steps: ["PR creation", "Self-review", "Assign reviewers", "Address feedback", "Final approval", "Merge"] }, version: 6 },
-    { title: "Employee Onboarding Checklist", category: "HR", status: "PUBLISHED" as const, content: { steps: ["Documentation", "IT setup", "Team intro", "Role briefing", "Buddy assignment", "30-day check"] }, version: 4 },
+    { title: "Client Onboarding Process", category: "Sales", status: "PUBLISHED" as const, sopType: "WRITTEN" as const, content: writtenSteps(["Initial contact", "Needs assessment", "Proposal", "Onboarding call", "Setup", "Training", "Go-live"]), version: 3 },
+    { title: "Order Processing Workflow", category: "Operations", status: "PUBLISHED" as const, sopType: "WRITTEN" as const, content: writtenSteps(["Order received", "Verification", "Processing", "Quality check", "Dispatch", "Confirmation"]), version: 5 },
+    { title: "Code Review Guidelines", category: "Engineering", status: "PUBLISHED" as const, sopType: "WRITTEN" as const, content: writtenSteps(["PR creation", "Self-review", "Assign reviewers", "Address feedback", "Final approval", "Merge"]), version: 6 },
+    {
+      title: "Employee Onboarding Checklist", category: "HR", status: "PUBLISHED" as const, sopType: "CHECKLIST" as const,
+      content: {
+        type: "CHECKLIST",
+        sections: [{
+          title: "Onboarding",
+          steps: ["Documentation", "IT setup", "Team intro", "Role briefing", "Buddy assignment", "30-day check"]
+            .map((title, i) => ({ id: `eo${i + 1}`, title, type: "task", inputs: [], contentBlocks: [] })),
+        }],
+      },
+      version: 4,
+    },
   ];
 
   await Promise.all(

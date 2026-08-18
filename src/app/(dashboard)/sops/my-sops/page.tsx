@@ -9,12 +9,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   BookCopy, Clock, AlertCircle, CheckCircle2, FileText, ListChecks, Video,
-  BadgeAlert, Hash, Activity, ClipboardCheck, Layers,
+  BadgeAlert, Hash, Activity, ClipboardCheck, Layers, Loader2,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { useOsToast } from "@/components/layout/os/toast";
 
 type Status = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
 type SopType = "WRITTEN" | "RECORDED" | "CHECKLIST";
@@ -51,7 +52,10 @@ export default function MySopsPage() {
   const [items, setItems] = useState<ApiAssignment[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAllDone, setShowAllDone] = useState(false);
+  // Assignment id currently being acknowledged (one at a time).
+  const [ackingId, setAckingId] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
+  const { toast } = useOsToast();
 
   const load = useCallback(async () => {
     try {
@@ -71,6 +75,25 @@ export default function MySopsPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("sops");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
+
+  // Quick acknowledge straight from the row — same endpoint the SOP
+  // detail page uses. Reloads so the row moves to Completed.
+  const ack = useCallback(async (assignmentId: string) => {
+    setAckingId(assignmentId);
+    try {
+      const res = await fetch(`/api/me/sops/${encodeURIComponent(assignmentId)}/ack`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast("Acknowledged");
+      await load();
+    } catch {
+      toast("Couldn't acknowledge");
+    } finally {
+      setAckingId(null);
+    }
+  }, [load, toast]);
 
   const today0 = Date.now();
   const overdue = useMemo(() => (items ?? []).filter((a) => a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate).getTime() < today0), [items, today0]);
@@ -133,17 +156,17 @@ export default function MySopsPage() {
 
             {overdue.length > 0 && (
               <Section title="Overdue" Icon={AlertCircle} count={overdue.length} hue="var(--os-c-red)">
-                {overdue.map((a) => <SopRow key={a.id} a={a} />)}
+                {overdue.map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
               </Section>
             )}
 
             <Section title="Active" Icon={Clock} count={active.length} hue="var(--os-c-orange)">
-              {active.length === 0 ? <div className="mys__empty-soft">Nothing active. Nice work.</div> : active.map((a) => <SopRow key={a.id} a={a} />)}
+              {active.length === 0 ? <div className="mys__empty-soft">Nothing active. Nice work.</div> : active.map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
             </Section>
 
             {done.length > 0 && (
               <Section title="Completed" Icon={CheckCircle2} count={done.length} hue="var(--os-c-green)">
-                {(showAllDone ? done : done.slice(0, 10)).map((a) => <SopRow key={a.id} a={a} />)}
+                {(showAllDone ? done : done.slice(0, 10)).map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
                 {done.length > 10 && (
                   <button
                     type="button"
@@ -175,7 +198,7 @@ function Section({ title, Icon, count, hue, children }: { title: string; Icon: t
   );
 }
 
-function SopRow({ a }: { a: ApiAssignment }) {
+function SopRow({ a, onAck, acking }: { a: ApiAssignment; onAck: (assignmentId: string) => void; acking: boolean }) {
   const Type = a.sop?.sopType ? TYPE_ICON[a.sop.sopType] : FileText;
   const hue = a.sop?.sopType ? TYPE_HUE[a.sop.sopType] : "var(--os-ink-3)";
   const chip = dueChip(a);
@@ -200,6 +223,18 @@ function SopRow({ a }: { a: ApiAssignment }) {
       <div className="mys__row-right">
         {a.status !== "COMPLETED" && a.stepsTotal > 0 && <span className="mys__row-pct">{pct}%</span>}
         {chip && <span className={`mys__row-chip mys__row-chip--${chip.tone}`}>{chip.label}</span>}
+        {a.status !== "COMPLETED" && (
+          <button
+            type="button"
+            disabled={acking}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAck(a.id); }}
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[11px] text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50"
+            title="Mark this SOP as read"
+          >
+            {acking ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+            Acknowledge
+          </button>
+        )}
       </div>
     </Link>
   );

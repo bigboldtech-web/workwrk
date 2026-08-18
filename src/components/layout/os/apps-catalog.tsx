@@ -18,6 +18,7 @@ import {
   HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
+  ListChecks, ListOrdered, MousePointerClick,
   Activity, LayoutTemplate, Plug,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
@@ -1245,10 +1246,16 @@ export const APPS: AppEntry[] = [
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
     matchPaths: ["/sops"], category: "Knowledge", defaultPinned: true,
-    createActions: [{ label: "New SOP", icon: ScrollText, href: "/sops/new" }],
+    // One action per SOP kind — /sops/new?type=STEPS pre-creates a
+    // step-list SOP and drops straight into inline editing.
+    createActions: [
+      { label: "New written SOP",       icon: FileText,          href: "/sops/new/text" },
+      { label: "New step-by-step SOP",  icon: ListOrdered,       href: "/sops/new?type=STEPS" },
+      { label: "New checklist SOP",     icon: ListChecks,        href: "/sops/new/checklist" },
+      { label: "New click-capture SOP", icon: MousePointerClick, href: "/sops/new/record" },
+    ],
     Sidebar: linksSidebar([
       { href: "/sops",               label: "All SOPs",             Icon: ScrollText },
-      { href: "/sops/new/checklist", label: "New step-by-step SOP", Icon: Workflow },
       { href: "/sops/my-sops",       label: "My SOPs",              Icon: ScrollText },
       { href: "/process-runs",       label: "Run history",          Icon: Workflow },
       { href: "/sops/compliance",    label: "Compliance",           Icon: ShieldCheck },

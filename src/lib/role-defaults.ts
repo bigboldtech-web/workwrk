@@ -176,36 +176,19 @@ const STARTER_KRAS: StarterKra[] = [
 ];
 
 const STARTER_SOP_TITLE = "Welcome — how we work here";
+// Written-SOP blocks shape — the legacy `blocks` mirror BlockNoteCanvas
+// accepts as legacyBlocks (see sops/new/text/page.tsx). The previous
+// TipTap { type: "doc" } shape had no renderer and isSOPContentEmpty
+// judged it empty, so the starter SOP showed up blank.
 const STARTER_SOP_CONTENT = {
-  type: "doc",
-  content: [
-    {
-      type: "heading",
-      attrs: { level: 1 },
-      content: [{ type: "text", text: "Welcome to the team" }],
-    },
-    {
-      type: "paragraph",
-      content: [
-        {
-          type: "text",
-          text: "This is a starter SOP auto-assigned to everyone in the org so the entry gate is satisfied. Replace the steps below with your real onboarding flow — anything from 'where to file expenses' to 'how to push code'.",
-        },
-      ],
-    },
-    {
-      type: "heading",
-      attrs: { level: 2 },
-      content: [{ type: "text", text: "Day 1" }],
-    },
-    {
-      type: "bulletList",
-      content: [
-        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Read the role brief in your Sidekick onboarding panel." }] }] },
-        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Acknowledge your assigned KRAs in KRA & KPIs." }] }] },
-        { type: "listItem", content: [{ type: "paragraph", content: [{ type: "text", text: "Complete this SOP." }] }] },
-      ],
-    },
+  type: "blocks",
+  blocks: [
+    { id: "starter-h1", kind: "h1", text: "Welcome to the team" },
+    { id: "starter-intro", kind: "paragraph", text: "This is a starter SOP auto-assigned to everyone in the org so the entry gate is satisfied. Replace the steps below with your real onboarding flow — anything from 'where to file expenses' to 'how to push code'." },
+    { id: "starter-day1", kind: "h2", text: "Day 1" },
+    { id: "starter-day1-brief", kind: "bullet", text: "Read the role brief in your Sidekick onboarding panel." },
+    { id: "starter-day1-kras", kind: "bullet", text: "Acknowledge your assigned KRAs in KRA & KPIs." },
+    { id: "starter-day1-sop", kind: "bullet", text: "Complete this SOP." },
   ],
 };
 
@@ -297,6 +280,7 @@ export async function ensureOrgStarterDefinitions(organizationId: string): Promi
         organizationId,
         title: STARTER_SOP_TITLE,
         description: "Auto-generated starter SOP. Replace with your real onboarding doc.",
+        sopType: "WRITTEN",
         content: STARTER_SOP_CONTENT,
         status: "PUBLISHED",
         publishedAt: new Date(),

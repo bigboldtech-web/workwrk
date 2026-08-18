@@ -31,7 +31,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const assignment = await prisma.sOPAssignment.findUnique({
     where: { id },
-    select: { id: true, userId: true, status: true, stepsTotal: true, progress: true },
+    select: { id: true, sopId: true, userId: true, status: true, stepsTotal: true, progress: true },
   });
   if (!assignment || assignment.userId !== u.id) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -49,15 +49,46 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     ackNote: parsed.data.note ?? null,
   };
 
+  const completedAt = new Date();
   const updated = await prisma.sOPAssignment.update({
     where: { id },
     data: {
       status: "COMPLETED",
-      completedAt: new Date(),
+      completedAt,
       stepsCompleted: assignment.stepsTotal || 1,
       progress: nextProgress as object,
     },
   });
+
+  // Mirror the completion into SOPCompliance — the dashboard, analytics
+  // and review surfaces aggregate that table, not SOPAssignment, so an
+  // acknowledgment must land there too. Keyed by (sopId, userId) via
+  // find-then-write (the PK is a cuid; there is no compound unique).
+  // Reference SOPs have stepsTotal 0 — record 1/1 so ratio surfaces
+  // read a full attestation, matching stepsCompleted above.
+  const stepsDone = assignment.stepsTotal || 1;
+  const complianceData = {
+    period: completedAt.toISOString().slice(0, 7), // YYYY-MM
+    stepsTotal: stepsDone,
+    stepsCompleted: stepsDone,
+    score: 100,
+    notes: parsed.data.note ?? null,
+    completedAt,
+  };
+  const existingCompliance = await prisma.sOPCompliance.findFirst({
+    where: { sopId: assignment.sopId, userId: u.id },
+    select: { id: true },
+  });
+  if (existingCompliance) {
+    await prisma.sOPCompliance.update({
+      where: { id: existingCompliance.id },
+      data: complianceData,
+    });
+  } else {
+    await prisma.sOPCompliance.create({
+      data: { sopId: assignment.sopId, userId: u.id, ...complianceData },
+    });
+  }
 
   return NextResponse.json({ assignment: updated });
 }

@@ -24,6 +24,16 @@ type Hit = {
   updatedAt: string;
 };
 
+// Board-item sources use a distinct shape (sourceType/sourceId/href) so
+// the panel can route them to /item/<id> instead of a doc/SOP page.
+type ItemHit = {
+  sourceType: "BOARD_ITEM";
+  sourceId: string;
+  title: string;
+  href: string;
+  updatedAt: string;
+};
+
 export async function GET(req: NextRequest) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
@@ -52,8 +62,9 @@ export async function GET(req: NextRequest) {
   // Bucket by source type so we can do one batched fetch per kind.
   const docIds = links.filter((l) => l.sourceType === "DOC").map((l) => l.sourceId);
   const sopIds = links.filter((l) => l.sourceType === "SOP").map((l) => l.sourceId);
+  const itemIds = links.filter((l) => l.sourceType === "BOARD_ITEM").map((l) => l.sourceId);
 
-  const [docs, sops] = await Promise.all([
+  const [docs, sops, items] = await Promise.all([
     docIds.length > 0
       ? prisma.doc.findMany({
           where: { id: { in: docIds }, organizationId: ctx.orgId, archivedAt: null },
@@ -66,6 +77,12 @@ export async function GET(req: NextRequest) {
     sopIds.length > 0
       ? prisma.sOP.findMany({
           where: { id: { in: sopIds }, organizationId: ctx.orgId, status: { not: "ARCHIVED" } },
+          select: { id: true, title: true, updatedAt: true },
+        })
+      : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date }>),
+    itemIds.length > 0
+      ? prisma.item.findMany({
+          where: { id: { in: itemIds }, organizationId: ctx.orgId, archivedAt: null },
           select: { id: true, title: true, updatedAt: true },
         })
       : Promise.resolve([] as Array<{ id: string; title: string; updatedAt: Date }>),
@@ -96,8 +113,19 @@ export async function GET(req: NextRequest) {
       updatedAt: s.updatedAt.toISOString(),
     }));
 
+  // Board items that embed/reference this entity ("this SOP backs task
+  // X"). Additive — `docs` and `sops` keep their existing shape.
+  const itemHits: ItemHit[] = items.map((it) => ({
+    sourceType: "BOARD_ITEM" as const,
+    sourceId: it.id,
+    title: it.title || "Untitled task",
+    href: `/item/${it.id}`,
+    updatedAt: it.updatedAt.toISOString(),
+  }));
+
   docHits.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   sopHits.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  itemHits.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
-  return NextResponse.json({ docs: docHits, sops: sopHits });
+  return NextResponse.json({ docs: docHits, sops: sopHits, items: itemHits });
 }

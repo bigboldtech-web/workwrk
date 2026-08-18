@@ -25,11 +25,36 @@ export async function GET(req: NextRequest) {
   };
 
   if (sopId) where.sopId = sopId;
-  if (userId) {
-    where.userId = userId;
-  } else if (!sopId) {
-    // Default: show current user's assignments
-    where.userId = getUserId(session);
+
+  // Visibility: assignment rows expose who has / hasn't completed
+  // mandatory training. Non-managers only ever see their own rows —
+  // userId / sopId params can't widen that. Managers without an
+  // org-wide role are scoped to their report tree (self included),
+  // mirroring the assignment governance on POST below.
+  const callerId = getUserId(session);
+  if (!isManager(session)) {
+    // Refuse, never substitute: silently returning the caller's own rows
+    // under someone else's userId would mislabel the data client-side.
+    if (userId && userId !== callerId) {
+      return jsonError("You can only view your own assignments.", 403);
+    }
+    where.userId = callerId;
+  } else {
+    const orgWide = ORG_WIDE_ASSIGNERS.has((session.user as any).accessLevel as string);
+    const teamIds = orgWide ? null : new Set(await getTeamUserIds(orgId, callerId));
+    if (userId) {
+      if (teamIds && !teamIds.has(userId)) {
+        return jsonError("You can only view assignments for people who report to you.", 403);
+      }
+      where.userId = userId;
+    } else if (sopId) {
+      // "Who's assigned this SOP" — org-wide roles see everyone,
+      // team-scoped managers see their report tree.
+      if (teamIds) where.userId = { in: [...teamIds] };
+    } else {
+      // Default: show current user's assignments
+      where.userId = callerId;
+    }
   }
   if (status) where.status = status;
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,6 +70,8 @@ import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-can
 // (written/richtext SOPs, notes, policies) uses BlockNoteCanvas.
 import { RichEditor } from "@/components/ui/rich-editor";
 import { BacklinksPanel } from "@/components/docs/block-doc-editor";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
 import Link from "next/link";
 import { useRole } from "@/hooks/use-role";
@@ -128,7 +130,8 @@ interface SOP {
   category: string | null;
   subcategory: string | null;
   sopType: "WRITTEN" | "RECORDED" | "CHECKLIST";
-  content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[]; flow?: ProcessFlow };
+  content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[]; flow?: ProcessFlow; body?: string };
+  kraId?: string | null;
   version: number;
   status: string;
   publishedAt: string | null;
@@ -162,10 +165,21 @@ function getStatusBadge(status: string) {
 // needs to say "what kind of SOP is this?" stays in sync.
 function getSopKindLabel(sop: SOP): string {
   if (sop.sopType === "CHECKLIST") return "Checklist";
-  if (sop.sopType === "RECORDED") return "Recording";
-  if ((sop.content as { type?: string } | null)?.type === "richtext") return "Write";
-  if ((sop.content as { type?: string } | null)?.type === "recorded") return "Recording";
+  const ctype = (sop.content as { type?: string } | null)?.type;
+  if (sop.sopType === "RECORDED" || ctype === "recorded" || ctype === "RECORDED") return "Recording";
+  if (ctype === "blocks" || ctype === "WRITTEN" || ctype === "richtext") return "Written";
+  // content.type "steps" or legacy bare { steps: [...] }
   return "Step-by-step";
+}
+
+// True when the SOP's body is a written document (block editor / legacy
+// body / legacy rich html). These have NO inline editor on this page —
+// they edit in /sops/new/text — and their content must round-trip
+// verbatim through every save from here.
+function isWrittenDocContent(sop: Pick<SOP, "sopType" | "content">): boolean {
+  const ctype = (sop.content as { type?: string } | null)?.type;
+  return sop.sopType === "WRITTEN"
+    && (ctype === "blocks" || ctype === "WRITTEN" || ctype === "richtext");
 }
 
 function formatDate(dateStr: string | null): string {
@@ -338,6 +352,124 @@ function safeHtml(html: string): string {
     .replace(/<\s*(script|style|iframe|object|embed|link|meta)[^>]*\/?>/gi, "")
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     .replace(/(href|src)\s*=\s*("\s*javascript:[^"]*"|'\s*javascript:[^']*')/gi, '$1="#"');
+}
+
+// "Linked KRA" picker for the details rail. Same MenuList-in-MorePortal
+// idiom as the Function picker on the role page. The rail sits in normal
+// page flow (no transformed ancestor), so the portal's fixed positioning
+// is safe here — inside a dialog it would need position:absolute instead.
+function SopKraPicker({
+  sopId,
+  kraId,
+  canEdit,
+  onSaved,
+}: {
+  sopId: string;
+  kraId: string | null;
+  canEdit: boolean;
+  onSaved: (next: string | null) => void;
+}) {
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [kras, setKras] = useState<Array<{ id: string; name: string }> | null>(null); // null = not loaded
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { error: toastError } = useToast();
+
+  const loadKras = useCallback(() => {
+    setLoadFailed(false);
+    fetch("/api/kras?limit=200")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load failed"))))
+      .then((d) => {
+        const list = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+        setKras(list.map((k: { id: string; name: string }) => ({ id: k.id, name: k.name })));
+      })
+      .catch(() => { setKras([]); setLoadFailed(true); });
+  }, []);
+
+  // Resolve the linked KRA's name for display without requiring the
+  // user to open the menu first.
+  useEffect(() => {
+    if (kraId && kras === null) loadKras();
+  }, [kraId, kras, loadKras]);
+
+  const currentName = kraId ? (kras?.find((k) => k.id === kraId)?.name ?? "Linked") : null;
+
+  const pick = async (next: string | null) => {
+    setOpen(false);
+    if (next === kraId) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/sops/${sopId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kraId: next }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Couldn't update linked KRA");
+        return;
+      }
+      // Trust the server's echo — if the API doesn't accept kraId yet
+      // the row is unchanged and the UI must not pretend otherwise.
+      const updated = await res.json().catch(() => null);
+      const echoed = ((updated?.kraId ?? null) as string | null);
+      if (echoed !== next) toastError("Linking KRAs isn't available yet");
+      onSaved(echoed);
+    } catch {
+      toastError("Couldn't update linked KRA");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canEdit) {
+    return <p className="text-sm mt-0.5">{currentName ?? <span className="text-zinc-500">None</span>}</p>;
+  }
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        disabled={saving}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next && (kras === null || loadFailed)) { setKras(null); loadKras(); }
+        }}
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-[13px] hover:bg-zinc-50 disabled:opacity-50"
+        title="Link this SOP to a Key Responsibility Area"
+      >
+        <span className={currentName ? "text-zinc-700" : "text-zinc-400"}>{currentName ?? "None"}</span>
+        <ChevronDown size={14} className="text-zinc-400" />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-[70]" onClick={() => setOpen(false)} aria-hidden />
+          <MorePortal anchorRef={anchorRef} width={240} open={open} placement="below">
+            <MenuList>
+              {kras === null ? (
+                <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              ) : loadFailed ? (
+                <div className="px-3 py-2 text-[12px] text-zinc-500">Couldn&rsquo;t load KRAs. Reopen to retry.</div>
+              ) : kras.length === 0 ? (
+                <div className="px-3 py-2 text-[12px] text-zinc-500">No KRAs in this workspace yet.</div>
+              ) : (
+                <>
+                  <MenuItem label={<span className="text-zinc-500">No linked KRA</span>} selected={!kraId} onClick={() => void pick(null)} />
+                  <MenuSeparator />
+                  {kras.map((k) => (
+                    <MenuItem key={k.id} label={k.name} selected={kraId === k.id} onClick={() => void pick(k.id)} />
+                  ))}
+                </>
+              )}
+            </MenuList>
+          </MorePortal>
+        </>
+      ) : null}
+    </>
+  );
 }
 
 function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: string; currentVersion: number; onRollback: () => void }) {
@@ -631,6 +763,77 @@ export default function SOPDetailPage() {
     }
   };
 
+  // The viewer's own assignment for this SOP (if any) — powers the
+  // "Mark as read" affordance. /api/me/sops doesn't return completedAt,
+  // so the timestamp comes from the ack response or the assignments list.
+  const [myAssignment, setMyAssignment] = useState<{ assignmentId: string; status: string; completedAt?: string | null } | null>(null);
+  const [acking, setAcking] = useState(false);
+
+  const fetchMyAssignment = useCallback(async () => {
+    try {
+      const res = await fetch("/api/me/sops");
+      if (!res.ok) return;
+      const data = await res.json();
+      const mine = Array.isArray(data?.sops)
+        ? data.sops.find((s: { sop?: { id?: string } }) => s?.sop?.id === id)
+        : null;
+      setMyAssignment(mine ? { assignmentId: mine.assignmentId, status: mine.status } : null);
+    } catch {
+      // Non-fatal: the ack affordance just stays hidden.
+    }
+  }, [id]);
+
+  const handleAcknowledge = async () => {
+    if (!myAssignment || acking) return;
+    setAcking(true);
+    try {
+      const res = await fetch(`/api/me/sops/${myAssignment.assignmentId}/ack`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Couldn't acknowledge");
+      }
+      const data = await res.json().catch(() => null);
+      const completedAt = data?.assignment?.completedAt ?? new Date().toISOString();
+      setMyAssignment((prev) => (prev ? { ...prev, status: "COMPLETED", completedAt } : prev));
+      toastSuccess("Acknowledged — marked as read");
+      fetchAssignments();
+    } catch (err) {
+      toastError(err instanceof Error ? err.message : "Couldn't acknowledge");
+    } finally {
+      setAcking(false);
+    }
+  };
+
+  // Board items that link this SOP ("Used by tasks" rail section). The
+  // backlinks API is being extended to include BOARD_ITEM sources — read
+  // every plausible field defensively and hide the section when empty.
+  const [taskLinks, setTaskLinks] = useState<Array<{ sourceId: string; title: string; href: string | null }>>([]);
+  useEffect(() => {
+    // Send both param styles: kind/id is the current contract,
+    // entityType/entityId the extended one.
+    fetch(`/api/backlinks?kind=sop&id=${id}&entityType=SOP&entityId=${id}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d || typeof d !== "object") return;
+        const pools = [d.boardItems, d.items, d.tasks].filter(Array.isArray) as Array<Array<Record<string, unknown>>>;
+        const hits = pools
+          .flat()
+          .filter((x) => x && (x.sourceType === "BOARD_ITEM" || x.type === "BOARD_ITEM"))
+          .map((x) => ({
+            sourceId: String(x.sourceId ?? x.id ?? ""),
+            title: typeof x.title === "string" && x.title ? x.title : "Untitled task",
+            href: typeof x.href === "string" ? x.href : null,
+          }))
+          .filter((x) => x.sourceId);
+        setTaskLinks(hits);
+      })
+      .catch(() => {});
+  }, [id]);
+
   const fetchSOP = useCallback(async () => {
     try {
       const res = await fetch(`/api/sops/${id}`);
@@ -652,8 +855,14 @@ export default function SOPDetailPage() {
           type: "process_flow",
           steps: Array.isArray(data.content?.flow?.steps) ? data.content.flow.steps : [],
         });
+      } else if (data.content?.type === "WRITTEN") {
+        // Legacy written SOP ({ type: "WRITTEN", body }) — rendered as
+        // prose below and edited in /sops/new/text. Nothing hydrates
+        // into the step editor, and getContentPayload round-trips the
+        // original content object verbatim so Save can't destroy it.
       } else {
-        setSteps((data.content?.type === "recorded" ? [] : data.content?.steps || []) as SOPStep[]);
+        const t = data.content?.type;
+        setSteps(((t === "recorded" || t === "RECORDED") ? [] : data.content?.steps || []) as SOPStep[]);
       }
     } catch (err) {
       console.error("Error fetching SOP:", err);
@@ -666,7 +875,25 @@ export default function SOPDetailPage() {
     fetchSOP();
     fetchAssignments();
     fetchOrgUsers();
-  }, [fetchSOP, fetchAssignments, fetchOrgUsers]);
+    fetchMyAssignment();
+  }, [fetchSOP, fetchAssignments, fetchOrgUsers, fetchMyAssignment]);
+
+  // /sops/<id>?edit=1 (create flow + sidebar deep-link) drops straight
+  // into editing once the SOP loads — but written docs redirect to their
+  // dedicated editor page instead, since this page has no inline editor
+  // for them. Latch fires once so a user Cancel isn't re-overridden.
+  const searchParams = useSearchParams();
+  const editParamHandled = useRef(false);
+  useEffect(() => {
+    if (!sop || editParamHandled.current) return;
+    if (searchParams?.get("edit") !== "1" || !canManageSOPs) return;
+    editParamHandled.current = true;
+    if (isWrittenDocContent(sop)) {
+      router.replace(`/sops/new/text?id=${sop.id}`);
+      return;
+    }
+    setEditing(true);
+  }, [sop, canManageSOPs, searchParams, router]);
 
   // Offer to restore an unsaved local backup if one exists and is newer
   // than the server's `updatedAt`. Backups older than a week are treated
@@ -714,22 +941,42 @@ export default function SOPDetailPage() {
     }
   };
 
+  // Content payload for the top-bar Save. CRITICAL invariant: for kinds
+  // this page has no inline editor for (written docs, recordings), the
+  // ORIGINAL content object is returned unchanged — a title/description-
+  // only save must round-trip content verbatim, never rebuild it from
+  // editor state that was never hydrated.
   const getContentPayload = () => {
+    const original = (sop?.content ?? {}) as Record<string, unknown>;
+    const ctype = (original as { type?: string }).type;
     if (sop?.sopType === "CHECKLIST") {
-      return { sections: checklistSections };
+      return { ...original, type: "CHECKLIST", sections: checklistSections };
     }
-    if (sop?.content && (sop.content as any).type === "richtext") {
-      return { type: "richtext", html: richtextHtml };
+    if (ctype === "richtext") {
+      // richtextHtml mirrors the server html (only a restored local
+      // backup changes it); the spread keeps any extra fields intact.
+      return { ...original, type: "richtext", html: richtextHtml };
     }
-    if (sop?.content && (sop.content as any).type === "blocks") {
-      // Echo bnDoc back so a top-bar Save doesn't strip it and downgrade to
-      // legacy-only.
-      return { type: "blocks", ...(sopBnDoc ? { bnDoc: sopBnDoc } : {}), blocks: sopBlocks ?? [] };
+    if (ctype === "blocks") {
+      // Echo bnDoc/meta back so a top-bar Save doesn't strip them and
+      // downgrade to legacy-only.
+      return {
+        ...original,
+        type: "blocks",
+        ...(sopBnDoc ? { bnDoc: sopBnDoc } : {}),
+        blocks: sopBlocks ?? ((original as { blocks?: Block[] }).blocks ?? []),
+      };
     }
-    if (sop?.content && (sop.content as any).type === "process_flow") {
-      return { type: "process_flow", flow: processFlow };
+    if (ctype === "WRITTEN" || ctype === "recorded" || ctype === "RECORDED") {
+      // Written body / recorded steps: no inline editor state here
+      // (recorded-step edits already live on sop.content via
+      // persistRecordedStepsDebounced) — echo verbatim.
+      return { ...original };
     }
-    return { steps };
+    if (ctype === "process_flow") {
+      return { ...original, type: "process_flow", flow: processFlow };
+    }
+    return { type: "steps", steps };
   };
 
   // Autosave snapshot — the shape that gets watched for changes and
@@ -1134,6 +1381,25 @@ export default function SOPDetailPage() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          {/* Assignee loop — visible to ANY viewer with an assignment,
+              including non-managers who get no other header actions. */}
+          {myAssignment && !editing && (
+            myAssignment.status === "COMPLETED" ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[11px] text-green-600">
+                <CheckCircle size={12} />
+                Acknowledged{(() => {
+                  const at = myAssignment.completedAt
+                    ?? (assignments.find((a: any) => a.id === myAssignment.assignmentId)?.completedAt ?? null);
+                  return at ? ` ${formatDate(at)}` : "";
+                })()}
+              </span>
+            ) : (
+              <Button size="sm" onClick={handleAcknowledge} disabled={acking} className="gap-1.5">
+                <CheckCircle size={14} />
+                {acking ? "Acknowledging…" : "Mark as read"}
+              </Button>
+            )
+          )}
           {!canManageSOPs ? null : editing ? (
             <>
               <Button
@@ -1178,7 +1444,13 @@ export default function SOPDetailPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  // Written docs (blocks / WRITTEN / richtext) edit in
+                  // the dedicated BlockNote page — the inline path here
+                  // was a dead-end stub that could drop the body on Save.
+                  if (isWrittenDocContent(sop)) router.push(`/sops/new/text?id=${sop.id}`);
+                  else setEditing(true);
+                }}
                 className="gap-1.5"
               >
                 <Edit3 size={14} />
@@ -1529,97 +1801,80 @@ export default function SOPDetailPage() {
                 <p className="text-[13.5px] leading-relaxed text-zinc-500">{sop.description}</p>
               ) : null}
 
-              {/* Rich Text Editor for "Write" type SOPs — parent owns the
-                  html so the top-bar Save persists it along with title /
-                  description / type-specific content in one request. */}
+              {/* Legacy rich-html written SOPs — read-only reader. Editing
+                  happens in /sops/new/text (the header Edit button routes
+                  there), which converts the html to blocks on first save. */}
               {sop.content && (sop.content as any).type === "richtext" && (
-                editing ? (
-                  <div className="rounded-xl border border-zinc-200 bg-white">
-                    <BlockNoteCanvas
-                      key={sop.id + "-rt"}
-                      initialBnDoc={null}
-                      legacyBlocks={null}
-                      initialHtml={richtextHtml}
-                      readonly={false}
-                      onChange={() => { /* HTML-mode: see onHtmlChange */ }}
-                      onHtmlChange={setRichtextHtml}
-                      entity={{ type: "sop", id: sop.id }}
-                    />
-                  </div>
-                ) : (
-                  // Notes-style reader — render the saved HTML as full-size
-                  // prose (big headings, left-aligned reading column), not the
-                  // dark-themed prose-sm editor chrome.
-                  <div className="rounded-xl border border-zinc-200 bg-white px-6 py-7 sm:px-10 sm:py-10">
-                    <article
-                      className="prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[26px] prose-h2:text-[21px] prose-h3:text-[17px] prose-p:text-zinc-700 prose-li:text-zinc-700 prose-strong:text-zinc-900 prose-a:text-blue-600"
-                      dangerouslySetInnerHTML={{ __html: safeHtml(richtextHtml) }}
-                    />
-                  </div>
-                )
+                // Notes-style reader — render the saved HTML as full-size
+                // prose (big headings, left-aligned reading column), not the
+                // dark-themed prose-sm editor chrome.
+                <div className="rounded-xl border border-zinc-200 bg-white px-6 py-7 sm:px-10 sm:py-10">
+                  <article
+                    className="prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[26px] prose-h2:text-[21px] prose-h3:text-[17px] prose-p:text-zinc-700 prose-li:text-zinc-700 prose-strong:text-zinc-900 prose-a:text-blue-600"
+                    dangerouslySetInnerHTML={{ __html: safeHtml(richtextHtml) }}
+                  />
+                </div>
               )}
 
-              {/* Block editor — same engine as Notes. Used for new WRITTEN
-                  SOPs created via /sops/new/text. Read-only render here;
-                  full editing happens in the dedicated /sops/new/text
-                  editor (richer UI, single-purpose chrome). */}
+              {/* Legacy plain-body written SOPs ({ type: "WRITTEN", body })
+                  — simple prose paragraphs until the first block-editor
+                  save converts them. Previously rendered NOTHING. */}
+              {sop.content && (sop.content as any).type === "WRITTEN" && (
+                <div className="rounded-xl border border-zinc-200 bg-white px-6 py-7 sm:px-10 sm:py-10">
+                  {(sop.content.body ?? "").trim().length > 0 ? (
+                    <article className="prose prose-zinc max-w-none prose-p:text-zinc-700">
+                      {(sop.content.body ?? "").split(/\n{2,}/).map((para, i) => (
+                        <p key={i} className="whitespace-pre-wrap">{para}</p>
+                      ))}
+                    </article>
+                  ) : (
+                    <p className="text-sm text-zinc-500">
+                      No content yet.{canManageSOPs ? " Click Edit to write this SOP." : ""}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Block-editor written SOPs (same engine as Notes) — always
+                  the read-only reader here; the header Edit button routes
+                  to the dedicated /sops/new/text editor. */}
               {sop.content && (sop.content as any).type === "blocks" && (
-                editing ? (
-                  <Card>
-                    <CardContent className="p-4 sm:p-6">
-                      <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-zinc-200 p-4 text-sm">
-                        <div>
-                          <div className="font-medium">Block editor</div>
-                          <div className="text-xs text-zinc-500">
-                            This SOP uses the Notes block editor. Open the
-                            full editor to add headings, lists, images,
-                            mentions, embedded SOPs and more.
-                          </div>
-                        </div>
-                        <Button asChild size="sm">
-                          <Link href={`/sops/new/text?id=${sop.id}`}>Open editor</Link>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  // Notes-style reader: clean white canvas + a word-count meta
-                  // strip + a centered reading column, using the same block
-                  // engine as Notes (so Written SOPs read exactly like a note).
-                  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-                    <div className="flex items-center gap-1.5 border-b border-zinc-100 px-6 py-2.5 text-xs text-zinc-400">
-                      <FileText size={13} />
-                      {(() => {
-                        const w = (sopBlocks ?? []).reduce(
-                          (a: number, b: any) =>
-                            a + (typeof b?.text === "string"
-                              ? b.text.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
-                              : 0),
-                          0,
-                        );
-                        return `${w.toLocaleString()} word${w === 1 ? "" : "s"} · ${Math.max(1, Math.round(w / 220))} min read`;
-                      })()}
-                    </div>
-                    <div className="px-5 py-6 sm:px-10 sm:py-9">
-                      <div className="w-full">
-                        <BlockNoteCanvas
-                          key={sop.id}
-                          initialBnDoc={sopBnDoc}
-                          legacyBlocks={sopBlocks}
-                          readonly
-                          onChange={() => { /* read-only */ }}
-                          entity={{ type: "sop", id: sop.id }}
-                        />
-                      </div>
+                // Notes-style reader: clean white canvas + a word-count meta
+                // strip + a centered reading column, using the same block
+                // engine as Notes (so Written SOPs read exactly like a note).
+                <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
+                  <div className="flex items-center gap-1.5 border-b border-zinc-100 px-6 py-2.5 text-xs text-zinc-400">
+                    <FileText size={13} />
+                    {(() => {
+                      const w = (sopBlocks ?? []).reduce(
+                        (a: number, b: any) =>
+                          a + (typeof b?.text === "string"
+                            ? b.text.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length
+                            : 0),
+                        0,
+                      );
+                      return `${w.toLocaleString()} word${w === 1 ? "" : "s"} · ${Math.max(1, Math.round(w / 220))} min read`;
+                    })()}
+                  </div>
+                  <div className="px-5 py-6 sm:px-10 sm:py-9">
+                    <div className="w-full">
+                      <BlockNoteCanvas
+                        key={sop.id}
+                        initialBnDoc={sopBnDoc}
+                        legacyBlocks={sopBlocks}
+                        readonly
+                        onChange={() => { /* read-only */ }}
+                        entity={{ type: "sop", id: sop.id }}
+                      />
                     </div>
                   </div>
-                )
+                </div>
               )}
 
-              {/* Steps / Checklist Builder — suppressed for blocks-typed
-                  content because that variant owns its own layout via
-                  the Block editor above. */}
-              {(sop.content as any)?.type === "blocks" ? null : sop.sopType === "CHECKLIST" ? (
+              {/* Steps / Checklist Builder — suppressed for written-doc
+                  content (blocks / WRITTEN / richtext) because those
+                  variants own their layout via the readers above. */}
+              {["blocks", "WRITTEN", "richtext"].includes((sop.content as any)?.type) ? null : sop.sopType === "CHECKLIST" ? (
                 <div>
                   {aiGenerating && (
                     <p className="text-xs text-[color:var(--accent-strong)] animate-pulse mb-2">Generating with AI...</p>
@@ -2290,6 +2545,23 @@ export default function SOPDetailPage() {
               </div>
 
               <div className="flex items-center gap-3">
+                <GitBranch size={14} className="text-zinc-500 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Linked KRA
+                  </Label>
+                  <div className="mt-0.5">
+                    <SopKraPicker
+                      sopId={sop.id}
+                      kraId={sop.kraId ?? null}
+                      canEdit={canManageSOPs}
+                      onSaved={(next) => setSop((prev) => (prev ? { ...prev, kraId: next } : prev))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
                 <Hash size={14} className="text-zinc-500 shrink-0" />
                 <div>
                   <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
@@ -2332,6 +2604,29 @@ export default function SOPDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Board items that link this SOP. Hidden until the backlinks
+              API returns BOARD_ITEM sources — renders nothing when the
+              field is absent or empty. */}
+          {taskLinks.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Used by tasks ({taskLinks.length})</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1">
+                {taskLinks.map((t) => (
+                  <Link
+                    key={t.sourceId}
+                    href={t.href || "#"}
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-zinc-700 ${t.href ? "hover:bg-zinc-50 hover:text-[#0073EA]" : "pointer-events-none opacity-70"}`}
+                  >
+                    <Link2 size={13} className="shrink-0 text-zinc-400" />
+                    <span className="truncate">{t.title}</span>
+                  </Link>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Quick Stats */}
           <Card>

@@ -31,6 +31,9 @@ type ApiProcessRun = {
   updatedAt: string;
   assigneeId?: string | null;
   sopId: string;
+  // Returned by GET /api/process-runs (findMany with include returns all
+  // scalars). Powers the /run/<token> link for runnable rows.
+  shareToken?: string | null;
   sop?: { id: string; title: string; category?: string | null; sopType?: string } | null;
 };
 
@@ -228,8 +231,12 @@ function RunRow({ r, onCancel }: { r: ApiProcessRun; onCancel: (id: string) => v
     days !== null && days <= 3 ? `Due in ${days}d` :
     `Due ${new Date(r.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
   const dueTone = !days ? "" : days < 0 ? "is-late" : days <= 3 ? "is-soon" : "";
+  // Runnable rows (active / overdue) open the run itself; finished ones
+  // open the source SOP.
+  const runnable = (r.status === "ACTIVE" || r.status === "OVERDUE") && r.shareToken;
+  const href = runnable ? `/run/${r.shareToken}` : r.sopId ? `/sops/${r.sopId}` : "/sops";
   return (
-    <Link href={r.sopId ? `/sops/${r.sopId}` : "/sops"} className="prun__row">
+    <Link href={href} className="prun__row">
       <div className="prun__row-main">
         <div className="prun__row-title">{r.title}</div>
         <div className="prun__row-meta">

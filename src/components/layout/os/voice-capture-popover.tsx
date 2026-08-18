@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { Mic, X, Copy, RotateCcw, Square, StickyNote, CheckSquare } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
@@ -38,6 +39,8 @@ export function VoiceCapturePopover() {
   const { toast } = useOsToast();
   const { openCreateTask } = useOsShell();
   const router = useRouter();
+  const { data: session } = useSession();
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const [open, setOpen] = useState(false);
   const [recording, setRecording] = useState(false);
   const [finalText, setFinalText] = useState("");
@@ -93,16 +96,23 @@ export function VoiceCapturePopover() {
     catch { toast("Couldn't copy"); }
   }
 
-  // Save the transcript as a real standalone note (Doc) — the same model +
-  // endpoint the Notepad panel writes to — then open it. No more clipboard-only.
+  // Save the transcript as a personal Notepad note (Doc anchored
+  // NOTEPAD/<me>) — the same anchor the Notepad panel writes, so voice notes
+  // stay private to the speaker and never appear in /docs or Library.
   async function saveAsNote() {
     if (!text || saving) return;
+    // Without the owner anchor the note would be an org-visible doc (or an
+    // orphaned NOTEPAD/null row) — refuse instead of leaking.
+    if (!meId) { toast("Still signing you in — try again in a moment"); return; }
     setSaving(true);
     try {
       const title = (text.split("\n")[0] ?? "").trim().slice(0, 80) || "Voice note";
       const res = await fetch("/api/docs", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, content: textToContent(text), excerpt: text.slice(0, 200) }),
+        body: JSON.stringify({
+          title, content: textToContent(text), excerpt: text.slice(0, 200),
+          entityType: "NOTEPAD", entityId: meId,
+        }),
       });
       if (!res.ok) { toast("Couldn't save note"); return; }
       const d = await res.json();
