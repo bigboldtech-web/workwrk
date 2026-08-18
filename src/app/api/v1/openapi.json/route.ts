@@ -5,10 +5,23 @@
  */
 
 export async function GET(req: Request) {
-  const base =
-    new URL(req.url).origin.replace(/\/$/, "") ||
-    process.env.NEXTAUTH_URL ||
-    "https://workwrk.com";
+  // Public base URL. `new URL(req.url).origin` is ALWAYS truthy, so it can
+  // never fall through — and behind nginx it is the internal origin
+  // (http://localhost:3002), which would publish a "Production" server URL
+  // pointing at the reader's own machine. Trust the proxy's forwarded host
+  // first, then the configured public URL, and only then the raw origin.
+  const h = req.headers;
+  const fwdHost = h.get("x-forwarded-host") || h.get("host");
+  const fwdProto = h.get("x-forwarded-proto") || "https";
+  const configured = process.env.NEXTAUTH_URL?.replace(/\/$/, "");
+  const rawOrigin = new URL(req.url).origin.replace(/\/$/, "");
+  const isLocal = (u: string) => /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|$)/i.test(u);
+
+  let base: string;
+  if (fwdHost && !isLocal(`${fwdProto}://${fwdHost}`)) base = `${fwdProto}://${fwdHost}`;
+  else if (configured && !isLocal(configured)) base = configured;
+  else if (!isLocal(rawOrigin)) base = rawOrigin;
+  else base = rawOrigin; // genuine local dev — keep localhost so dev tooling works
 
   const spec = {
     openapi: "3.1.0",
@@ -345,6 +358,57 @@ export async function GET(req: Request) {
       { name: "okr.updated" },
     ],
   };
+
+  // ── Post-process: group endpoints and document the failures every one of
+  // them can return. Done here rather than on each operation so endpoints
+  // added later inherit it automatically and can never drift.
+  const TAG_OF: Record<string, string> = {
+    "/people": "People",
+    "/kras": "Alignment",
+    "/kpis": "Alignment",
+    "/kpi-records": "Alignment",
+    "/tasks": "Work",
+    "/kudos": "Culture",
+    "/sops": "Knowledge",
+  };
+  const SCOPE_OF: Record<string, "READ" | "WRITE"> = {
+    get: "READ", post: "WRITE", put: "WRITE", patch: "WRITE", delete: "WRITE",
+  };
+  const errRef = (description: string) => ({
+    description,
+    content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+  });
+
+  (spec.components as Record<string, unknown>).responses = {
+    Unauthorized: errRef("Missing, malformed, revoked or unknown API key."),
+    Forbidden: errRef("The key is valid but lacks the scope this endpoint requires."),
+    RateLimited: errRef("Per-minute or per-day rate limit for this key exceeded."),
+  };
+
+  const paths = spec.paths as Record<string, Record<string, Record<string, unknown>>>;
+  for (const [path, ops] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(ops)) {
+      if (!SCOPE_OF[method] || typeof op !== "object" || op === null) continue;
+      op.tags = [TAG_OF[path] ?? "General"];
+      op.operationId ??= `${method}${path.replace(/[^a-zA-Z]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ""))}`;
+      op.responses = {
+        ...(op.responses as Record<string, unknown>),
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      };
+      // Surface the scope a key needs, so a reader never has to guess.
+      op.description = `${(op.description as string) ?? ""}\n\nRequires a key with the **${SCOPE_OF[method]}** scope (ADMIN satisfies every scope).`.trim();
+    }
+  }
+
+  (spec as Record<string, unknown>).tags = [
+    { name: "People", description: "Directory of everyone in the organization." },
+    { name: "Alignment", description: "KRAs, KPIs and the readings recorded against them." },
+    { name: "Work", description: "Tasks, including SLA-tracked work." },
+    { name: "Culture", description: "Recognition and the kudos feed." },
+    { name: "Knowledge", description: "Published SOPs." },
+  ];
 
   return Response.json(spec, {
     headers: {
