@@ -601,7 +601,7 @@ function ColorSwatch({ color, onChange }: { color: string; onChange: (c: string)
                 onChange(c);
                 setOpen(false);
               }}
-              className="h-4 w-4 rounded-full hover:scale-110 transition-transform"
+              className="h-4 w-4 rounded-full hover:brightness-110 transition-[filter]"
               style={{ backgroundColor: c }}
             />
           ))}

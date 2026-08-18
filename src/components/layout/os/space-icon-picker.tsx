@@ -104,7 +104,7 @@ export function SpaceIconPicker({ iconName, color, fallbackInitial, onChange }: 
                 key={c.hex}
                 type="button"
                 onClick={() => onChange({ iconName, color: c.hex })}
-                className={`h-5 w-5 rounded-full transition-transform hover:scale-110 ${
+                className={`h-5 w-5 rounded-full transition-[filter] hover:brightness-110 ${
                   color.toLowerCase() === c.hex.toLowerCase() ? "ring-2 ring-offset-1 ring-foreground/30" : ""
                 }`}
                 style={{ backgroundColor: c.hex }}

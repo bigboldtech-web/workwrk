@@ -30,7 +30,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
       className={cn(
         "rounded-xl border border-border bg-surface transition-fast",
         variant === "interactive" &&
-          "cursor-pointer hover:border-[color:var(--accent)]/40 hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.12)] hover:-translate-y-px",
+          "cursor-pointer hover:border-[color:var(--accent)]/40 hover:shadow-[0_4px_14px_-6px_rgba(0,0,0,0.12)]",
         variant === "hero" && "rounded-2xl",
         variant === "default" && "hover:border-[color:var(--b-line-2)]",
         className,

@@ -273,7 +273,7 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex items-start gap-3 rounded-2xl border p-4 pr-10 text-left transition-all hover:-translate-y-px hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)]"
+      className="group relative flex items-start gap-3 rounded-2xl border p-4 pr-10 text-left transition-all hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)]"
       style={{
         borderColor: selected ? "#0073EA" : "#e6e6ec",
         background: selected ? "rgba(0,115,234,0.05)" : "#fff",
