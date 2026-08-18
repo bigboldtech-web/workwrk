@@ -2,6 +2,22 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Tailwind 4 preflight gives <button> the ARROW cursor (a v3→v4 change).
+   Links show the hand natively, and hundreds of styled controls declare
+   pointer by hand — so sweeping across mixed chrome (sidebar rows, menus,
+   toolbars) flickered hand↔arrow. One base rule makes every enabled
+   control consistent; disabled elements keep their default treatment. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled),
+  select:not(:disabled),
+  summary {
+    cursor: pointer;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * Design tokens — Phase B revamp.
  *
