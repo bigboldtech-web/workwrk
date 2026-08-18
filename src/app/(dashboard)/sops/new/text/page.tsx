@@ -68,6 +68,7 @@ export default function WrittenSopEditor() {
   const { toast } = useOsToast();
 
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [blocks, setBlocks] = useState<Block[] | null>(null);
   const [bnDoc, setBnDoc] = useState<BnDocJSON | null>(null);
   // Frozen custom-embed originals (sop_card/task_card/…) so they survive the
@@ -79,6 +80,13 @@ export default function WrittenSopEditor() {
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const descRef = useRef<HTMLTextAreaElement | null>(null);
+  // persist() reads these refs, not state: a debounce timer holds the persist
+  // closure from the render BEFORE the last keystroke, so state reads would
+  // save one character behind.
+  const titleValRef = useRef("");
+  const descValRef = useRef("");
   const initialLoad = useRef(true);
   const creatingRef = useRef(false);
 
@@ -106,6 +114,14 @@ export default function WrittenSopEditor() {
     })();
   }, [id, router, toast]);
 
+  // Size the description field to its loaded content (it arrives async, after
+  // the textarea has already rendered one row tall). Re-runs on editor changes
+  // too — idempotent and cheap.
+  useEffect(() => {
+    const el = descRef.current;
+    if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }
+  }, [blocks]);
+
   // Load
   useEffect(() => {
     if (!id) return;
@@ -116,6 +132,9 @@ export default function WrittenSopEditor() {
         const data = await res.json();
         const sop = data.data ?? data;
         setTitle(sop.title ?? "");
+        setDescription(sop.description ?? "");
+        titleValRef.current = sop.title ?? "";
+        descValRef.current = sop.description ?? "";
         setStatus(sop.status ?? "DRAFT");
 
         const c = sop.content as { type?: string; bnDoc?: BnDocJSON; blocks?: Block[]; body?: string; html?: string; meta?: DocMeta } | null;
@@ -150,7 +169,8 @@ export default function WrittenSopEditor() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: title.trim() || "Untitled SOP",
+          title: titleValRef.current.trim() || "Untitled SOP",
+          description: descValRef.current.trim() || null,
           // Keep type:"blocks" + the `blocks` mirror so EntityLink sync,
           // versioning and empty-checks keep working; bnDoc is BN's truth.
           content: { type: "blocks", ...(nextBnDoc ? { bnDoc: nextBnDoc } : {}), blocks: nextBlocks, meta: nextMeta },
@@ -162,7 +182,7 @@ export default function WrittenSopEditor() {
       if (opts.publish) { setStatus("PUBLISHED"); toast("SOP published"); }
     } catch { toast("Couldn't save"); }
     finally { setSaving(false); }
-  }, [id, status, title, toast]);
+  }, [id, status, toast]);
 
   const handleEditorChange = useCallback((nextBnDoc: BnDocJSON, mirror: Block[]) => {
     const enriched = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
@@ -173,8 +193,21 @@ export default function WrittenSopEditor() {
 
   function saveTitle(next: string) {
     setTitle(next);
+    titleValRef.current = next;
     if (titleTimer.current) clearTimeout(titleTimer.current);
     titleTimer.current = setTimeout(() => {
+      if (blocks) void persist(bnDoc, blocks, meta);
+    }, 700);
+  }
+
+  function saveDescription(next: string) {
+    setDescription(next);
+    descValRef.current = next;
+    // Auto-grow: the field is a one-line subtitle that expands with content.
+    const el = descRef.current;
+    if (el) { el.style.height = "auto"; el.style.height = `${el.scrollHeight}px`; }
+    if (descTimer.current) clearTimeout(descTimer.current);
+    descTimer.current = setTimeout(() => {
       if (blocks) void persist(bnDoc, blocks, meta);
     }, 700);
   }
@@ -239,6 +272,15 @@ export default function WrittenSopEditor() {
         value={title}
         onChange={(e) => saveTitle(e.target.value)}
         placeholder="SOP title…"
+      />
+
+      <textarea
+        ref={descRef}
+        className="sop-edit__desc"
+        value={description}
+        onChange={(e) => saveDescription(e.target.value)}
+        placeholder="Add a short description — what is this SOP for, and when should someone reach for it?"
+        rows={1}
       />
 
       {blocks === null ? (

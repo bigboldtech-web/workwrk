@@ -7579,6 +7579,19 @@ table.os-tbl {
 }
 .sop-edit__title::placeholder { color: var(--os-ink-3); font-weight: 600; }
 .sop-edit__title:focus { border-bottom-color: var(--os-brand); }
+/* Subtitle under the title on the written-SOP editor: quiet one-line field
+   that auto-grows (height driven from JS via scrollHeight). */
+.sop-edit__desc {
+  width: 100%; padding: 2px 0 10px;
+  font-size: 15px; line-height: 1.5; color: var(--os-ink-2);
+  border: none; outline: none; background: transparent;
+  resize: none; overflow: hidden;
+  border-bottom: 1px solid var(--os-line);
+  margin-bottom: 4px;
+  font-family: inherit;
+}
+.sop-edit__desc::placeholder { color: var(--os-ink-3); }
+.sop-edit__desc:focus { border-bottom-color: var(--os-brand); }
 .sop-edit__hint { margin-top: 12px; font-size: 12px; color: var(--os-ink-3); text-align: center; }
 .sop-edit__hint strong { color: var(--os-ink-2); }
 
