@@ -18,13 +18,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Briefcase, Plus, Users, Search, Building2, UserX,
-  Layers, GraduationCap,
+  Layers, GraduationCap, Trash2,
 } from "lucide-react";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { usePrompt } from "@/components/ui/dialog-provider";
+import { usePrompt, useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
 
 // Every AccessLevel the schema knows today, plus "OTHER" — a safe bucket
@@ -89,7 +89,9 @@ export default function RolesPage() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/roles");
+      // no-store + focus refetch: a level changed on the role detail page must
+      // regroup here the moment the user comes back — not after a hard refresh.
+      const res = await fetch("/api/roles", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setRoles(data.data ?? (Array.isArray(data) ? data : []));
@@ -99,8 +101,38 @@ export default function RolesPage() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const refetch = () => { if (document.visibilityState === "visible") void load(); };
+    window.addEventListener("focus", refetch);
+    document.addEventListener("visibilitychange", refetch);
+    return () => {
+      window.removeEventListener("focus", refetch);
+      document.removeEventListener("visibilitychange", refetch);
+    };
+  }, [load]);
   const v = rowVersion("people");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
+
+  const confirm = useConfirm();
+  const deleteRole = useCallback(async (r: ApiRole) => {
+    const holders = r._count?.users ?? 0;
+    if (holders > 0) {
+      toast(`${holders} ${holders === 1 ? "person holds" : "people hold"} this role — reassign them first.`);
+      return;
+    }
+    if (!(await confirm({
+      title: `Delete role "${r.title}"?`,
+      description: "Its KRA templates detach and stay in the library. No people are affected — deletion is refused while anyone holds the role.",
+      confirmLabel: "Delete role",
+      destructive: true,
+    }))) return;
+    const res = await fetch(`/api/roles/${r.id}`, { method: "DELETE" });
+    if (res.ok) { toast("Role deleted"); void load(); }
+    else {
+      const d = await res.json().catch(() => ({}));
+      toast(d?.error ?? "Couldn't delete the role");
+    }
+  }, [confirm, toast, load]);
 
   async function quickAdd() {
     const title = (await promptDialog({ title: "Role title?" }))?.trim();
@@ -309,7 +341,7 @@ export default function RolesPage() {
                 <span className="rls__group-line" />
               </header>
               <div className="rls__grid">
-                {g.items.map((r) => <RoleCard key={r.id} role={r} />)}
+                {g.items.map((r) => <RoleCard key={r.id} role={r} onDelete={() => void deleteRole(r)} />)}
               </div>
             </section>
           ))
@@ -319,7 +351,7 @@ export default function RolesPage() {
   );
 }
 
-function RoleCard({ role: r }: { role: ApiRole }) {
+function RoleCard({ role: r, onDelete }: { role: ApiRole; onDelete: () => void }) {
   const count = r._count?.users ?? 0;
   const isUnfilled = count === 0;
   const level = normalizeLevel(r.level);
@@ -328,8 +360,19 @@ function RoleCard({ role: r }: { role: ApiRole }) {
     <Link href={`/people/roles/${r.id}`} className={`rls__card${isUnfilled ? " is-unfilled" : ""}`} style={{ ["--card-c" as unknown as string]: levelColor, cursor: "pointer" }}>
       <header className="rls__card-head">
         <h3 className="rls__card-title">{r.title}</h3>
-        <span className={`rls__card-count${isUnfilled ? " is-zero" : ""}`}>
-          <Users /> {count}
+        <span className="inline-flex items-center gap-1">
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDelete(); }}
+            title={count > 0 ? "Reassign holders first, then delete" : "Delete role"}
+            aria-label={`Delete role ${r.title}`}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-300 hover:bg-red-50 hover:text-red-500"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          <span className={`rls__card-count${isUnfilled ? " is-zero" : ""}`}>
+            <Users /> {count}
+          </span>
         </span>
       </header>
 

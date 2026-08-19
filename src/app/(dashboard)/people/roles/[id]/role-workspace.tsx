@@ -132,27 +132,120 @@ function useApi() {
 
 // ─────────────────────────── Identity ───────────────────────────
 function IdentityCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolean }) {
-  const { call, busy } = useApi();
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const [title, setTitle] = useState(bundle.role.title);
   const [mission, setMission] = useState(bundle.role.description ?? "");
-  const dirty = mission.trim() !== (bundle.role.description ?? "").trim();
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Autosave reads refs, not state: the debounce timer holds the closure from
+  // the render BEFORE the last keystroke, so state reads would save one
+  // character behind ("sometimes it saves, sometimes it doesn't").
+  const titleRef = useRef(bundle.role.title);
+  const missionRef = useRef(bundle.role.description ?? "");
+  const savedRef = useRef({ title: bundle.role.title, mission: bundle.role.description ?? "" });
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flush = async () => {
+    const nextTitle = titleRef.current.trim();
+    const nextMission = missionRef.current.trim();
+    if (nextTitle === savedRef.current.title.trim() && nextMission === savedRef.current.mission.trim()) return;
+    if (!nextTitle) return; // never save a role into a blank title
+    setSaveState("saving");
+    try {
+      const res = await fetch(`/api/roles/${bundle.role.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: nextTitle, description: nextMission }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast(d?.error ?? "Couldn't save the role");
+        setSaveState("idle");
+        return;
+      }
+      savedRef.current = { title: nextTitle, mission: nextMission };
+      setSaveState("saved");
+      router.refresh();
+    } catch { toast("Network error — change not saved"); setSaveState("idle"); }
+  };
+  const queueSave = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => void flush(), 700);
+  };
+
+  const holders = bundle.people.length;
+  async function deleteRole() {
+    const res = await fetch(`/api/roles/${bundle.role.id}`, { method: "DELETE" });
+    if (res.ok) {
+      toast("Role deleted");
+      router.push("/people/roles");
+      router.refresh();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      toast(d?.error ?? "Couldn't delete the role");
+    }
+    setConfirmDelete(false);
+  }
+
   return (
-    <Card title="Identity & scope">
+    <Card
+      title="Identity & scope"
+      action={
+        <div className="flex items-center gap-2">
+          {canEdit && saveState !== "idle" ? (
+            <span className="text-[11px] text-zinc-400">{saveState === "saving" ? "Saving…" : "Saved"}</span>
+          ) : null}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (holders > 0) { toast(`${holders} ${holders === 1 ? "person holds" : "people hold"} this role — reassign them first.`); return; }
+                setConfirmDelete(true);
+              }}
+              className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-zinc-400 hover:text-red-500 hover:bg-red-50"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> Delete role
+            </button>
+          ) : null}
+        </div>
+      }
+    >
+      {confirmDelete ? (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => void deleteRole()}
+          title={`Delete role "${bundle.role.title}"?`}
+          description="Its KRA templates detach and stay in the library. Nobody holds this role, so no people are affected."
+          confirmLabel="Delete role"
+          destructive
+        />
+      ) : null}
       <div className="space-y-3">
+        <Field label="Title">
+          {canEdit ? (
+            <input
+              value={title}
+              onChange={(e) => { setTitle(e.target.value); titleRef.current = e.target.value; queueSave(); }}
+              onBlur={() => void flush()}
+              placeholder="Job title"
+              className="w-full text-[13px] rounded-md border border-zinc-200 px-2.5 py-1.5 focus:outline-none focus:border-[var(--os-brand)]"
+            />
+          ) : (
+            <span className="text-[13px] text-zinc-700">{bundle.role.title}</span>
+          )}
+        </Field>
         <Field label="Mission">
           {canEdit ? (
-            <div className="flex items-start gap-2">
-              <textarea
-                value={mission}
-                onChange={(e) => setMission(e.target.value)}
-                rows={2}
-                placeholder="One line: what this role must ensure…"
-                className="flex-1 text-[13px] rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
-              />
-              {dirty ? (
-                <button type="button" disabled={busy} onClick={() => call(`/api/roles/${bundle.role.id}`, "PUT", { description: mission.trim() })}
-                  className="h-7 px-2.5 rounded-md text-[12px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50 shrink-0">Save</button>
-              ) : null}
-            </div>
+            <textarea
+              value={mission}
+              onChange={(e) => { setMission(e.target.value); missionRef.current = e.target.value; queueSave(); }}
+              onBlur={() => void flush()}
+              rows={2}
+              placeholder="One line: what this role must ensure…"
+              className="w-full text-[13px] rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
+            />
           ) : (
             <span className="text-[13px] text-zinc-700">{mission || <span className="text-zinc-400">Not set</span>}</span>
           )}
