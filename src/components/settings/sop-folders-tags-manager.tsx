@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Card, CardContent, CardHeader, CardTitle, CardDescription,
 } from "@/components/ui/card";
@@ -13,16 +13,18 @@ import {
 } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
-import { FolderTree, type FolderNode } from "@/components/sops/folder-tree";
+import { type FolderNode } from "@/components/sops/folder-tree";
 import { FolderManager } from "@/components/sops/folder-manager";
 
 /**
- * Org-admin folder + tag management for SOPs.
+ * Org-admin management for the SOP taxonomy and tags.
  *
- * Folders are the structural taxonomy + access-scope unit. Tags are
- * cross-cutting labels (e.g. "Compliance", "Q2-2026"). Both live
- * here so launch-day admins have one canonical place to keep the
- * SOP system tidy.
+ * One taxonomy: the SOPFolder tree is the data, but the entire UI speaks
+ * Category (top-level) / Subcategory (child). Internal ids and API paths
+ * keep the folder naming; user-visible copy never says "folder".
+ * Two levels only going forward — subcategories can be created on
+ * categories, never deeper (legacy deeper nodes still render indented).
+ * Tags are cross-cutting labels (e.g. "Compliance", "Q2-2026").
  */
 export function SopFoldersTagsManager() {
   const { success: toastSuccess, error: toastError } = useToast();
@@ -56,14 +58,29 @@ export function SopFoldersTagsManager() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  // ---------- Folder CRUD ----------
-  async function handleCreateFolder(parentId: string | null) {
+  // Category = top-level node, Subcategory = anything below.
+  const kindOf = (f: FolderNode) => (f.parentId === null ? "category" : "subcategory");
+  const kindCap = (f: FolderNode) => (f.parentId === null ? "Category" : "Subcategory");
+
+  const childrenOf = useMemo(() => {
+    const m = new Map<string | null, FolderNode[]>();
+    for (const f of folders) {
+      const arr = m.get(f.parentId) || [];
+      arr.push(f);
+      m.set(f.parentId, arr);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    return m;
+  }, [folders]);
+
+  // ---------- Category / Subcategory CRUD (SOPFolder under the hood) ----------
+  async function handleCreateNode(parentId: string | null) {
     const parentName = parentId ? folders.find((f) => f.id === parentId)?.name : null;
     const name = await prompt({
-      title: parentId ? `New sub-folder in "${parentName}"` : "New folder",
+      title: parentId ? `New subcategory in "${parentName}"` : "New category",
       description: parentId
-        ? "Sub-folders inherit access from their parent unless you grant access explicitly."
-        : "Top-level folder. Visible to everyone in the org until you set an access list.",
+        ? "Subcategories inherit access from their category unless you grant access explicitly."
+        : "Top-level category. Visible to everyone in the org until you set an access list.",
       placeholder: parentId ? "e.g. Hiring" : "e.g. HR",
       submitLabel: "Create",
     });
@@ -73,68 +90,70 @@ export function SopFoldersTagsManager() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, parentId }),
     });
-    if (res.ok) { toastSuccess("Folder created"); load(); }
+    if (res.ok) { toastSuccess(parentId ? "Subcategory created" : "Category created"); load(); }
     else {
       const err = await res.json().catch(() => ({}));
-      toastError(err.error || "Failed to create folder");
+      toastError(err.error || `Failed to create ${parentId ? "subcategory" : "category"}`);
     }
   }
-  async function handleRenameFolder(folder: FolderNode) {
+  async function handleRename(node: FolderNode) {
     const next = await prompt({
-      title: "Rename folder",
-      description: `Currently named "${folder.name}".`,
-      defaultValue: folder.name,
+      title: `Rename ${kindOf(node)}`,
+      description: `Currently named "${node.name}".`,
+      defaultValue: node.name,
       submitLabel: "Save",
     });
-    if (!next || next === folder.name) return;
-    const res = await fetch(`/api/sop-folders/${folder.id}`, {
+    if (!next || next === node.name) return;
+    const res = await fetch(`/api/sop-folders/${node.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: next }),
     });
-    if (res.ok) { toastSuccess("Folder renamed"); load(); }
+    if (res.ok) { toastSuccess(`${kindCap(node)} renamed`); load(); }
     else {
       const err = await res.json().catch(() => ({}));
-      toastError(err.error || "Failed to rename folder");
+      toastError(err.error || `Failed to rename ${kindOf(node)}`);
     }
   }
-  async function handleDeleteFolder(folder: FolderNode) {
-    // Sub-folders block deletion (server refuses too) — the admin must
+  async function handleDelete(node: FolderNode) {
+    // Subcategories block deletion (server refuses too) — the admin must
     // clear them first. SOPs never block: they are moved, not deleted.
-    const childCount = folders.filter((f) => f.parentId === folder.id).length;
+    const childCount = folders.filter((f) => f.parentId === node.id).length;
     if (childCount > 0) {
-      toastError(`"${folder.name}" still has ${childCount} sub-folder${childCount === 1 ? "" : "s"}. Delete or move them first.`);
+      toastError(`"${node.name}" still has ${childCount} subcategor${childCount === 1 ? "y" : "ies"}. Delete or move them first.`);
       return;
     }
-    const parentName = folder.parentId
-      ? folders.find((p) => p.id === folder.parentId)?.name ?? "the parent folder"
+    const parentName = node.parentId
+      ? folders.find((p) => p.id === node.parentId)?.name ?? "the parent category"
       : null;
-    const sopCount = folder._count.sops;
+    const sopCount = node._count.sops;
     const reparentNote = sopCount > 0
-      ? ` Its ${sopCount} SOP${sopCount === 1 ? "" : "s"} will move to ${parentName ? `"${parentName}"` : "the unfoldered bucket"} — none are deleted.`
+      ? ` Its ${sopCount} SOP${sopCount === 1 ? "" : "s"} will move to ${parentName ? `"${parentName}"` : "Uncategorized"} — none are deleted.`
       : "";
     if (!(await confirm({
-      title: `Delete folder "${folder.name}"?`,
-      description: `Folder access grants will also be removed.${reparentNote}`,
-      confirmLabel: "Delete folder",
+      title: `Delete ${kindOf(node)} "${node.name}"?`,
+      description: `Access grants on it will also be removed.${reparentNote}`,
+      confirmLabel: `Delete ${kindOf(node)}`,
       destructive: true,
     }))) return;
-    const res = await fetch(`/api/sop-folders/${folder.id}`, { method: "DELETE" });
+    const res = await fetch(`/api/sop-folders/${node.id}`, { method: "DELETE" });
     if (res.ok) {
       const d = await res.json().catch(() => ({}));
       const moved = d?.sopsReparented ?? 0;
-      toastSuccess(moved > 0 ? `Folder deleted — ${moved} SOP${moved === 1 ? "" : "s"} moved` : "Folder deleted");
+      toastSuccess(moved > 0
+        ? `${kindCap(node)} deleted — ${moved} SOP${moved === 1 ? "" : "s"} moved`
+        : `${kindCap(node)} deleted`);
       load();
     } else {
       const err = await res.json().catch(() => ({}));
-      toastError(err.error || "Failed to delete folder");
+      toastError(err.error || `Failed to delete ${kindOf(node)}`);
     }
   }
-  async function handleSetColor(folder: FolderNode) {
+  async function handleSetColor(node: FolderNode) {
     const hex = await prompt({
-      title: "Folder color",
-      description: "Hex color used for the dot in the sidebar tree (e.g. #0073EA).",
-      defaultValue: folder.color || "",
+      title: `${kindCap(node)} color`,
+      description: "Hex color used for the dot in the SOPs sidebar (e.g. #0073EA).",
+      defaultValue: node.color || "",
       placeholder: "#0073EA",
       submitLabel: "Save",
       required: false,
@@ -145,7 +164,7 @@ export function SopFoldersTagsManager() {
       toastError("Use a 6-digit hex color, e.g. #0073EA");
       return;
     }
-    const res = await fetch(`/api/sop-folders/${folder.id}`, {
+    const res = await fetch(`/api/sop-folders/${node.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ color: value }),
@@ -158,7 +177,7 @@ export function SopFoldersTagsManager() {
   async function handleRenameTag(tag: { name: string; count: number }) {
     const next = await prompt({
       title: "Rename tag",
-      description: `"${tag.name}" is used on ${tag.count} SOP${tag.count === 1 ? "" : "s"}. Renaming updates them all.`,
+      description: `"${tag.name}" is used on ${tag.count} SOP${tag.count === 1 ? "" : "s"}. Renaming updates them all; renaming to an existing tag merges the two.`,
       defaultValue: tag.name,
       submitLabel: "Rename",
     });
@@ -170,7 +189,7 @@ export function SopFoldersTagsManager() {
     });
     if (res.ok) {
       const d = await res.json().catch(() => ({}));
-      toastSuccess(`Renamed on ${d?.data?.updated ?? "every"} SOP`);
+      toastSuccess(`Renamed on ${d?.updated ?? "every"} SOP`);
       load();
     } else {
       const err = await res.json().catch(() => ({}));
@@ -197,99 +216,123 @@ export function SopFoldersTagsManager() {
   const filteredTags = tagFilter
     ? tags.filter((t) => t.name.toLowerCase().includes(tagFilter.toLowerCase()))
     : tags;
-  const totalSopsAcross = folders.reduce((s, f) => s + f._count.sops, 0);
+
+  // One tree, hover actions on every row. "New subcategory" only on
+  // categories — two levels going forward; legacy deeper nodes still render.
+  function renderNode(node: FolderNode, depth: number): React.ReactNode {
+    const kids = childrenOf.get(node.id) || [];
+    return (
+      <div key={node.id}>
+        <div
+          className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] hover:bg-surface-2 transition-colors"
+          style={{ paddingLeft: depth * 18 + 8 }}
+        >
+          <span
+            className="h-2.5 w-2.5 rounded-full shrink-0"
+            style={{ backgroundColor: node.color || "#0073EA" }}
+          />
+          <span className="truncate font-medium">{node.name}</span>
+          <Badge variant="outline" className="text-[10px] h-5 shrink-0" title={depth === 0 ? "SOPs in this category, subcategories included" : "SOPs in this subcategory"}>
+            {node.sopCountDeep} SOP{node.sopCountDeep === 1 ? "" : "s"}
+          </Badge>
+          <span className="flex-1" />
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+            {node.parentId === null && (
+              <Button
+                variant="ghost" size="icon" className="h-7 w-7"
+                onClick={() => handleCreateNode(node.id)}
+                title="New subcategory"
+                aria-label={`New subcategory in ${node.name}`}
+              >
+                <Plus size={12} />
+              </Button>
+            )}
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7"
+              onClick={() => setShowAccessDialog(true)}
+              title={`Manage access (${node._count.access})`}
+              aria-label={`Manage access for ${node.name}`}
+            >
+              <UsersIcon size={12} />
+            </Button>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7"
+              onClick={() => handleRename(node)}
+              title="Rename"
+              aria-label={`Rename ${node.name}`}
+            >
+              <Pencil size={12} />
+            </Button>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7"
+              onClick={() => handleSetColor(node)}
+              title="Set color"
+              aria-label={`Set color for ${node.name}`}
+            >
+              <Palette size={12} />
+            </Button>
+            <Button
+              variant="ghost" size="icon" className="h-7 w-7 text-red-400 hover:text-red-300"
+              onClick={() => handleDelete(node)}
+              title={`Delete ${kindOf(node)}`}
+              aria-label={`Delete ${node.name}`}
+            >
+              <Trash2 size={12} />
+            </Button>
+          </div>
+        </div>
+        {kids.map((child) => renderNode(child, depth + 1))}
+      </div>
+    );
+  }
+
+  const roots = childrenOf.get(null) || [];
 
   return (
     <div className="space-y-4">
-      {/* Folders */}
+      {/* Categories */}
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <FolderTreeIcon size={16} /> Folders
+                <FolderTreeIcon size={16} /> Categories
               </CardTitle>
               <CardDescription>
-                The structural taxonomy for SOPs. Folders nest, and access
-                cascades to sub-folders. Right-click a node for actions.
+                How the SOP library is organized: categories with subcategories
+                inside them. Hover a row for actions.
               </CardDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowAccessDialog(true)}>
                 <UsersIcon size={13} /> Manage access
               </Button>
-              <Button size="sm" className="gap-1.5" onClick={() => handleCreateFolder(null)}>
-                <Plus size={13} /> New folder
+              <Button size="sm" className="gap-1.5" onClick={() => handleCreateNode(null)}>
+                <Plus size={13} /> New category
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-xs text-muted py-6 text-center">Loading folders…</div>
-          ) : folders.length === 0 ? (
+            <div className="text-xs text-muted py-6 text-center">Loading categories…</div>
+          ) : roots.length === 0 ? (
             <div className="text-xs text-muted py-6 text-center">
-              No folders yet. Create one to start organizing SOPs.
+              No categories yet. Create one to start organizing SOPs.
             </div>
           ) : (
             <div className="rounded-lg border border-border bg-surface-2 p-2">
-              <FolderTree
-                folders={folders}
-                totalSops={totalSopsAcross}
-                selected="all"
-                onSelect={() => {}}
-                onCreateChild={handleCreateFolder}
-                onRename={handleRenameFolder}
-                onManageAccess={() => setShowAccessDialog(true)}
-                onDelete={handleDeleteFolder}
-                canManage
-              />
+              {roots.map((r) => renderNode(r, 0))}
             </div>
           )}
           <p className="text-[11px] text-muted mt-3 leading-relaxed flex items-start gap-1.5">
-            <Palette size={12} className="mt-0.5 shrink-0" />
+            <UsersIcon size={12} className="mt-0.5 shrink-0" />
             <span>
-              Right-click any folder to rename or delete. Use the colored dot in
-              the SOPs sidebar to recognise folders at a glance — set a color
-              with Rename + the color action below if needed.
+              Access cascades: anyone granted a category also sees its
+              subcategories. Deleting never deletes SOPs — they move to the
+              parent category, or to Uncategorized.
             </span>
           </p>
-          {folders.length > 0 && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-2">
-              {folders.map((f) => (
-                <div key={f.id} className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 p-2 text-xs">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: f.color || "#0073EA" }}
-                  />
-                  <span className="flex-1 truncate">
-                    {f.name}
-                    {f.parentId && (
-                      <span className="text-muted ml-1">
-                        · child of {folders.find((p) => p.id === f.parentId)?.name ?? "—"}
-                      </span>
-                    )}
-                  </span>
-                  <Badge variant="outline" className="text-[10px] h-5">{f._count.sops} SOP{f._count.sops === 1 ? "" : "s"}</Badge>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleSetColor(f)} aria-label={`Set color for ${f.name}`}>
-                    <Palette size={12} />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRenameFolder(f)} aria-label={`Rename ${f.name}`}>
-                    <Pencil size={12} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-red-400 hover:text-red-300"
-                    onClick={() => handleDeleteFolder(f)}
-                    aria-label={`Delete ${f.name}`}
-                  >
-                    <Trash2 size={12} />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -321,7 +364,8 @@ export function SopFoldersTagsManager() {
             <div className="text-xs text-muted py-6 text-center">Loading tags…</div>
           ) : tags.length === 0 ? (
             <div className="text-xs text-muted py-6 text-center">
-              No tags in use yet. People will add them as they create SOPs.
+              No tags yet. Add tags while creating or editing an SOP — they
+              appear here for cleanup.
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
@@ -354,7 +398,7 @@ export function SopFoldersTagsManager() {
         </CardContent>
       </Card>
 
-      {/* Folder access — same dialog used by the SOPs page sidebar. */}
+      {/* Category access — same dialog used by the SOPs page sidebar. */}
       <FolderManager
         open={showAccessDialog}
         onOpenChange={(o) => { setShowAccessDialog(o); if (!o) load(); }}

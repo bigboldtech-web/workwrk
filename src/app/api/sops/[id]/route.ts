@@ -134,12 +134,30 @@ export async function PATCH(
     if (next) {
       const folder = await prisma.sOPFolder.findFirst({
         where: { id: next, organizationId: orgId },
-        select: { id: true },
+        select: { id: true, name: true, parentId: true },
       });
       if (!folder) return jsonError("Target folder not found", 404);
       if (!(await canWriteToFolder(session, next))) {
         return jsonError("You don't have access to the target folder", 403);
       }
+      // One taxonomy: the folder chain IS the category. Mirror its names into
+      // the legacy category/subcategory strings so every older reader (list
+      // chips, filters, exports) agrees with the tree. A top-level folder is
+      // the category; a nested one contributes (top ancestor, itself).
+      let top = folder;
+      while (top.parentId) {
+        const parent = await prisma.sOPFolder.findFirst({
+          where: { id: top.parentId, organizationId: orgId },
+          select: { id: true, name: true, parentId: true },
+        });
+        if (!parent) break;
+        top = parent;
+      }
+      data.category = top.name;
+      data.subcategory = top.id === folder.id ? null : folder.name;
+    } else {
+      data.category = null;
+      data.subcategory = null;
     }
     data.folderId = next;
   }

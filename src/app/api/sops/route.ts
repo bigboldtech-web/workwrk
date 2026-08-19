@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager, requirePermission } from "@/lib/api-helpers";
 import { checkPlanLimit } from "@/lib/plan-limits";
 import { logActivity } from "@/lib/activity";
+import { categoryChainFor } from "@/lib/sop-taxonomy";
 import { parsePaginationParams, paginatedResult, skipTake } from "@/lib/pagination";
 import { sopVisibilityWhere, canWriteToFolder, descendantFolderIds } from "@/lib/sop-access";
 
@@ -175,12 +176,18 @@ export async function POST(req: NextRequest) {
       ))
     : [];
 
+  // One taxonomy: when a folder is supplied, the mirrored category/subcategory
+  // strings come from the folder chain, never from the body.
+  const chain = resolvedFolderId
+    ? await categoryChainFor(getOrgId(session), resolvedFolderId)
+    : { category: category ?? null, subcategory: subcategory || null };
+
   const sop = await prisma.sOP.create({
     data: {
       title,
       description,
-      category,
-      subcategory: subcategory || null,
+      category: chain.category,
+      subcategory: chain.subcategory,
       sopType: resolvedType,
       content: resolvedContent,
       folderId: resolvedFolderId,

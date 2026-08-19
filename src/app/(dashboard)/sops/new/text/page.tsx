@@ -24,6 +24,8 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { type Block } from "@/components/docs/block-editor";
 import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-canvas";
 import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "@/components/docs/legacy-embed-preserve";
+import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
+import { SopTagInput } from "@/components/sops/sop-tag-input";
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
@@ -75,6 +77,8 @@ export default function WrittenSopEditor() {
   // blocks→BlockNote→blocks round-trip instead of decaying to paragraphs.
   const preservedLegacyRef = useRef<Map<string, Block>>(new Map());
   const [meta, setMeta] = useState<DocMeta>({});
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
   const [status, setStatus] = useState<"DRAFT" | "PUBLISHED" | "ARCHIVED" | "IN_REVIEW" | "APPROVED">("DRAFT");
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -135,6 +139,8 @@ export default function WrittenSopEditor() {
         setDescription(sop.description ?? "");
         titleValRef.current = sop.title ?? "";
         descValRef.current = sop.description ?? "";
+        setFolderId(sop.folderId ?? null);
+        setTags(Array.isArray(sop.tags) ? sop.tags : []);
         setStatus(sop.status ?? "DRAFT");
 
         const c = sop.content as { type?: string; bnDoc?: BnDocJSON; blocks?: Block[]; body?: string; html?: string; meta?: DocMeta } | null;
@@ -183,6 +189,22 @@ export default function WrittenSopEditor() {
     } catch { toast("Couldn't save"); }
     finally { setSaving(false); }
   }, [id, status, toast]);
+
+  // Taxonomy + tags save as their OWN single-field PATCHes, never through
+  // persist()'s content payload — a content autosave in flight can then never
+  // clobber a concurrent category/tag pick.
+  const patchMeta = useCallback(async (patch: { folderId?: string | null; tags?: string[] }, label: string) => {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/sops/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      setLastSaved(new Date());
+    } catch { toast(`Couldn't save ${label}`); }
+  }, [id, toast]);
 
   const handleEditorChange = useCallback((nextBnDoc: BnDocJSON, mirror: Block[]) => {
     const enriched = rehydrateMirrorWithLegacyEmbeds(mirror, preservedLegacyRef.current);
@@ -282,6 +304,17 @@ export default function WrittenSopEditor() {
         placeholder="Add a short description — what is this SOP for, and when should someone reach for it?"
         rows={1}
       />
+
+      <div className="mb-3 mt-1 flex flex-wrap items-center gap-1.5">
+        <SopTaxonomyPicker disabled={blocks === null} folderId={folderId}
+          onChange={(next) => { setFolderId(next); void patchMeta({ folderId: next }, "category"); }}
+        />
+        <div className="min-w-[220px] max-w-[360px] flex-1">
+          <SopTagInput disabled={blocks === null} value={tags}
+            onChange={(next) => { setTags(next); void patchMeta({ tags: next }, "tags"); }}
+          />
+        </div>
+      </div>
 
       {blocks === null ? (
         <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Loading…</div>

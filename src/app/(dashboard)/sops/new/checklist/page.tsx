@@ -19,6 +19,8 @@ import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ChecklistBuilder, normalizeChecklistSections, type ChecklistSection } from "@/components/checklist-builder";
+import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
+import { SopTagInput } from "@/components/sops/sop-tag-input";
 
 function genId(prefix: string) { return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`; }
 function emptySections(): ChecklistSection[] {
@@ -33,7 +35,12 @@ export default function ChecklistSopEditor() {
 
   const [title, setTitle] = useState("");
   const [sections, setSections] = useState<ChecklistSection[]>(emptySections);
+  const [folderId, setFolderId] = useState<string | null>(null);
+  const [tags, setTags] = useState<string[]>([]);
   const [status, setStatus] = useState<"DRAFT" | "PUBLISHED" | "ARCHIVED" | "IN_REVIEW" | "APPROVED">("DRAFT");
+  // Gate taxonomy controls until the GET hydrates: a tag added pre-load
+  // would PATCH [newTag] and wipe the server's existing tags.
+  const [hydrated, setHydrated] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const dirty = useRef(false);
@@ -77,6 +84,9 @@ export default function ChecklistSopEditor() {
         const c = sop.content as { sections?: unknown } | null;
         const normalized = normalizeChecklistSections(c?.sections);
         if (normalized.length > 0) setSections(normalized);
+        setFolderId(sop.folderId ?? null);
+        setTags(Array.isArray(sop.tags) ? sop.tags : []);
+        setHydrated(true);
         setStatus(sop.status ?? "DRAFT");
         initialLoad.current = false;
       } catch { /* ignore */ }
@@ -84,6 +94,21 @@ export default function ChecklistSopEditor() {
   }, [id]);
 
   useEffect(() => { if (!initialLoad.current) dirty.current = true; }, [title, sections]);
+
+  // Taxonomy + tags save as their OWN single-field PATCHes, never through
+  // save()'s content payload — the 5s autosave in flight can then never
+  // clobber a concurrent category/tag pick.
+  async function patchMeta(patch: { folderId?: string | null; tags?: string[] }, label: string) {
+    if (!id) return;
+    try {
+      const res = await fetch(`/api/sops/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      setLastSaved(new Date());
+    } catch { toast(`Couldn't save ${label}`); }
+  }
 
   async function save(opts: { publish?: boolean } = {}) {
     if (!id) return;
@@ -160,6 +185,21 @@ export default function ChecklistSopEditor() {
       </button>
 
       <input type="text" className="sop-edit__title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Checklist title…" />
+
+      <div className="mb-3 mt-1 flex flex-wrap items-center gap-1.5">
+        <SopTaxonomyPicker
+          disabled={!hydrated}
+          folderId={folderId}
+          onChange={(next) => { setFolderId(next); void patchMeta({ folderId: next }, "category"); }}
+        />
+        <div className="min-w-[220px] max-w-[360px] flex-1">
+          <SopTagInput
+            disabled={!hydrated}
+            value={tags}
+            onChange={(next) => { setTags(next); void patchMeta({ tags: next }, "tags"); }}
+          />
+        </div>
+      </div>
 
       <ChecklistBuilder sections={sections} onChange={setSections} editing />
     </div>

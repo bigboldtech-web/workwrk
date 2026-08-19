@@ -2,14 +2,17 @@
 
 /* SOPs · Organize — the taxonomy admin home.
  *
- * Mounts the folder + tag manager and the category/subcategory manager
- * (both previously built but imported nowhere). This is where SOPs are
- * administered, reachable from the "Organize" action on the SOP library.
+ * One taxonomy: the SOPFolder tree IS the category system (top-level =
+ * Category, child = Subcategory), so only SopFoldersTagsManager mounts
+ * here. The legacy string-based SopCategoryManager (/api/sop-categories)
+ * must NOT be mounted again — it would let admins edit category strings
+ * the API now mirrors from the tree. Reachable from the "Organize" action
+ * on the SOP library.
  *
- * Gated to users who can manage SOPs. The underlying folder/tag write
- * endpoints additionally enforce org-admin; the category endpoints
- * enforce manager — so a manager-but-not-admin still lands here and sees
- * honest 403 toasts on admin-only actions rather than a hidden page.
+ * Gated to users who can manage SOPs. The underlying write endpoints
+ * additionally enforce org-admin — so a manager-but-not-admin still lands
+ * here and sees honest 403 toasts on admin-only actions rather than a
+ * hidden page.
  */
 
 import Link from "next/link";
@@ -19,7 +22,6 @@ import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
 import { useRole } from "@/hooks/use-role";
 import { SopFoldersTagsManager } from "@/components/settings/sop-folders-tags-manager";
-import { SopCategoryManager } from "@/components/settings/sop-category-manager";
 
 export default function SopManagePage() {
   const { canManageSOPs } = useRole();
@@ -31,7 +33,7 @@ export default function SopManagePage() {
         showStandardActions={false}
         Icon={FolderTree}
         iconGradient={GRAD.tealGreen}
-        description="Folders, tags, categories — the taxonomy SOP authors pick from."
+        description="Categories, subcategories and tags — how your SOP library is organized."
         actions={
           <Link
             href="/sops"
@@ -48,12 +50,11 @@ export default function SopManagePage() {
             Icon={FolderTree}
             iconGradient={GRAD.redPink}
             title="Manager access required"
-            subtitle="Organizing SOP folders, tags, and categories is limited to people who can manage SOPs."
+            subtitle="Organizing SOP categories, subcategories, and tags is limited to people who can manage SOPs."
           />
         ) : (
           <div className="max-w-4xl space-y-6">
             <SopFoldersTagsManager />
-            <SopCategoryManager />
           </div>
         )}
       </div>

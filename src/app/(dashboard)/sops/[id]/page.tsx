@@ -73,6 +73,8 @@ import { BacklinksPanel } from "@/components/docs/block-doc-editor";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { SopWalkthrough } from "@/components/sops/sop-walkthrough";
+import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
+import { SopTagInput } from "@/components/sops/sop-tag-input";
 import Link from "next/link";
 import { useRole } from "@/hooks/use-role";
 import {
@@ -129,6 +131,8 @@ interface SOP {
   description: string | null;
   category: string | null;
   subcategory: string | null;
+  folderId?: string | null;
+  tags?: string[];
   sopType: "WRITTEN" | "RECORDED" | "CHECKLIST";
   content: { type?: string; steps?: SOPStep[] | RecordedStep[]; sections?: ChecklistSection[]; flow?: ProcessFlow; body?: string };
   kraId?: string | null;
@@ -559,30 +563,20 @@ export default function SOPDetailPage() {
 
   const { canManageSOPs, canPublishSOPs } = useRole();
   const [sop, setSop] = useState<SOP | null>(null);
-  // Org-wide list of saved categories (with their subcategories) so the
-  // detail page's editor mirrors the create dialog. Refreshed only when
-  // the user opens a Select; cheap on the server.
-  const [savedCategories, setSavedCategories] = useState<Array<{ id: string; name: string; subcategories: { id: string; name: string }[] }>>([]);
-  const [savingCategory, setSavingCategory] = useState(false);
-  // Category/subcategory are read-only by default. The pencil button
-  // flips this to true so the dropdowns appear; saving auto-exits.
-  const [editingCategory, setEditingCategory] = useState(false);
-  useEffect(() => {
-    fetch("/api/sop-categories")
-      .then((r) => r.ok ? r.json() : { data: [] })
-      .then((d) => setSavedCategories(Array.isArray(d) ? d : d?.data || []))
-      .catch(() => {});
-  }, []);
-
-  // Persist a category / subcategory change. Optimistic UI: we set the
-  // local state first so the picker reflects the choice instantly, then
-  // round-trip to the server to actually save. If the request fails we
-  // roll back.
-  async function patchCategory(partial: { category?: string | null; subcategory?: string | null }) {
+  // One taxonomy: the rail writes folderId (and tags) only; the API
+  // mirrors the legacy category/subcategory strings from the folder
+  // chain, so the PATCH echo — not the request — is merged back as the
+  // source of truth for the read-only display. Optimistic set first,
+  // rollback of just the touched keys on failure.
+  const [savingMeta, setSavingMeta] = useState(false);
+  async function patchSopMeta(partial: { folderId?: string | null; tags?: string[] }) {
     if (!sop) return;
-    const previous = { category: sop.category, subcategory: sop.subcategory };
+    const previous: Partial<SOP> = {};
+    for (const key of Object.keys(partial) as Array<keyof typeof partial>) {
+      (previous as Record<string, unknown>)[key] = sop[key];
+    }
     setSop({ ...sop, ...partial } as SOP);
-    setSavingCategory(true);
+    setSavingMeta(true);
     try {
       const res = await fetch(`/api/sops/${id}`, {
         method: "PATCH",
@@ -590,12 +584,26 @@ export default function SOPDetailPage() {
         body: JSON.stringify(partial),
       });
       if (!res.ok) {
-        setSop({ ...sop, ...previous } as SOP);
+        setSop((prev) => (prev ? ({ ...prev, ...previous } as SOP) : prev));
+        const err = await res.json().catch(() => ({}));
+        toastError(err.error || "Couldn't save — try again");
+        return;
+      }
+      const updated = await res.json().catch(() => null);
+      if (updated?.id) {
+        setSop((prev) => prev ? ({
+          ...prev,
+          folderId: updated.folderId ?? null,
+          category: updated.category ?? null,
+          subcategory: updated.subcategory ?? null,
+          tags: Array.isArray(updated.tags) ? updated.tags : prev.tags,
+        } as SOP) : prev);
       }
     } catch {
-      setSop({ ...sop, ...previous } as SOP);
+      setSop((prev) => (prev ? ({ ...prev, ...previous } as SOP) : prev));
+      toastError("Couldn't save — try again");
     } finally {
-      setSavingCategory(false);
+      setSavingMeta(false);
     }
   }
 
@@ -893,6 +901,9 @@ export default function SOPDetailPage() {
       return;
     }
     setEditing(true);
+    // Category/tags live in the Details rail — editing opens it so the
+    // whole SOP is editable without hunting for "Show details".
+    setShowInfo(true);
   }, [sop, canManageSOPs, searchParams, router]);
 
   // Offer to restore an unsaved local backup if one exists and is newer
@@ -1326,6 +1337,7 @@ export default function SOPDetailPage() {
                 applyRestoredSnapshot(restorePrompt.data);
                 // Drop into edit mode so autosave picks up from here.
                 setEditing(true);
+                setShowInfo(true);
                 setRestorePrompt(null);
                 toastSuccess("Restored unsaved changes — autosaving now");
               }}
@@ -1449,7 +1461,12 @@ export default function SOPDetailPage() {
                   // the dedicated BlockNote page — the inline path here
                   // was a dead-end stub that could drop the body on Save.
                   if (isWrittenDocContent(sop)) router.push(`/sops/new/text?id=${sop.id}`);
-                  else setEditing(true);
+                  else {
+                    setEditing(true);
+                    // Auto-open the Details rail: category/tags are edited
+                    // there. Exiting edit leaves it as the user last set it.
+                    setShowInfo(true);
+                  }
                 }}
                 className="gap-1.5"
               >
@@ -2459,66 +2476,17 @@ export default function SOPDetailPage() {
               <div className="flex items-start gap-3">
                 <Tag size={14} className="text-zinc-500 shrink-0 mt-1" />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                      Category {savingCategory && <span className="text-zinc-500-2 normal-case ml-1">· saving…</span>}
-                    </Label>
-                    {canManageSOPs && (
-                      editingCategory ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditingCategory(false)}
-                          className="text-[10px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
-                        >
-                          <CheckCircle size={11} /> Done
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setEditingCategory(true)}
-                          className="text-[10px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
-                          aria-label="Edit category"
-                        >
-                          <Edit3 size={11} /> Edit
-                        </button>
-                      )
-                    )}
-                  </div>
-                  {canManageSOPs && editingCategory ? (
-                    <div className="space-y-1.5 mt-1">
-                      <Select
-                        value={sop.category ?? "__none__"}
-                        onValueChange={(v) => patchCategory({
-                          category: v === "__none__" ? null : v,
-                          // Reset subcategory when the parent category changes,
-                          // since subcategory names live under a parent.
-                          subcategory: v === sop.category ? sop.subcategory : null,
-                        })}
-                        disabled={savingCategory}
-                      >
-                        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No category" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">No category</SelectItem>
-                          {savedCategories.map((c) => (
-                            <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {sop.category && (
-                        <Select
-                          value={sop.subcategory ?? "__none__"}
-                          onValueChange={(v) => patchCategory({ subcategory: v === "__none__" ? null : v })}
-                          disabled={savingCategory}
-                        >
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No subcategory" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__none__">No subcategory</SelectItem>
-                            {(savedCategories.find((c) => c.name === sop.category)?.subcategories ?? []).map((s) => (
-                              <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
+                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Category {savingMeta && <span className="normal-case ml-1">· saving…</span>}
+                  </Label>
+                  {canManageSOPs ? (
+                    <div className="mt-1">
+                      <SopTaxonomyPicker
+                        folderId={sop.folderId ?? null}
+                        stacked
+                        disabled={savingMeta}
+                        onChange={(folderId) => patchSopMeta({ folderId })}
+                      />
                     </div>
                   ) : (
                     <p className="text-sm mt-0.5">
@@ -2528,6 +2496,35 @@ export default function SOPDetailPage() {
                   )}
                 </div>
               </div>
+
+              {sop.tags !== undefined && (
+                <div className="flex items-start gap-3">
+                  <Hash size={14} className="text-zinc-500 shrink-0 mt-1" />
+                  <div className="min-w-0 flex-1">
+                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                      Tags
+                    </Label>
+                    {canManageSOPs ? (
+                      <div className="mt-1">
+                        <SopTagInput
+                          value={sop.tags ?? []}
+                          onChange={(tags) => patchSopMeta({ tags })}
+                        />
+                      </div>
+                    ) : (sop.tags?.length ?? 0) > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {(sop.tags ?? []).map((t) => (
+                          <span key={t} className="inline-flex items-center rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm mt-0.5 text-zinc-500">None</p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-3">
                 <Activity size={14} className="text-zinc-500 shrink-0" />

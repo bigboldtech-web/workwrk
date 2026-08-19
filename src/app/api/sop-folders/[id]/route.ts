@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isOrgAdmin, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { categoryChainFor, resyncFolderSubtreeMirrors } from "@/lib/sop-taxonomy";
 
 /**
  * Individual folder — rename / describe / recolor / delete.
@@ -92,6 +93,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     const updated = await prisma.sOPFolder.update({ where: { id }, data });
+    // A rename or re-parent changes what the category chain READS for every
+    // SOP in this subtree — re-mirror their category/subcategory strings so
+    // list grouping and chips follow the tree instead of showing stale names.
+    if (data.name !== undefined || "parentId" in body) {
+      await resyncFolderSubtreeMirrors(orgId, id);
+    }
     return jsonSuccess(updated);
   } catch (err) {
     const e = err as { code?: string; message?: string };
@@ -133,10 +140,13 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   // onDelete:SetNull as a backstop, and this explicit move keeps the
   // SOPs inside the surviving parent's access scope instead of dropping
   // them to org-wide. Access grants cascade via schema.
+  // The moved SOPs must also re-mirror their category/subcategory strings to
+  // the SURVIVING chain — otherwise they keep naming the deleted category.
+  const chain = await categoryChainFor(orgId, existing.parentId);
   const [reparented] = await prisma.$transaction([
     prisma.sOP.updateMany({
       where: { folderId: id, organizationId: orgId },
-      data: { folderId: existing.parentId },
+      data: { folderId: existing.parentId, category: chain.category, subcategory: chain.subcategory },
     }),
     prisma.sOPFolder.delete({ where: { id } }),
   ]);

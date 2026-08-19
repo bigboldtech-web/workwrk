@@ -83,33 +83,29 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
       body: JSON.stringify({ name }),
     });
     if (res.ok) {
-      toastSuccess("Folder created");
+      toastSuccess("Category created");
       setCreatingName("");
       loadFolders();
     } else {
       const body = await res.json().catch(() => ({}));
-      toastError(body?.error || "Failed to create folder");
+      toastError(body?.error || "Failed to create category");
     }
   }
 
   async function deleteFolder(f: Folder) {
-    if ((f._count?.sops ?? 0) > 0) {
-      toastError(`Move the ${f._count?.sops} SOP${f._count?.sops === 1 ? "" : "s"} out of "${f.name}" before deleting.`);
-      return;
-    }
     if (!(await confirm({
-      title: `Delete folder "${f.name}"?`,
-      description: "Empty folders only. The folder will be removed and any access grants on it cleared.",
-      confirmLabel: "Delete folder",
+      title: `Delete category "${f.name}"?`,
+      description: "Its SOPs move to the parent category (or Uncategorized) — none are deleted. Access grants on it are cleared.",
+      confirmLabel: "Delete category",
       destructive: true,
     }))) return;
     const res = await fetch(`/api/sop-folders/${f.id}`, { method: "DELETE" });
     if (res.ok) {
-      toastSuccess("Folder deleted");
+      toastSuccess("Category deleted");
       loadFolders();
     } else {
       const body = await res.json().catch(() => ({}));
-      toastError(body?.error || "Failed to delete folder");
+      toastError(body?.error || "Failed to delete category");
     }
   }
 
@@ -134,12 +130,12 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
         body: JSON.stringify({ name }),
       });
       if (res.ok) {
-        toastSuccess("Folder renamed");
+        toastSuccess("Category renamed");
         cancelRename();
         loadFolders();
       } else {
         const body = await res.json().catch(() => ({}));
-        toastError(body?.error || "Failed to rename folder");
+        toastError(body?.error || "Failed to rename category");
       }
     } finally { setRenaming(false); }
   }
@@ -231,8 +227,8 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
         {!selected && (
           <div className="space-y-4">
             <p className="text-xs text-muted">
-              Organize SOPs into folders and control who sees what. Managers assigned to a folder can read,
-              create, and edit SOPs in it; everyone else can&apos;t. Org admins see every folder regardless.
+              Organize SOPs into categories and control who sees what. Managers assigned to a category can read,
+              create, and edit SOPs in it; everyone else can&apos;t. Org admins see every category regardless.
             </p>
 
             {/* Create new */}
@@ -241,7 +237,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                 value={creatingName}
                 onChange={(e) => setCreatingName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createFolder(); } }}
-                placeholder="New folder name (e.g. Marketing, HR, Operations)"
+                placeholder="New category name (e.g. Marketing, HR, Operations)"
                 className="flex-1"
               />
               <Button onClick={createFolder} disabled={!creatingName.trim()} className="gap-1.5">
@@ -251,7 +247,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
 
             {/* List */}
             {loading || folders === null ? (
-              <div className="flex items-center gap-2 text-xs text-muted py-4"><Loader2 size={14} className="animate-spin" /> Loading folders…</div>
+              <div className="flex items-center gap-2 text-xs text-muted py-4"><Loader2 size={14} className="animate-spin" /> Loading categories…</div>
             ) : folders.length === 0 ? (
               <div className="text-center py-8 text-sm text-muted">
                 No folders yet. Create one above to start scoping SOPs.
@@ -260,7 +256,6 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
               <div className="space-y-1.5">
                 {folders.map((f) => {
                   const isRenaming = renameId === f.id;
-                  const hasSops = (f._count?.sops ?? 0) > 0;
                   return (
                     <div key={f.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:border-muted-2 transition-colors">
                       <FolderOpen size={16} className="text-[#d4ff2e] shrink-0" />
@@ -297,7 +292,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                       </div>
                       {!isRenaming && (
                         <>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => beginRename(f)} aria-label="Rename folder">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => beginRename(f)} aria-label="Rename category">
                             <Pencil size={13} className="text-muted" />
                           </Button>
                           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openAccess(f)}>
@@ -306,11 +301,10 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                           <Button
                             variant="ghost"
                             size="icon"
-                            className={`h-8 w-8 ${hasSops ? "text-muted-2 cursor-not-allowed" : "text-red-400 hover:text-red-300"}`}
+                            className="h-8 w-8 text-red-400 hover:text-red-300"
                             onClick={() => deleteFolder(f)}
-                            disabled={hasSops}
-                            title={hasSops ? `Cannot delete — move the ${f._count?.sops} SOP${f._count?.sops === 1 ? "" : "s"} out first` : "Delete folder"}
-                            aria-label="Delete folder"
+                            title="Delete category (its SOPs move up, never deleted)"
+                            aria-label="Delete category"
                           >
                             <Trash2 size={14} />
                           </Button>
@@ -368,7 +362,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                           value={role}
                           onChange={(e) => setUserRole(u.id, e.target.value as FolderRole)}
                           className="h-7 shrink-0 rounded-md border border-border bg-transparent px-1.5 text-xs"
-                          title="Folder role"
+                          title="Category role"
                         >
                           <option value="VIEWER">Viewer</option>
                           <option value="EDITOR">Editor</option>
