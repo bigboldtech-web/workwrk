@@ -32,6 +32,7 @@ import { BlockNoteCanvas } from "./blocknote-canvas";
 import { refreshSidebar, notifyDocsChanged } from "@/components/layout/os/sidebar-refresh";
 import type { PartialBlock } from "@blocknote/core";
 import { useOsToast } from "@/components/layout/os/toast";
+import { BackButton } from "@/components/ui/back-button";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
 import { DocShareModal } from "./doc-share-modal";
@@ -664,7 +665,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return (
       <div className="bdoc__error">
         <p>Couldn&apos;t load doc: {loadError}</p>
-        <button type="button" onClick={() => router.back()}>Back</button>
+        <BackButton fallbackHref="/docs" label="Back" />
       </div>
     );
   }
@@ -743,6 +744,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             panes keep it minimal — DocSplitView provides Close + Swap. */}
         {pane !== "peek" && (
           <div className="flex min-w-0 items-center gap-1.5">
+            <BackButton fallbackHref="/docs" />
             <button
               type="button"
               onClick={() => void addSubpage()}
@@ -1725,9 +1727,33 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
 
   if (headings.length === 0) return null;
 
-  const scrollTo = (id: string) => {
-    const el = document.querySelector(`[data-id="${id}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  const scrollTo = (id: string, text?: string) => {
+    // data-id first; fall back to matching the heading's TEXT among rendered
+    // heading blocks — the mirror's ids can drift from the DOM after
+    // conversions, and a stale id used to land the scroll on the wrong
+    // section entirely.
+    let el = document.querySelector(`[data-id="${id}"]`);
+    if (!el && text) {
+      const target = text.trim();
+      el = Array.from(document.querySelectorAll('[data-content-type="heading"]'))
+        .find((h) => (h.textContent ?? "").trim() === target) ?? null;
+    }
+    if (!el) return;
+    // The clicked entry is the truth for the highlight — don't let the
+    // scroll-spy flicker through intermediate sections mid-scroll.
+    setActiveId(id);
+    // scroll-margin keeps the heading below the sticky chrome instead of
+    // vanishing under it (which read as "it jumped to the next section").
+    (el as HTMLElement).style.scrollMarginTop = "96px";
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Smooth scrolls drift when content shifts mid-flight — verify the
+    // landing once settled and correct in one instant hop if needed.
+    const check = () => {
+      const rect = el!.getBoundingClientRect();
+      if (rect.top < 40 || rect.top > 200) el!.scrollIntoView({ behavior: "auto", block: "start" });
+      setActiveId(id);
+    };
+    window.setTimeout(check, 450);
   };
 
   return (
@@ -1747,7 +1773,7 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
             key={h.id}
             type="button"
             className={`bdoc__outline-tick bdoc__outline-tick--${h.kind} ${activeId === h.id ? "is-active" : ""}`}
-            onClick={() => scrollTo(h.id)}
+            onClick={() => scrollTo(h.id, h.text)}
             title={h.text}
           >
             <span className="bdoc__outline-line" aria-hidden />

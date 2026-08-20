@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FormInput, CheckCircle2, Loader2 } from "lucide-react";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { BackButton } from "@/components/ui/back-button";
 
 type FieldType = "short_text" | "long_text" | "number" | "email" | "url" | "date" | "select" | "multi_select" | "checkbox";
 type Field = { id: string; type: FieldType; label: string; required: boolean; options?: string[]; placeholder?: string };
@@ -103,6 +104,9 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
   return (
     <div className="resp">
       <div className="resp__card">
+        <div className="mb-2">
+          <BackButton fallbackHref="/forms" label="Back" />
+        </div>
         <header className="resp__head">
           <div className="resp__icon"><FormInput /></div>
           <div>

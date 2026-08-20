@@ -81,7 +81,16 @@ export default function ItemDetailPage() {
     <div className="h-full overflow-y-auto bg-white">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-zinc-100 px-6 py-3 flex items-center gap-3">
-        <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1.5 text-[14px] text-zinc-600 hover:text-zinc-900">
+        <button
+          type="button"
+          onClick={() => {
+            // Direct links / new tabs have no history — go UP to the item's
+            // board (or Everything) instead of dead-ending on a no-op.
+            if (window.history.length > 1) router.back();
+            else router.push(board ? `/boards/${board.slug}` : "/everything");
+          }}
+          className="inline-flex items-center gap-1.5 text-[14px] text-zinc-600 hover:text-zinc-900"
+        >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         {board ? (
@@ -107,7 +116,7 @@ export default function ItemDetailPage() {
               This task may have been deleted or moved to Trash. The link that brought you here is no longer available.
             </p>
             <div className="flex items-center gap-2 mt-5">
-              <button type="button" onClick={() => router.back()} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[14px] text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/5">
+              <button type="button" onClick={() => { if (window.history.length > 1) router.back(); else router.push("/everything"); }} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-[14px] text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/5">
                 <ArrowLeft className="w-4 h-4" /> Go back
               </button>
               <Link href="/today" className="inline-flex items-center h-9 px-3.5 rounded-lg text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]">

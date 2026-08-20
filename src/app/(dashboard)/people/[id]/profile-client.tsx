@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { BackButton } from "@/components/ui/back-button";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -937,6 +938,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             <span>My Profile</span>
           ) : (
             <>
+              <BackButton fallbackHref="/people" className="inline-flex items-center rounded-md p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800" />
               <Link href="/team" className="hover:text-zinc-900">Teams</Link>
               <span className="text-zinc-300">/</span>
               <Link href="/people" className="hover:text-zinc-900">Directory</Link>

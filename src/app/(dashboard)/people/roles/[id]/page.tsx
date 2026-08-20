@@ -5,6 +5,7 @@
 // and is cloneable per scope. Mirrors the Space-detail chrome.
 
 import { notFound, redirect } from "next/navigation";
+import { BackButton } from "@/components/ui/back-button";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -149,6 +150,7 @@ export default async function RolePage(props: {
       {/* Breadcrumb + title row */}
       <div className="px-6 pt-4 pb-3">
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
+          <BackButton fallbackHref="/people/roles" className="inline-flex items-center rounded-md p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800" />
           <Link href="/people/roles" className="hover:text-zinc-900">Roles</Link>
           {role.department ? (
             <>
