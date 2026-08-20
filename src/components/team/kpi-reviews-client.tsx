@@ -144,7 +144,7 @@ function PendingKpiCard({
           <div className="text-sm font-semibold tabular-nums">
             {item.score != null ? `${Math.round(item.score)}%` : "—"}
           </div>
-          <div className="text-[11px] text-zinc-500 tabular-nums">
+          <div className="text-[12px] text-zinc-500 tabular-nums">
             {fmt(item.actualValue)} / {fmt(item.targetValue)}
           </div>
         </div>
@@ -201,7 +201,7 @@ function ActedKpiCard({ item }: { item: KpiReviewQueueItem }) {
         <span className="font-medium truncate">{nameOf(item.subject)}</span>
         <span className="text-xs text-zinc-500 truncate flex-1">{item.kpi.name} · {item.period}</span>
         <span
-          className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+          className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
             approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
           }`}
         >

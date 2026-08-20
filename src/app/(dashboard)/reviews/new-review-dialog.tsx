@@ -148,56 +148,56 @@ export function NewReviewCycleDialog({
 
         <div className="p-4 space-y-3">
           <div>
-            <span className="text-[12px] font-medium text-zinc-600">Type</span>
+            <span className="text-[13px] font-medium text-zinc-600">Type</span>
             <div className="mt-1 grid grid-cols-1 gap-1.5">
               {TYPE_OPTIONS.map((o) => (
                 <button
                   key={o.value}
                   type="button"
                   onClick={() => setType(o.value)}
-                  className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-md border text-[12.5px] ${
+                  className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-md border text-[13.5px] ${
                     type === o.value ? "border-zinc-900 bg-zinc-50" : "border-zinc-200 hover:bg-zinc-50"
                   }`}
                 >
                   <span className="font-medium text-zinc-800">{o.label}</span>
-                  <span className="text-[11px] text-zinc-400 truncate ml-2">{o.hint}</span>
+                  <span className="text-[12px] text-zinc-400 truncate ml-2">{o.hint}</span>
                 </button>
               ))}
             </div>
           </div>
 
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">Name</span>
+            <span className="text-[13px] font-medium text-zinc-600">Name</span>
             <input
               ref={nameRef}
               value={name}
               onChange={(e) => { setName(e.target.value); setTouchedName(true); }}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-zinc-400"
+              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] focus:outline-none focus:border-zinc-400"
             />
           </label>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Starts</span>
-              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[12.5px]" />
+              <span className="text-[13px] font-medium text-zinc-600">Starts</span>
+              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13.5px]" />
             </label>
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Ends</span>
-              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[12.5px]" />
+              <span className="text-[13px] font-medium text-zinc-600">Ends</span>
+              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13.5px]" />
             </label>
           </div>
 
-          {error ? <p className="text-[12px] text-red-600">{error}</p> : null}
+          {error ? <p className="text-[13px] text-red-600">{error}</p> : null}
         </div>
 
         <footer className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-100">
-          <button type="button" onClick={() => onOpenChange(false)} className="h-8 px-3 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+          <button type="button" onClick={() => onOpenChange(false)} className="h-8 px-3 rounded-md text-[13.5px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
           <button
             type="button"
             onClick={() => void submit()}
             disabled={busy || !name.trim()}
-            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium disabled:opacity-40 hover:bg-zinc-800"
+            className="inline-flex items-center gap-1.5 h-8 px-3.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium disabled:opacity-40 hover:bg-zinc-800"
           >
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             Create cycle

@@ -51,7 +51,7 @@ export function LandingFAQ() {
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           >
             <p
-              className="text-[11px] font-bold uppercase tracking-[0.22em]"
+              className="text-[12px] font-bold uppercase tracking-[0.22em]"
               style={{ color: "var(--brand-red)" }}
             >
               Common questions

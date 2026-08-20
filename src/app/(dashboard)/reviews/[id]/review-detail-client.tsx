@@ -731,7 +731,7 @@ export default function ReviewCycleDetailPage() {
                 )}
                 {/* Autosave indicator. Visible while the draft is editable. */}
                 {canSelfAssessAutosave && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
                     {autosaveSelf.status === "saving" ? (
                       <><Cloud size={11} className="animate-pulse" /> Saving…</>
                     ) : autosaveSelf.status === "saved" ? (
@@ -756,19 +756,19 @@ export default function ReviewCycleDetailPage() {
                       <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-zinc-500"}`}>
                         {selfData.metrics.avgKpiScore ?? "N/A"}
                       </p>
-                      <p className="text-[10px] text-zinc-500">Avg KPI Score</p>
+                      <p className="text-[11px] text-zinc-500">Avg KPI Score</p>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
                       <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-zinc-500"}`}>
                         {selfData.metrics.avgSopScore ?? "N/A"}
                       </p>
-                      <p className="text-[10px] text-zinc-500">SOP Compliance</p>
+                      <p className="text-[11px] text-zinc-500">SOP Compliance</p>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
                       <p className={`text-2xl font-bold font-mono ${selfData.metrics.okrAvgProgress != null ? getScoreColor(selfData.metrics.okrAvgProgress) : "text-zinc-500"}`}>
                         {selfData.metrics.okrAvgProgress != null ? `${selfData.metrics.okrAvgProgress}%` : "N/A"}
                       </p>
-                      <p className="text-[10px] text-zinc-500">OKR Progress</p>
+                      <p className="text-[11px] text-zinc-500">OKR Progress</p>
                     </div>
                   </div>
                 </CardContent>
@@ -786,14 +786,14 @@ export default function ReviewCycleDetailPage() {
                         <div className="flex items-center justify-between gap-3 mb-2">
                           <div className="min-w-0">
                             <p className="text-sm font-medium truncate">{okr.title}</p>
-                            <p className="text-[10px] text-zinc-500">{okr.level} · {okr.quarter || "—"}</p>
+                            <p className="text-[11px] text-zinc-500">{okr.level} · {okr.quarter || "—"}</p>
                           </div>
                           <span className={`text-xs font-mono tabular-nums shrink-0 ${getScoreColor(okr.progress)}`}>
                             {okr.progress}%
                           </span>
                         </div>
                         {okr.keyResults?.map((kr) => (
-                          <div key={kr.id} className="mt-1.5 text-[11px] flex items-center gap-2">
+                          <div key={kr.id} className="mt-1.5 text-[12px] flex items-center gap-2">
                             <span className="text-zinc-500 truncate flex-1">{kr.title}</span>
                             <span className="font-mono tabular-nums">
                               {kr.currentValue}/{kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
@@ -805,7 +805,7 @@ export default function ReviewCycleDetailPage() {
                         ))}
                       </div>
                     ))}
-                    <p className="text-[10px] text-zinc-500 leading-relaxed pt-1">
+                    <p className="text-[11px] text-zinc-500 leading-relaxed pt-1">
                       These came from your own check-ins during this review period. Use them as
                       proof points in the reflection below.
                     </p>
@@ -823,7 +823,7 @@ export default function ReviewCycleDetailPage() {
                         <div className="flex items-center justify-between mb-2">
                           <div>
                             <p className="text-sm font-medium">{a.kra.name}</p>
-                            <Badge variant="outline" className="text-[10px]">{a.kra.category}</Badge>
+                            <Badge variant="outline" className="text-[11px]">{a.kra.category}</Badge>
                           </div>
                           <span className="text-sm text-zinc-500">{a.weightage}% weightage</span>
                         </div>
@@ -1028,13 +1028,13 @@ export default function ReviewCycleDetailPage() {
                             <span className="text-xs">{r.kraName}</span>
                             <span className="text-xs font-mono text-[color:var(--accent-strong)]">{r.rating}/5</span>
                           </div>
-                          {r.achievements && <p className="text-[10px] text-zinc-500 ml-2">{r.achievements}</p>}
+                          {r.achievements && <p className="text-[11px] text-zinc-500 ml-2">{r.achievements}</p>}
                         </div>
                       ))}
                       {selectedReview.selfRatings.reflection && (
                         <div className="mt-2 space-y-1 border-t border-zinc-200 pt-2">
-                          {selectedReview.selfRatings.reflection.wentWell && <p className="text-[10px] text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
-                          {selectedReview.selfRatings.reflection.couldImprove && <p className="text-[10px] text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
+                          {selectedReview.selfRatings.reflection.wentWell && <p className="text-[11px] text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
+                          {selectedReview.selfRatings.reflection.couldImprove && <p className="text-[11px] text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
                         </div>
                       )}
                     </div>
@@ -1045,7 +1045,7 @@ export default function ReviewCycleDetailPage() {
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
                       <p className="text-xs font-medium text-zinc-500 mb-2">Peer Feedback ({selectedReview.peerFeedback?.length ?? 0})</p>
                       {selectedReview.peerFeedback?.map((pf, i: number) => (
-                        <div key={i} className="mb-2 text-[10px]">
+                        <div key={i} className="mb-2 text-[11px]">
                           {!pf.anonymous && pf.giver && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
                           {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
                           {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
@@ -1080,7 +1080,7 @@ export default function ReviewCycleDetailPage() {
                           </button>
                         ))}
                       </div>
-                      <p className="text-[10px] text-zinc-500 mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
+                      <p className="text-[11px] text-zinc-500 mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
                     </div>
                   ))}
                 </CardContent>
@@ -1109,7 +1109,7 @@ export default function ReviewCycleDetailPage() {
               </Card>
 
               <div className="flex justify-end gap-2 items-center">
-                <span className="mr-auto inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+                <span className="mr-auto inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
                   {autosaveMgr.status === "saving" ? (
                     <><Cloud size={11} className="animate-pulse" /> Saving draft…</>
                   ) : autosaveMgr.status === "saved" ? (
@@ -1153,7 +1153,7 @@ export default function ReviewCycleDetailPage() {
                       <p className="text-xs text-zinc-500">{pf.review?.cycle?.name || ""}</p>
                     </div>
                     {pf.status === "SUBMITTED" ? (
-                      <Badge variant="success" className="text-[10px]">Submitted</Badge>
+                      <Badge variant="success" className="text-[11px]">Submitted</Badge>
                     ) : (
                       <Button size="sm" onClick={() => setShowPeerDialog(pf)}>Give Feedback</Button>
                     )}
@@ -1195,9 +1195,9 @@ export default function ReviewCycleDetailPage() {
                       const height = (band.count / maxCount) * 100;
                       return (
                         <div key={band.label} className="flex-1 flex flex-col items-center gap-1">
-                          <span className="text-[10px] font-mono">{band.count}</span>
+                          <span className="text-[11px] font-mono">{band.count}</span>
                           <div className={`w-full rounded-t ${band.color}`} style={{ height: `${Math.max(height, 4)}%` }} />
-                          <span className="text-[10px] text-zinc-500">{band.label}</span>
+                          <span className="text-[11px] text-zinc-500">{band.label}</span>
                         </div>
                       );
                     })}
@@ -1227,7 +1227,7 @@ export default function ReviewCycleDetailPage() {
                         <tr key={d.reviewId} className="border-b border-zinc-200/50 hover:bg-zinc-50/50">
                           <td className="p-3">
                             <p className="text-sm font-medium">{d.subject.firstName} {d.subject.lastName}</p>
-                            <p className="text-[10px] text-zinc-500">{d.subject.department?.name}</p>
+                            <p className="text-[11px] text-zinc-500">{d.subject.department?.name}</p>
                           </td>
                           <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.kpiScore)}`}>{d.kpiScore}</td>
                           <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.selfRating)}`}>{d.selfRating}</td>
@@ -1288,7 +1288,7 @@ export default function ReviewCycleDetailPage() {
                   <div key={stat.label} className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
                     <stat.icon size={16} className={`mx-auto mb-1 ${stat.color}`} />
                     <p className="text-xl font-bold font-mono">{stat.value}</p>
-                    <p className="text-[10px] text-zinc-500">{stat.label}</p>
+                    <p className="text-[11px] text-zinc-500">{stat.label}</p>
                   </div>
                 ))}
               </div>
@@ -1305,12 +1305,12 @@ export default function ReviewCycleDetailPage() {
                 cycle.reviews?.filter((r) => r.status === "PENDING").map((r) => (
                   <div key={r.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-2">
                     <Avatar className="h-7 w-7">
-                      <AvatarFallback className="text-[10px]">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
+                      <AvatarFallback className="text-[11px]">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm">{r.subject.firstName} {r.subject.lastName}</p>
                     </div>
-                    <Badge variant="warning" className="text-[10px]">Self-Assessment Pending</Badge>
+                    <Badge variant="warning" className="text-[11px]">Self-Assessment Pending</Badge>
                   </div>
                 ))
               )}
@@ -1449,21 +1449,21 @@ export default function ReviewCycleDetailPage() {
                 <p className="text-xs text-zinc-500">
                   {[letter.role, letter.department].filter(Boolean).join(" · ") || "—"}
                 </p>
-                <p className="text-[11px] text-zinc-500 mt-1">
+                <p className="text-[12px] text-zinc-500 mt-1">
                   Period {fmtDate(letter.periodStart)} → {fmtDate(letter.periodEnd)} · Reviewer {letter.reviewerName || "—"}
                 </p>
               </div>
               <div className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3">
                 <div>
-                  <p className="text-[10px] text-zinc-500 uppercase">Overall</p>
+                  <p className="text-[11px] text-zinc-500 uppercase">Overall</p>
                   <p className={`text-3xl font-bold font-mono ${getScoreColor(letter.overallScore)}`}>{letter.overallScore}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-500 uppercase">Band</p>
+                  <p className="text-[11px] text-zinc-500 uppercase">Band</p>
                   <Badge className="bg-blue-500/15 text-blue-500">{letter.performanceBand}</Badge>
                 </div>
                 <div>
-                  <p className="text-[10px] text-zinc-500 uppercase">Recommended increment</p>
+                  <p className="text-[11px] text-zinc-500 uppercase">Recommended increment</p>
                   <p className="text-sm font-semibold">{letter.hikeRecommendation?.label || "—"}</p>
                 </div>
                 {letter.outcome && (

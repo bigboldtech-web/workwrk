@@ -164,15 +164,15 @@ function Step2Main({
                   boxShadow: isSelected ? `0 0 0 2px ${accent}20` : undefined,
                 }}
               >
-                <div className="text-[13px] font-semibold">{p.title}</div>
-                <div className="text-[11.5px] text-muted mt-0.5 leading-snug">{p.blurb}</div>
+                <div className="text-[14px] font-semibold">{p.title}</div>
+                <div className="text-[12.5px] text-muted mt-0.5 leading-snug">{p.blurb}</div>
               </button>
             );
           })}
         </div>
 
         <div className="pt-2">
-          <div className="text-[12px] text-muted mb-2">
+          <div className="text-[13px] text-muted mb-2">
             Customize defaults for <span className="font-medium text-foreground">{selectedPreset?.title}</span>
           </div>
           <div className="space-y-2">
@@ -214,7 +214,7 @@ function Step2Main({
         </div>
 
         {error ? (
-          <div className="text-[12px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
+          <div className="text-[13px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
         ) : null}
       </div>
 
@@ -222,7 +222,7 @@ function Step2Main({
         <button
           type="button"
           onClick={onBack}
-          className="text-[13px] text-muted hover:text-foreground px-3 py-2"
+          className="text-[14px] text-muted hover:text-foreground px-3 py-2"
         >
           Back
         </button>
@@ -230,7 +230,7 @@ function Step2Main({
           type="button"
           onClick={onCreate}
           disabled={submitting}
-          className="px-4 py-2 rounded-lg text-[13px] font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
+          className="px-4 py-2 rounded-lg text-[14px] font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
           style={{ backgroundColor: accent }}
         >
           {submitting ? "Creating…" : "Create Space"}
@@ -266,8 +266,8 @@ function CustomizeRow({
         {icon}
       </span>
       <span className="flex-1 min-w-0">
-        <span className="block text-[12.5px] font-medium">{label}</span>
-        <span className="block text-[11.5px] text-muted truncate mt-0.5">{value}</span>
+        <span className="block text-[13.5px] font-medium">{label}</span>
+        <span className="block text-[12.5px] text-muted truncate mt-0.5">{value}</span>
       </span>
       {!disabled ? <ChevronRight className="h-4 w-4 text-muted shrink-0" /> : null}
     </button>
@@ -323,7 +323,7 @@ function OwnerSubScreen({
             placeholder="Search people…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full h-9 pl-8 pr-2 rounded-md border border-border bg-surface text-[12.5px] focus:outline-none focus:border-[color:var(--accent)]"
+            className="w-full h-9 pl-8 pr-2 rounded-md border border-border bg-surface text-[13.5px] focus:outline-none focus:border-[color:var(--accent)]"
             autoFocus
           />
         </div>
@@ -335,17 +335,17 @@ function OwnerSubScreen({
             ownerId === null ? "bg-surface-2" : "hover:bg-surface-2"
           }`}
         >
-          <span className="h-7 w-7 rounded-full bg-surface-2 border border-border flex items-center justify-center text-[10px] font-semibold text-muted">
+          <span className="h-7 w-7 rounded-full bg-surface-2 border border-border flex items-center justify-center text-[11px] font-semibold text-muted">
             You
           </span>
-          <span className="flex-1 text-[12.5px]">Creator (default)</span>
+          <span className="flex-1 text-[13.5px]">Creator (default)</span>
           {ownerId === null ? <Check className="h-4 w-4" style={{ color: accent }} /> : null}
         </button>
 
         {loading ? (
-          <div className="text-[12px] text-muted py-6 text-center">Loading people…</div>
+          <div className="text-[13px] text-muted py-6 text-center">Loading people…</div>
         ) : filtered.length === 0 ? (
-          <div className="text-[12px] text-muted py-6 text-center">
+          <div className="text-[13px] text-muted py-6 text-center">
             {query ? `No match for "${query}"` : "No people available"}
           </div>
         ) : (
@@ -361,12 +361,12 @@ function OwnerSubScreen({
                     selected ? "bg-surface-2" : "hover:bg-surface-2"
                   }`}
                 >
-                  <span className="h-7 w-7 rounded-full bg-surface-2 border border-border flex items-center justify-center text-[10px] font-semibold uppercase text-muted shrink-0">
+                  <span className="h-7 w-7 rounded-full bg-surface-2 border border-border flex items-center justify-center text-[11px] font-semibold uppercase text-muted shrink-0">
                     {(u.firstName?.[0] ?? u.email[0] ?? "?").toUpperCase()}
                   </span>
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[12.5px] font-medium truncate">{userDisplayName(u)}</span>
-                    <span className="block text-[11px] text-muted truncate">
+                    <span className="block text-[13.5px] font-medium truncate">{userDisplayName(u)}</span>
+                    <span className="block text-[12px] text-muted truncate">
                       {u.role?.title ?? u.email}
                       {u.department?.name ? ` · ${u.department.name}` : ""}
                     </span>
@@ -430,28 +430,28 @@ function ViewsSubScreen({
             return (
               <div key={v.key} className="flex items-center gap-3 px-3 py-2.5">
                 <span
-                  className="h-6 w-6 rounded-md flex items-center justify-center text-white text-[10px] font-semibold"
+                  className="h-6 w-6 rounded-md flex items-center justify-center text-white text-[11px] font-semibold"
                   style={{ backgroundColor: v.swatch }}
                 >
                   {v.label[0]}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] font-medium">
+                  <div className="text-[13.5px] font-medium">
                     {v.label}
                     {v.required ? <span className="text-muted ml-1">– Required</span> : null}
-                    {!v.shipped ? <span className="text-[10px] uppercase tracking-wide text-muted-2 ml-2">Coming soon</span> : null}
+                    {!v.shipped ? <span className="text-[11px] uppercase tracking-wide text-muted-2 ml-2">Coming soon</span> : null}
                   </div>
                 </div>
                 {enabled && !isDefault ? (
                   <button
                     type="button"
                     onClick={() => markDefault(v.key)}
-                    className="text-[11px] text-muted hover:text-foreground"
+                    className="text-[12px] text-muted hover:text-foreground"
                   >
                     Mark as default
                   </button>
                 ) : null}
-                {isDefault ? <span className="text-[11px] font-medium" style={{ color: accent }}>Default</span> : null}
+                {isDefault ? <span className="text-[12px] font-medium" style={{ color: accent }}>Default</span> : null}
                 <Toggle
                   value={enabled}
                   onChange={() => toggle(v.key)}
@@ -527,8 +527,8 @@ function StatusesSubScreen({
             <div key={group.id}>
               <div className="flex items-center justify-between mb-2">
                 <div>
-                  <div className="text-[12.5px] font-semibold">{group.label}</div>
-                  <div className="text-[11px] text-muted">{group.blurb}</div>
+                  <div className="text-[13.5px] font-semibold">{group.label}</div>
+                  <div className="text-[12px] text-muted">{group.blurb}</div>
                 </div>
                 <button
                   type="button"
@@ -551,7 +551,7 @@ function StatusesSubScreen({
                       type="text"
                       value={s.label}
                       onChange={(e) => updateStatus(s.key, { label: e.target.value.toUpperCase() })}
-                      className="flex-1 bg-transparent text-[12.5px] font-medium uppercase tracking-wide focus:outline-none"
+                      className="flex-1 bg-transparent text-[13.5px] font-medium uppercase tracking-wide focus:outline-none"
                     />
                     <button
                       type="button"
@@ -564,7 +564,7 @@ function StatusesSubScreen({
                   </div>
                 ))}
                 {rows.length === 0 ? (
-                  <div className="px-3 py-3 text-[11.5px] text-muted-2">No statuses in this group yet.</div>
+                  <div className="px-3 py-3 text-[12.5px] text-muted-2">No statuses in this group yet.</div>
                 ) : null}
               </div>
             </div>
@@ -646,8 +646,8 @@ export function ModulesSubScreen({
       <div className="px-6 pb-2 max-h-[60vh] overflow-y-auto space-y-4">
         <label className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
           <div>
-            <div className="text-[12.5px] font-semibold">{turnOffAll ? "Turn off all Modules" : "Turn on starter modules"}</div>
-            <div className="text-[11px] text-muted">Bulk toggle — you can fine-tune below</div>
+            <div className="text-[13.5px] font-semibold">{turnOffAll ? "Turn off all Modules" : "Turn on starter modules"}</div>
+            <div className="text-[12px] text-muted">Bulk toggle — you can fine-tune below</div>
           </div>
           <Toggle
             value={turnOffAll}
@@ -680,7 +680,7 @@ function ModuleGroup({
 }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-muted-2 mb-2">{title}</div>
+      <div className="text-[12px] uppercase tracking-wide text-muted-2 mb-2">{title}</div>
       <div className="grid grid-cols-2 gap-2">
         {entries.map((m) => {
           const enabled = modules.includes(m.key) && !m.soon;
@@ -699,13 +699,13 @@ function ModuleGroup({
               <div className="flex items-start gap-2.5">
                 <m.Icon className="w-4 h-4 shrink-0 mt-0.5" style={{ color: m.color }} />
                 <div className="min-w-0">
-                  <div className="text-[12.5px] font-semibold flex items-center gap-1.5">
+                  <div className="text-[13.5px] font-semibold flex items-center gap-1.5">
                     {m.label}
                     {m.soon ? (
-                      <span className="text-[9px] uppercase tracking-wide text-muted-2 border border-border rounded px-1 leading-4">Soon</span>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-2 border border-border rounded px-1 leading-4">Soon</span>
                     ) : null}
                   </div>
-                  <div className="text-[11px] text-muted mt-0.5 leading-snug">{m.blurb}</div>
+                  <div className="text-[12px] text-muted mt-0.5 leading-snug">{m.blurb}</div>
                 </div>
               </div>
             </button>
@@ -753,7 +753,7 @@ function SubFooter({
       <button
         type="button"
         onClick={onDone}
-        className="px-4 py-2 rounded-lg text-[13px] font-medium text-white shadow-sm transition hover:opacity-90"
+        className="px-4 py-2 rounded-lg text-[14px] font-medium text-white shadow-sm transition hover:opacity-90"
         style={{ backgroundColor: accent }}
       >
         {doneLabel}

@@ -189,12 +189,12 @@ export function BoardItemDrawer({
                 <X className="w-4 h-4" />
               </button>
               <div className="h-4 w-px bg-zinc-200" aria-hidden />
-              <span className="text-[12px] font-medium text-zinc-400">Task</span>
+              <span className="text-[13px] font-medium text-zinc-400">Task</span>
               <div className="ml-auto flex items-center gap-1">
                 {item ? (
                   <Link
                     href={`/item/${item.id}`}
-                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
+                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] font-medium text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800"
                     title="Open full page"
                   >
                     <ExternalLink className="w-3.5 h-3.5" /> Full page
@@ -204,7 +204,7 @@ export function BoardItemDrawer({
                   <button
                     type="button"
                     onClick={archive}
-                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] font-medium text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
+                    className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] font-medium text-zinc-500 transition-colors hover:bg-red-50 hover:text-red-600"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Archive
                   </button>
@@ -322,7 +322,7 @@ function DetailRail({
       {!collapsed ? (
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           <div className="h-11 shrink-0 px-4 flex items-center border-b border-zinc-100">
-            <span className="text-[13px] font-semibold text-zinc-800">
+            <span className="text-[14px] font-semibold text-zinc-800">
               {RAIL_PANEL_TITLES[panel]}
             </span>
           </div>
@@ -359,7 +359,7 @@ function RailIconButton({
       }`}
     >
       <Icon className="w-4 h-4" />
-      <span className="pointer-events-none absolute right-full top-1/2 -translate-y-1/2 mr-2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity duration-100 z-10">
+      <span className="pointer-events-none absolute right-full top-1/2 -translate-y-1/2 mr-2 whitespace-nowrap rounded-md bg-zinc-900 px-2 py-1 text-[12px] font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity duration-100 z-10">
         {label}
       </span>
     </button>

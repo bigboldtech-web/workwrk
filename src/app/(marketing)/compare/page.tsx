@@ -173,7 +173,7 @@ function Cell({ v, highlight = false }: { v: boolean | string; highlight?: boole
       ) : v === false ? (
         <Minus size={16} className="inline text-slate-300" />
       ) : (
-        <span className={`text-[11px] font-bold ${highlight ? "text-violet-700" : "text-slate-500"}`}>{v}</span>
+        <span className={`text-[12px] font-bold ${highlight ? "text-violet-700" : "text-slate-500"}`}>{v}</span>
       )}
     </td>
   );

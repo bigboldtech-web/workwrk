@@ -163,8 +163,8 @@ function Tile({
         <Icon className="w-4 h-4" style={{ color: accent }} />
         {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : null}
       </div>
-      <div className="text-[12.5px] font-semibold text-zinc-900">{label}</div>
-      <div className="text-[10.5px] text-zinc-500 mt-0.5">{blurb}</div>
+      <div className="text-[13.5px] font-semibold text-zinc-900">{label}</div>
+      <div className="text-[11.5px] text-zinc-500 mt-0.5">{blurb}</div>
     </button>
   );
 }

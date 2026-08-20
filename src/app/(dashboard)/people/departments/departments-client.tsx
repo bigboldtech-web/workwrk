@@ -632,7 +632,7 @@ function PickerField({
         type="button"
         aria-label={ariaLabel}
         onClick={() => setOpen((s) => !s)}
-        className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-left text-[13px] text-zinc-900 hover:border-zinc-300 focus:border-[#0073EA] focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        className="flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-left text-[14px] text-zinc-900 hover:border-zinc-300 focus:border-[#0073EA] focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
       >
         <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-zinc-400"}`}>
           {selected ? (
@@ -655,22 +655,22 @@ function PickerField({
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
                   placeholder="Search people…"
-                  className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-900 outline-none focus:border-[#0073EA] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+                  className="h-8 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-900 outline-none focus:border-[#0073EA] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                 />
               </div>
             )}
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-[12.5px] text-zinc-400">No matches</div>
+              <div className="px-3 py-2 text-[13.5px] text-zinc-400">No matches</div>
             ) : filtered.map((o) => (
               <button
                 key={o.value || "__none"}
                 type="button"
                 onClick={() => { onChange(o.value); setOpen(false); setQ(""); }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13.5px] text-zinc-800 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-zinc-800"
               >
                 {o.leading}
                 <span className="min-w-0 flex-1 truncate">{o.label}</span>
-                {o.hint && <span className="text-[11px] text-zinc-400">{o.hint}</span>}
+                {o.hint && <span className="text-[12px] text-zinc-400">{o.hint}</span>}
                 {o.value === value && <Check className="h-3.5 w-3.5 shrink-0 text-[#0073EA]" />}
               </button>
             ))}
@@ -684,7 +684,7 @@ function PickerField({
 function MemberAvatar({ m }: { m: Member }) {
   return (
     <span
-      className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold text-white"
+      className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold text-white"
       style={{ background: avColor(m.id) }}
     >
       {initials(m.firstName, m.lastName)}
@@ -786,32 +786,32 @@ function DeptDialog({
         <div className="flex flex-col gap-3.5 pt-1">
           {/* Name */}
           <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Name</span>
+            <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Name</span>
             <input
               autoFocus={!editing}
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void save(); }}
               placeholder="e.g. Engineering"
-              className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-3 text-[14px] text-zinc-900 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
 
           {/* Description */}
           <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Description <span className="font-normal text-zinc-400">(optional)</span></span>
+            <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Description <span className="font-normal text-zinc-400">(optional)</span></span>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="What this function owns…"
               rows={2}
-              className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[13px] text-zinc-900 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[14px] text-zinc-900 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/20 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             />
           </label>
 
           {/* Color */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Color</span>
+            <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Color</span>
             <div className="flex flex-wrap gap-1.5">
               {SWATCHES.map((s) => (
                 <button
@@ -831,7 +831,7 @@ function DeptDialog({
 
           {/* Head */}
           <div className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Department head</span>
+            <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Department head</span>
             <PickerField
               ariaLabel="Department head"
               value={headId}
@@ -844,7 +844,7 @@ function DeptDialog({
 
           {/* Parent */}
           <div className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">Parent department</span>
+            <span className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400">Parent department</span>
             <PickerField
               ariaLabel="Parent department"
               value={parentId}
@@ -860,7 +860,7 @@ function DeptDialog({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="inline-flex h-8 items-center rounded-lg border border-zinc-200 px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="inline-flex h-8 items-center rounded-lg border border-zinc-200 px-3 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -868,7 +868,7 @@ function DeptDialog({
             type="button"
             onClick={() => void save()}
             disabled={saving || !name.trim()}
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0073EA] px-3.5 text-[13px] font-medium text-white hover:bg-[#0068d6] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[#0073EA] px-3.5 text-[14px] font-medium text-white hover:bg-[#0068d6] disabled:opacity-50"
           >
             {saving ? "Saving…" : editing ? "Save changes" : "Create function"}
           </button>

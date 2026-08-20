@@ -70,10 +70,10 @@ export default function PolicyComplianceDashboard() {
         description={data === null ? "Loading…" : `${data.overview.totalAcked} / ${data.overview.totalRequired} acks · ${data.overview.orgRate}% org rate · ${data.overview.overdue} overdue`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               <ShieldCheck className="h-3.5 w-3.5" /> All policies
             </Link>
-            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               SOP compliance
             </Link>
           </div>
@@ -162,7 +162,7 @@ export default function PolicyComplianceDashboard() {
                           <div className="cmpl__over-title">{o.policyTitle}</div>
                           <div className="cmpl__over-meta">{o.userName} · {o.department}</div>
                         </div>
-                        <span className="text-[11px] font-medium" style={{ color: o.status === "overdue" ? "var(--os-c-red)" : o.status === "out-of-date" ? "var(--os-c-orange)" : "var(--os-c-orange)" }}>
+                        <span className="text-[12px] font-medium" style={{ color: o.status === "overdue" ? "var(--os-c-red)" : o.status === "out-of-date" ? "var(--os-c-orange)" : "var(--os-c-orange)" }}>
                           {o.status === "overdue" ? `${o.daysOverdue}d overdue` : o.status === "out-of-date" ? "re-ack" : o.dueDate ? `due ${new Date(o.dueDate).toLocaleDateString()}` : "pending"}
                         </span>
                       </Link>
@@ -183,7 +183,7 @@ export default function PolicyComplianceDashboard() {
 
 function MoreToggle({ open, total, onClick }: { open: boolean; total: number; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="mt-1 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2">
+    <button type="button" onClick={onClick} className="mt-1 text-[13px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2">
       {open ? "Show less" : `View all ${total}`}
     </button>
   );

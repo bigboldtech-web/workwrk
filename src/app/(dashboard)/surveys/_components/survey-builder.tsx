@@ -316,19 +316,19 @@ export function SurveyBuilder({
         <div className="flex flex-col gap-4 py-1">
           {/* Title */}
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Title</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Title</span>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. How was your sprint?"
               maxLength={160}
-              className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[13.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
+              className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[14.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
             />
           </label>
 
           {/* Questions */}
           <div className="flex flex-col gap-2">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Questions</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Questions</span>
             <div className="flex flex-col gap-2.5">
               {questions.map((q, qi) => {
                 const meta = Q_TYPES.find((t) => t.value === q.type);
@@ -343,7 +343,7 @@ export function SurveyBuilder({
                           onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
                           placeholder={`Question ${qi + 1}`}
                           maxLength={240}
-                          className="h-9 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-[13px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
+                          className="h-9 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-[14px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
                         />
                         <div className="flex flex-wrap gap-1.5">
                           {Q_TYPES.map(({ value, label, Icon }) => {
@@ -353,7 +353,7 @@ export function SurveyBuilder({
                                 key={value}
                                 type="button"
                                 onClick={() => setQuestionType(q.id, value)}
-                                className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11.5px] border transition-colors ${
+                                className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] border transition-colors ${
                                   active
                                     ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                                     : "border-[var(--os-line)] text-[var(--os-ink-3)] hover:bg-[var(--os-surface)]"
@@ -377,7 +377,7 @@ export function SurveyBuilder({
                                   onChange={(e) => setOption(q.id, oi, e.target.value)}
                                   placeholder={`Option ${oi + 1}`}
                                   maxLength={120}
-                                  className="flex-1 h-8 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-[12.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
+                                  className="flex-1 h-8 rounded-md border border-[var(--os-line)] bg-[var(--os-surface)] px-2.5 text-[13.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
                                 />
                                 <button
                                   type="button"
@@ -393,7 +393,7 @@ export function SurveyBuilder({
                             <button
                               type="button"
                               onClick={() => addOption(q.id)}
-                              className="self-start inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-[var(--os-brand-deep)] hover:bg-[var(--os-surface)]"
+                              className="self-start inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-[var(--os-brand-deep)] hover:bg-[var(--os-surface)]"
                             >
                               <Plus className="w-3 h-3" /> Add option
                             </button>
@@ -417,7 +417,7 @@ export function SurveyBuilder({
             <button
               type="button"
               onClick={addQuestion}
-              className="self-start inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-dashed border-[var(--os-line)] text-[12.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+              className="self-start inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-dashed border-[var(--os-line)] text-[13.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
             >
               <Plus className="w-3.5 h-3.5" /> Add question
             </button>
@@ -425,7 +425,7 @@ export function SurveyBuilder({
 
           {/* Audience */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Audience</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Audience</span>
             <div className="flex flex-wrap gap-1.5">
               {([
                 { value: "ALL", label: "Everyone" },
@@ -439,7 +439,7 @@ export function SurveyBuilder({
                     key={value}
                     type="button"
                     onClick={() => setAudienceType(value)}
-                    className={`inline-flex items-center h-8 px-3 rounded-lg text-[12.5px] border transition-colors ${
+                    className={`inline-flex items-center h-8 px-3 rounded-lg text-[13.5px] border transition-colors ${
                       active
                         ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                         : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -450,7 +450,7 @@ export function SurveyBuilder({
                 );
               })}
               <span
-                className="inline-flex items-center h-8 px-3 rounded-lg text-[12.5px] border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
+                className="inline-flex items-center h-8 px-3 rounded-lg text-[13.5px] border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
                 title="Targeting named individuals is coming soon"
               >
                 Specific people · Coming soon
@@ -472,10 +472,10 @@ export function SurveyBuilder({
           <div className="flex flex-col gap-2.5 rounded-lg border border-[var(--os-line)] p-3">
             <label className="flex items-center justify-between gap-3">
               <span className="flex flex-col">
-                <span className="text-[13px] text-[var(--os-ink)] inline-flex items-center gap-1.5">
+                <span className="text-[14px] text-[var(--os-ink)] inline-flex items-center gap-1.5">
                   <Lock className="w-3.5 h-3.5 text-[var(--os-ink-3)]" /> {anonLabel} responses
                 </span>
-                <span className="text-[11.5px] text-[var(--os-ink-3)]">
+                <span className="text-[12.5px] text-[var(--os-ink-3)]">
                   {anonymous
                     ? "Managers see aggregates only — no names, ever."
                     : "Managers can see who said what. Use only when people expect it."}
@@ -486,17 +486,17 @@ export function SurveyBuilder({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Repeat</span>
+                <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Repeat</span>
                 <select
                   value={frequency}
                   onChange={(e) => setFrequency(e.target.value)}
-                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-2.5 text-[13px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
+                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-2.5 text-[14px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
                 >
                   {FREQ_OPTS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                 </select>
               </label>
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-[var(--os-ink-2)]">
+                <span className="text-[13px] font-medium text-[var(--os-ink-2)]">
                   Close date {frequency ? <span className="text-[var(--os-c-red)]">*</span> : <span className="text-[var(--os-ink-4)]">(optional)</span>}
                 </span>
                 <input
@@ -504,14 +504,14 @@ export function SurveyBuilder({
                   value={closesAt}
                   min={dateInputValue(1)}
                   onChange={(e) => setClosesAt(e.target.value)}
-                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[13px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
+                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[14px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
                 />
               </label>
             </div>
           </div>
 
           {error ? (
-            <div className="flex items-start gap-2 rounded-lg border border-[color:var(--os-c-red)]/40 bg-[color:var(--os-c-red)]/10 px-3 py-2 text-[12.5px] text-[var(--os-c-red)]">
+            <div className="flex items-start gap-2 rounded-lg border border-[color:var(--os-c-red)]/40 bg-[color:var(--os-c-red)]/10 px-3 py-2 text-[13.5px] text-[var(--os-c-red)]">
               <AlertTriangle className="w-4 h-4 mt-[1px] shrink-0" />
               <span>{error}</span>
             </div>
@@ -523,7 +523,7 @@ export function SurveyBuilder({
             type="button"
             onClick={() => handleOpenChange(false)}
             disabled={submitting}
-            className="h-9 px-3.5 rounded-lg border border-[var(--os-line)] text-[13px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)] disabled:opacity-50"
+            className="h-9 px-3.5 rounded-lg border border-[var(--os-line)] text-[14px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)] disabled:opacity-50"
           >
             Cancel
           </button>
@@ -531,7 +531,7 @@ export function SurveyBuilder({
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-[14px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
           >
             {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             {mode === "edit" ? "Save changes" : "Publish survey"}
@@ -554,7 +554,7 @@ function PickerGrid({
   empty: string;
 }) {
   if (items.length === 0) {
-    return <div className="text-[12px] text-[var(--os-ink-4)] px-1 pt-1">{empty}…</div>;
+    return <div className="text-[13px] text-[var(--os-ink-4)] px-1 pt-1">{empty}…</div>;
   }
   return (
     <div className="flex flex-wrap gap-1.5 pt-1">
@@ -565,7 +565,7 @@ function PickerGrid({
             key={it.id}
             type="button"
             onClick={() => onToggle(it.id)}
-            className={`inline-flex items-center h-7 px-2.5 rounded-md text-[12px] border transition-colors ${
+            className={`inline-flex items-center h-7 px-2.5 rounded-md text-[13px] border transition-colors ${
               active
                 ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                 : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"

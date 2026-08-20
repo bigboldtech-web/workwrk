@@ -69,7 +69,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
             <span className="flex items-center gap-2 min-w-0">
               <span className="truncate min-w-0">{selected.name}</span>
               {selected.category && (
-                <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-muted">{selected.category}</span>
+                <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{selected.category}</span>
               )}
             </span>
           ) : (
@@ -105,7 +105,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
             )}
             {sortedCategories.map((cat) => (
               <div key={cat}>
-                <div className="sticky top-0 bg-surface px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted">
+                <div className="sticky top-0 bg-surface px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted">
                   {cat}
                 </div>
                 {grouped[cat].map((k) => (

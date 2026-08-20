@@ -54,7 +54,7 @@ export function NotificationBanner() {
 
   return (
     <div
-      className="flex-shrink-0 h-10 flex items-center px-4 gap-3 text-[13px]"
+      className="flex-shrink-0 h-10 flex items-center px-4 gap-3 text-[14px]"
       style={{
         background: "color-mix(in srgb, var(--os-brand-rail) 14%, white)",
         // Banner bg hardcodes a white-mixed base, so rail (dark) text stays
@@ -72,7 +72,7 @@ export function NotificationBanner() {
       <button
         type="button"
         onClick={enable}
-        className="px-3 py-1 rounded-md text-[12px] font-medium hover:opacity-90 transition-opacity"
+        className="px-3 py-1 rounded-md text-[13px] font-medium hover:opacity-90 transition-opacity"
         style={{ background: "var(--os-brand-rail)", color: "white" }}
       >
         Enable
@@ -80,7 +80,7 @@ export function NotificationBanner() {
       <button
         type="button"
         onClick={remind}
-        className="px-3 py-1 rounded-md text-[12px] font-medium hover:bg-black/5 transition-colors"
+        className="px-3 py-1 rounded-md text-[13px] font-medium hover:bg-black/5 transition-colors"
         style={{ color: "var(--os-brand-ink)" }}
       >
         Remind me

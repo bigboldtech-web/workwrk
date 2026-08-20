@@ -683,7 +683,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       <div className="flex flex-col items-center justify-center gap-3 py-24 px-6 text-center">
         <Trash2 className="w-8 h-8 text-zinc-300" />
         <p className="text-[15px] font-semibold text-zinc-900">This page is in Trash</p>
-        <p className="max-w-sm text-[12.5px] leading-snug text-zinc-500">
+        <p className="max-w-sm text-[13.5px] leading-snug text-zinc-500">
           &ldquo;{doc.title || "Untitled"}&rdquo; was deleted. Restore it to keep editing, or head back to your docs.
         </p>
         <div className="mt-2 flex items-center gap-2">
@@ -702,14 +702,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                 setRestoring(false);
               }
             }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13.5px] font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
           >
             {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             Restore page
           </button>
           <Link
             href="/docs"
-            className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+            className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13.5px] font-medium text-zinc-700 hover:bg-zinc-50"
           >
             Back to Docs
           </Link>
@@ -746,11 +746,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <button
               type="button"
               onClick={() => void addSubpage()}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
             >
               <FilePlus className="h-3.5 w-3.5" /> Add subpage
             </button>
-            <Link href="/docs" className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
+            <Link href="/docs" className="text-[13.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
               Docs
             </Link>
             <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
@@ -761,14 +761,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
               : tree.ancestors
             ).map((a, i) => a === null ? (
               <Fragment key={`bc-gap-${i}`}>
-                <span className="text-[12.5px] text-[var(--os-ink-3)]" aria-hidden>…</span>
+                <span className="text-[13.5px] text-[var(--os-ink-3)]" aria-hidden>…</span>
                 <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
               </Fragment>
             ) : (
               <Fragment key={a.id}>
                 <Link
                   href={`/docs/${a.id}`}
-                  className="text-[12.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] truncate max-w-[140px]"
+                  className="text-[13.5px] font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] truncate max-w-[140px]"
                 >
                   {a.title || "Untitled"}
                 </Link>
@@ -778,7 +778,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <span className="inline-flex h-[15px] w-[15px] shrink-0 items-center justify-center [&_svg]:h-[15px] [&_svg]:w-[15px]">
               {meta.icon ? renderNoteIcon(meta.icon) : <FileText className="text-[var(--os-ink-3)]" />}
             </span>
-            <span className="truncate max-w-[320px] text-[13px] font-semibold text-[var(--os-ink)]">
+            <span className="truncate max-w-[320px] text-[14px] font-semibold text-[var(--os-ink)]">
               {title || "Untitled note"}
             </span>
             <button
@@ -822,7 +822,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             type="button"
             onClick={() => setPanel(panel?.kind === "ask" ? null : { kind: "ask" })}
             title="Chat with this note"
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-semibold hover:bg-[var(--os-surface-1)] ${panel?.kind === "ask" ? "text-[var(--os-brand)]" : "text-[var(--os-ink-2)]"}`}
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[13.5px] font-semibold hover:bg-[var(--os-surface-1)] ${panel?.kind === "ask" ? "text-[var(--os-brand)]" : "text-[var(--os-ink-2)]"}`}
           >
             <Sparkles className="h-3.5 w-3.5" /> Ask
           </button>
@@ -833,7 +833,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             title="Share"
             aria-haspopup="dialog"
             aria-expanded={shareOpen}
-            className="inline-flex h-7 items-center rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
+            className="inline-flex h-7 items-center rounded-md bg-zinc-900 px-3 text-[13.5px] font-semibold text-white hover:bg-zinc-800"
           >
             Share
           </button>
@@ -1117,7 +1117,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <button
               type="button"
               onClick={() => setPanel({ kind: "ask" })}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13.5px] text-zinc-600 hover:bg-zinc-50"
             >
               <Sparkles className="h-3.5 w-3.5" /> Help me write
             </button>
@@ -1458,13 +1458,13 @@ function WordCountPill({ blocks, containerRef, recomputeKey }: {
       {open && (
         <div className="absolute bottom-full left-0 mb-1.5">
           <MenuList className="w-[200px]">
-            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300">
               <span>Words</span><span>{stats.words.toLocaleString()}</span>
             </div>
-            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300">
               <span>Characters</span><span>{stats.chars.toLocaleString()}</span>
             </div>
-            <div className="flex items-center justify-between px-3 py-1.5 text-[12px] text-zinc-600 dark:text-zinc-300">
+            <div className="flex items-center justify-between px-3 py-1.5 text-[13px] text-zinc-600 dark:text-zinc-300">
               <span>Read time</span><span>{stats.minutes} min</span>
             </div>
           </MenuList>
@@ -1475,7 +1475,7 @@ function WordCountPill({ blocks, containerRef, recomputeKey }: {
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="true"
-        className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white dark:bg-[#1B1F26] px-2.5 text-[11.5px] font-medium text-zinc-500 shadow-sm hover:text-zinc-700"
+        className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white dark:bg-[#1B1F26] px-2.5 text-[12.5px] font-medium text-zinc-500 shadow-sm hover:text-zinc-700"
       >
         {stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}
         <ChevronUp className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />

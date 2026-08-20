@@ -182,7 +182,7 @@ export function ItemActivityDrawer(props: Props) {
 function CountBadge({ count }: { count?: number }) {
   if (count === undefined || count <= 0) return null;
   return (
-    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[9px] bg-zinc-50 text-zinc-500-2">{count}</span>
+    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-zinc-50 text-zinc-500-2">{count}</span>
   );
 }
 
@@ -214,7 +214,7 @@ function UpdatesTab({
           }}
         />
         <div className="flex items-center justify-between pt-2 mt-2 border-t border-zinc-200">
-          <p className="text-[10px] text-zinc-500-2">⌘/Ctrl + Enter to post</p>
+          <p className="text-[11px] text-zinc-500-2">⌘/Ctrl + Enter to post</p>
           <button
             type="button"
             onClick={onSubmit}
@@ -245,7 +245,7 @@ function UpdatesTab({
                 <Avatar name={u.authorName} image={u.authorImage} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{u.authorName ?? "Unknown"}</p>
-                  <p className="text-[10px] text-zinc-500-2">{fmtAbs(new Date(u.createdAt))}</p>
+                  <p className="text-[11px] text-zinc-500-2">{fmtAbs(new Date(u.createdAt))}</p>
                 </div>
                 <button
                   type="button"
@@ -305,7 +305,7 @@ function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: 
               <span className="font-medium">{a.actorName ?? "System"}</span>{" "}
               <span className="text-zinc-500-2">{renderActivity(a)}</span>
             </p>
-            <p className="text-[10px] text-zinc-500-2 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
+            <p className="text-[11px] text-zinc-500-2 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
           </div>
         </li>
       ))}
@@ -336,7 +336,7 @@ function renderActivity(a: ActivityRow) {
 }
 
 function Avatar({ name, image, small }: { name: string | null; image: string | null; small?: boolean }) {
-  const dim = small ? "w-5 h-5 text-[9px]" : "w-7 h-7 text-[11px]";
+  const dim = small ? "w-5 h-5 text-[10px]" : "w-7 h-7 text-[12px]";
   if (image) {
     return <img src={image} alt={name ?? ""} className={`${dim} rounded-full object-cover`} />;
   }

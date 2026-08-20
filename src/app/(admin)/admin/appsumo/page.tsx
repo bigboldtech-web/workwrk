@@ -133,7 +133,7 @@ export default function AdminAppsumoPage() {
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-5 animate-fade-in">
       <div>
-        <p className="text-[11px] text-muted font-mono uppercase tracking-wider">Lifetime deals</p>
+        <p className="text-[12px] text-muted font-mono uppercase tracking-wider">Lifetime deals</p>
         <h1 className="text-xl font-semibold flex items-center gap-2 mt-1">
           <Sparkles size={18} className="text-[#d4ff2e]" /> AppSumo redemption codes
         </h1>
@@ -189,7 +189,7 @@ export default function AdminAppsumoPage() {
               </div>
 
               <div className="flex items-center justify-between">
-                <p className="text-[11px] text-muted">
+                <p className="text-[12px] text-muted">
                   Duplicates are skipped silently — safe to re-run.
                 </p>
                 <Button onClick={bulkImport} disabled={importing || !importCSV.trim()} className="gap-1.5">
@@ -225,7 +225,7 @@ export default function AdminAppsumoPage() {
                 <div className="p-8 text-center text-sm text-muted">No codes match this filter.</div>
               ) : (
                 <table className="w-full text-sm">
-                  <thead className="text-[10px] font-mono uppercase tracking-wider text-muted bg-surface-2">
+                  <thead className="text-[11px] font-mono uppercase tracking-wider text-muted bg-surface-2">
                     <tr>
                       <th className="text-left p-3">Code</th>
                       <th className="text-left p-3">Tier / Plan / Seats</th>
@@ -246,11 +246,11 @@ export default function AdminAppsumoPage() {
                         </td>
                         <td className="p-3">
                           {c.refundedAt ? (
-                            <Badge variant="outline" className="text-amber-400 text-[10px]"><XCircle size={10} className="mr-1" /> Refunded</Badge>
+                            <Badge variant="outline" className="text-amber-400 text-[11px]"><XCircle size={10} className="mr-1" /> Refunded</Badge>
                           ) : c.redeemedAt ? (
-                            <Badge variant="success" className="text-[10px]"><CheckCircle2 size={10} className="mr-1" /> Redeemed</Badge>
+                            <Badge variant="success" className="text-[11px]"><CheckCircle2 size={10} className="mr-1" /> Redeemed</Badge>
                           ) : (
-                            <Badge variant="outline" className="text-[10px]">Unused</Badge>
+                            <Badge variant="outline" className="text-[11px]">Unused</Badge>
                           )}
                         </td>
                         <td className="p-3 text-xs text-muted">
@@ -282,7 +282,7 @@ function Stat({ label, value, tone = "default" }: { label: string; value: number
     <Card>
       <CardContent className="p-3 text-center">
         <p className={`text-2xl font-bold tabular-nums ${color}`}>{value}</p>
-        <p className="text-[10px] text-muted">{label}</p>
+        <p className="text-[11px] text-muted">{label}</p>
       </CardContent>
     </Card>
   );

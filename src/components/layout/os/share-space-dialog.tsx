@@ -368,7 +368,7 @@ export function ShareSpaceDialog({
 
         {/* Visibility selector */}
         <div className="px-6 pb-3">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             Visibility
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -384,11 +384,11 @@ export function ShareSpaceDialog({
                     active ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200 hover:bg-zinc-50"
                   } disabled:opacity-60`}
                 >
-                  <div className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold">
+                  <div className="inline-flex items-center gap-1.5 text-[13.5px] font-semibold">
                     <opt.Icon className="h-3.5 w-3.5" />
                     {opt.label}
                   </div>
-                  <div className="text-[11px] text-zinc-500 mt-0.5 leading-snug">{opt.blurb}</div>
+                  <div className="text-[12px] text-zinc-500 mt-0.5 leading-snug">{opt.blurb}</div>
                 </button>
               );
             })}
@@ -398,10 +398,10 @@ export function ShareSpaceDialog({
         {/* Add member — tabbed picker (People / Departments / Offices) */}
         <div className="px-6 pb-3 border-t border-zinc-100 pt-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold">
+            <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold">
               Add people
             </div>
-            <div className="inline-flex items-center rounded-md border border-zinc-200 overflow-hidden text-[11px]">
+            <div className="inline-flex items-center rounded-md border border-zinc-200 overflow-hidden text-[12px]">
               <PickerTabBtn active={tab === "people"} onClick={() => setTab("people")}>
                 <UserPlus className="h-3 w-3" /> People
               </PickerTabBtn>
@@ -426,12 +426,12 @@ export function ShareSpaceDialog({
                 onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
                 onFocus={() => setPickerOpen(true)}
                 placeholder="Type a name or email…"
-                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
               />
               {pickerOpen ? (
                 <div className="absolute left-0 right-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
                   {candidates.length === 0 ? (
-                    <div className="px-3 py-3 text-[12px] text-zinc-400">
+                    <div className="px-3 py-3 text-[13px] text-zinc-400">
                       {query ? `No match for "${query}"` : "Start typing to find people"}
                     </div>
                   ) : (
@@ -445,8 +445,8 @@ export function ShareSpaceDialog({
                       >
                         <Avatar user={u} />
                         <span className="flex-1 min-w-0">
-                          <span className="block text-[12.5px] font-medium truncate">{displayName(u)}</span>
-                          <span className="block text-[11px] text-zinc-500 truncate">{u.email}</span>
+                          <span className="block text-[13.5px] font-medium truncate">{displayName(u)}</span>
+                          <span className="block text-[12px] text-zinc-500 truncate">{u.email}</span>
                         </span>
                         {busyAddId === u.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
@@ -488,7 +488,7 @@ export function ShareSpaceDialog({
           ) : null}
 
           {bulkResult ? (
-            <div className="mt-2 text-[11.5px] text-zinc-500">
+            <div className="mt-2 text-[12.5px] text-zinc-500">
               Added {bulkResult.added} · skipped {bulkResult.skipped} already in this Space
             </div>
           ) : null}
@@ -496,13 +496,13 @@ export function ShareSpaceDialog({
 
         {/* Members list */}
         <div className="px-6 pb-5 border-t border-zinc-100 pt-4">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             {members === null ? "Members" : `Members · ${members.length}`}
           </div>
           {members === null ? (
-            <div className="text-[12px] text-zinc-400">Loading…</div>
+            <div className="text-[13px] text-zinc-400">Loading…</div>
           ) : members.length === 0 ? (
-            <div className="text-[12px] text-zinc-400">No members yet. Add someone above.</div>
+            <div className="text-[13px] text-zinc-400">No members yet. Add someone above.</div>
           ) : (
             <ul className="rounded-lg border border-zinc-200 divide-y divide-zinc-100 max-h-[260px] overflow-y-auto">
               {members.map((m) => {
@@ -511,14 +511,14 @@ export function ShareSpaceDialog({
                   <li key={m.user.id} className="flex items-center gap-2.5 px-3 py-2">
                     <Avatar user={m.user} />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[12.5px] font-medium truncate">{displayName(m.user)}</span>
-                      <span className="block text-[11px] text-zinc-500 truncate">{m.user.email}</span>
+                      <span className="block text-[13.5px] font-medium truncate">{displayName(m.user)}</span>
+                      <span className="block text-[12px] text-zinc-500 truncate">{m.user.email}</span>
                     </span>
                     <select
                       value={m.role}
                       onChange={(e) => changeRole(m, e.target.value as SpaceRole)}
                       disabled={busy}
-                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[11.5px] focus:outline-none focus:border-zinc-400"
+                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
                     >
                       {ROLE_OPTIONS.map((r) => (
                         <option key={r.value} value={r.value}>{r.label}</option>
@@ -550,7 +550,7 @@ export function ShareSpaceDialog({
 
 function Avatar({ user }: { user: UserOption }) {
   return (
-    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[10px] font-semibold text-zinc-600 shrink-0">
+    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[11px] font-semibold text-zinc-600 shrink-0">
       {avatarInitials(user)}
     </span>
   );
@@ -701,12 +701,12 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
           onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") void send(); }}
           placeholder="name@company.com"
-          className="flex-1 h-9 px-3 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+          className="flex-1 h-9 px-3 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
         />
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as SpaceRole)}
-          className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-[12px] focus:outline-none focus:border-zinc-400"
+          className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
         >
           <option value="GUEST">Guest</option>
           <option value="MEMBER">Member</option>
@@ -716,24 +716,24 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
           type="button"
           onClick={send}
           disabled={busy || !email.trim()}
-          className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-[12.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-[13.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
           Send invite
         </button>
       </div>
 
-      <div className="mt-2 text-[11.5px] text-zinc-500 leading-snug">
+      <div className="mt-2 text-[12.5px] text-zinc-500 leading-snug">
         We&rsquo;ll email them a link. They land on Sign-up, set a password, and join this Space automatically.
       </div>
 
       {inviteUrl ? (
         <div className="mt-3 rounded-md border border-zinc-200 bg-zinc-50 p-2.5">
-          <div className="text-[11px] text-zinc-500 mb-1.5">
+          <div className="text-[12px] text-zinc-500 mb-1.5">
             {reused ? "Reusing an active invitation" : "Invitation sent"} — share the link if email doesn&rsquo;t arrive:
           </div>
           <div className="flex items-center gap-1.5">
-            <code className="flex-1 min-w-0 text-[11px] text-zinc-700 truncate px-2 py-1 rounded bg-white border border-zinc-200">
+            <code className="flex-1 min-w-0 text-[12px] text-zinc-700 truncate px-2 py-1 rounded bg-white border border-zinc-200">
               {inviteUrl}
             </code>
             <button
@@ -751,7 +751,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
 
       {pending && pending.length > 0 ? (
         <div className="mt-4 pt-3 border-t border-zinc-100">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             Pending invitations · {pending.length}
           </div>
           <ul className="rounded-md border border-zinc-200 divide-y divide-zinc-100 max-h-[200px] overflow-y-auto">
@@ -761,8 +761,8 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
                 <li key={inv.id} className="px-2.5 py-2 flex items-center gap-2">
                   <Mail className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[12.5px] font-medium text-zinc-900 truncate">{inv.email}</span>
-                    <span className="block text-[11px] text-zinc-500">
+                    <span className="block text-[13.5px] font-medium text-zinc-900 truncate">{inv.email}</span>
+                    <span className="block text-[12px] text-zinc-500">
                       {(inv.spaceRole ?? "MEMBER").toLowerCase()} · sent {relTime(inv.createdAt)}
                     </span>
                   </span>
@@ -844,13 +844,13 @@ function GroupPickerList({
   emptyLabel: string;
 }) {
   if (groups === null) {
-    return <div className="text-[12px] text-zinc-400 py-3 text-center">Loading {kind === "department" ? "departments" : "offices"}…</div>;
+    return <div className="text-[13px] text-zinc-400 py-3 text-center">Loading {kind === "department" ? "departments" : "offices"}…</div>;
   }
   if (groups.length === 0) {
     return (
       <div className="rounded-md border border-dashed border-zinc-200 px-4 py-6 text-center">
         <EmptyIcon className="h-5 w-5 text-zinc-300 mx-auto mb-1.5" />
-        <div className="text-[12px] text-zinc-500">{emptyLabel}</div>
+        <div className="text-[13px] text-zinc-500">{emptyLabel}</div>
       </div>
     );
   }
@@ -868,8 +868,8 @@ function GroupPickerList({
               )}
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block text-[12.5px] font-medium text-zinc-900 truncate">{g.name}</span>
-              <span className="block text-[11px] text-zinc-500">
+              <span className="block text-[13.5px] font-medium text-zinc-900 truncate">{g.name}</span>
+              <span className="block text-[12px] text-zinc-500">
                 {g.memberCount} {g.memberCount === 1 ? "person" : "people"}
               </span>
             </span>
@@ -877,7 +877,7 @@ function GroupPickerList({
               type="button"
               onClick={() => onAdd(g)}
               disabled={busy || g.memberCount === 0}
-              className="h-7 px-2.5 rounded-md bg-[#0073EA] text-white text-[11.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
+              className="h-7 px-2.5 rounded-md bg-[#0073EA] text-white text-[12.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
             >
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
               Add all

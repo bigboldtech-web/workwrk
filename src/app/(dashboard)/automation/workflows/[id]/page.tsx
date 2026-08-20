@@ -136,16 +136,16 @@ interface ApiBoard {
 /* ─────────────────────────── styling ─────────────────────────── */
 
 const INPUT =
-  "h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400";
+  "h-7 rounded-md border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400";
 const OUTLINE_PILL =
-  "inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50";
+  "inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-[13.5px] font-medium text-zinc-700 hover:bg-zinc-50";
 /** Monday-style fillable sentence token. */
 const TOKEN =
   "inline-flex max-w-full items-center gap-1 border-b-2 pb-0.5 text-[20px] font-semibold leading-tight transition-colors";
 
 function NotEmittingChip() {
   return (
-    <span className="inline-flex h-[16px] items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+    <span className="inline-flex h-[16px] items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
       not emitting yet
     </span>
   );
@@ -292,7 +292,7 @@ function ActionToken({
                       disabled={!a.available}
                       trailing={
                         !a.available ? (
-                          <span className="text-[10.5px] font-medium text-zinc-400">
+                          <span className="text-[11.5px] font-medium text-zinc-400">
                             coming soon
                           </span>
                         ) : undefined
@@ -386,7 +386,7 @@ function UserParamPicker({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search people…"
-                  className="w-full bg-transparent text-[12.5px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+                  className="w-full bg-transparent text-[13.5px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
                 />
               </div>
               <div className="max-h-[280px] overflow-y-auto py-1">
@@ -405,7 +405,7 @@ function UserParamPicker({
                 <MenuSeparator />
                 <MenuSectionLabel>People</MenuSectionLabel>
                 {filtered.length === 0 ? (
-                  <div className="px-3 py-3 text-[12px] text-zinc-400">No people found</div>
+                  <div className="px-3 py-3 text-[13px] text-zinc-400">No people found</div>
                 ) : (
                   filtered.slice(0, 30).map((p) => (
                     <MenuItem
@@ -548,7 +548,7 @@ function ParamInput({
         onChange={(e) => onChange(e.target.value)}
         rows={2}
         placeholder="Supports {{field}} tokens from the trigger"
-        className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[12.5px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
+        className="w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13.5px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
       />
     );
   }
@@ -899,10 +899,10 @@ export default function AutomationBuilderPage() {
   if (loadError) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-white">
-        <p className="text-[13px] text-zinc-500">This automation doesn&apos;t exist or you can&apos;t view it.</p>
+        <p className="text-[14px] text-zinc-500">This automation doesn&apos;t exist or you can&apos;t view it.</p>
         <Link
           href="/automation/workflows"
-          className="mt-3 text-[12.5px] font-medium text-[#0073EA] hover:underline"
+          className="mt-3 text-[13.5px] font-medium text-[#0073EA] hover:underline"
         >
           Back to automations →
         </Link>
@@ -911,7 +911,7 @@ export default function AutomationBuilderPage() {
   }
   if (!wf) {
     return (
-      <div className="flex h-full items-center gap-2 bg-white p-6 text-[13px] text-zinc-500">
+      <div className="flex h-full items-center gap-2 bg-white p-6 text-[14px] text-zinc-500">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading…
       </div>
     );
@@ -944,11 +944,11 @@ export default function AutomationBuilderPage() {
           className="h-7 w-full min-w-0 max-w-md rounded-md border border-transparent bg-transparent px-1.5 text-[14px] font-semibold text-zinc-900 outline-none placeholder:font-normal placeholder:text-zinc-400 hover:border-zinc-200 focus:border-zinc-300"
         />
         <StatusPill color={statusMeta.color} label={statusMeta.label} />
-        {dirty ? <span className="shrink-0 text-[11px] text-zinc-400">Unsaved changes</span> : null}
+        {dirty ? <span className="shrink-0 text-[12px] text-zinc-400">Unsaved changes</span> : null}
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <label
-            className="flex items-center gap-1.5 text-[12px] text-zinc-500"
+            className="flex items-center gap-1.5 text-[13px] text-zinc-500"
             title={canActivate ? undefined : "Publish this workflow first"}
           >
             Active
@@ -1006,13 +1006,13 @@ export default function AutomationBuilderPage() {
               />
             </div>
             {selectedTrigger ? (
-              <p className="mt-1.5 text-[12px] text-zinc-400">{selectedTrigger.description}</p>
+              <p className="mt-1.5 text-[13px] text-zinc-400">{selectedTrigger.description}</p>
             ) : null}
 
             {/* Conditions */}
             <div className="mt-6">
               <div className="flex items-center gap-2">
-                <span className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
+                <span className="text-[13px] font-semibold uppercase tracking-wide text-zinc-400">
                   Only if
                 </span>
                 {condRows.length > 1 ? (
@@ -1025,7 +1025,7 @@ export default function AutomationBuilderPage() {
                           setCondLogic(logic);
                           markDirty();
                         }}
-                        className={`h-6 px-2.5 text-[11px] font-semibold ${
+                        className={`h-6 px-2.5 text-[12px] font-semibold ${
                           condLogic === logic
                             ? "bg-zinc-900 text-white"
                             : "bg-white text-zinc-500 hover:bg-zinc-50"
@@ -1045,7 +1045,7 @@ export default function AutomationBuilderPage() {
                       key={row._id}
                       className="flex h-8 items-center gap-2 rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-2.5"
                     >
-                      <span className="flex-1 truncate text-[12px] text-zinc-500">
+                      <span className="flex-1 truncate text-[13px] text-zinc-500">
                         Nested condition group (edited via the API) — kept as-is
                       </span>
                       <button
@@ -1115,7 +1115,7 @@ export default function AutomationBuilderPage() {
               <button
                 type="button"
                 onClick={addCondRow}
-                className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-zinc-500 hover:text-zinc-900"
+                className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-900"
               >
                 <Plus className="h-3.5 w-3.5" /> Add condition
               </button>
@@ -1172,7 +1172,7 @@ export default function AutomationBuilderPage() {
                               key={param.key}
                               className={param.type === "text" ? "sm:col-span-2" : undefined}
                             >
-                              <label className="mb-1 block text-[11px] font-medium text-zinc-500">
+                              <label className="mb-1 block text-[12px] font-medium text-zinc-500">
                                 {param.label}
                                 {param.required ? (
                                   <span className="ml-0.5 text-[#E2445C]">*</span>
@@ -1187,7 +1187,7 @@ export default function AutomationBuilderPage() {
                                 onChange={(v) => setActionParam(row._id, param.key, v)}
                               />
                               {param.help ? (
-                                <p className="mt-0.5 text-[10.5px] text-zinc-400">{param.help}</p>
+                                <p className="mt-0.5 text-[11.5px] text-zinc-400">{param.help}</p>
                               ) : null}
                             </div>
                           ))}
@@ -1201,7 +1201,7 @@ export default function AutomationBuilderPage() {
                 <button
                   type="button"
                   onClick={addActionRow}
-                  className="inline-flex items-center gap-1 text-[12px] font-medium text-zinc-500 hover:text-zinc-900"
+                  className="inline-flex items-center gap-1 text-[13px] font-medium text-zinc-500 hover:text-zinc-900"
                 >
                   <Plus className="h-3.5 w-3.5" /> Add another action
                 </button>
@@ -1213,8 +1213,8 @@ export default function AutomationBuilderPage() {
         {/* Right rail */}
         <div className="hidden w-[300px] shrink-0 overflow-y-auto border-l border-zinc-100 p-4 lg:block">
           <div className={`${CARD} p-3`}>
-            <div className="text-[12px] font-semibold text-zinc-900">Details</div>
-            <label className="mt-2 block text-[11px] font-medium text-zinc-500">Description</label>
+            <div className="text-[13px] font-semibold text-zinc-900">Details</div>
+            <label className="mt-2 block text-[12px] font-medium text-zinc-500">Description</label>
             <textarea
               value={description}
               onChange={(e) => {
@@ -1223,9 +1223,9 @@ export default function AutomationBuilderPage() {
               }}
               rows={2}
               placeholder="What does this automation do?"
-              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[12px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
+              className="mt-1 w-full rounded-md border border-zinc-200 bg-white px-2 py-1.5 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
             />
-            <label className="mt-2 block text-[11px] font-medium text-zinc-500">
+            <label className="mt-2 block text-[12px] font-medium text-zinc-500">
               Severity (for Health)
             </label>
             <select
@@ -1240,7 +1240,7 @@ export default function AutomationBuilderPage() {
               <option value="MAJOR">Major</option>
               <option value="MINOR">Minor</option>
             </select>
-            <div className="mt-3 space-y-1 border-t border-zinc-100 pt-2 text-[11.5px] text-zinc-500">
+            <div className="mt-3 space-y-1 border-t border-zinc-100 pt-2 text-[12.5px] text-zinc-500">
               <div className="flex justify-between">
                 <span>Published</span>
                 <span className="tabular-nums">
@@ -1260,16 +1260,16 @@ export default function AutomationBuilderPage() {
 
           <div className={`${CARD} mt-3 p-3`}>
             <div className="flex items-baseline justify-between">
-              <div className="text-[12px] font-semibold text-zinc-900">Run history</div>
+              <div className="text-[13px] font-semibold text-zinc-900">Run history</div>
               <Link
                 href={`/automation/logs?workflowId=${wf.id}`}
-                className="text-[11px] font-medium text-zinc-500 hover:text-zinc-900"
+                className="text-[12px] font-medium text-zinc-500 hover:text-zinc-900"
               >
                 All logs →
               </Link>
             </div>
             {wf.runs.length === 0 ? (
-              <p className="mt-2 text-[12px] text-zinc-400">
+              <p className="mt-2 text-[13px] text-zinc-400">
                 No runs yet. Publish the automation and trigger the event to see runs here.
               </p>
             ) : (
@@ -1284,10 +1284,10 @@ export default function AutomationBuilderPage() {
                       color={RUN_STATUS_COLORS[run.status] ?? "#A1A1AA"}
                       label={run.status.toLowerCase()}
                     />
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-zinc-500">
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-500">
                       {run.errorMessage ?? run.triggerEventKey}
                     </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
+                    <span className="shrink-0 text-[12px] tabular-nums text-zinc-400">
                       {relTime(run.createdAt)}
                     </span>
                   </Link>

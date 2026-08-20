@@ -77,7 +77,7 @@ export function SopTagInput({ value, onChange, disabled, placeholder = "Add a ta
         {value.map((tag) => (
           <span
             key={tag}
-            className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
+            className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[12px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
           >
             {tag}
             {!disabled && (
@@ -116,7 +116,7 @@ export function SopTagInput({ value, onChange, disabled, placeholder = "Add a ta
               className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-white/5"
             >
               <span className="truncate">{t.name}</span>
-              <span className="ml-2 shrink-0 text-[10px] text-zinc-400">{t.count}</span>
+              <span className="ml-2 shrink-0 text-[11px] text-zinc-400">{t.count}</span>
             </button>
           ))}
         </div>

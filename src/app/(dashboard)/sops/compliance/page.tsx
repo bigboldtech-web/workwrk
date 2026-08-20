@@ -83,8 +83,8 @@ export default function SopComplianceDashboard() {
         description={data === null ? "Loading…" : `${data.overview.completed} / ${data.overview.total} complete · ${data.overview.overallRate}% org rate · ${data.overview.overdue} overdue`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ClipboardCheck className="h-3.5 w-3.5" /> My SOPs</Link>
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><ClipboardCheck className="h-3.5 w-3.5" /> My SOPs</Link>
           </div>
         }
       />
@@ -222,7 +222,7 @@ function MoreToggle({ open, total, onClick }: { open: boolean; total: number; on
     <button
       type="button"
       onClick={onClick}
-      className="mt-1 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
+      className="mt-1 text-[13px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
     >
       {open ? "Show less" : `View all ${total}`}
     </button>

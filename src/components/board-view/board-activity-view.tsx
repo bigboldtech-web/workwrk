@@ -87,7 +87,7 @@ export function BoardActivityView({ boardId, statuses, onOpenItem }: BoardActivi
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <ActivityIcon className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">
+        <p className="text-[13.5px] text-zinc-500">
           {error ?? "No activity yet — task changes across this List will stream here."}
         </p>
       </div>
@@ -97,7 +97,7 @@ export function BoardActivityView({ boardId, statuses, onOpenItem }: BoardActivi
   return (
     <div className="rounded-lg border border-zinc-200 bg-white px-4 py-2 divide-y divide-zinc-50">
       {rows.map((r) => (
-        <div key={r.id} className="flex items-baseline gap-2 py-2 text-[12.5px]">
+        <div key={r.id} className="flex items-baseline gap-2 py-2 text-[13.5px]">
           <span className="text-zinc-400 whitespace-nowrap tabular-nums w-16 shrink-0">
             {relativeTime(new Date(r.createdAt))}
           </span>

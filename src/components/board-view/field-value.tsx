@@ -307,7 +307,7 @@ function PeopleValue({
           <PersonAvatar person={p} size={22} />
         </span>
       ))}
-      {ids.length > 4 ? <span className="text-[11px] text-zinc-500 pl-2.5">+{ids.length - 4}</span> : null}
+      {ids.length > 4 ? <span className="text-[12px] text-zinc-500 pl-2.5">+{ids.length - 4}</span> : null}
     </span>
   );
 
@@ -886,7 +886,7 @@ function KraValue({
               <Target className="w-3.5 h-3.5 text-zinc-500" />
               <span className="flex-1 truncate">
                 {k.name}
-                {k.category ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
+                {k.category ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
               </span>
               {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
@@ -1037,7 +1037,7 @@ function LinkedEntityValue({
               <Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="flex-1 truncate">
                 {it.label}
-                {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                {it.sub ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
               </span>
               {it.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
@@ -1122,7 +1122,7 @@ function RelationshipValue({
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">
       <RelIcon className="w-3 h-3" />
       <span className="truncate max-w-[150px]">{current?.label ?? rel.id}</span>
-      <span className="text-[9px] uppercase tracking-wide text-zinc-400">{rel.kind}</span>
+      <span className="text-[10px] uppercase tracking-wide text-zinc-400">{rel.kind}</span>
     </span>
   ) : (
     <span className="text-xs text-zinc-500">—</span>
@@ -1171,7 +1171,7 @@ function RelationshipValue({
         {/* Kind toggle */}
         <div className="flex items-center gap-1 px-2 pb-1.5 pt-1 border-b border-zinc-100">
           {RELATION_KINDS.map((r) => (
-            <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[11px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
+            <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[12px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
               <r.Icon className="w-3 h-3" /> {r.label}
             </button>
           ))}
@@ -1192,7 +1192,7 @@ function RelationshipValue({
               <active.Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="flex-1 truncate">
                 {it.label}
-                {it.sub ? <span className="ml-2 text-[10px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                {it.sub ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
               </span>
               {rel && rel.kind === kind && rel.id === it.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>

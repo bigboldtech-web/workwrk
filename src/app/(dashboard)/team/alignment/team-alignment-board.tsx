@@ -84,7 +84,7 @@ export function TeamAlignmentBoard({ members }: { members: TeamMember[] }) {
                 key={f.key}
                 type="button"
                 onClick={() => setFilter(f.key)}
-                className={`h-7 px-2.5 rounded-md text-[12px] border ${
+                className={`h-7 px-2.5 rounded-md text-[13px] border ${
                   filter === f.key ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                 }`}
               >
@@ -92,7 +92,7 @@ export function TeamAlignmentBoard({ members }: { members: TeamMember[] }) {
               </button>
             ))}
           </div>
-          <label className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 text-[12px] text-zinc-600">
+          <label className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 text-[13px] text-zinc-600">
             <ArrowUpDown className="w-3.5 h-3.5 text-zinc-400" />
             <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="bg-transparent outline-none">
               {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -140,7 +140,7 @@ function MemberCard({
           <div className="text-xs text-zinc-500 truncate">{m.email}</div>
         </div>
         {m.via === "dotted" ? (
-          <span title="Dotted-line report" className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">
+          <span title="Dotted-line report" className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-50 text-zinc-500">
             <GitBranchPlus className="w-3 h-3" /> Dotted
           </span>
         ) : null}
@@ -218,7 +218,7 @@ function ReviewActions({
         type="button"
         onClick={() => void act("approve")}
         disabled={busy !== null}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-emerald-600 text-white text-[12px] font-medium disabled:opacity-50 hover:bg-emerald-700"
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-emerald-600 text-white text-[13px] font-medium disabled:opacity-50 hover:bg-emerald-700"
       >
         {busy === "approve" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
         Approve
@@ -227,13 +227,13 @@ function ReviewActions({
         type="button"
         onClick={() => void act("request_changes")}
         disabled={busy !== null}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[12px] text-zinc-700 disabled:opacity-50 hover:bg-zinc-50"
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[13px] text-zinc-700 disabled:opacity-50 hover:bg-zinc-50"
       >
         {busy === "request_changes" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
         Request changes
       </button>
-      <Link href="/team/reviews" className="ml-auto text-[11.5px] text-zinc-400 hover:text-zinc-700">Open review →</Link>
-      {err ? <span className="text-[11px] text-red-600">Couldn&apos;t save</span> : null}
+      <Link href="/team/reviews" className="ml-auto text-[12.5px] text-zinc-400 hover:text-zinc-700">Open review →</Link>
+      {err ? <span className="text-[12px] text-red-600">Couldn&apos;t save</span> : null}
     </div>
   );
 }
@@ -258,9 +258,9 @@ function Metric({
   const valueColor = tone === "bad" ? "text-red-600" : tone === "warn" ? "text-amber-600" : tone === "good" ? "text-emerald-600" : undefined;
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500"><Icon className="w-3 h-3" />{label}</div>
+      <div className="flex items-center gap-1.5 text-[12px] text-zinc-500"><Icon className="w-3 h-3" />{label}</div>
       <div className={`text-base font-semibold ${valueColor ?? ""}`}>{value}</div>
-      <div className="text-[11px] text-zinc-500 truncate" title={sub}>{sub}</div>
+      <div className="text-[12px] text-zinc-500 truncate" title={sub}>{sub}</div>
     </div>
   );
 }

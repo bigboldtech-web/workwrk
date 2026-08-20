@@ -62,7 +62,7 @@ export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = 
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <ListTree className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">No items yet — add tasks and subtasks to grow the tree.</p>
+        <p className="text-[13.5px] text-zinc-500">No items yet — add tasks and subtasks to grow the tree.</p>
       </div>
     );
   }
@@ -95,17 +95,17 @@ export function BoardHierarchyView({ boardId, initialItems, statuses, canEdit = 
           <button
             type="button"
             onClick={() => onOpenItem?.(row.id)}
-            className="flex-1 min-w-0 text-left text-[13px] text-zinc-800 truncate hover:text-[var(--os-brand)]"
+            className="flex-1 min-w-0 text-left text-[14px] text-zinc-800 truncate hover:text-[var(--os-brand)]"
             title={row.title}
           >
             {row.title}
           </button>
           {children.length > 0 ? (
-            <span className="text-[10.5px] text-zinc-400 tabular-nums shrink-0">{children.length}</span>
+            <span className="text-[11.5px] text-zinc-400 tabular-nums shrink-0">{children.length}</span>
           ) : null}
           {opt ? (
             <span
-              className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium shrink-0"
+              className="inline-flex items-center px-1.5 py-0.5 rounded text-[11.5px] font-medium shrink-0"
               style={{ background: `${opt.color}22`, color: opt.color }}
             >
               {opt.label}

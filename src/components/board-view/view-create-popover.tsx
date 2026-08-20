@@ -187,7 +187,7 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search or describe a view to create"
-            className="w-full h-9 pl-8 pr-9 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+            className="w-full h-9 pl-8 pr-9 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
             autoFocus
           />
           <button
@@ -234,7 +234,7 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
         </Section>
       </div>
 
-      <div className="px-3 py-2 border-t border-zinc-100 flex items-center gap-4 text-[12px] text-zinc-700">
+      <div className="px-3 py-2 border-t border-zinc-100 flex items-center gap-4 text-[13px] text-zinc-700">
         <label className="inline-flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -262,7 +262,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       {label ? (
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">
+        <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">
           {label}
         </div>
       ) : null}
@@ -297,7 +297,7 @@ function ViewTileButton({
       >
         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <tile.Icon className="h-3.5 w-3.5" />}
       </span>
-      <span className="text-[12.5px] text-zinc-900 truncate">
+      <span className="text-[13.5px] text-zinc-900 truncate">
         <span className="font-medium">{tile.label}</span>
         {tile.tag ? <span className="ml-1 text-zinc-500 font-normal">{tile.tag}</span> : null}
       </span>
@@ -318,7 +318,7 @@ function EmbedTileButton({ tile, onClick }: { tile: EmbedTile; onClick: () => vo
       >
         <tile.Icon className="h-3.5 w-3.5" />
       </span>
-      <span className="text-[12.5px] text-zinc-700 truncate">{tile.label}</span>
+      <span className="text-[13.5px] text-zinc-700 truncate">{tile.label}</span>
     </button>
   );
 }

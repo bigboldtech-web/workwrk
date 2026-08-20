@@ -33,7 +33,7 @@ export function AskAiButton({ onClick, size = "md", className, title }: Props) {
       className={
         iconOnly
           ? `inline-flex items-center justify-center w-6 h-6 rounded-md hover:bg-zinc-100 transition-colors flex-shrink-0${className ? " " + className : ""}`
-          : `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-[12px] font-semibold transition-colors flex-shrink-0${className ? " " + className : ""}`
+          : `inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-[13px] font-semibold transition-colors flex-shrink-0${className ? " " + className : ""}`
       }
     >
       {!iconOnly && <span>Ask AI</span>}

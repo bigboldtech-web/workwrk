@@ -352,7 +352,7 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
       >
         <Bell className="w-[15px] h-[15px]" />
         {unread > 0 ? (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#FB5A6F] text-white text-[9px] font-bold leading-[14px] text-center">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#FB5A6F] text-white text-[10px] font-bold leading-[14px] text-center">
             {unread > 99 ? "99+" : unread}
           </span>
         ) : null}

@@ -295,7 +295,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       <button
         type="button"
         onClick={() => setStatusEditorOpen(true)}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13.5px] border border-zinc-200 hover:bg-zinc-50"
         title="Edit this List's task statuses"
       >
         <CircleDot className="w-3.5 h-3.5" />
@@ -304,7 +304,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       <button
         type="button"
         onClick={() => setShelfOpen(true)}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12.5px] border border-zinc-200 hover:bg-zinc-50"
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13.5px] border border-zinc-200 hover:bg-zinc-50"
       >
         <Settings2 className="w-3.5 h-3.5" />
         Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}

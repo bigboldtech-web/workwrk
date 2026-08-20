@@ -174,13 +174,13 @@ export default function SurveyDetailPage() {
     <>
       {/* Header */}
       <div className="px-7 pt-4 pb-3 bg-white border-b border-[var(--os-line)]">
-        <Link href="/surveys" className="inline-flex items-center gap-1.5 text-[12px] text-[var(--os-ink-3)] hover:text-[var(--os-ink)] mb-2">
+        <Link href="/surveys" className="inline-flex items-center gap-1.5 text-[13px] text-[var(--os-ink-3)] hover:text-[var(--os-ink)] mb-2">
           <ArrowLeft className="w-3.5 h-3.5" /> All surveys
         </Link>
         <div className="flex items-start gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <h1 className="text-[17px] font-semibold text-[var(--os-ink)] leading-tight truncate">{survey.title}</h1>
-            <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11.5px]">
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[12.5px]">
               <span className="inline-flex items-center gap-1 font-semibold px-2 py-0.5 rounded-full" style={{ color: sm.hue, background: "color-mix(in srgb, currentColor 12%, transparent)" }}>
                 <sm.Icon className="w-3 h-3" /> {sm.label}
               </span>
@@ -201,7 +201,7 @@ export default function SurveyDetailPage() {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-[var(--os-line)] text-[12.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-[var(--os-line)] text-[13.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
             >
               <Pencil className="w-3.5 h-3.5" /> Edit
             </button>
@@ -335,7 +335,7 @@ function RespondPanel({
           <div className="mt-2 text-[14px] font-semibold text-[var(--os-ink)]">
             {isDraft ? "This survey isn't open yet" : "This survey is closed"}
           </div>
-          <div className="mt-1 text-[12.5px] text-[var(--os-ink-3)]">
+          <div className="mt-1 text-[13.5px] text-[var(--os-ink-3)]">
             {isDraft
               ? "It hasn't been launched, so it's not collecting responses."
               : done ? "Your response was recorded. Thanks for taking part." : "It's no longer collecting responses."}
@@ -351,21 +351,21 @@ function RespondPanel({
       {survey.anonymous ? (
         <div className="flex items-start gap-2 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3.5 py-2.5">
           <Lock className="w-4 h-4 mt-[1px] text-[var(--os-brand-deep)] shrink-0" />
-          <div className="text-[12.5px] text-[var(--os-ink-2)]">
+          <div className="text-[13.5px] text-[var(--os-ink-2)]">
             <span className="font-semibold text-[var(--os-ink)]">This survey is anonymous.</span> Your name is never attached to your answers. Managers only ever see combined results.
           </div>
         </div>
       ) : (
         <div className="flex items-start gap-2 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3.5 py-2.5">
           <Users className="w-4 h-4 mt-[1px] text-[var(--os-ink-3)] shrink-0" />
-          <div className="text-[12.5px] text-[var(--os-ink-2)]">
+          <div className="text-[13.5px] text-[var(--os-ink-2)]">
             <span className="font-semibold text-[var(--os-ink)]">This survey is attributed.</span> Your responses are linked to your name for managers.
           </div>
         </div>
       )}
 
       {done ? (
-        <div className="flex items-center gap-2 rounded-lg border border-[color:var(--os-c-green)]/40 bg-[color:var(--os-c-green)]/10 px-3.5 py-2.5 text-[12.5px] text-[var(--os-c-green)]">
+        <div className="flex items-center gap-2 rounded-lg border border-[color:var(--os-c-green)]/40 bg-[color:var(--os-c-green)]/10 px-3.5 py-2.5 text-[13.5px] text-[var(--os-c-green)]">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>You&rsquo;ve responded. You can update your answers below while the survey is open.</span>
         </div>
@@ -389,7 +389,7 @@ function RespondPanel({
           type="button"
           onClick={submit}
           disabled={submitting}
-          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[var(--os-brand)] text-white text-[14px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
         >
           {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
           {done ? "Update response" : "Submit response"}
@@ -419,8 +419,8 @@ function QuestionField({
   return (
     <div className="rounded-xl border border-[var(--os-line)] bg-white p-4">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11px] font-semibold text-[var(--os-ink-4)] tabular-nums">{index + 1}</span>
-        <div className="text-[13.5px] font-medium text-[var(--os-ink)]">{question.text}</div>
+        <span className="text-[12px] font-semibold text-[var(--os-ink-4)] tabular-nums">{index + 1}</span>
+        <div className="text-[14.5px] font-medium text-[var(--os-ink)]">{question.text}</div>
       </div>
       <div className="mt-3">
         {question.type === "rating" ? (
@@ -451,7 +451,7 @@ function QuestionField({
             onChange={(e) => onScalar(e.target.value)}
             placeholder="Type your answer…"
             rows={3}
-            className="w-full rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2 text-[13px] leading-relaxed text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none resize-y focus:border-[var(--os-brand)]"
+            className="w-full rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2 text-[14px] leading-relaxed text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none resize-y focus:border-[var(--os-brand)]"
           />
         )}
       </div>
@@ -478,7 +478,7 @@ function ScaleRow({
               type="button"
               onClick={() => onPick(n)}
               aria-label={`${n}`}
-              className={`h-9 min-w-9 px-2 inline-flex items-center justify-center gap-1 rounded-lg border text-[13px] font-medium transition-colors ${
+              className={`h-9 min-w-9 px-2 inline-flex items-center justify-center gap-1 rounded-lg border text-[14px] font-medium transition-colors ${
                 active
                   ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)]"
                   : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -490,7 +490,7 @@ function ScaleRow({
           );
         })}
       </div>
-      <div className="flex justify-between text-[10.5px] text-[var(--os-ink-4)] px-0.5">
+      <div className="flex justify-between text-[11.5px] text-[var(--os-ink-4)] px-0.5">
         <span>{labelLeft}</span>
         <span>{labelRight}</span>
       </div>
@@ -503,7 +503,7 @@ function OptionChip({ active, label, onClick }: { active: boolean; label: string
     <button
       type="button"
       onClick={onClick}
-      className={`h-9 px-4 rounded-lg border text-[13px] font-medium transition-colors ${
+      className={`h-9 px-4 rounded-lg border text-[14px] font-medium transition-colors ${
         active
           ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)]"
           : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -519,7 +519,7 @@ function ChoiceRow({ active, label, kind, onClick }: { active: boolean; label: s
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-2.5 h-10 px-3 rounded-lg border text-[13px] transition-colors text-left ${
+      className={`flex items-center gap-2.5 h-10 px-3 rounded-lg border text-[14px] transition-colors text-left ${
         active
           ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
           : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -545,14 +545,14 @@ function ReadonlyAnswers({ survey, values }: { survey: DetailResp["survey"]; val
   if (answered.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--os-ink-4)]">Your answers</div>
+      <div className="text-[12px] font-semibold uppercase tracking-wide text-[var(--os-ink-4)]">Your answers</div>
       {answered.map((q) => {
         const v = values[q.id];
         const display = Array.isArray(v) ? v.join(", ") : String(v);
         return (
           <div key={q.id} className="rounded-lg border border-[var(--os-line)] bg-white p-3">
-            <div className="text-[12.5px] font-medium text-[var(--os-ink)]">{q.text}</div>
-            <div className="mt-1 text-[13px] text-[var(--os-ink-2)]">{display}</div>
+            <div className="text-[13.5px] font-medium text-[var(--os-ink)]">{q.text}</div>
+            <div className="mt-1 text-[14px] text-[var(--os-ink-2)]">{display}</div>
           </div>
         );
       })}
@@ -607,7 +607,7 @@ function ResultsPanel({
         <div className="flex-1 min-w-[120px]" />
         <a
           href={`/api/pulse-surveys/${surveyId}/responses/export`}
-          className={`self-center inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border text-[12.5px] font-medium ${
+          className={`self-center inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg border text-[13.5px] font-medium ${
             total > 0
               ? "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
               : "border-[var(--os-line)] text-[var(--os-ink-4)] pointer-events-none opacity-50"
@@ -619,7 +619,7 @@ function ResultsPanel({
       </div>
 
       {anonymous ? (
-        <div className="flex items-start gap-2 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3.5 py-2.5 text-[12px] text-[var(--os-ink-3)]">
+        <div className="flex items-start gap-2 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3.5 py-2.5 text-[13px] text-[var(--os-ink-3)]">
           <Lock className="w-3.5 h-3.5 mt-[1px] shrink-0" />
           <span>Anonymous survey — only combined results are shown. Individual respondents are never identified.</span>
         </div>
@@ -640,8 +640,8 @@ function ResultCard({ q, anonymous }: { q: ResultQuestion; anonymous: boolean })
   return (
     <div className="rounded-xl border border-[var(--os-line)] bg-white p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="text-[13.5px] font-medium text-[var(--os-ink)]">{q.text}</div>
-        <span className="shrink-0 text-[11px] text-[var(--os-ink-4)] tabular-nums">{q.totalAnswered} answered</span>
+        <div className="text-[14.5px] font-medium text-[var(--os-ink)]">{q.text}</div>
+        <span className="shrink-0 text-[12px] text-[var(--os-ink-4)] tabular-nums">{q.totalAnswered} answered</span>
       </div>
 
       <div className="mt-3">
@@ -669,18 +669,18 @@ function RatingResult({ q }: { q: Extract<ResultQuestion, { kind: "rating" | "np
     <div className="flex flex-col gap-3">
       <div className="flex items-end gap-2">
         <span className="text-[26px] font-bold text-[var(--os-ink)] leading-none tabular-nums">{q.average ?? "—"}</span>
-        <span className="text-[12px] text-[var(--os-ink-4)] mb-0.5">avg · {q.min}–{q.max}</span>
+        <span className="text-[13px] text-[var(--os-ink-4)] mb-0.5">avg · {q.min}–{q.max}</span>
       </div>
       <div className="flex flex-col gap-1.5">
         {q.distribution.map((d) => {
           const pct = q.totalAnswered > 0 ? Math.round((d.count / q.totalAnswered) * 100) : 0;
           return (
             <div key={d.value} className="flex items-center gap-2">
-              <span className="w-6 text-right text-[11.5px] text-[var(--os-ink-3)] tabular-nums">{d.value}</span>
+              <span className="w-6 text-right text-[12.5px] text-[var(--os-ink-3)] tabular-nums">{d.value}</span>
               <div className="flex-1 h-4 rounded bg-[var(--os-surface-1)] overflow-hidden">
                 <div className="h-full rounded bg-[var(--os-brand)]" style={{ width: `${(d.count / maxCount) * 100}%` }} />
               </div>
-              <span className="w-16 text-[11px] text-[var(--os-ink-4)] tabular-nums text-right">{d.count} · {pct}%</span>
+              <span className="w-16 text-[12px] text-[var(--os-ink-4)] tabular-nums text-right">{d.count} · {pct}%</span>
             </div>
           );
         })}
@@ -697,11 +697,11 @@ function ChoiceResult({ options, total }: { options: { value: string; count: num
         const pct = total > 0 ? Math.round((o.count / total) * 100) : 0;
         return (
           <div key={o.value} className="flex items-center gap-2">
-            <span className="w-28 truncate text-[12px] text-[var(--os-ink-2)]" title={o.value}>{o.value}</span>
+            <span className="w-28 truncate text-[13px] text-[var(--os-ink-2)]" title={o.value}>{o.value}</span>
             <div className="flex-1 h-4 rounded bg-[var(--os-surface-1)] overflow-hidden">
               <div className="h-full rounded bg-[var(--os-brand)]" style={{ width: `${(o.count / maxCount) * 100}%` }} />
             </div>
-            <span className="w-16 text-[11px] text-[var(--os-ink-4)] tabular-nums text-right">{o.count} · {pct}%</span>
+            <span className="w-16 text-[12px] text-[var(--os-ink-4)] tabular-nums text-right">{o.count} · {pct}%</span>
           </div>
         );
       })}
@@ -716,13 +716,13 @@ function TextResult({
   responses: { value: string; createdAt: string; respondent: { id: string; name: string } | null }[];
   anonymous: boolean;
 }) {
-  if (responses.length === 0) return <div className="text-[12px] text-[var(--os-ink-4)]">No text responses.</div>;
+  if (responses.length === 0) return <div className="text-[13px] text-[var(--os-ink-4)]">No text responses.</div>;
   return (
     <div className="flex flex-col gap-2">
       {responses.map((r, i) => (
         <div key={i} className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2">
-          <div className="text-[12.5px] text-[var(--os-ink)] whitespace-pre-wrap break-words">{r.value}</div>
-          <div className="mt-1 text-[10.5px] text-[var(--os-ink-4)]">
+          <div className="text-[13.5px] text-[var(--os-ink)] whitespace-pre-wrap break-words">{r.value}</div>
+          <div className="mt-1 text-[11.5px] text-[var(--os-ink-4)]">
             {!anonymous && r.respondent ? r.respondent.name : "Anonymous"} · {fmtDate(r.createdAt)}
           </div>
         </div>
@@ -738,7 +738,7 @@ function TabButton({ active, onClick, Icon, label }: { active: boolean; onClick:
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12.5px] font-medium transition-colors ${
+      className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13.5px] font-medium transition-colors ${
         active
           ? "bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)]"
           : "text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)]"
@@ -752,18 +752,18 @@ function TabButton({ active, onClick, Icon, label }: { active: boolean; onClick:
 function StatTile({ label, value, sub, Icon }: { label: string; value: string; sub: string; Icon: typeof Activity }) {
   return (
     <div className="rounded-xl border border-[var(--os-line)] bg-white px-3.5 py-2.5 min-w-[130px]">
-      <div className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-[var(--os-ink-4)]">
+      <div className="flex items-center gap-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-[var(--os-ink-4)]">
         <Icon className="w-3 h-3" /> {label}
       </div>
       <div className="mt-1 text-[20px] font-bold text-[var(--os-ink)] leading-none tabular-nums">{value}</div>
-      <div className="mt-0.5 text-[11px] text-[var(--os-ink-4)]">{sub}</div>
+      <div className="mt-0.5 text-[12px] text-[var(--os-ink-4)]">{sub}</div>
     </div>
   );
 }
 
 function Centered({ children, inline }: { children: React.ReactNode; inline?: boolean }) {
   return (
-    <div className={`flex items-center justify-center gap-2 text-[13px] text-[var(--os-ink-3)] ${inline ? "py-16" : "h-full py-24"}`}>
+    <div className={`flex items-center justify-center gap-2 text-[14px] text-[var(--os-ink-3)] ${inline ? "py-16" : "h-full py-24"}`}>
       {children}
     </div>
   );
@@ -788,12 +788,12 @@ function StatePanel({
         <Icon className="w-5 h-5" />
       </div>
       <div className="text-[14px] font-semibold text-[var(--os-ink)]">{title}</div>
-      <div className="text-[12.5px] text-[var(--os-ink-3)] max-w-[340px]">{subtitle}</div>
+      <div className="text-[13.5px] text-[var(--os-ink-3)] max-w-[340px]">{subtitle}</div>
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="mt-1 h-8 px-3 rounded-lg border border-[var(--os-line)] text-[12.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+          className="mt-1 h-8 px-3 rounded-lg border border-[var(--os-line)] text-[13.5px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
         >
           Retry
         </button>

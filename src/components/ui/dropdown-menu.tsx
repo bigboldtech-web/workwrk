@@ -36,7 +36,7 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground outline-none transition-all",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[14px] text-foreground outline-none transition-all",
       "hover:bg-surface-2",
       "focus:bg-surface-2",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
@@ -66,7 +66,7 @@ const DropdownMenuLabel = React.forwardRef<
   <DropdownMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2.5 pt-2 pb-1.5 text-[10.5px] font-medium text-muted-2 tracking-[0.12em] uppercase font-mono",
+      "px-2.5 pt-2 pb-1.5 text-[11.5px] font-medium text-muted-2 tracking-[0.12em] uppercase font-mono",
       className,
     )}
     style={{ fontFamily: "var(--font-geist-mono), monospace" }}

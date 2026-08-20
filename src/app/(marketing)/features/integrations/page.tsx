@@ -67,7 +67,7 @@ export default function IntegrationsFeaturePage() {
               {INTEGRATIONS.map((i) => (
                 <div key={i.name} className="p-4 bg-white border border-slate-200 rounded-xl text-center">
                   <p className="font-bold text-slate-900 text-sm">{i.name}</p>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-700 mt-1">{i.cat}</p>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-700 mt-1">{i.cat}</p>
                 </div>
               ))}
             </div>

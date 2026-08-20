@@ -160,9 +160,9 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
         <MenuList className="min-w-[236px]" onClick={(e) => e.stopPropagation()}>
           {/* Copy trio (ClickUp header row) */}
           <div className="flex items-stretch gap-1.5 px-2.5 pt-0.5 pb-2">
-            <button type="button" onClick={copyLink} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[12px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">Copy link</button>
-            <button type="button" onClick={copyId} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[12px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">Copy ID</button>
-            <button type="button" onClick={newTab} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[12px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">New tab</button>
+            <button type="button" onClick={copyLink} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">Copy link</button>
+            <button type="button" onClick={copyId} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">Copy ID</button>
+            <button type="button" onClick={newTab} className="flex-1 h-7 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">New tab</button>
           </div>
           <MenuSeparator />
           <MenuItem icon={Star} label="Favorite" onClick={() => soon("Favorite")} />

@@ -79,7 +79,7 @@ export function AddCardPanel({
             <span className="grid h-5 w-5 place-items-center rounded-md border border-zinc-200">
               <Plus className="h-3 w-3 text-zinc-600" />
             </span>
-            <span className="text-[13px] font-semibold text-zinc-900">Add Card</span>
+            <span className="text-[14px] font-semibold text-zinc-900">Add Card</span>
           </div>
           <div className="mt-1 space-y-0.5">
             {CATEGORIES.map((c) => (
@@ -87,7 +87,7 @@ export function AddCardPanel({
                 key={c.key}
                 type="button"
                 onClick={() => setCategory(c.key)}
-                className={`flex h-7 w-full items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors ${
+                className={`flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13.5px] transition-colors ${
                   category === c.key ? "bg-zinc-100 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                 }`}
               >
@@ -101,14 +101,14 @@ export function AddCardPanel({
         {/* Right pane */}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex h-11 shrink-0 items-center gap-2 border-b border-zinc-100 px-4">
-            <span className="text-[13px] font-semibold text-zinc-900">{activeLabel}</span>
+            <span className="text-[14px] font-semibold text-zinc-900">{activeLabel}</span>
             <div className="relative ml-auto">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search..."
-                className="h-7 w-52 rounded-md border border-zinc-200 bg-white pl-7 pr-2 text-[12.5px] outline-none focus:border-zinc-300"
+                className="h-7 w-52 rounded-md border border-zinc-200 bg-white pl-7 pr-2 text-[13.5px] outline-none focus:border-zinc-300"
               />
             </div>
             <button
@@ -123,7 +123,7 @@ export function AddCardPanel({
           <div className="flex-1 overflow-y-auto p-4">
             <h3 className="mb-3 text-[15px] font-semibold text-zinc-900">{activeLabel}</h3>
             {tiles.length === 0 ? (
-              <p className="text-[12.5px] text-zinc-500">No cards match &ldquo;{query}&rdquo;.</p>
+              <p className="text-[13.5px] text-zinc-500">No cards match &ldquo;{query}&rdquo;.</p>
             ) : (
               <div className="grid grid-cols-3 gap-3">
                 {tiles.map((t) => (
@@ -142,8 +142,8 @@ export function AddCardPanel({
                   >
                     <div className={`h-28 rounded-t-lg border-b border-zinc-100 ${t.tint}`} />
                     <div className="p-3">
-                      <div className="text-[13px] font-semibold text-zinc-900">{t.name}</div>
-                      <p className="mt-0.5 text-[12px] leading-snug text-zinc-500">{t.desc}</p>
+                      <div className="text-[14px] font-semibold text-zinc-900">{t.name}</div>
+                      <p className="mt-0.5 text-[13px] leading-snug text-zinc-500">{t.desc}</p>
                     </div>
                   </button>
                 ))}

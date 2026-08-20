@@ -192,25 +192,25 @@ export function AnnouncementComposer({
         <div className="flex flex-col gap-4 py-1">
           {/* Title */}
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Title</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Title</span>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. Office closed Friday for maintenance"
               maxLength={160}
-              className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[13.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
+              className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[14.5px] text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none focus:border-[var(--os-brand)]"
             />
           </label>
 
           {/* Content */}
           <label className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Content</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Content</span>
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder="Write the announcement…"
               rows={4}
-              className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2 text-[13.5px] leading-relaxed text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none resize-y focus:border-[var(--os-brand)]"
+              className="rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 py-2 text-[14.5px] leading-relaxed text-[var(--os-ink)] placeholder:text-[var(--os-ink-4)] outline-none resize-y focus:border-[var(--os-brand)]"
             />
           </label>
 
@@ -218,7 +218,7 @@ export function AnnouncementComposer({
               tags. Non-ALL targets are resolved to their current members at
               read time, so the feed + notifications only reach the audience. */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Who sees this</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Who sees this</span>
             <div className="flex flex-wrap gap-1.5">
               {AUDIENCE_OPTS.map(({ value, label }) => {
                 const active = audienceType === value;
@@ -227,7 +227,7 @@ export function AnnouncementComposer({
                     key={value}
                     type="button"
                     onClick={() => { setAudienceType(value); setAudienceIds([]); }}
-                    className={`h-8 px-3 rounded-lg text-[12.5px] border transition-colors ${
+                    className={`h-8 px-3 rounded-lg text-[13.5px] border transition-colors ${
                       active
                         ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                         : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -241,9 +241,9 @@ export function AnnouncementComposer({
             {audienceType !== "ALL" && (
               <div className="mt-1 max-h-[168px] overflow-y-auto rounded-lg border border-[var(--os-line)] p-1.5">
                 {audLoading ? (
-                  <div className="px-2 py-3 text-center text-[12px] text-[var(--os-ink-4)]">Loading…</div>
+                  <div className="px-2 py-3 text-center text-[13px] text-[var(--os-ink-4)]">Loading…</div>
                 ) : audOptions.length === 0 ? (
-                  <div className="px-2 py-3 text-center text-[12px] text-[var(--os-ink-4)]">
+                  <div className="px-2 py-3 text-center text-[13px] text-[var(--os-ink-4)]">
                     {audienceType === "TAGS" ? "No tags yet — create some in Settings → Tags" : "Nothing to pick here"}
                   </div>
                 ) : (
@@ -255,7 +255,7 @@ export function AnnouncementComposer({
                           key={o.id}
                           type="button"
                           onClick={() => setAudienceIds((l) => (on ? l.filter((x) => x !== o.id) : [...l, o.id]))}
-                          className={`flex items-center gap-2 h-8 px-2 rounded-md text-[12.5px] text-left border ${
+                          className={`flex items-center gap-2 h-8 px-2 rounded-md text-[13.5px] text-left border ${
                             on ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)]" : "border-transparent hover:bg-[var(--os-surface-1)]"
                           }`}
                         >
@@ -274,7 +274,7 @@ export function AnnouncementComposer({
 
           {/* Type */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Type</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Type</span>
             <div className="flex flex-wrap gap-1.5">
               {TYPE_OPTS.map(({ value, label, Icon }) => {
                 const active = type === value;
@@ -283,7 +283,7 @@ export function AnnouncementComposer({
                     key={value}
                     type="button"
                     onClick={() => setType(value)}
-                    className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[12.5px] border transition-colors ${
+                    className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-[13.5px] border transition-colors ${
                       active
                         ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                         : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -298,7 +298,7 @@ export function AnnouncementComposer({
 
           {/* Priority */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Priority</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Priority</span>
             <div className="flex flex-wrap gap-1.5">
               {PRIO_OPTS.map(({ value, label }) => {
                 const active = priority === value;
@@ -307,7 +307,7 @@ export function AnnouncementComposer({
                     key={value}
                     type="button"
                     onClick={() => setPriority(value)}
-                    className={`inline-flex items-center h-8 px-3 rounded-lg text-[12.5px] border transition-colors ${
+                    className={`inline-flex items-center h-8 px-3 rounded-lg text-[13.5px] border transition-colors ${
                       active
                         ? "border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium"
                         : "border-[var(--os-line)] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
@@ -324,13 +324,13 @@ export function AnnouncementComposer({
               ack roster both run org-wide). Narrower targeting is honest
               Coming-soon rather than a selector the backend ignores. */}
           <div className="flex flex-col gap-1.5">
-            <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Audience</span>
+            <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Audience</span>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center h-8 px-3 rounded-lg text-[12.5px] border border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium">
+              <span className="inline-flex items-center h-8 px-3 rounded-lg text-[13.5px] border border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium">
                 Everyone in the organization
               </span>
               <span
-                className="inline-flex items-center h-8 px-3 rounded-lg text-[12.5px] border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
+                className="inline-flex items-center h-8 px-3 rounded-lg text-[13.5px] border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
                 title="Targeting specific teams or roles is coming soon"
               >
                 Specific teams / roles · Coming soon
@@ -342,15 +342,15 @@ export function AnnouncementComposer({
           <div className="flex flex-col gap-2.5 rounded-lg border border-[var(--os-line)] p-3">
             <label className="flex items-center justify-between gap-3">
               <span className="flex flex-col">
-                <span className="text-[13px] text-[var(--os-ink)]">Pin to top</span>
-                <span className="text-[11.5px] text-[var(--os-ink-3)]">Keeps this above the priority sections.</span>
+                <span className="text-[14px] text-[var(--os-ink)]">Pin to top</span>
+                <span className="text-[12.5px] text-[var(--os-ink-3)]">Keeps this above the priority sections.</span>
               </span>
               <Switch checked={pinned} onChange={setPinned} aria-label="Pin to top" />
             </label>
             <label className="flex items-center justify-between gap-3">
               <span className="flex flex-col">
-                <span className="text-[13px] text-[var(--os-ink)]">Require acknowledgment</span>
-                <span className="text-[11.5px] text-[var(--os-ink-3)]">Each person must confirm they&apos;ve read it.</span>
+                <span className="text-[14px] text-[var(--os-ink)]">Require acknowledgment</span>
+                <span className="text-[12.5px] text-[var(--os-ink-3)]">Each person must confirm they&apos;ve read it.</span>
               </span>
               <Switch checked={mustAcknowledge} onChange={setMustAcknowledge} aria-label="Require acknowledgment" />
             </label>
@@ -360,37 +360,37 @@ export function AnnouncementComposer({
           <div className="flex flex-col gap-3">
             <label className="flex items-center justify-between gap-3">
               <span className="flex flex-col">
-                <span className="text-[13px] text-[var(--os-ink)]">Schedule for later</span>
-                <span className="text-[11.5px] text-[var(--os-ink-3)]">Off publishes immediately.</span>
+                <span className="text-[14px] text-[var(--os-ink)]">Schedule for later</span>
+                <span className="text-[12.5px] text-[var(--os-ink-3)]">Off publishes immediately.</span>
               </span>
               <Switch checked={scheduleOn} onChange={setScheduleOn} aria-label="Schedule for later" />
             </label>
             {scheduleOn ? (
               <label className="flex flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Publish at</span>
+                <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Publish at</span>
                 <input
                   type="datetime-local"
                   value={publishedAt}
                   onChange={(e) => setPublishedAt(e.target.value)}
-                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[13.5px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
+                  className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[14.5px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
                 />
               </label>
             ) : null}
             <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-medium text-[var(--os-ink-2)]">Expires on</span>
+              <span className="text-[13px] font-medium text-[var(--os-ink-2)]">Expires on</span>
               <input
                 type="date"
                 value={expiresAt}
                 min={dateInputValue(1)}
                 onChange={(e) => setExpiresAt(e.target.value)}
-                className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[13.5px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
+                className="h-10 rounded-lg border border-[var(--os-line)] bg-[var(--os-surface-1)] px-3 text-[14.5px] text-[var(--os-ink)] outline-none focus:border-[var(--os-brand)]"
               />
-              <span className="text-[11.5px] text-[var(--os-ink-3)]">Required — the post drops off the feed after this date.</span>
+              <span className="text-[12.5px] text-[var(--os-ink-3)]">Required — the post drops off the feed after this date.</span>
             </label>
           </div>
 
           {error ? (
-            <div className="flex items-start gap-2 rounded-lg border border-[color:var(--os-c-red)]/40 bg-[color:var(--os-c-red)]/10 px-3 py-2 text-[12.5px] text-[var(--os-c-red)]">
+            <div className="flex items-start gap-2 rounded-lg border border-[color:var(--os-c-red)]/40 bg-[color:var(--os-c-red)]/10 px-3 py-2 text-[13.5px] text-[var(--os-c-red)]">
               <AlertTriangle className="w-4 h-4 mt-[1px] shrink-0" />
               <span>{error}</span>
             </div>
@@ -402,7 +402,7 @@ export function AnnouncementComposer({
             type="button"
             onClick={() => handleOpenChange(false)}
             disabled={submitting}
-            className="h-9 px-3.5 rounded-lg border border-[var(--os-line)] text-[13px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)] disabled:opacity-50"
+            className="h-9 px-3.5 rounded-lg border border-[var(--os-line)] text-[14px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)] disabled:opacity-50"
           >
             Cancel
           </button>
@@ -410,7 +410,7 @@ export function AnnouncementComposer({
             type="button"
             onClick={submit}
             disabled={submitting}
-            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-[14px] font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
           >
             {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
             {scheduleOn && publishedAt ? "Schedule announcement" : "Post announcement"}

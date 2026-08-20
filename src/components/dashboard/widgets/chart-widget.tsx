@@ -110,11 +110,11 @@ export function ChartWidget({
       <Loader2 className="h-4 w-4 animate-spin text-zinc-300" />
     </div>
   ) : error ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center text-[12px] text-zinc-400">
+    <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-zinc-400">
       Couldn&apos;t load tasks
     </div>
   ) : slices.length === 0 ? (
-    <div className="flex min-h-0 flex-1 items-center justify-center text-[12px] text-zinc-400">
+    <div className="flex min-h-0 flex-1 items-center justify-center text-[13px] text-zinc-400">
       No tasks here yet
     </div>
   ) : chartKind === "bar" ? (
@@ -151,7 +151,7 @@ export function ChartWidget({
           </PieChart>
         </ResponsiveContainer>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-1 text-[11px] text-zinc-500">
+      <div className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-1 text-[12px] text-zinc-500">
         {slices.slice(0, LEGEND_CAP).map((s) => (
           <span key={s.key} className="inline-flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
@@ -171,7 +171,7 @@ export function ChartWidget({
             value={chartBy}
             onChange={(e) => onConfigChange({ chartBy: e.target.value as ChartBy })}
             aria-label="Group by"
-            className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[11.5px] text-zinc-600 outline-none focus:border-zinc-300"
+            className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[12.5px] text-zinc-600 outline-none focus:border-zinc-300"
           >
             {CHART_BYS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -181,7 +181,7 @@ export function ChartWidget({
             value={chartKind}
             onChange={(e) => onConfigChange({ chartKind: e.target.value as ChartKind })}
             aria-label="Chart type"
-            className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[11.5px] text-zinc-600 outline-none focus:border-zinc-300"
+            className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[12.5px] text-zinc-600 outline-none focus:border-zinc-300"
           >
             {CHART_KINDS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>

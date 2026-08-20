@@ -65,7 +65,7 @@ const GRID =
   "grid grid-cols-[96px_minmax(160px,1.4fr)_minmax(130px,1fr)_minmax(120px,1fr)_90px_70px_minmax(140px,1.6fr)] items-center gap-2";
 
 const SELECT =
-  "h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12px] text-zinc-700 outline-none focus:border-zinc-400";
+  "h-7 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700 outline-none focus:border-zinc-400";
 
 function fmtDuration(ms: number | null): string {
   if (ms === null) return "—";
@@ -84,10 +84,10 @@ function JsonBlock({ label, value }: { label: string; value: unknown }) {
   if (text === "{}" || text === "null") return null;
   return (
     <div className="mt-1.5">
-      <div className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">
+      <div className="text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">
         {label}
       </div>
-      <pre className="mt-0.5 max-h-48 overflow-auto rounded-md border border-zinc-100 bg-zinc-50 p-2 text-[11px] leading-relaxed text-zinc-700">
+      <pre className="mt-0.5 max-h-48 overflow-auto rounded-md border border-zinc-100 bg-zinc-50 p-2 text-[12px] leading-relaxed text-zinc-700">
         {text}
       </pre>
     </div>
@@ -164,7 +164,7 @@ function RunDrawer({
         aria-label="Run detail"
       >
         <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
-          <span className="text-[13px] font-semibold text-zinc-900">Run detail</span>
+          <span className="text-[14px] font-semibold text-zinc-900">Run detail</span>
           {run ? (
             <StatusPill
               color={RUN_STATUS_COLORS[run.status] ?? "#A1A1AA"}
@@ -177,7 +177,7 @@ function RunDrawer({
                 type="button"
                 onClick={() => void retry()}
                 disabled={retrying}
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50"
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50"
               >
                 {retrying ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -200,14 +200,14 @@ function RunDrawer({
 
         <div className="flex-1 overflow-y-auto p-4">
           {error ? (
-            <p className="text-[12.5px] text-zinc-500">Couldn&apos;t load this run.</p>
+            <p className="text-[13.5px] text-zinc-500">Couldn&apos;t load this run.</p>
           ) : run === null ? (
-            <div className="flex items-center gap-2 text-[12.5px] text-zinc-500">
+            <div className="flex items-center gap-2 text-[13.5px] text-zinc-500">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : (
             <>
-              <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-[12.5px]">
+              <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-[13.5px]">
                 <dt className="text-zinc-400">Workflow</dt>
                 <dd className="truncate">
                   <Link
@@ -236,29 +236,29 @@ function RunDrawer({
               </dl>
 
               {hasUnsafeFailure && (run.status === "FAILED" || run.status === "PARTIAL") ? (
-                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11.5px] text-amber-700">
+                <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[12.5px] text-amber-700">
                   This run can&apos;t be retried: a failed action isn&apos;t safe to re-run (it
                   could cause duplicate side effects).
                 </p>
               ) : null}
 
-              <div className="mt-4 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <div className="mt-4 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 Steps
               </div>
               <div className="mt-1.5 space-y-2">
                 {run.steps.length === 0 ? (
-                  <p className="text-[12px] text-zinc-400">This run recorded no steps.</p>
+                  <p className="text-[13px] text-zinc-400">This run recorded no steps.</p>
                 ) : (
                   run.steps.map((step) => (
                     <div key={step.id} className="rounded-lg border border-zinc-200 p-2.5">
                       <div className="flex items-center gap-2">
-                        <span className="inline-flex h-[16px] items-center rounded border border-zinc-200 bg-zinc-50 px-1 text-[9.5px] font-semibold uppercase tracking-wide text-zinc-500">
+                        <span className="inline-flex h-[16px] items-center rounded border border-zinc-200 bg-zinc-50 px-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                           {step.stepType}
                         </span>
-                        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-900">
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-zinc-900">
                           {step.stepName ?? step.stepKey}
                         </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">
+                        <span className="shrink-0 text-[12px] tabular-nums text-zinc-400">
                           {fmtDuration(step.durationMs)}
                         </span>
                         <StatusPill
@@ -267,7 +267,7 @@ function RunDrawer({
                         />
                       </div>
                       {step.errorMessage ? (
-                        <p className="mt-1.5 text-[11.5px] text-[#E2445C]">{step.errorMessage}</p>
+                        <p className="mt-1.5 text-[12.5px] text-[#E2445C]">{step.errorMessage}</p>
                       ) : null}
                       <JsonBlock label="Input" value={step.inputJson} />
                       <JsonBlock label="Output" value={step.outputJson} />
@@ -391,7 +391,7 @@ function AutomationLogsInner() {
 
       <div className="flex-1 overflow-y-auto">
         {runs === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : runs.length === 0 ? (
@@ -400,7 +400,7 @@ function AutomationLogsInner() {
               <ScrollText className="h-5 w-5 text-zinc-500" />
             </span>
             <h2 className="mt-4 text-[16px] font-semibold text-zinc-900">No runs logged</h2>
-            <p className="mt-1 max-w-sm text-center text-[13px] text-zinc-500">
+            <p className="mt-1 max-w-sm text-center text-[14px] text-zinc-500">
               {workflowFilter || statusFilter
                 ? "Nothing matches these filters."
                 : "Every automation run lands here with its steps, inputs, and outputs."}
@@ -410,7 +410,7 @@ function AutomationLogsInner() {
           <div className="overflow-x-auto px-4 py-2">
             <div className="min-w-[920px]">
               <div
-                className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400`}
+                className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[12px] font-medium uppercase tracking-wide text-zinc-400`}
               >
                 <span>Status</span>
                 <span>Workflow</span>
@@ -425,7 +425,7 @@ function AutomationLogsInner() {
                   key={run.id}
                   type="button"
                   onClick={() => setOpenRunId(run.id)}
-                  className={`${GRID} h-7 w-full border-b border-zinc-100 px-2 text-left text-[12.5px] text-zinc-600 hover:bg-zinc-50`}
+                  className={`${GRID} h-7 w-full border-b border-zinc-100 px-2 text-left text-[13.5px] text-zinc-600 hover:bg-zinc-50`}
                 >
                   <span>
                     <StatusPill
@@ -468,7 +468,7 @@ export default function AutomationLogsPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex h-full items-center gap-2 bg-white p-6 text-[13px] text-zinc-500">
+        <div className="flex h-full items-center gap-2 bg-white p-6 text-[14px] text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       }

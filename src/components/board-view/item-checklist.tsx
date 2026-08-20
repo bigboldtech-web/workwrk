@@ -36,7 +36,7 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
   return (
     <div>
       <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
-        Checklist {items.length > 0 ? <span className="text-[10.5px] text-zinc-400 normal-case tracking-normal">{done}/{items.length}</span> : null}
+        Checklist {items.length > 0 ? <span className="text-[11.5px] text-zinc-400 normal-case tracking-normal">{done}/{items.length}</span> : null}
       </h3>
       <div className="space-y-1">
         {items.map((it, idx) => (

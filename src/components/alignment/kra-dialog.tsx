@@ -111,7 +111,7 @@ export function KraDialog({
           </span>
           <DialogTitle className="leading-none">{editing ? "Edit KRA" : "New KRA"}</DialogTitle>
         </div>
-        <p className="mt-2 text-[12.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
           A KRA is a permanent area of responsibility inside a job title. Everyone
           holding that title inherits it.
         </p>
@@ -119,18 +119,18 @@ export function KraDialog({
         <div className="mt-4 space-y-3">
           {!lockRole || editing ? (
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Job title</span>
+              <span className="text-[13px] font-medium text-zinc-600">Job title</span>
               <select
                 value={roleId}
                 onChange={(e) => setRoleId(e.target.value)}
-                className="mt-1 w-full h-9 px-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-[#0073EA]"
+                className="mt-1 w-full h-9 px-2 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-[#0073EA]"
               >
                 <option value="" disabled>Pick a job title…</option>
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
               </select>
             </label>
           ) : (
-            <div className="text-[12px] text-zinc-500">
+            <div className="text-[13px] text-zinc-500">
               Job title:{" "}
               <span className="font-medium text-zinc-800 dark:text-zinc-200">
                 {roles.find((r) => r.id === roleId)?.title ?? "—"}
@@ -139,19 +139,19 @@ export function KraDialog({
           )}
 
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">Name</span>
+            <span className="text-[13px] font-medium text-zinc-600">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
               placeholder="e.g. Pipeline generation"
               autoFocus
-              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] focus:outline-none focus:border-[#0073EA]"
             />
           </label>
 
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">
+            <span className="text-[13px] font-medium text-zinc-600">
               Description <span className="text-zinc-400 font-normal">(optional)</span>
             </span>
             <textarea
@@ -159,12 +159,12 @@ export function KraDialog({
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               placeholder="What outcome does this area own?"
-              className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-[13px] resize-none focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-[14px] resize-none focus:outline-none focus:border-[#0073EA]"
             />
           </label>
 
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">
+            <span className="text-[13px] font-medium text-zinc-600">
               Weight % <span className="text-zinc-400 font-normal">(share of the job title, 0 to 100)</span>
             </span>
             <div className="mt-1 flex items-center gap-2">
@@ -177,13 +177,13 @@ export function KraDialog({
                 placeholder="0"
                 // [appearance:textfield] + the webkit pseudo rules hide the
                 // native number-spinner arrows — type it, don't click it.
-                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] text-right tabular-nums focus:outline-none focus:border-[#0073EA] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                className="w-24 h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] text-right tabular-nums focus:outline-none focus:border-[#0073EA] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
-              <span className="text-[11.5px] text-zinc-400">Every holder inherits this as their starting weightage.</span>
+              <span className="text-[12.5px] text-zinc-400">Every holder inherits this as their starting weightage.</span>
             </div>
           </label>
 
-          {error ? <p className="text-[12px] text-red-600">{error}</p> : null}
+          {error ? <p className="text-[13px] text-red-600">{error}</p> : null}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">

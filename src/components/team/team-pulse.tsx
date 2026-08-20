@@ -118,22 +118,22 @@ function MemberCard({ m, now }: { m: PulseMember; now: number }) {
         <div className="min-w-0 flex-1">
           <Link
             href={`/people/${m.id}`}
-            className="block text-[13px] font-semibold text-zinc-900 truncate hover:text-[#0073EA]"
+            className="block text-[14px] font-semibold text-zinc-900 truncate hover:text-[#0073EA]"
           >
             {m.name}
           </Link>
-          <div className="text-[11.5px] text-zinc-500 truncate">{m.roleTitle ?? m.department ?? "—"}</div>
+          <div className="text-[12.5px] text-zinc-500 truncate">{m.roleTitle ?? m.department ?? "—"}</div>
         </div>
         <div className="flex items-center gap-3 shrink-0 text-center">
           <div>
             <div className="text-[15px] font-semibold tabular-nums text-zinc-900">{m.open}</div>
-            <div className="text-[10px] text-zinc-400">Not done</div>
+            <div className="text-[11px] text-zinc-400">Not done</div>
           </div>
           <div>
             <div className="text-[15px] font-semibold tabular-nums text-zinc-900">{m.done}</div>
-            <div className="text-[10px] text-zinc-400">Done</div>
+            <div className="text-[11px] text-zinc-400">Done</div>
           </div>
-          <span className="text-[11px] font-semibold tabular-nums" style={{ color: pctColor(pct) }}>
+          <span className="text-[12px] font-semibold tabular-nums" style={{ color: pctColor(pct) }}>
             {pct}%
           </span>
         </div>
@@ -152,14 +152,14 @@ function MemberCard({ m, now }: { m: PulseMember; now: number }) {
       {m.total > 0 && segs.length > 0 ? (
         <StatusDistribution segs={segs} total={m.total} />
       ) : (
-        <div className="text-[11.5px] text-zinc-400 py-1">No open work</div>
+        <div className="text-[12.5px] text-zinc-400 py-1">No open work</div>
       )}
 
       {/* Working on now */}
       <div>
-        <div className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">Working on</div>
+        <div className="text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">Working on</div>
         {m.inProgress.length === 0 ? (
-          <div className="text-[11.5px] text-zinc-400 px-1.5">Nothing in progress</div>
+          <div className="text-[12.5px] text-zinc-400 px-1.5">Nothing in progress</div>
         ) : (
           m.inProgress.map((it) => {
             const isOverdue = it.dueAt !== null && new Date(it.dueAt).getTime() < now;
@@ -170,9 +170,9 @@ function MemberCard({ m, now }: { m: PulseMember; now: number }) {
                   style={{ background: STATUS_LOOKUP[it.status ?? ""]?.color ?? UNKNOWN_STATUS_COLOR }}
                   aria-hidden
                 />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-700">{it.title}</span>
-                <span className="max-w-[90px] truncate text-[11px] text-zinc-400">{it.board.name}</span>
-                {isOverdue ? <span className="shrink-0 text-[10.5px] font-medium text-red-600">overdue</span> : null}
+                <span className="min-w-0 flex-1 truncate text-[13.5px] text-zinc-700">{it.title}</span>
+                <span className="max-w-[90px] truncate text-[12px] text-zinc-400">{it.board.name}</span>
+                {isOverdue ? <span className="shrink-0 text-[11.5px] font-medium text-red-600">overdue</span> : null}
               </Link>
             );
           })
@@ -183,7 +183,7 @@ function MemberCard({ m, now }: { m: PulseMember; now: number }) {
       {m.recent.length > 0 ? (
         <div className="border-t border-zinc-100 pt-2 space-y-1">
           {m.recent.map((r) => (
-            <div key={r.id} className="flex items-baseline gap-2 text-[11px] text-zinc-400">
+            <div key={r.id} className="flex items-baseline gap-2 text-[12px] text-zinc-400">
               <span className="min-w-0 flex-1 truncate">{r.description}</span>
               <span className="shrink-0 tabular-nums">{relTime(r.createdAt, now)}</span>
             </div>
@@ -243,7 +243,7 @@ export function TeamPulse() {
   }, [load]);
 
   if (error) {
-    return <div className="py-8 text-center text-[12px] text-zinc-400">Couldn&apos;t load your team</div>;
+    return <div className="py-8 text-center text-[13px] text-zinc-400">Couldn&apos;t load your team</div>;
   }
   if (members === null) {
     return (
@@ -253,7 +253,7 @@ export function TeamPulse() {
     );
   }
   if (members.length === 0) {
-    return <div className="py-8 text-center text-[12px] text-zinc-400">No teammates visible to you yet</div>;
+    return <div className="py-8 text-center text-[13px] text-zinc-400">No teammates visible to you yet</div>;
   }
 
   return (

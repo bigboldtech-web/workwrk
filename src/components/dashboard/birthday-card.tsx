@@ -81,7 +81,7 @@ export function BirthdayCard() {
                   </Avatar>
                   <div>
                     <p className="text-sm font-medium">{u.firstName} {u.lastName} 🎂</p>
-                    <p className="text-[10px] text-muted">{u.department?.name || u.role?.title || ""}</p>
+                    <p className="text-[11px] text-muted">{u.department?.name || u.role?.title || ""}</p>
                   </div>
                 </div>
               ))}

@@ -21,7 +21,7 @@ export function BoardAddTaskButton({ boardId, boardSlug, boardName, spaceId }: B
     <button
       type="button"
       onClick={() => openCreateTask({ id: boardId, slug: boardSlug, name: boardName, spaceId })}
-      className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-white"
+      className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[13px] text-white"
       style={{ background: "var(--os-brand)" }}
       title="Add task"
     >

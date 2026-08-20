@@ -128,11 +128,11 @@ export function ManagerTeamDashboard() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium">{member.firstName} {member.lastName}</p>
-                      {member.role && <span className="text-[10px] text-muted">{member.role}</span>}
+                      {member.role && <span className="text-[11px] text-muted">{member.role}</span>}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <Progress value={completionPct} className="h-1 flex-1 max-w-[120px]" />
-                      <span className="text-[10px] text-muted">{member.kpiCompleted}/{member.kpiTotal} KPIs</span>
+                      <span className="text-[11px] text-muted">{member.kpiCompleted}/{member.kpiTotal} KPIs</span>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
@@ -165,11 +165,11 @@ export function ManagerTeamDashboard() {
               <div key={record.id} className="flex items-center justify-between p-2 rounded-lg border border-border">
                 <div>
                   <p className="text-sm">{record.kpi?.name}</p>
-                  <p className="text-[10px] text-muted">
+                  <p className="text-[11px] text-muted">
                     {record.user?.firstName} {record.user?.lastName} &middot; Value: {record.actualValue} {record.kpi?.unit}
                   </p>
                 </div>
-                <Badge variant="warning" className="text-[10px]">Submitted</Badge>
+                <Badge variant="warning" className="text-[11px]">Submitted</Badge>
               </div>
             ))}
           </CardContent>

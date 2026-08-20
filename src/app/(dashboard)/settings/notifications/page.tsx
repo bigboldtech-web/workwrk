@@ -95,7 +95,7 @@ const EMAIL_CATEGORY_ROWS: Array<{ key: EmailCatKey; label: string; sub: string;
 
 function SoonChip() {
   return (
-    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">Soon</span>
+    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-400">Soon</span>
   );
 }
 
@@ -118,8 +118,8 @@ function PrefRow({
   return (
     <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-4 py-3 last:border-0">
       <div className={`min-w-0 ${dimmed ? "opacity-60" : ""}`}>
-        <div className="text-[13px] font-medium text-zinc-900">{label}</div>
-        <div className="text-[12px] text-zinc-500">{sub}</div>
+        <div className="text-[14px] font-medium text-zinc-900">{label}</div>
+        <div className="text-[13px] text-zinc-500">{sub}</div>
       </div>
       {live ? (
         <Switch checked={checked} disabled={disabled} onChange={onChange} aria-label={label} />
@@ -239,18 +239,18 @@ export default function NotificationSettingsPage() {
       <header className="mb-1">
         <h1 className="text-[16px] font-bold text-zinc-900">Notifications</h1>
       </header>
-      <p className="mb-5 text-[12px] text-zinc-500">
+      <p className="mb-5 text-[13px] text-zinc-500">
         Choose what lands in your Inbox and what WorkwrK emails you. Changes save automatically.
       </p>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       ) : (
         <div className="max-w-2xl">
           {/* ── Inbox (in-app) ─────────────────────────────────────── */}
-          <h2 className="mb-2 text-[13px] font-semibold text-zinc-900">Inbox</h2>
+          <h2 className="mb-2 text-[14px] font-semibold text-zinc-900">Inbox</h2>
           <div className="mb-6 overflow-hidden rounded-xl border border-zinc-200 bg-white">
             {INBOX_ROWS.map((row) => (
               <PrefRow
@@ -265,13 +265,13 @@ export default function NotificationSettingsPage() {
           </div>
 
           {/* ── Email · Task & activity (store 1, master-governed) ──── */}
-          <h2 className="mb-2 text-[13px] font-semibold text-zinc-900">Email</h2>
-          <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-zinc-400">Task &amp; activity</div>
+          <h2 className="mb-2 text-[14px] font-semibold text-zinc-900">Email</h2>
+          <div className="mb-1.5 text-[13px] font-medium uppercase tracking-wide text-zinc-400">Task &amp; activity</div>
           <div className="mb-5 overflow-hidden rounded-xl border border-zinc-200 bg-white">
             <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-[13px] font-medium text-zinc-900">Email notifications</div>
-                <div className="text-[12px] text-zinc-500">Master switch for the task &amp; activity emails below</div>
+                <div className="text-[14px] font-medium text-zinc-900">Email notifications</div>
+                <div className="text-[13px] text-zinc-500">Master switch for the task &amp; activity emails below</div>
               </div>
               <Switch
                 checked={emailMaster}
@@ -298,7 +298,7 @@ export default function NotificationSettingsPage() {
           </div>
 
           {/* ── Email · Workflow & HR (store 2, independent of master) ─ */}
-          <div className="mb-1.5 text-[12px] font-medium uppercase tracking-wide text-zinc-400">Workflow &amp; HR</div>
+          <div className="mb-1.5 text-[13px] font-medium uppercase tracking-wide text-zinc-400">Workflow &amp; HR</div>
           <div className="mb-3 overflow-hidden rounded-xl border border-zinc-200 bg-white">
             {EMAIL_CATEGORY_ROWS.map((row) => (
               <PrefRow
@@ -311,7 +311,7 @@ export default function NotificationSettingsPage() {
               />
             ))}
           </div>
-          <p className="mb-6 text-[12px] text-zinc-500">
+          <p className="mb-6 text-[13px] text-zinc-500">
             Workflow &amp; HR emails send independently of the master switch above.
           </p>
         </div>

@@ -41,7 +41,7 @@ export function ConfirmDialog({
           )}
           <DialogTitle className="text-[15px] leading-none">{title}</DialogTitle>
         </div>
-        <p className="mt-2.5 text-[13px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2.5 text-[14px] leading-relaxed text-zinc-500 dark:text-zinc-400">
           {description}
         </p>
         <div className="mt-5 flex items-center justify-end gap-2">

@@ -334,7 +334,7 @@ export default function AutomationWorkflowsPage() {
 
       <div className="flex-1 overflow-y-auto">
         {workflows === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : workflows.length === 0 ? (
@@ -345,7 +345,7 @@ export default function AutomationWorkflowsPage() {
             <h2 className="mt-4 text-[16px] font-semibold text-zinc-900">
               Create your first automation
             </h2>
-            <p className="mt-1 max-w-sm text-center text-[13px] text-zinc-500">
+            <p className="mt-1 max-w-sm text-center text-[14px] text-zinc-500">
               When something happens in WorkwrK, check conditions and run actions automatically:
               assign people, change statuses, create tasks, send notifications.
             </p>
@@ -356,7 +356,7 @@ export default function AutomationWorkflowsPage() {
               </button>
               <Link
                 href="/automation/templates"
-                className="text-[12.5px] font-medium text-zinc-600 hover:text-zinc-900"
+                className="text-[13.5px] font-medium text-zinc-600 hover:text-zinc-900"
               >
                 Browse templates →
               </Link>
@@ -366,7 +366,7 @@ export default function AutomationWorkflowsPage() {
           <div className="overflow-x-auto px-4 py-2">
             <div className="min-w-[860px]">
               <div
-                className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400`}
+                className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[12px] font-medium uppercase tracking-wide text-zinc-400`}
               >
                 <span>Name</span>
                 <span>Status</span>
@@ -385,7 +385,7 @@ export default function AutomationWorkflowsPage() {
                 return (
                   <div
                     key={w.id}
-                    className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[12.5px] text-zinc-600 hover:bg-zinc-50`}
+                    className={`${GRID} h-7 border-b border-zinc-100 px-2 text-[13.5px] text-zinc-600 hover:bg-zinc-50`}
                   >
                     <Link
                       href={`/automation/workflows/${w.id}`}
@@ -403,7 +403,7 @@ export default function AutomationWorkflowsPage() {
                     >
                       {trigger?.name ?? w.triggerEvent ?? "No trigger"}
                       {trigger && !trigger.isEmitting ? (
-                        <span className="ml-1 text-[10.5px] text-zinc-400">· not live</span>
+                        <span className="ml-1 text-[11.5px] text-zinc-400">· not live</span>
                       ) : null}
                     </span>
                     <span className="tabular-nums text-zinc-500">

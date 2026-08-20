@@ -41,7 +41,7 @@ export function MonthView({
 
   return (
     <div className="rounded-xl border border-border bg-surface overflow-hidden">
-      <div className="grid grid-cols-7 text-[10px] text-muted border-b border-border bg-surface-2/40">
+      <div className="grid grid-cols-7 text-[11px] text-muted border-b border-border bg-surface-2/40">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
           <div key={d} className="px-2 py-1.5 font-medium">{d}</div>
         ))}
@@ -59,7 +59,7 @@ export function MonthView({
                 inMonth ? "" : "opacity-40"
               }`}
             >
-              <div className={`text-[11px] font-medium mb-1 ${isToday ? "text-[#d4ff2e]" : ""}`}>
+              <div className={`text-[12px] font-medium mb-1 ${isToday ? "text-[#d4ff2e]" : ""}`}>
                 {date.getDate()}
               </div>
               <div className="space-y-0.5">
@@ -76,14 +76,14 @@ export function MonthView({
                     <span
                       key={t.id}
                       onClick={(e) => { e.stopPropagation(); onOpenTask(t); }}
-                      className={`block truncate text-[10px] rounded px-1 py-0.5 cursor-pointer ${cls}`}
+                      className={`block truncate text-[11px] rounded px-1 py-0.5 cursor-pointer ${cls}`}
                     >
                       {t.title}
                     </span>
                   );
                 })}
                 {list.length > 3 && (
-                  <span className="block text-[10px] text-muted">+{list.length - 3} more</span>
+                  <span className="block text-[11px] text-muted">+{list.length - 3} more</span>
                 )}
               </div>
             </button>

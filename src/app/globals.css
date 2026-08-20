@@ -2,6 +2,14 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Readability lift (2026-08-20): the whole product ran 1px+ too small on a
+   13px base. Hard px sizes were rescaled one step up (10->11 ... 13.5->14.5,
+   floor 10px), body base is 14px, and text-xs rises with the same step. */
+@theme {
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.25rem;
+}
+
 /* Tailwind 4 preflight gives <button> the ARROW cursor (a v3→v4 change).
    Links show the hand natively, and hundreds of styled controls declare
    pointer by hand — so sweeping across mixed chrome (sidebar rows, menus,
@@ -82,8 +90,8 @@
   /* Typography scale — only four sizes are blessed */
   --text-heading: 18px;              /* page title, card title */
   --text-body: 14px;                 /* default; form labels, list rows */
-  --text-small: 12px;                /* subtitles, metadata */
-  --text-caption: 10px;              /* tag pills, eyebrow labels */
+  --text-small: 13px;                /* subtitles, metadata */
+  --text-caption: 11px;              /* tag pills, eyebrow labels */
   --leading-tight: 1.35;
   --leading-base: 1.55;
 
@@ -309,7 +317,7 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-outfit), sans-serif;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Compact default sizes for bare headings (no text-size utility).

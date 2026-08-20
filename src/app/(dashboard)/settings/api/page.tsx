@@ -374,7 +374,7 @@ export default function ApiKeysPage() {
 
           <div className="flex flex-col gap-4 pt-1">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-semibold text-foreground">Name</span>
+              <span className="text-[13px] font-semibold text-foreground">Name</span>
               <input
                 autoFocus
                 value={newName}
@@ -382,12 +382,12 @@ export default function ApiKeysPage() {
                 onKeyDown={(e) => { if (e.key === "Enter" && !creating) void submitCreate(); }}
                 placeholder="e.g. Production · Backend"
                 maxLength={80}
-                className="h-9 rounded-lg border border-border bg-surface px-3 text-[13px] text-foreground outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/25"
+                className="h-9 rounded-lg border border-border bg-surface px-3 text-[14px] text-foreground outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/25"
               />
             </label>
 
             <div className="flex flex-col gap-1.5">
-              <span className="text-[12px] font-semibold text-foreground">Scopes</span>
+              <span className="text-[13px] font-semibold text-foreground">Scopes</span>
               <div className="flex flex-col gap-2">
                 {SCOPE_OPTIONS.map((opt) => {
                   const on = newScopes.includes(opt.value);
@@ -411,8 +411,8 @@ export default function ApiKeysPage() {
                         {on ? <Check className="h-3 w-3" /> : null}
                       </span>
                       <span className="flex flex-col">
-                        <span className="text-[12.5px] font-medium text-foreground">{opt.label}</span>
-                        <span className="text-[11.5px] text-muted">{opt.hint}</span>
+                        <span className="text-[13.5px] font-medium text-foreground">{opt.label}</span>
+                        <span className="text-[12.5px] text-muted">{opt.hint}</span>
                       </span>
                     </button>
                   );
@@ -421,7 +421,7 @@ export default function ApiKeysPage() {
             </div>
 
             {createError ? (
-              <div className="flex items-center gap-2 rounded-lg border border-[#E2445C]/30 bg-[#E2445C]/[0.06] px-3 py-2 text-[12px] text-[#E2445C]">
+              <div className="flex items-center gap-2 rounded-lg border border-[#E2445C]/30 bg-[#E2445C]/[0.06] px-3 py-2 text-[13px] text-[#E2445C]">
                 <AlertTriangle className="h-3.5 w-3.5 flex-none" /> {createError}
               </div>
             ) : null}
@@ -432,7 +432,7 @@ export default function ApiKeysPage() {
               type="button"
               onClick={() => setCreateOpen(false)}
               disabled={creating}
-              className="h-9 rounded-lg border border-border bg-surface px-4 text-[13px] font-medium text-foreground hover:bg-surface-2 disabled:opacity-50"
+              className="h-9 rounded-lg border border-border bg-surface px-4 text-[14px] font-medium text-foreground hover:bg-surface-2 disabled:opacity-50"
             >
               Cancel
             </button>
@@ -440,7 +440,7 @@ export default function ApiKeysPage() {
               type="button"
               onClick={() => void submitCreate()}
               disabled={creating || !newName.trim()}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0073EA] px-4 text-[13px] font-semibold text-white hover:bg-[#0060B9] disabled:opacity-50"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0073EA] px-4 text-[14px] font-semibold text-white hover:bg-[#0060B9] disabled:opacity-50"
             >
               {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               Generate key
@@ -460,7 +460,7 @@ export default function ApiKeysPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex items-start gap-2 rounded-lg border border-[#F5A623]/35 bg-[#F5A623]/[0.08] px-3 py-2.5 text-[12px] text-foreground">
+          <div className="flex items-start gap-2 rounded-lg border border-[#F5A623]/35 bg-[#F5A623]/[0.08] px-3 py-2.5 text-[13px] text-foreground">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-[#F5A623]" />
             <span>
               <strong>You won&apos;t be able to see this key again.</strong> Store it in a secret
@@ -469,14 +469,14 @@ export default function ApiKeysPage() {
           </div>
 
           <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-surface-2 px-3 py-2.5">
-            <code className="flex-1 break-all font-mono text-[12.5px] text-foreground">
+            <code className="flex-1 break-all font-mono text-[13.5px] text-foreground">
               {revealed?.plaintext}
             </code>
             <button
               type="button"
               onClick={copyRevealed}
               title="Copy key"
-              className={`inline-flex h-8 flex-none items-center gap-1.5 rounded-md px-2.5 text-[12px] font-semibold ${
+              className={`inline-flex h-8 flex-none items-center gap-1.5 rounded-md px-2.5 text-[13px] font-semibold ${
                 revealCopied
                   ? "bg-[#00A96E]/15 text-[#00A96E]"
                   : "bg-[#0073EA] text-white hover:bg-[#0060B9]"
@@ -491,7 +491,7 @@ export default function ApiKeysPage() {
             <button
               type="button"
               onClick={() => { setRevealed(null); setRevealCopied(false); }}
-              className="h-9 rounded-lg bg-[#0073EA] px-4 text-[13px] font-semibold text-white hover:bg-[#0060B9]"
+              className="h-9 rounded-lg bg-[#0073EA] px-4 text-[14px] font-semibold text-white hover:bg-[#0060B9]"
             >
               Done — I&apos;ve saved it
             </button>

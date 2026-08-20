@@ -169,7 +169,7 @@ export function KudosModal({
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{person.firstName} {person.lastName}</p>
-                      <p className="text-[10px] text-muted">
+                      <p className="text-[11px] text-muted">
                         {person.role?.title || "No role"}{person.department?.name ? ` · ${person.department.name}` : ""}
                       </p>
                     </div>

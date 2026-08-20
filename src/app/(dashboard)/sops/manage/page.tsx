@@ -37,7 +37,7 @@ export default function SopManagePage() {
         actions={
           <Link
             href="/sops"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50"
           >
             <ArrowLeft className="h-3.5 w-3.5" /> Back to SOPs
           </Link>

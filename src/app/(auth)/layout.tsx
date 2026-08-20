@@ -69,14 +69,14 @@ export default function AuthLayout({
                 </span>
                 <span className="flex flex-col">
                   <span className="font-semibold text-slate-800">{p.label}</span>
-                  <span className="text-[11px] text-slate-500">{p.hint}</span>
+                  <span className="text-[12px] text-slate-500">{p.hint}</span>
                 </span>
               </div>
             ))}
           </div>
 
           {/* Trust badges — kept since they answer real buyer questions */}
-          <div className="flex items-center gap-3 mt-6 text-[11px] text-slate-500 font-medium">
+          <div className="flex items-center gap-3 mt-6 text-[12px] text-slate-500 font-medium">
             <span className="inline-flex items-center gap-1"><Shield size={11} className="text-emerald-600" /> SSO + audit log</span>
             <span className="text-slate-300">·</span>
             <span className="inline-flex items-center gap-1"><Zap size={11} className="text-amber-500" /> Setup in minutes</span>

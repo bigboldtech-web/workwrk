@@ -35,7 +35,7 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <LayoutGrid className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">No items yet — new tasks show up here as cards.</p>
+        <p className="text-[13.5px] text-zinc-500">No items yet — new tasks show up here as cards.</p>
       </div>
     );
   }
@@ -58,14 +58,14 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
             className="flex flex-col text-left rounded-lg border border-zinc-200 bg-white p-3 hover:border-zinc-300 hover:shadow-sm transition-all"
             style={opt ? { borderTop: `3px solid ${opt.color}` } : undefined}
           >
-            <div className="text-[13px] font-medium text-zinc-900 break-words">{it.title}</div>
+            <div className="text-[14px] font-medium text-zinc-900 break-words">{it.title}</div>
             {desc ? (
-              <p className="mt-1 text-[11.5px] text-zinc-500 line-clamp-2">{desc}</p>
+              <p className="mt-1 text-[12.5px] text-zinc-500 line-clamp-2">{desc}</p>
             ) : null}
             <div className="mt-2 flex items-center gap-1.5 flex-wrap">
               {opt ? (
                 <span
-                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium"
+                  className="inline-flex items-center px-1.5 py-0.5 rounded text-[11.5px] font-medium"
                   style={{ background: `${opt.color}22`, color: opt.color }}
                 >
                   {opt.label}
@@ -73,9 +73,9 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
               ) : null}
               {it.priority ? <PriorityFlag value={it.priority} /> : null}
               {tags.slice(0, 2).map((t) => <TagChip key={t.id} tag={t} />)}
-              {tags.length > 2 ? <span className="text-[10.5px] text-zinc-500">+{tags.length - 2}</span> : null}
+              {tags.length > 2 ? <span className="text-[11.5px] text-zinc-500">+{tags.length - 2}</span> : null}
             </div>
-            <div className="mt-auto pt-2 flex items-center justify-between text-[11px] text-zinc-500">
+            <div className="mt-auto pt-2 flex items-center justify-between text-[12px] text-zinc-500">
               {it.owner ? (
                 <span className="inline-flex items-center gap-1.5 min-w-0">
                   <PersonAvatar person={{ ...it.owner, email: null }} size={18} />

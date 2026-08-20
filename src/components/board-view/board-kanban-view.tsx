@@ -350,12 +350,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
             >
               <div className="flex items-center gap-2 px-1 pt-0.5 pb-2.5">
                 <span
-                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-[10.5px] font-bold uppercase tracking-wider text-white"
+                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-[11.5px] font-bold uppercase tracking-wider text-white"
                   style={{ background: meta.color }}
                 >
                   {meta.label}
                 </span>
-                <span className="text-[11px] font-medium text-zinc-400 tabular-nums">{cards.length}</span>
+                <span className="text-[12px] font-medium text-zinc-400 tabular-nums">{cards.length}</span>
                 {canEdit ? (
                   <button
                     type="button"
@@ -547,10 +547,10 @@ function KanbanCard({
               onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); else if (e.key === "Escape") { setTitle(card.title); setEditing(false); } }}
               onBlur={saveTitle}
-              className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-[13px] font-medium text-zinc-900 focus:outline-none"
+              className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-[14px] font-medium text-zinc-900 focus:outline-none"
             />
           ) : (
-            <div className="break-words text-[13px] font-medium leading-snug text-zinc-800">
+            <div className="break-words text-[14px] font-medium leading-snug text-zinc-800">
               {card.title}
               {card.recurRule ? (
                 <span
@@ -653,7 +653,7 @@ function KanbanCard({
 
       {/* Footer — subtask count only (ClickUp cards carry no created date). */}
       {subtaskCount > 0 ? (
-        <div className="mt-2 flex items-center text-[11px] text-zinc-400">
+        <div className="mt-2 flex items-center text-[12px] text-zinc-400">
           <span className="inline-flex items-center gap-1">
             <Network className="w-3 h-3" />
             {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}

@@ -357,7 +357,7 @@ function LinkSection({
               <button
                 type="button"
                 onClick={() => setPickerOpen((v) => !v)}
-                className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
                 title={`Link an existing ${linkExisting.kindLabel}`}
               >
                 <Link2 className="h-3 w-3" />
@@ -368,7 +368,7 @@ function LinkSection({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
               >
                 <Plus className="h-3 w-3" />
                 Add
@@ -585,7 +585,7 @@ function FileLinkSection({
             <button
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
-              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
               title="Link an existing file"
             >
               <Link2 className="h-3 w-3" />
@@ -596,7 +596,7 @@ function FileLinkSection({
               type="button"
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
-              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
+              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
               Upload
@@ -657,7 +657,7 @@ function FileLinkSection({
                     {it.target?.title || "Untitled file"}
                   </a>
                   {it.target?.subtitle ? (
-                    <span className="text-[10.5px] text-zinc-400 truncate max-w-[140px]" title={it.target.subtitle}>
+                    <span className="text-[11.5px] text-zinc-400 truncate max-w-[140px]" title={it.target.subtitle}>
                       {it.target.subtitle}
                     </span>
                   ) : null}

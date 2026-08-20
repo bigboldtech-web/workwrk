@@ -92,7 +92,7 @@ export function AutonomousDigest() {
           <Sparkles size={13} className="text-blue-600" />
           <h2 className="text-sm font-semibold">What your agents got done</h2>
           {!loading && (
-            <span className="text-[10px] text-muted-2 tabular-nums">
+            <span className="text-[11px] text-muted-2 tabular-nums">
               · {runs?.length ?? 0} recent
             </span>
           )}
@@ -139,9 +139,9 @@ export function AutonomousDigest() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-sm font-medium truncate">{r.agentName}</span>
-                      <span className="text-[10px] text-muted-2">· {relTime(r.startedAt)}</span>
+                      <span className="text-[11px] text-muted-2">· {relTime(r.startedAt)}</span>
                       {r.tokensIn !== null && r.tokensOut !== null && (
-                        <span className="text-[10px] text-muted-2">
+                        <span className="text-[11px] text-muted-2">
                           · {r.tokensIn + r.tokensOut} tok
                         </span>
                       )}
@@ -156,7 +156,7 @@ export function AutonomousDigest() {
                       {open ? (r.output?.text ?? summary) : summary}
                     </p>
                     {open && r.output?.toolCalls && Array.isArray(r.output.toolCalls) && r.output.toolCalls.length > 0 && (
-                      <p className="text-[10px] text-muted-2 mt-1">
+                      <p className="text-[11px] text-muted-2 mt-1">
                         {r.output.toolCalls.length} tool call{r.output.toolCalls.length === 1 ? "" : "s"}
                       </p>
                     )}

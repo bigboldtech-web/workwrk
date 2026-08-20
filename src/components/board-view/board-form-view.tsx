@@ -111,29 +111,29 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
           <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">
             {picking ? "Change the connected form" : "Connect a form to this List"}
           </h3>
-          <p className="text-[12.5px] text-zinc-500 mb-5">
+          <p className="text-[13.5px] text-zinc-500 mb-5">
             Submissions create tasks on this List automatically. Create a fresh intake
             form, or connect a form you already built.
           </p>
-          {error ? <p className="text-[12px] text-red-500 mb-3">{error}</p> : null}
+          {error ? <p className="text-[13px] text-red-500 mb-3">{error}</p> : null}
           {canEdit ? (
             <div className="flex items-center justify-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => void createForm()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[14px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
               >
                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
                 Create intake form
               </button>
               {forms === null ? (
-                <span className="text-[12px] text-zinc-400">Loading forms…</span>
+                <span className="text-[13px] text-zinc-400">Loading forms…</span>
               ) : forms.length > 0 ? (
                 <select
                   defaultValue=""
                   onChange={(e) => { if (e.target.value) { persistFormId(e.target.value); setPicking(false); } }}
-                  className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-700 outline-none focus:border-zinc-400"
+                  className="h-8 rounded-lg border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-700 outline-none focus:border-zinc-400"
                 >
                   <option value="" disabled>Connect existing…</option>
                   {forms.map((f) => (
@@ -147,14 +147,14 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
                 <button
                   type="button"
                   onClick={() => setPicking(false)}
-                  className="h-8 px-3 rounded-lg text-[12.5px] text-zinc-500 hover:bg-zinc-50"
+                  className="h-8 px-3 rounded-lg text-[13.5px] text-zinc-500 hover:bg-zinc-50"
                 >
                   Cancel
                 </button>
               ) : null}
             </div>
           ) : (
-            <p className="text-[12px] text-zinc-400">Ask a List editor to connect a form.</p>
+            <p className="text-[13px] text-zinc-400">Ask a List editor to connect a form.</p>
           )}
         </div>
       </div>
@@ -165,19 +165,19 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
     <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2">
         <ClipboardList className="w-3.5 h-3.5 text-[#0073EA]" />
-        <span className="text-[12.5px] font-medium text-zinc-800">Live form</span>
+        <span className="text-[13.5px] font-medium text-zinc-800">Live form</span>
         <div className="flex-1" />
         <button
           type="button"
           onClick={() => void copyLink()}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[11.5px] text-zinc-600 hover:bg-zinc-50"
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
         >
           {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Link2 className="w-3 h-3" />}
           {copied ? "Copied" : "Copy link"}
         </button>
         <Link
           href={`/forms/${formId}`}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[11.5px] text-zinc-600 hover:bg-zinc-50"
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
         >
           <ExternalLink className="w-3 h-3" />
           Edit form
@@ -186,7 +186,7 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
           <button
             type="button"
             onClick={() => { setPicking(true); setForms(null); }}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[11.5px] text-zinc-600 hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50"
             title="Connect a different form"
           >
             <RefreshCcw className="w-3 h-3" />

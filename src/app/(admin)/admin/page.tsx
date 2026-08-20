@@ -63,7 +63,7 @@ function getPlanBadge(plan: string) {
     ENTERPRISE: "bg-amber-500/10 text-amber-400 border-amber-500/20",
   };
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${colors[plan] || ""}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${colors[plan] || ""}`}>
       {plan}
     </span>
   );
@@ -226,7 +226,7 @@ export default function AdminDashboard() {
                         <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
                           <span className="text-sm font-medium">{company.name}</span>
-                          <p className="text-[10px] text-muted">{company.slug}</p>
+                          <p className="text-[11px] text-muted">{company.slug}</p>
                         </div>
                       </div>
                     </td>
@@ -234,7 +234,7 @@ export default function AdminDashboard() {
                     <td className="p-4 text-center text-sm text-muted">{company._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-[10px] text-muted">
+                      <div className="flex items-center justify-center gap-3 text-[11px] text-muted">
                         <span>{company._count.tasks} tasks</span>
                         <span>{company._count.kras} KRAs</span>
                         <span>{company._count.sops} SOPs</span>

@@ -37,14 +37,14 @@ export default function ImportExportPage() {
         <Download className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Import / Export</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Move data in and out of WorkwrK.
       </p>
 
       <div className="max-w-2xl space-y-6">
         {SECTIONS.map((section) => (
           <div key={section.label}>
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               {section.label}
             </div>
             <div className="space-y-2">
@@ -57,7 +57,7 @@ export default function ImportExportPage() {
                   <Icon className="h-5 w-5 shrink-0 text-zinc-500" />
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] font-medium text-zinc-900">{title}</div>
-                    <div className="text-[12.5px] text-zinc-500">{desc}</div>
+                    <div className="text-[13.5px] text-zinc-500">{desc}</div>
                   </div>
                   <ChevronRight className="h-4 w-4 text-zinc-400" />
                 </Link>

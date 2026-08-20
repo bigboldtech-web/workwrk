@@ -144,7 +144,7 @@ export default function AdminAnalyticsPage() {
           <CardContent className="p-5">
             <p className="text-xs text-muted mb-1">Monthly Recurring Revenue</p>
             <p className="text-2xl font-bold text-green-400">{formatCurrency(stats?.mrr ?? 0)}</p>
-            <p className="text-[10px] text-muted mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
+            <p className="text-[11px] text-muted mt-1">From {stats?.activeOrgs ?? 0} paying organizations</p>
           </CardContent>
         </Card>
         <Card>
@@ -153,21 +153,21 @@ export default function AdminAnalyticsPage() {
             <p className="text-2xl font-bold text-[#d4ff2e]">
               {stats && stats.activeOrgs > 0 ? formatCurrency(Math.round((stats.mrr) / stats.activeOrgs)) : "—"}
             </p>
-            <p className="text-[10px] text-muted mt-1">ARPU across all plans</p>
+            <p className="text-[11px] text-muted mt-1">ARPU across all plans</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
             <p className="text-xs text-muted mb-1">Avg. Users Per Org</p>
             <p className="text-2xl font-bold text-blue-400">{avgUsers}</p>
-            <p className="text-[10px] text-muted mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
+            <p className="text-[11px] text-muted mt-1">{stats?.totalUsers ?? 0} users across {stats?.totalOrgs ?? 0} orgs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-5">
             <p className="text-xs text-muted mb-1">Trial Conversion Pipeline</p>
             <p className="text-2xl font-bold text-orange-400">{stats?.trialOrgs ?? 0}</p>
-            <p className="text-[10px] text-muted mt-1">Organizations currently on trial</p>
+            <p className="text-[11px] text-muted mt-1">Organizations currently on trial</p>
           </CardContent>
         </Card>
       </div>
@@ -334,19 +334,19 @@ export default function AdminAnalyticsPage() {
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-[#d4ff2e]">+{stats?.newOrgsThisMonth ?? 0}</p>
-              <p className="text-[10px] text-muted mt-1">New orgs this month</p>
+              <p className="text-[11px] text-muted mt-1">New orgs this month</p>
             </div>
             <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-blue-400">+{stats?.newUsersThisMonth ?? 0}</p>
-              <p className="text-[10px] text-muted mt-1">New users this month</p>
+              <p className="text-[11px] text-muted mt-1">New users this month</p>
             </div>
             <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-green-400">{stats?.activeRate ?? 0}%</p>
-              <p className="text-[10px] text-muted mt-1">Active rate</p>
+              <p className="text-[11px] text-muted mt-1">Active rate</p>
             </div>
             <div className="rounded-lg bg-surface-2 p-4 text-center">
               <p className="text-2xl font-bold text-amber-400">{formatCurrency((stats?.mrr ?? 0) * 12)}</p>
-              <p className="text-[10px] text-muted mt-1">Projected ARR</p>
+              <p className="text-[11px] text-muted mt-1">Projected ARR</p>
             </div>
           </div>
         </CardContent>

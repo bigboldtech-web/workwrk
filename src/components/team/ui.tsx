@@ -25,10 +25,10 @@ export function TeamStatTile({ icon: Icon, label, value, sub, accent = "#0073EA"
         <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: `${accent}1a` }}>
           <Icon className="h-4 w-4" style={{ color: accent }} />
         </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{label}</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">{label}</span>
       </div>
       <div className="text-2xl font-semibold text-zinc-900 tabular-nums">{value}</div>
-      {sub ? <div className="text-[12px] text-zinc-400 mt-0.5">{sub}</div> : null}
+      {sub ? <div className="text-[13px] text-zinc-400 mt-0.5">{sub}</div> : null}
     </div>
   );
   return href ? <Link href={href} className="block">{inner}</Link> : inner;
@@ -43,7 +43,7 @@ export function TeamCard({ title, subtitle, action, children, className }: {
         <div className="flex items-center justify-between mb-3 gap-2">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
-            {subtitle ? <p className="text-[11.5px] text-zinc-400 mt-0.5">{subtitle}</p> : null}
+            {subtitle ? <p className="text-[12.5px] text-zinc-400 mt-0.5">{subtitle}</p> : null}
           </div>
           {action}
         </div>
@@ -73,7 +73,7 @@ export function TeamProgressBar({ pct, className }: { pct: number; className?: s
       <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden min-w-[60px]">
         <span className="block h-full rounded-full" style={{ width: `${clamped}%`, background: pctColor(clamped) }} />
       </span>
-      <span className="text-[11px] tabular-nums shrink-0" style={{ color: pctColor(clamped) }}>{clamped}%</span>
+      <span className="text-[12px] tabular-nums shrink-0" style={{ color: pctColor(clamped) }}>{clamped}%</span>
     </span>
   );
 }

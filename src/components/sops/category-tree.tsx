@@ -97,34 +97,34 @@ export function CategoryTree({
       <div
         onClick={() => onSelect("all")}
         className={[
-          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[12.5px] cursor-pointer select-none",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[13.5px] cursor-pointer select-none",
           selected === "all" ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
         ].join(" ")}
       >
         <Layers size={12} className="text-muted" />
         <span className="flex-1">All SOPs</span>
-        <span className="text-[10px] font-mono tabular-nums text-muted">{totalSops}</span>
+        <span className="text-[11px] font-mono tabular-nums text-muted">{totalSops}</span>
       </div>
 
       {/* Pseudo-node: SOPs with no category. */}
       <div
         onClick={() => onSelect("uncategorized")}
         className={[
-          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[12.5px] cursor-pointer select-none",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[13.5px] cursor-pointer select-none",
           selected === "uncategorized" ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
         ].join(" ")}
       >
         <Inbox size={12} className="text-muted" />
         <span className="flex-1">Uncategorized</span>
         {typeof uncategorizedCount === "number" && (
-          <span className="text-[10px] font-mono tabular-nums text-muted">{uncategorizedCount}</span>
+          <span className="text-[11px] font-mono tabular-nums text-muted">{uncategorizedCount}</span>
         )}
       </div>
 
       <div className="my-1 border-t border-border" />
 
       {sortedCategories.length === 0 ? (
-        <div className="px-2 py-3 text-[11px] text-muted">
+        <div className="px-2 py-3 text-[12px] text-muted">
           No categories yet.{canManage ? " Create one below to start organising." : ""}
         </div>
       ) : sortedCategories.map((cat) => {
@@ -140,7 +140,7 @@ export function CategoryTree({
             onDrop={(e) => handleDrop(e, cat.name, null)}
             onClick={() => onSelect(cat.name)}
             className={[
-              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12.5px] cursor-pointer select-none",
+              "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13.5px] cursor-pointer select-none",
               isSelected ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
               isDrop ? "ring-1 ring-[#d4ff2e] ring-inset" : "",
             ].join(" ")}
@@ -160,7 +160,7 @@ export function CategoryTree({
             )}
             <Folder size={12} className="text-muted shrink-0" />
             <span className="truncate flex-1">{cat.name}</span>
-            <span className="text-[10px] font-mono tabular-nums text-muted">
+            <span className="text-[11px] font-mono tabular-nums text-muted">
               {cat.sopCount ?? 0}
             </span>
           </div>
@@ -207,7 +207,7 @@ export function CategoryTree({
                   onDrop={(e) => handleDrop(e, cat.name, sub.name)}
                   onClick={() => onSelect(subKey)}
                   className={[
-                    "flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12.5px] cursor-pointer select-none ml-4",
+                    "flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13.5px] cursor-pointer select-none ml-4",
                     subSelected ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
                     subDrop ? "ring-1 ring-[#d4ff2e] ring-inset" : "",
                   ].join(" ")}
@@ -215,7 +215,7 @@ export function CategoryTree({
                   <span className="h-4 w-4" />
                   <Tag size={11} className="text-muted shrink-0" />
                   <span className="truncate flex-1">{sub.name}</span>
-                  <span className="text-[10px] font-mono tabular-nums text-muted">
+                  <span className="text-[11px] font-mono tabular-nums text-muted">
                     {sub.sopCount ?? 0}
                   </span>
                 </div>
@@ -251,7 +251,7 @@ export function CategoryTree({
         <button
           type="button"
           onClick={onCreateCategory}
-          className="mt-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+          className="mt-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
         >
           <Plus size={12} /> New category
         </button>

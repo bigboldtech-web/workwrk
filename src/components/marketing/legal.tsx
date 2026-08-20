@@ -39,7 +39,7 @@ export function LegalPage({
                     href={`#${s.id}`}
                     className="block py-1 text-slate-600 hover:text-slate-900 transition leading-snug"
                   >
-                    <span className="text-slate-400 font-mono text-[11px] mr-2">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="text-slate-400 font-mono text-[12px] mr-2">{String(i + 1).padStart(2, "0")}</span>
                     {s.title}
                   </a>
                 </li>

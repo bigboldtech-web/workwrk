@@ -78,13 +78,13 @@ export function MyWorkPanel() {
                     className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-zinc-50 dark:hover:bg-white/5"
                   >
                     <span className="h-2 w-2 rounded-full shrink-0" style={{ background: b.color }} />
-                    <span className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100">{b.label}</span>
-                    <span className="text-[12px] text-zinc-400 dark:text-zinc-500">{items.length}</span>
+                    <span className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100">{b.label}</span>
+                    <span className="text-[13px] text-zinc-400 dark:text-zinc-500">{items.length}</span>
                     <ChevronRight className={`ml-auto w-3.5 h-3.5 text-zinc-400 transition-transform ${isCollapsed ? "" : "rotate-90"}`} />
                   </button>
                   {!isCollapsed ? (
                     items.length === 0 ? (
-                      <div className="px-4 pb-3 text-[12px] text-zinc-400 dark:text-zinc-500">Nothing here.</div>
+                      <div className="px-4 pb-3 text-[13px] text-zinc-400 dark:text-zinc-500">Nothing here.</div>
                     ) : (
                       <ul className="pb-1.5">
                         {items.map((it) => (
@@ -92,10 +92,10 @@ export function MyWorkPanel() {
                             <button type="button" onClick={() => go(it.url)} className="w-full flex items-center gap-2 px-4 py-1.5 text-left hover:bg-zinc-50 dark:hover:bg-white/5">
                               <CircleDot className="w-3.5 h-3.5 shrink-0" style={{ color: b.color }} />
                               <span className="flex-1 min-w-0">
-                                <span className="block truncate text-[12.5px] text-zinc-800 dark:text-zinc-200">{it.title}</span>
-                                {it.board ? <span className="block truncate text-[11px] text-zinc-400 dark:text-zinc-500">{it.board}</span> : null}
+                                <span className="block truncate text-[13.5px] text-zinc-800 dark:text-zinc-200">{it.title}</span>
+                                {it.board ? <span className="block truncate text-[12px] text-zinc-400 dark:text-zinc-500">{it.board}</span> : null}
                               </span>
-                              {it.dueAt ? <span className="text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0">{new Date(it.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span> : null}
+                              {it.dueAt ? <span className="text-[12px] text-zinc-400 dark:text-zinc-500 shrink-0">{new Date(it.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span> : null}
                             </button>
                           </li>
                         ))}
@@ -107,7 +107,7 @@ export function MyWorkPanel() {
             })
           )}
           {!loading && data && Object.values(data.counts).every((n) => n === 0) ? (
-            <div className="px-4 py-10 text-center text-[12.5px] text-zinc-400 dark:text-zinc-500">
+            <div className="px-4 py-10 text-center text-[13.5px] text-zinc-400 dark:text-zinc-500">
               Tasks assigned to you will show here.
             </div>
           ) : null}

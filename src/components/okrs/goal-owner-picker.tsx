@@ -75,7 +75,7 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
 
   if (!canEdit) {
     return (
-      <span className="text-[12.5px] text-zinc-500 truncate">
+      <span className="text-[13.5px] text-zinc-500 truncate">
         {value ? personName(value) : "Unassigned"}
       </span>
     );
@@ -86,7 +86,7 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="flex h-8 w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-left text-[12.5px] text-zinc-800 hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+        className="flex h-8 w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-left text-[13.5px] text-zinc-800 hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
         aria-label="Set goal owner"
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -121,7 +121,7 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search people…"
-              className="flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+              className="flex-1 bg-transparent text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
             />
             {query && (
               <button type="button" onClick={() => setQuery("")} className="text-zinc-400 hover:text-zinc-600" aria-label="Clear search">
@@ -142,9 +142,9 @@ export function GoalOwnerPicker({ value, onChange, canEdit = true, initialOpen =
               </>
             ) : null}
             {people === null ? (
-              <div className="px-3 py-4 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-[13px] text-zinc-400">Loading…</div>
             ) : people.length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-zinc-400">No people found</div>
+              <div className="px-3 py-4 text-[13px] text-zinc-400">No people found</div>
             ) : (
               people.map((p) => (
                 <MenuItem

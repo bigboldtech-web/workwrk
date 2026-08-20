@@ -249,7 +249,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Emails */}
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
             Email addresses
           </label>
           <div
@@ -258,7 +258,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             {emails.map((email) => (
               <span
                 key={email}
-                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 py-0.5 pl-2.5 pr-1 text-[12px] text-zinc-800"
+                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 py-0.5 pl-2.5 pr-1 text-[13px] text-zinc-800"
               >
                 {email}
                 <button
@@ -284,11 +284,11 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
                 commitDraft(`${draft} ${e.clipboardData.getData("text")}`);
               }}
               placeholder={emails.length === 0 ? "name@company.com, another@company.com" : ""}
-              className="min-w-[140px] flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400"
+              className="min-w-[140px] flex-1 bg-transparent text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400"
             />
           </div>
           {invalidTokens.length > 0 ? (
-            <p className="mt-1 text-[11.5px] text-red-600">
+            <p className="mt-1 text-[12.5px] text-red-600">
               Not a valid email: {invalidTokens.join(", ")}
             </p>
           ) : null}
@@ -296,13 +296,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Access level */}
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
             Access level
           </label>
           <select
             value={accessLevel}
             onChange={(e) => setAccessLevel(e.target.value as AccessLevel)}
-            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
           >
             {INVITE_LEVELS.map((l) => (
               <option key={l.value} value={l.value}>
@@ -318,13 +318,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             at accept-invite time. */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
               Department <span className="font-normal normal-case text-zinc-400">(optional)</span>
             </label>
             <select
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
             >
               <option value="">No department</option>
               {(depts ?? []).map((d) => (
@@ -335,13 +335,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
               Role <span className="font-normal normal-case text-zinc-400">(optional)</span>
             </label>
             <select
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
             >
               <option value="">No role</option>
               {(roles ?? []).map((r) => (
@@ -353,13 +353,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
             Reporting manager <span className="font-normal normal-case text-zinc-400">(optional)</span>
           </label>
           <select
             value={managerId}
             onChange={(e) => setManagerId(e.target.value)}
-            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
           >
             <option value="">No manager</option>
             {(people ?? []).map((p) => (
@@ -373,21 +373,21 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
         {/* Role definition — required by the invitations contract */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
               KRAs <span className="font-normal normal-case text-zinc-400">(pick at least 1)</span>
             </label>
             <div className="max-h-[140px] overflow-y-auto rounded-md border border-zinc-200 bg-white">
               {kras === null ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-[12px] text-zinc-400">
+                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-zinc-400">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
                 </div>
               ) : kras.length === 0 ? (
-                <div className="px-2.5 py-2 text-[12px] text-zinc-400">No KRAs yet</div>
+                <div className="px-2.5 py-2 text-[13px] text-zinc-400">No KRAs yet</div>
               ) : (
                 kras.map((k) => (
                   <label
                     key={k.id}
-                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-zinc-800 hover:bg-zinc-50"
+                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[13.5px] text-zinc-800 hover:bg-zinc-50"
                   >
                     <input
                       type="checkbox"
@@ -402,21 +402,21 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             </div>
           </div>
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
               SOPs <span className="font-normal normal-case text-zinc-400">(pick at least 1)</span>
             </label>
             <div className="max-h-[140px] overflow-y-auto rounded-md border border-zinc-200 bg-white">
               {sops === null ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-[12px] text-zinc-400">
+                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-zinc-400">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
                 </div>
               ) : sops.length === 0 ? (
-                <div className="px-2.5 py-2 text-[12px] text-zinc-400">No SOPs yet</div>
+                <div className="px-2.5 py-2 text-[13px] text-zinc-400">No SOPs yet</div>
               ) : (
                 sops.map((s) => (
                   <label
                     key={s.id}
-                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-zinc-800 hover:bg-zinc-50"
+                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[13.5px] text-zinc-800 hover:bg-zinc-50"
                   >
                     <input
                       type="checkbox"
@@ -432,7 +432,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           </div>
         </div>
         {noCatalog ? (
-          <p className="text-[11.5px] text-zinc-500">
+          <p className="text-[12.5px] text-zinc-500">
             Invites need at least one KRA and one SOP so every new hire lands
             with a role definition. Create them under KRA &amp; KPI and SOPs
             first.
@@ -441,7 +441,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Personal message */}
         <div>
-          <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
             Personal message <span className="font-normal normal-case text-zinc-400">(optional)</span>
           </label>
           <textarea
@@ -450,7 +450,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             maxLength={1000}
             rows={3}
             placeholder="Add a note to the invitation email…"
-            className="w-full resize-none rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[13px] text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none"
+            className="w-full resize-none rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[14px] text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none"
           />
         </div>
 
@@ -458,7 +458,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           <button
             type="button"
             onClick={() => handleOpenChange(false)}
-            className="h-8 rounded-md px-2.5 text-[12.5px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
+            className="h-8 rounded-md px-2.5 text-[13.5px] font-medium text-zinc-600 transition-colors hover:bg-zinc-100 hover:text-zinc-900"
           >
             Cancel
           </button>
@@ -466,7 +466,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             type="button"
             onClick={() => void handleSend()}
             disabled={!canSend}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[12.5px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13.5px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
           >
             {sending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

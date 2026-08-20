@@ -208,8 +208,8 @@ export function DocShareModal({
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-[13px] font-semibold text-zinc-900">Share this doc</div>
-              <div className="mt-0.5 max-w-[340px] truncate text-[12px] text-zinc-500">{docTitle}</div>
+              <div className="text-[14px] font-semibold text-zinc-900">Share this doc</div>
+              <div className="mt-0.5 max-w-[340px] truncate text-[13px] text-zinc-500">{docTitle}</div>
             </div>
             <button
               type="button"
@@ -227,15 +227,15 @@ export function DocShareModal({
               <button
                 type="button"
                 onClick={() => toast("Guest invites are coming soon")}
-                className="mt-3 flex h-8 w-full items-center justify-between rounded-md border border-zinc-200 px-2.5 text-[12.5px] text-zinc-400 hover:border-zinc-300"
+                className="mt-3 flex h-8 w-full items-center justify-between rounded-md border border-zinc-200 px-2.5 text-[13.5px] text-zinc-400 hover:border-zinc-300"
               >
                 <span>Invite by name or email</span>
-                <span className="inline-flex h-6 items-center rounded-md bg-zinc-900 px-2.5 text-[12px] font-semibold text-white">Invite</span>
+                <span className="inline-flex h-6 items-center rounded-md bg-zinc-900 px-2.5 text-[13px] font-semibold text-white">Invite</span>
               </button>
 
               {/* Public link */}
               <div className="mt-3 flex h-8 items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-zinc-700">
+                <span className="inline-flex items-center gap-1.5 text-[13.5px] font-medium text-zinc-700">
                   <Globe className="h-3.5 w-3.5 text-zinc-400" /> Share link with anyone
                 </span>
                 <Switch
@@ -250,14 +250,14 @@ export function DocShareModal({
                   <button
                     type="button"
                     onClick={copyPublic}
-                    className="mt-2 h-8 w-full rounded-md bg-zinc-900 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
+                    className="mt-2 h-8 w-full rounded-md bg-zinc-900 text-[13.5px] font-semibold text-white hover:bg-zinc-800"
                   >
                     {copied ? "Copied!" : "Copy public link"}
                   </button>
-                  <p className="mt-1.5 text-[11.5px] text-zinc-400">Anyone with this link can view. Turn off to revoke it.</p>
+                  <p className="mt-1.5 text-[12.5px] text-zinc-400">Anyone with this link can view. Turn off to revoke it.</p>
                 </>
               ) : (
-                <p className="mt-1.5 text-[11.5px] text-zinc-400">Off. Only workspace members with access can open this doc.</p>
+                <p className="mt-1.5 text-[12.5px] text-zinc-400">Off. Only workspace members with access can open this doc.</p>
               )}
 
               <div className="my-3 h-px bg-zinc-100" />
@@ -266,11 +266,11 @@ export function DocShareModal({
 
           {/* Private (in-app) link — every role may copy it. */}
           <div className={`flex h-7 items-center justify-between ${canEdit ? "" : "mt-3"}`}>
-            <span className="text-[12.5px] font-medium text-zinc-700">Private link</span>
+            <span className="text-[13.5px] font-medium text-zinc-700">Private link</span>
             <button
               type="button"
               onClick={copyInApp}
-              className="text-[12.5px] font-medium text-[var(--os-brand-ink)] hover:underline"
+              className="text-[13.5px] font-medium text-[var(--os-brand-ink)] hover:underline"
             >
               Copy link
             </button>
@@ -279,17 +279,17 @@ export function DocShareModal({
           {canEdit && (
             <>
               {/* Share with — per-member roles */}
-              <div className="mt-3 mb-1 text-[12px] font-medium text-zinc-500">Share with</div>
+              <div className="mt-3 mb-1 text-[13px] font-medium text-zinc-500">Share with</div>
               <input
                 type="text"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 placeholder="Search people"
-                className="h-7 w-full rounded-md border border-zinc-200 px-2 text-[12.5px] text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-[var(--os-brand)]"
+                className="h-7 w-full rounded-md border border-zinc-200 px-2 text-[13.5px] text-zinc-800 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-[var(--os-brand)]"
               />
               <div className="mt-1 max-h-[220px] overflow-y-auto">
                 {rows.length === 0 ? (
-                  <div className="px-1.5 py-2 text-[12px] text-zinc-400">
+                  <div className="px-1.5 py-2 text-[13px] text-zinc-400">
                     {users.length === 0 ? "Loading people…" : "No matches"}
                   </div>
                 ) : (
@@ -300,12 +300,12 @@ export function DocShareModal({
                     return (
                       <div key={u.id} className="flex h-8 items-center gap-2 rounded-md px-1.5 hover:bg-zinc-50">
                         <PersonAvatar person={u} size={22} />
-                        <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-800">
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] text-zinc-800">
                           {personName(u)}
                           {meId === u.id ? <span className="text-zinc-400"> (you)</span> : null}
                         </span>
                         {isOwner ? (
-                          <span className="text-[12px] text-zinc-400">Owner</span>
+                          <span className="text-[13px] text-zinc-400">Owner</span>
                         ) : (
                           <button
                             type="button"
@@ -314,7 +314,7 @@ export function DocShareModal({
                               roleAnchorRef.current = e.currentTarget;
                               setRoleMenuFor((cur) => (cur === u.id ? null : u.id));
                             }}
-                            className="inline-flex h-6 items-center gap-0.5 rounded px-1.5 text-[12px] text-zinc-500 hover:bg-zinc-100"
+                            className="inline-flex h-6 items-center gap-0.5 rounded px-1.5 text-[13px] text-zinc-500 hover:bg-zinc-100"
                           >
                             {label}
                             <ChevronDown className="h-3 w-3" />
@@ -331,12 +331,12 @@ export function DocShareModal({
                 type="button"
                 onClick={() => void toggleRestricted()}
                 disabled={!sharing}
-                className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-zinc-200 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+                className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-zinc-200 text-[13.5px] font-medium text-zinc-700 hover:bg-zinc-50"
               >
                 <Lock className="h-3.5 w-3.5" />
                 {sharing?.restricted ? "Make workspace-visible" : "Make private"}
               </button>
-              <p className="mt-1 text-[11.5px] text-zinc-400">
+              <p className="mt-1 text-[12.5px] text-zinc-400">
                 {sharing?.restricted
                   ? "Only you, admins, and the people listed above can open this doc."
                   : "Everyone in the workspace keeps their current access."}

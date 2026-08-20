@@ -79,7 +79,7 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
     <div className="flex flex-wrap items-center gap-2.5">
       <MemberAvatarStack members={members} total={total} size={22} />
       {total > 0 && (
-        <span className="text-[12px] text-zinc-500">
+        <span className="text-[13px] text-zinc-500">
           {total} member{total === 1 ? "" : "s"}
         </span>
       )}
@@ -88,7 +88,7 @@ export function OkrAudience({ okrId, canEdit, initialEntries, initialMembers, in
           <GoalAudiencePicker value={entries} onChange={(next) => void apply(next)} />
         </div>
       ) : null}
-      {error && <span className="text-[12px] text-[#E2445C]">{error}</span>}
+      {error && <span className="text-[13px] text-[#E2445C]">{error}</span>}
     </div>
   );
 }

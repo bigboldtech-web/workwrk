@@ -145,7 +145,7 @@ export function DocEditorDialog({
           </div>
           <div className="flex items-center gap-1">
             {saving && (
-              <span className="text-[11px] text-muted-2 inline-flex items-center gap-1 mr-2">
+              <span className="text-[12px] text-muted-2 inline-flex items-center gap-1 mr-2">
                 <Loader2 size={11} className="animate-spin" /> Saving…
               </span>
             )}

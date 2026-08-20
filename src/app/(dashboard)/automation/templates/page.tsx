@@ -126,7 +126,7 @@ export default function AutomationTemplatesPage() {
 
       <div className="flex-1 overflow-y-auto p-4">
         {templates === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : templates.length === 0 ? (
@@ -135,7 +135,7 @@ export default function AutomationTemplatesPage() {
               <Zap className="h-5 w-5 text-zinc-500" />
             </span>
             <h2 className="mt-4 text-[16px] font-semibold text-zinc-900">No templates yet</h2>
-            <p className="mt-1 max-w-sm text-center text-[13px] text-zinc-500">
+            <p className="mt-1 max-w-sm text-center text-[14px] text-zinc-500">
               Starter recipes appear here. You can always build an automation from scratch in
               Workflows.
             </p>
@@ -150,13 +150,13 @@ export default function AutomationTemplatesPage() {
                 <div key={t.id} className={`${CARD} flex flex-col p-4`}>
                   <div className="flex items-center gap-1.5">
                     {t.category ? (
-                      <span className="inline-flex h-[18px] items-center rounded-md border border-zinc-200 bg-zinc-50 px-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500">
+                      <span className="inline-flex h-[18px] items-center rounded-md border border-zinc-200 bg-zinc-50 px-1.5 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-500">
                         {t.category}
                       </span>
                     ) : null}
                     {severityMeta && severityMeta.key !== "MINOR" ? (
                       <span
-                        className="inline-flex h-[18px] items-center gap-1 rounded-md px-1.5 text-[10.5px] font-semibold uppercase tracking-wide"
+                        className="inline-flex h-[18px] items-center gap-1 rounded-md px-1.5 text-[11.5px] font-semibold uppercase tracking-wide"
                         style={{
                           backgroundColor: `${severityMeta.color}14`,
                           color: severityMeta.color,
@@ -168,7 +168,7 @@ export default function AutomationTemplatesPage() {
                     ) : null}
                     {trigger && !trigger.isEmitting ? (
                       <span
-                        className="inline-flex h-[18px] items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700"
+                        className="inline-flex h-[18px] items-center rounded-md border border-amber-200 bg-amber-50 px-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700"
                         title="This trigger event isn't emitting yet — the recipe goes live automatically once its module ships."
                       >
                         not live yet
@@ -178,7 +178,7 @@ export default function AutomationTemplatesPage() {
                   <h3 className="mt-2.5 text-[14.5px] font-semibold leading-snug text-zinc-900">
                     {t.name}
                   </h3>
-                  <p className="mt-1.5 flex-1 text-[12px] leading-relaxed text-zinc-500">
+                  <p className="mt-1.5 flex-1 text-[13px] leading-relaxed text-zinc-500">
                     {t.description}
                   </p>
                   <div className="mt-3">

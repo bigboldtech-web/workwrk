@@ -283,14 +283,14 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
                     <button
                       type="button"
                       onClick={() => restoreVersion(v.id)}
-                      className="inline-flex items-center gap-1 text-[10px] font-medium text-[#0073EA] hover:text-[#005BB8]"
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0073EA] hover:text-[#005BB8]"
                       title="Restore this version"
                     >
                       <RotateCcw size={10} /> Restore
                     </button>
                   </div>
                   <p className="text-xs text-foreground truncate">{v.title}</p>
-                  <p className="text-[10px] text-muted-2 mt-1">
+                  <p className="text-[11px] text-muted-2 mt-1">
                     {v.authorName ? `${v.authorName} · ` : ""}{fmtAbs(new Date(v.createdAt))}
                   </p>
                 </div>

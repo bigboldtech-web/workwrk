@@ -101,8 +101,8 @@ export default function TaskTypesPage() {
         description={`${usage.used} of ${usage.limit} custom types used`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-zinc-200 text-[13px] text-zinc-600 hover:bg-zinc-50"><SettingsIcon className="w-3.5 h-3.5" /> Settings</Link>
-            <button type="button" onClick={() => setCreateOpen(true)} disabled={usage.used >= usage.limit} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[var(--os-brand)] text-white text-[13px] disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> New type</button>
+            <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-zinc-200 text-[14px] text-zinc-600 hover:bg-zinc-50"><SettingsIcon className="w-3.5 h-3.5" /> Settings</Link>
+            <button type="button" onClick={() => setCreateOpen(true)} disabled={usage.used >= usage.limit} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[var(--os-brand)] text-white text-[14px] disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> New type</button>
           </div>
         }
       />
@@ -110,7 +110,7 @@ export default function TaskTypesPage() {
       <div className="max-w-[860px] mx-auto px-5 py-6 space-y-8">
         {/* Active types */}
         <section>
-          <h2 className="text-[13px] font-semibold text-zinc-900 mb-3">Active types</h2>
+          <h2 className="text-[14px] font-semibold text-zinc-900 mb-3">Active types</h2>
           {types === null ? (
             <div className="flex items-center gap-2 text-sm text-zinc-400 py-8"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
           ) : (
@@ -122,11 +122,11 @@ export default function TaskTypesPage() {
                     <span className="mt-0.5 inline-flex w-8 h-8 rounded-lg bg-zinc-50 items-center justify-center text-zinc-600 shrink-0"><Icon className="w-4 h-4" /></span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[13.5px] font-medium text-zinc-900 truncate">{t.singular}</span>
-                        {t.isDefault ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium">Default</span> : null}
-                        {t.builtIn ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500">Built-in</span> : null}
+                        <span className="text-[14.5px] font-medium text-zinc-900 truncate">{t.singular}</span>
+                        {t.isDefault ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-medium">Default</span> : null}
+                        {t.builtIn ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500">Built-in</span> : null}
                       </div>
-                      <div className="text-[12px] text-zinc-500 truncate">{t.description || t.plural}</div>
+                      <div className="text-[13px] text-zinc-500 truncate">{t.description || t.plural}</div>
                     </div>
                     <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                       {!t.isDefault ? <button type="button" onClick={() => setDefault(t.id)} title="Set as default" className="w-7 h-7 rounded-md inline-flex items-center justify-center text-zinc-400 hover:bg-zinc-100 hover:text-amber-500"><Star className="w-3.5 h-3.5" /></button> : null}
@@ -142,22 +142,22 @@ export default function TaskTypesPage() {
         {/* Recommended library */}
         <section>
           <div className="flex items-center justify-between mb-3 gap-3">
-            <h2 className="text-[13px] font-semibold text-zinc-900">Recommended</h2>
+            <h2 className="text-[14px] font-semibold text-zinc-900">Recommended</h2>
             <div className="inline-flex items-center gap-2 h-8 px-2.5 rounded-lg border border-zinc-200 w-[220px]">
               <Search className="w-3.5 h-3.5 text-zinc-400" />
-              <input value={recSearch} onChange={(e) => setRecSearch(e.target.value)} placeholder="Search types…" className="flex-1 text-[13px] bg-transparent outline-none" />
+              <input value={recSearch} onChange={(e) => setRecSearch(e.target.value)} placeholder="Search types…" className="flex-1 text-[14px] bg-transparent outline-none" />
             </div>
           </div>
           {recCats.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mb-3">
-              <button type="button" onClick={() => setRecCat(null)} className={`h-7 px-2.5 rounded-full text-[12px] ${recCat === null ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>All</button>
+              <button type="button" onClick={() => setRecCat(null)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === null ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>All</button>
               {recCats.map((c) => (
-                <button key={c} type="button" onClick={() => setRecCat(recCat === c ? null : c)} className={`h-7 px-2.5 rounded-full text-[12px] ${recCat === c ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>{c}</button>
+                <button key={c} type="button" onClick={() => setRecCat(recCat === c ? null : c)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === c ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>{c}</button>
               ))}
             </div>
           ) : null}
           {recFiltered.length === 0 ? (
-            <div className="text-[13px] text-zinc-400 py-6">Nothing to add{recSearch || recCat ? " for this filter" : ""}.</div>
+            <div className="text-[14px] text-zinc-400 py-6">Nothing to add{recSearch || recCat ? " for this filter" : ""}.</div>
           ) : (
             <div className="grid sm:grid-cols-2 gap-2.5">
               {recFiltered.map((r) => {
@@ -166,10 +166,10 @@ export default function TaskTypesPage() {
                   <div key={r.singular} className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3">
                     <span className="inline-flex w-8 h-8 rounded-lg bg-zinc-50 items-center justify-center text-zinc-600 shrink-0"><Icon className="w-4 h-4" /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[13.5px] font-medium text-zinc-900 truncate">{r.singular}</div>
-                      <div className="text-[12px] text-zinc-500 truncate">{r.description}</div>
+                      <div className="text-[14.5px] font-medium text-zinc-900 truncate">{r.singular}</div>
+                      <div className="text-[13px] text-zinc-500 truncate">{r.description}</div>
                     </div>
-                    <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-zinc-200 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+                    <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-zinc-200 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
                       {adding === r.singular ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
                     </button>
                   </div>
@@ -229,10 +229,10 @@ function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () =>
         <div className="p-5 space-y-4">
           <div className="flex items-center gap-3">
             <span className="inline-flex w-11 h-11 rounded-xl bg-zinc-50 items-center justify-center text-zinc-600"><PreviewIcon className="w-5 h-5" /></span>
-            <div className="text-[13px] text-zinc-500">Pick an icon and name your type.</div>
+            <div className="text-[14px] text-zinc-500">Pick an icon and name your type.</div>
           </div>
           <div>
-            <label className="text-[12px] font-medium text-zinc-600">Icon</label>
+            <label className="text-[13px] font-medium text-zinc-600">Icon</label>
             <div className="mt-1.5 grid grid-cols-9 gap-1 max-h-[120px] overflow-y-auto rounded-lg border border-zinc-200 p-2">
               {ITEM_TYPE_ICON_NAMES.map((name) => {
                 const Ic = itemTypeIcon(name);
@@ -246,24 +246,24 @@ function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () =>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-[12px] font-medium text-zinc-600">Singular name <span className="text-red-400">*</span></label>
-              <input value={singular} onChange={(e) => setSingular(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bug" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[13px] outline-none focus:border-zinc-400" autoFocus />
-              {dupe ? <div className="text-[11px] text-red-500 mt-1">A type with this name exists.</div> : null}
+              <label className="text-[13px] font-medium text-zinc-600">Singular name <span className="text-red-400">*</span></label>
+              <input value={singular} onChange={(e) => setSingular(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bug" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[14px] outline-none focus:border-zinc-400" autoFocus />
+              {dupe ? <div className="text-[12px] text-red-500 mt-1">A type with this name exists.</div> : null}
             </div>
             <div>
-              <label className="text-[12px] font-medium text-zinc-600">Plural name</label>
-              <input value={plural} onChange={(e) => setPlural(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bugs" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[13px] outline-none focus:border-zinc-400" />
+              <label className="text-[13px] font-medium text-zinc-600">Plural name</label>
+              <input value={plural} onChange={(e) => setPlural(e.target.value.slice(0, 16))} maxLength={16} placeholder="Bugs" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[14px] outline-none focus:border-zinc-400" />
             </div>
           </div>
           <div>
-            <label className="text-[12px] font-medium text-zinc-600">Description</label>
-            <input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 100))} maxLength={100} placeholder="A defect to fix" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[13px] outline-none focus:border-zinc-400" />
-            <div className="text-[11px] text-zinc-400 mt-1 text-right">{description.length}/100</div>
+            <label className="text-[13px] font-medium text-zinc-600">Description</label>
+            <input value={description} onChange={(e) => setDescription(e.target.value.slice(0, 100))} maxLength={100} placeholder="A defect to fix" className="mt-1 w-full h-9 px-2.5 rounded-lg border border-zinc-200 text-[14px] outline-none focus:border-zinc-400" />
+            <div className="text-[12px] text-zinc-400 mt-1 text-right">{description.length}/100</div>
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-zinc-100">
-          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-[13px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
-          <button type="button" onClick={submit} disabled={!canSave} className="h-9 px-4 rounded-lg text-[13px] text-white bg-[var(--os-brand)] inline-flex items-center gap-1.5 disabled:opacity-50">
+          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-[14px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+          <button type="button" onClick={submit} disabled={!canSave} className="h-9 px-4 rounded-lg text-[14px] text-white bg-[var(--os-brand)] inline-flex items-center gap-1.5 disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Create
           </button>
         </div>

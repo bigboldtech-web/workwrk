@@ -79,7 +79,7 @@ export function EntityTimer({ entityType, entityId, compact }: Props) {
         onClick={toggle}
         disabled={loading}
         className={
-          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-mono transition-colors " +
+          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[12px] font-mono transition-colors " +
           (running
             ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300"
             : "bg-surface-2 text-muted hover:text-foreground")
@@ -111,7 +111,7 @@ export function EntityTimer({ entityType, entityId, compact }: Props) {
         {running ? <Pause size={11} /> : <Play size={11} />}
       </button>
       <span className="font-mono text-xs tabular-nums">{fmtDuration(totalMs)}</span>
-      {running && <span className="text-[10px] text-emerald-600 uppercase tracking-wider">live</span>}
+      {running && <span className="text-[11px] text-emerald-600 uppercase tracking-wider">live</span>}
     </div>
   );
 }

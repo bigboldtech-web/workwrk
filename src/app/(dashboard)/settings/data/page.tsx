@@ -179,7 +179,7 @@ export default function DataCompliancePage() {
       />
 
       <div className="flex-1 overflow-y-auto px-6 pt-4 pb-10">
-        <p className="mb-6 max-w-2xl text-[13px] text-zinc-500">
+        <p className="mb-6 max-w-2xl text-[14px] text-zinc-500">
           Download a full copy of this organization&rsquo;s data for compliance,
           backup or migration. Every export is admin-only and recorded in the audit trail.
         </p>
@@ -207,7 +207,7 @@ export default function DataCompliancePage() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[14px] font-medium text-zinc-900">{title}</div>
-                  <div className="text-[12.5px] text-zinc-500">{desc}</div>
+                  <div className="text-[13.5px] text-zinc-500">{desc}</div>
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400" />
               </Link>
@@ -222,7 +222,7 @@ export default function DataCompliancePage() {
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <section>
-      <div className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+      <div className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
         {label}
       </div>
       <div className="space-y-2">{children}</div>
@@ -252,7 +252,7 @@ function ExportButton({
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-[14px] font-medium text-zinc-900">{row.title}</div>
-        <div className="text-[12.5px] text-zinc-500">{row.desc}</div>
+        <div className="text-[13.5px] text-zinc-500">{row.desc}</div>
       </div>
       {isBusy ? (
         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[color:var(--os-brand)]" />

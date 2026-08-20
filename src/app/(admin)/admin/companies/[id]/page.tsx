@@ -190,7 +190,7 @@ export default function CompanyDetailPage() {
             onChange={(v) => patch({ feature: "customDomain", enabled: v }, "Custom domain")}
           />
           {!isEnterprise && (
-            <p className="text-[11px] text-muted pt-2 border-t border-border">
+            <p className="text-[12px] text-muted pt-2 border-t border-border">
               Lift their plan to Enterprise above for these flags to activate.
             </p>
           )}
@@ -205,7 +205,7 @@ function Stat({ label, value }: { label: string; value: number }) {
     <Card>
       <CardContent className="p-3 text-center">
         <p className="text-xl font-bold tabular-nums">{value}</p>
-        <p className="text-[10px] text-muted">{label}</p>
+        <p className="text-[11px] text-muted">{label}</p>
       </CardContent>
     </Card>
   );
@@ -229,7 +229,7 @@ function FeatureRow({
         </div>
         <div className="min-w-0">
           <div className="text-sm font-medium">{title}</div>
-          <p className="text-[11px] text-muted leading-relaxed mt-0.5">{blurb}</p>
+          <p className="text-[12px] text-muted leading-relaxed mt-0.5">{blurb}</p>
         </div>
       </div>
       <button

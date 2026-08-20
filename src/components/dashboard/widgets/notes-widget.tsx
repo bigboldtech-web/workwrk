@@ -51,11 +51,11 @@ export function NotesWidget({
         value={text}
         onChange={(e) => handleChange(e.target.value)}
         placeholder="Jot down quick notes…"
-        className="min-h-0 flex-1 resize-none bg-transparent text-[13px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400"
+        className="min-h-0 flex-1 resize-none bg-transparent text-[14px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400"
       />
       <div className="flex h-4 shrink-0 items-center justify-end">
         {saveState !== "idle" ? (
-          <span className="text-[11px] text-zinc-400">
+          <span className="text-[12px] text-zinc-400">
             {saveState === "dirty" ? "Saving…" : "Saved"}
           </span>
         ) : null}

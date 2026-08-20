@@ -134,19 +134,19 @@ export default function AppearancePage() {
         <Palette className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Appearance</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Personalize your theme, accent color, and layout density. Changes apply across your devices.
       </p>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       ) : (
         <div className="max-w-2xl space-y-7">
           {/* ── Theme ───────────────────────────────────── */}
           <section>
-            <h2 className="mb-2 text-[13px] font-semibold text-zinc-800">Theme</h2>
+            <h2 className="mb-2 text-[14px] font-semibold text-zinc-800">Theme</h2>
             <div className="grid grid-cols-3 gap-3">
               {APPEARANCE_CARDS.map((opt) => {
                 const active = theme.appearance === opt.value;
@@ -161,7 +161,7 @@ export default function AppearancePage() {
                     }`}
                   >
                     <opt.Icon className="h-4 w-4 text-zinc-600" />
-                    <span className="text-[13px] font-medium text-zinc-900">{opt.label}</span>
+                    <span className="text-[14px] font-medium text-zinc-900">{opt.label}</span>
                   </button>
                 );
               })}
@@ -170,7 +170,7 @@ export default function AppearancePage() {
 
           {/* ── Accent ──────────────────────────────────── */}
           <section>
-            <h2 className="mb-2 text-[13px] font-semibold text-zinc-800">Accent</h2>
+            <h2 className="mb-2 text-[14px] font-semibold text-zinc-800">Accent</h2>
             <div className="flex flex-wrap gap-2.5">
               {ACCENT_OPTIONS.map((a) => {
                 const active = theme.accent === a.key;
@@ -197,7 +197,7 @@ export default function AppearancePage() {
 
           {/* ── Density ─────────────────────────────────── */}
           <section>
-            <h2 className="mb-2 text-[13px] font-semibold text-zinc-800">Density</h2>
+            <h2 className="mb-2 text-[14px] font-semibold text-zinc-800">Density</h2>
             <div className="inline-flex rounded-lg border border-zinc-200 bg-zinc-100 p-0.5">
               {DENSITY_OPTIONS.map((opt) => {
                 const active = density === opt.value;
@@ -207,7 +207,7 @@ export default function AppearancePage() {
                     type="button"
                     disabled={saving}
                     onClick={() => pickDensity(opt.value)}
-                    className={`rounded-md px-4 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-60 ${
+                    className={`rounded-md px-4 py-1.5 text-[14px] font-medium transition-colors disabled:opacity-60 ${
                       active ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-600 hover:text-zinc-900"
                     }`}
                   >

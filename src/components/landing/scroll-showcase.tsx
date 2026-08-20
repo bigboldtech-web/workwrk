@@ -149,7 +149,7 @@ export function ScrollShowcase() {
             {/* ── Left rail ───────────────────────────────────────── */}
             <div>
               <p
-                className="text-[11px] font-bold uppercase tracking-[0.22em]"
+                className="text-[12px] font-bold uppercase tracking-[0.22em]"
                 style={{ color: "var(--brand-red)" }}
               >
                 One platform · seven surfaces
@@ -249,7 +249,7 @@ function HubLine({
             {hub.name}
           </p>
           <p
-            className="text-[11.5px] leading-tight mt-0.5 transition-colors"
+            className="text-[12.5px] leading-tight mt-0.5 transition-colors"
             style={{
               color: active ? "var(--m-text-muted)" : "var(--m-text-soft)",
             }}
@@ -260,7 +260,7 @@ function HubLine({
 
         {/* Progress indicator (small step number) */}
         <span
-          className="text-[10px] font-mono font-bold transition-colors flex-shrink-0"
+          className="text-[11px] font-mono font-bold transition-colors flex-shrink-0"
           style={{
             color: active ? hub.hue : "var(--m-text-soft)",
           }}
@@ -306,7 +306,7 @@ function MockShell({
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--brand-red)", opacity: 0.55 }} />
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--brand-yellow)", opacity: 0.65 }} />
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--status-done)", opacity: 0.55 }} />
-          <span className="ml-3 text-[11px] font-mono" style={{ color: "var(--m-text-soft)" }}>
+          <span className="ml-3 text-[12px] font-mono" style={{ color: "var(--m-text-soft)" }}>
             workwrk.com / {active.slug}
           </span>
         </div>
@@ -347,11 +347,11 @@ function MockHome() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Home
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Inbox</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Inbox</span>
       </div>
       <p className="mt-1 font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
         12 signals to triage
@@ -371,15 +371,15 @@ function MockHome() {
               {it.icon}
             </span>
             <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
+              <p className="text-[14px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
                 {it.title}
               </p>
-              <p className="text-[11px] mt-0.5" style={{ color: "var(--m-text-soft)" }}>
+              <p className="text-[12px] mt-0.5" style={{ color: "var(--m-text-soft)" }}>
                 {it.meta}
               </p>
             </div>
             <button
-              className="text-[11px] font-semibold px-2.5 h-7 rounded-md border whitespace-nowrap"
+              className="text-[12px] font-semibold px-2.5 h-7 rounded-md border whitespace-nowrap"
               style={{
                 borderColor: "var(--m-border-dark)",
                 color: "var(--m-text)",
@@ -400,11 +400,11 @@ function MockPeople() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           People
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Org chart</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Org chart</span>
       </div>
       <p className="mt-1 font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
         248 people · 9 departments
@@ -448,21 +448,21 @@ function OrgCard({
       style={{ border: "1px solid var(--m-border)" }}
     >
       <span
-        className={`rounded-full flex items-center justify-center text-white font-bold ${mini ? "w-6 h-6 text-[9px]" : "w-7 h-7 text-[10px]"}`}
+        className={`rounded-full flex items-center justify-center text-white font-bold ${mini ? "w-6 h-6 text-[10px]" : "w-7 h-7 text-[11px]"}`}
         style={{ backgroundColor: hue }}
       >
         {initials}
       </span>
       <div className="min-w-0">
-        <p className={`font-bold leading-tight truncate ${mini ? "text-[10.5px]" : "text-[12px]"}`} style={{ color: "var(--m-text)" }}>
+        <p className={`font-bold leading-tight truncate ${mini ? "text-[11.5px]" : "text-[13px]"}`} style={{ color: "var(--m-text)" }}>
           {name}
         </p>
-        <p className={`leading-tight ${mini ? "text-[9px]" : "text-[10px]"}`} style={{ color: "var(--m-text-soft)" }}>
+        <p className={`leading-tight ${mini ? "text-[10px]" : "text-[11px]"}`} style={{ color: "var(--m-text-soft)" }}>
           {role}
         </p>
       </div>
       <span
-        className={`font-bold ${mini ? "text-[9px]" : "text-[11px]"}`}
+        className={`font-bold ${mini ? "text-[10px]" : "text-[12px]"}`}
         style={{ color: hue }}
       >
         {score}
@@ -480,11 +480,11 @@ function MockWork() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Work
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Tasks · board view</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Tasks · board view</span>
       </div>
       <p className="mt-1 font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
         Q3 launch board
@@ -517,11 +517,11 @@ function KanbanCol({
       <div className="flex items-center justify-between mb-2 px-1">
         <div className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: color }} />
-          <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color }}>
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color }}>
             {title}
           </span>
         </div>
-        <span className="text-[9px] font-mono" style={{ color: "var(--m-text-soft)" }}>{count}</span>
+        <span className="text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>{count}</span>
       </div>
       <div className="space-y-1.5">{children}</div>
     </div>
@@ -534,14 +534,14 @@ function KanbanCard({
   return (
     <div className="bg-white rounded-md p-2.5 shadow-sm" style={{ border: "1px solid var(--m-border)" }}>
       <p
-        className={`text-[11.5px] font-medium leading-tight ${done ? "line-through opacity-60" : ""}`}
+        className={`text-[12.5px] font-medium leading-tight ${done ? "line-through opacity-60" : ""}`}
         style={{ color: "var(--m-text)" }}
       >
         {label}
       </p>
       <div className="mt-2 flex items-center justify-between">
         <span
-          className="text-[9px] font-bold px-1.5 h-4 inline-flex items-center rounded-sm text-white"
+          className="text-[10px] font-bold px-1.5 h-4 inline-flex items-center rounded-sm text-white"
           style={{ backgroundColor: tagHue }}
         >
           {tag}
@@ -569,17 +569,17 @@ function MockMoney() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Money
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Approvals · Q3</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Approvals · Q3</span>
       </div>
       <div className="mt-1 flex items-baseline justify-between">
         <p className="font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
           Vendor spend
         </p>
-        <p className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[12px]" style={{ color: "var(--m-text-soft)" }}>
           <span className="font-bold" style={{ color: "var(--m-text)" }}>$71.5k</span> / $80k budget
         </p>
       </div>
@@ -591,7 +591,7 @@ function MockMoney() {
 
       <div className="mt-4 rounded-xl border overflow-hidden" style={{ borderColor: "var(--m-border)" }}>
         <div
-          className="grid grid-cols-[1.4fr_1fr_1fr_88px] gap-2 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]"
+          className="grid grid-cols-[1.4fr_1fr_1fr_88px] gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
           style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}
         >
           <span>Vendor</span>
@@ -607,17 +607,17 @@ function MockMoney() {
               className="grid grid-cols-[1.4fr_1fr_1fr_88px] gap-2 px-3 py-2.5 items-center border-t"
               style={{ borderColor: "var(--m-border)" }}
             >
-              <span className="text-[12px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
+              <span className="text-[13px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
                 {r.vendor}
               </span>
-              <span className="text-[11px] truncate" style={{ color: "var(--m-text-muted)" }}>
+              <span className="text-[12px] truncate" style={{ color: "var(--m-text-muted)" }}>
                 {r.cat}
               </span>
-              <span className="text-[12px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
+              <span className="text-[13px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
                 {r.amount}
               </span>
               <span
-                className="text-[9px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+                className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
                 style={{ backgroundColor: s.bg }}
               >
                 {s.label}
@@ -635,18 +635,18 @@ function MockTalent() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Talent
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Q3 2026 cycle</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Q3 2026 cycle</span>
       </div>
       <div className="mt-1 flex items-baseline justify-between">
         <p className="font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
           Performance reviews
         </p>
         <span
-          className="text-[10px] font-bold uppercase tracking-[0.16em] px-2 h-5 inline-flex items-center rounded text-white"
+          className="text-[11px] font-bold uppercase tracking-[0.16em] px-2 h-5 inline-flex items-center rounded text-white"
           style={{ backgroundColor: "#d946ef" }}
         >
           closes in 4 days
@@ -656,10 +656,10 @@ function MockTalent() {
       {/* Cycle progress */}
       <div className="mt-4 rounded-xl p-4" style={{ backgroundColor: "var(--m-surface)" }}>
         <div className="flex items-baseline justify-between">
-          <span className="text-[11px] font-semibold" style={{ color: "var(--m-text)" }}>
+          <span className="text-[12px] font-semibold" style={{ color: "var(--m-text)" }}>
             Cycle progress
           </span>
-          <span className="text-[11px] font-bold tabular-nums" style={{ color: "#d946ef" }}>
+          <span className="text-[12px] font-bold tabular-nums" style={{ color: "#d946ef" }}>
             72% complete
           </span>
         </div>
@@ -678,7 +678,7 @@ function MockTalent() {
 
       {/* People queue */}
       <div className="mt-4 rounded-xl border overflow-hidden" style={{ borderColor: "var(--m-border)" }}>
-        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
+        <p className="px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
           Awaiting your sign-off
         </p>
         <ReviewQueueRow initials="PI" name="Priya Iyer"   role="COO"  score={95} hue="#0ea5e9" />
@@ -695,11 +695,11 @@ function ReviewStat({
   const pct = (done / total) * 100;
   return (
     <div className="rounded-lg p-2.5 bg-white" style={{ border: "1px solid var(--m-border)" }}>
-      <p className="text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>
         {label}
       </p>
       <p className="mt-1 text-[14px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
-        {done}<span className="text-[10px] font-normal" style={{ color: "var(--m-text-soft)" }}>/{total}</span>
+        {done}<span className="text-[11px] font-normal" style={{ color: "var(--m-text-soft)" }}>/{total}</span>
       </p>
       <div className="mt-1.5 h-1 rounded-full overflow-hidden" style={{ backgroundColor: "var(--m-surface)" }}>
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: hue }} />
@@ -714,18 +714,18 @@ function ReviewQueueRow({
   return (
     <div className="flex items-center gap-3 px-3 py-2.5 border-t" style={{ borderColor: "var(--m-border)" }}>
       <span
-        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
         style={{ backgroundColor: hue }}
       >
         {initials}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-[12.5px] font-semibold leading-tight" style={{ color: "var(--m-text)" }}>{name}</p>
-        <p className="text-[10.5px] leading-tight" style={{ color: "var(--m-text-soft)" }}>{role}</p>
+        <p className="text-[13.5px] font-semibold leading-tight" style={{ color: "var(--m-text)" }}>{name}</p>
+        <p className="text-[11.5px] leading-tight" style={{ color: "var(--m-text-soft)" }}>{role}</p>
       </div>
-      <span className="text-[12px] font-bold tabular-nums" style={{ color: hue }}>{score}</span>
+      <span className="text-[13px] font-bold tabular-nums" style={{ color: hue }}>{score}</span>
       <button
-        className="text-[10.5px] font-semibold px-2.5 h-6 rounded-md border whitespace-nowrap"
+        className="text-[11.5px] font-semibold px-2.5 h-6 rounded-md border whitespace-nowrap"
         style={{ borderColor: "var(--m-border-dark)", color: "var(--m-text)" }}
       >
         Sign off
@@ -744,27 +744,27 @@ function MockCulture() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Culture
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Kudos feed</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Kudos feed</span>
       </div>
       <div className="mt-1 flex items-baseline justify-between">
         <p className="font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
           47 kudos this week
         </p>
-        <p className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[12px]" style={{ color: "var(--m-text-soft)" }}>
           <span className="font-bold" style={{ color: "#ec4899" }}>↑ +12</span> vs last week
         </p>
       </div>
 
       {/* Leaderboard chip */}
       <div className="mt-3 inline-flex items-center gap-2 px-3 h-8 rounded-full" style={{ backgroundColor: "#fce7f3", border: "1px solid #fbcfe8" }}>
-        <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "#9d174d" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "#9d174d" }}>
           Top this month
         </span>
-        <span className="text-[11px] font-bold" style={{ color: "#9d174d" }}>
+        <span className="text-[12px] font-bold" style={{ color: "#9d174d" }}>
           🥇 Maya · 47 kudos
         </span>
       </div>
@@ -776,23 +776,23 @@ function MockCulture() {
             className="p-3 rounded-xl bg-white"
             style={{ border: "1px solid var(--m-border)" }}
           >
-            <div className="flex items-center gap-2 text-[12px]">
-              <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{ backgroundColor: k.fromHue }}>
+            <div className="flex items-center gap-2 text-[13px]">
+              <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[11px] font-bold" style={{ backgroundColor: k.fromHue }}>
                 {k.from[0]}
               </span>
               <span className="font-semibold" style={{ color: "var(--m-text)" }}>{k.from}</span>
               <ArrowRight size={11} className="opacity-50" />
-              <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold" style={{ backgroundColor: k.toHue }}>
+              <span className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[11px] font-bold" style={{ backgroundColor: k.toHue }}>
                 {k.to[0]}
               </span>
               <span className="font-semibold" style={{ color: "var(--m-text)" }}>{k.to}</span>
-              <span className="ml-auto text-[10px]" style={{ color: "var(--m-text-soft)" }}>{k.time}</span>
+              <span className="ml-auto text-[11px]" style={{ color: "var(--m-text-soft)" }}>{k.time}</span>
             </div>
-            <p className="mt-2 text-[12.5px] leading-snug" style={{ color: "var(--m-text)" }}>
+            <p className="mt-2 text-[13.5px] leading-snug" style={{ color: "var(--m-text)" }}>
               {k.msg}
             </p>
             <span
-              className="mt-2 inline-flex items-center text-[9px] font-bold uppercase tracking-[0.14em] px-2 h-5 rounded-full"
+              className="mt-2 inline-flex items-center text-[10px] font-bold uppercase tracking-[0.14em] px-2 h-5 rounded-full"
               style={{ backgroundColor: "#fce7f3", color: "#9d174d" }}
             >
               ★ {k.value}
@@ -809,17 +809,17 @@ function MockGrowth() {
   return (
     <div className="p-5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
           Growth
         </span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-        <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Pipeline · Q3</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+        <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Pipeline · Q3</span>
       </div>
       <div className="mt-1 flex items-baseline justify-between">
         <p className="font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
           $2.4M forecast
         </p>
-        <p className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[12px]" style={{ color: "var(--m-text-soft)" }}>
           <span className="font-bold" style={{ color: "#10b981" }}>92%</span> of quota
         </p>
       </div>
@@ -832,7 +832,7 @@ function MockGrowth() {
       </div>
 
       <div className="mt-4 rounded-xl border overflow-hidden" style={{ borderColor: "var(--m-border)" }}>
-        <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
+        <p className="px-3 py-2 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
           Closing this week
         </p>
         <DealRow customer="Helios Labs"        owner="DP" amount="$120k" stage="Negotiation" />
@@ -849,10 +849,10 @@ function PipeCol({
   return (
     <div className="rounded-lg p-2.5 bg-white" style={{ border: "1px solid var(--m-border)" }}>
       <div className="flex items-center justify-between">
-        <span className="text-[9.5px] font-bold uppercase tracking-[0.14em]" style={{ color: hue }}>
+        <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: hue }}>
           {stage}
         </span>
-        <span className="text-[9.5px] font-mono" style={{ color: "var(--m-text-soft)" }}>{count}</span>
+        <span className="text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>{count}</span>
       </div>
       <p className="mt-1 text-[14px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>{value}</p>
       <div className="mt-1.5 h-1 rounded-full overflow-hidden" style={{ backgroundColor: "var(--m-surface)" }}>
@@ -867,11 +867,11 @@ function DealRow({
 }: { customer: string; owner: string; amount: string; stage: string }) {
   return (
     <div className="grid grid-cols-[1.4fr_88px_1fr_120px] gap-2 px-3 py-2.5 items-center border-t" style={{ borderColor: "var(--m-border)" }}>
-      <span className="text-[12px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{customer}</span>
-      <span className="text-[11px]" style={{ color: "var(--m-text-muted)" }}>{owner}</span>
-      <span className="text-[12px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>{amount}</span>
+      <span className="text-[13px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{customer}</span>
+      <span className="text-[12px]" style={{ color: "var(--m-text-muted)" }}>{owner}</span>
+      <span className="text-[13px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>{amount}</span>
       <span
-        className="text-[9px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+        className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
         style={{ backgroundColor: "#f59e0b" }}
       >
         {stage}

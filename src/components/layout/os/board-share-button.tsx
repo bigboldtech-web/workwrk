@@ -27,7 +27,7 @@ export function BoardShareButton({ boardId, boardName, visibility, parentSpaceNa
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
+        className="text-[13.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
       >
         <Share2 className="w-3.5 h-3.5" />
         Share

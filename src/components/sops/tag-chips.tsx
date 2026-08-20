@@ -39,7 +39,7 @@ export function TagChips({ tags, selected, onToggle, onClearAll, maxVisible = 12
             type="button"
             onClick={() => onToggle(t.name)}
             className={[
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] transition-colors",
+              "inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
               on
                 ? "border-[#d4ff2e] bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]"
                 : "border-border text-muted hover:text-foreground hover:border-muted-2",
@@ -47,18 +47,18 @@ export function TagChips({ tags, selected, onToggle, onClearAll, maxVisible = 12
             aria-pressed={on}
           >
             <span>{t.name}</span>
-            <span className="opacity-60 font-mono tabular-nums text-[10px]">{t.count}</span>
+            <span className="opacity-60 font-mono tabular-nums text-[11px]">{t.count}</span>
           </button>
         );
       })}
       {hidden > 0 && (
-        <span className="text-[10px] text-muted">+{hidden} more</span>
+        <span className="text-[11px] text-muted">+{hidden} more</span>
       )}
       {selected.length > 0 && onClearAll && (
         <button
           type="button"
           onClick={onClearAll}
-          className="inline-flex items-center gap-1 text-[10px] text-muted hover:text-foreground"
+          className="inline-flex items-center gap-1 text-[11px] text-muted hover:text-foreground"
         >
           <X size={10} /> Clear tags
         </button>

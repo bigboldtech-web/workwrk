@@ -91,8 +91,8 @@ export default function RoadmapPage() {
                 {g.items.map((item) => (
                   <div key={item.title} className="p-6 bg-white border border-slate-200 rounded-2xl">
                     <div className="flex items-center justify-between">
-                      <p className={`text-[10px] font-bold uppercase tracking-[0.16em] ${t.text}`}>{item.quarter}</p>
-                      <span className={`text-[10px] font-bold uppercase tracking-[0.16em] px-2 h-5 inline-flex items-center rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                      <p className={`text-[11px] font-bold uppercase tracking-[0.16em] ${t.text}`}>{item.quarter}</p>
+                      <span className={`text-[11px] font-bold uppercase tracking-[0.16em] px-2 h-5 inline-flex items-center rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                         {g.meta.label}
                       </span>
                     </div>

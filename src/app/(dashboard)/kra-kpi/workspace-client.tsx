@@ -213,21 +213,21 @@ export default function KraKpiPage() {
               : `${stats.jobTitles} job title${stats.jobTitles === 1 ? "" : "s"} · ${stats.kras} KRA${stats.kras === 1 ? "" : "s"} · ${stats.kpis} KPI${stats.kpis === 1 ? "" : "s"}`}
           </span>
           <div className="flex-1" />
-          <Link href="/kra-kpi/review" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/kra-kpi/review" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Activity className="w-3.5 h-3.5 text-zinc-400" /> KPI review cycle
           </Link>
-          <Link href="/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Award className="w-3.5 h-3.5 text-zinc-400" /> Reviews
           </Link>
           <button
             type="button"
             onClick={() => setNewOpen(true)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[14px] font-medium hover:bg-[#0060c2]"
           >
             <Plus className="w-3.5 h-3.5" /> New KRA
           </button>
         </div>
-        <p className="mt-2 text-[12.5px] text-zinc-500 max-w-[720px]">
+        <p className="mt-2 text-[13.5px] text-zinc-500 max-w-[720px]">
           KRAs and KPIs live inside job titles. Pick a role to define what it
           owns — every person holding that title inherits the template, and
           quarterly targets live on each person&rsquo;s goals.
@@ -257,14 +257,14 @@ export default function KraKpiPage() {
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search job titles, KRAs, KPIs…"
             aria-label="Search job titles, KRAs and KPIs"
-            className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-zinc-400"
+            className="flex-1 bg-transparent text-[14px] outline-none placeholder:text-zinc-400"
           />
         </div>
 
         {/* KRA / KPI matches that jump to their role */}
         {q && definitionMatches.length > 0 ? (
           <section>
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">Inside job titles</h2>
+            <h2 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">Inside job titles</h2>
             <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100">
               {definitionMatches.map((m) => (
                 <Link
@@ -275,9 +275,9 @@ export default function KraKpiPage() {
                   {m.kind === "KRA"
                     ? <Target className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                     : <Gauge className="w-3.5 h-3.5 text-zinc-400 shrink-0" />}
-                  <span className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400 w-7 shrink-0">{m.kind}</span>
-                  <span className="text-[13px] text-zinc-800 truncate">{m.label}</span>
-                  <span className="text-[11.5px] text-zinc-400 truncate">{m.sub}</span>
+                  <span className="text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400 w-7 shrink-0">{m.kind}</span>
+                  <span className="text-[14px] text-zinc-800 truncate">{m.label}</span>
+                  <span className="text-[12.5px] text-zinc-400 truncate">{m.sub}</span>
                   <ChevronRight className="w-3.5 h-3.5 text-zinc-300 ml-auto shrink-0" />
                 </Link>
               ))}
@@ -289,7 +289,7 @@ export default function KraKpiPage() {
         {loadError ? (
           <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load job titles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : roles === null ? (
-          <div className="py-16 text-center text-[13px] text-zinc-400">Loading…</div>
+          <div className="py-16 text-center text-[14px] text-zinc-400">Loading…</div>
         ) : roles.length === 0 ? (
           <OsEmptyView
             Icon={Briefcase}
@@ -300,11 +300,11 @@ export default function KraKpiPage() {
             onCta={() => router.push("/people/roles?new=1")}
           />
         ) : filteredRoles.length === 0 && definitionMatches.length === 0 ? (
-          <div className="py-16 text-center text-[13px] text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>
+          <div className="py-16 text-center text-[14px] text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>
         ) : (
           grouped.map((g) => (
             <section key={g.name}>
-              <h2 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{g.name}</h2>
+              <h2 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-1.5">{g.name}</h2>
               <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-zinc-100">
                 {g.items.map((r) => <RoleRow key={r.id} role={r} weight={weightByRole.get(r.id)} />)}
               </div>
@@ -321,8 +321,8 @@ export default function KraKpiPage() {
                   <AlertTriangle size={15} className="text-amber-500" />
                 </span>
                 <div>
-                  <h2 className="text-[13.5px] font-semibold text-zinc-900 leading-tight">Needs a job title</h2>
-                  <p className="text-[11.5px] text-zinc-500">
+                  <h2 className="text-[14.5px] font-semibold text-zinc-900 leading-tight">Needs a job title</h2>
+                  <p className="text-[12.5px] text-zinc-500">
                     These KRAs belong to no role, so nobody inherits them. Attach
                     each one to the job title it belongs to — nothing is deleted.
                   </p>
@@ -366,40 +366,40 @@ function RoleRow({ role: r, weight }: { role: ApiRole; weight?: { sum: number; c
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-2 min-w-0">
-          <span className="text-[13px] font-medium text-zinc-900 truncate">{r.title}</span>
+          <span className="text-[14px] font-medium text-zinc-900 truncate">{r.title}</span>
           {r.level ? (
-            <span className="text-[10px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide shrink-0">
+            <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide shrink-0">
               {LEVEL_SHORT[r.level] ?? r.level}
             </span>
           ) : null}
         </span>
-        <span className="block text-[11.5px] text-zinc-400 truncate">
+        <span className="block text-[12.5px] text-zinc-400 truncate">
           {r.department?.name ?? "No department"}
         </span>
       </span>
-      <span className="inline-flex items-center gap-1 text-[12px] text-zinc-500 shrink-0" title={`${people} person${people === 1 ? "" : "s"} holding this title`}>
+      <span className="inline-flex items-center gap-1 text-[13px] text-zinc-500 shrink-0" title={`${people} person${people === 1 ? "" : "s"} holding this title`}>
         <Users className="w-3.5 h-3.5 text-zinc-400" /> {people}
       </span>
       {kraCount === 0 ? (
-        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600 shrink-0">
+        <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11.5px] font-medium text-amber-600 shrink-0">
           <AlertTriangle className="w-3 h-3" /> No KRAs yet
         </span>
       ) : (
-        <span className="text-[12px] text-zinc-500 tabular-nums shrink-0">
+        <span className="text-[13px] text-zinc-500 tabular-nums shrink-0">
           {kraCount} KRA{kraCount === 1 ? "" : "s"} · {kpiCount} KPI{kpiCount === 1 ? "" : "s"}
         </span>
       )}
       {weightSum != null ? (
         weightSum === 100 ? (
           <span
-            className="inline-flex items-center rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10.5px] font-medium text-zinc-600 tabular-nums shrink-0"
+            className="inline-flex items-center rounded-md bg-zinc-100 px-1.5 py-0.5 text-[11.5px] font-medium text-zinc-600 tabular-nums shrink-0"
             title="KRA weights total 100%"
           >
             weight 100%
           </span>
         ) : (
           <span
-            className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-medium text-amber-600 tabular-nums shrink-0"
+            className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11.5px] font-medium text-amber-600 tabular-nums shrink-0"
             title={`KRA weights total ${weightSum}%, should be 100%`}
           >
             <AlertTriangle className="w-3 h-3" /> weight {weightSum}%
@@ -488,8 +488,8 @@ function OrphanRow({
       <Target className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       <span className="min-w-0 flex-1 basis-52">
         <span className="flex items-center gap-2">
-          <span className="text-[13px] font-medium text-zinc-900 truncate">{o.name}</span>
-          <span className="text-[11px] text-zinc-400 shrink-0">
+          <span className="text-[14px] font-medium text-zinc-900 truncate">{o.name}</span>
+          <span className="text-[12px] text-zinc-400 shrink-0">
             {o.kpis.length} KPI{o.kpis.length === 1 ? "" : "s"}
           </span>
           {o.kpis.some((k) => k.isNorthStar) ? (
@@ -497,11 +497,11 @@ function OrphanRow({
           ) : null}
         </span>
         {assignees.length > 0 ? (
-          <span className="block text-[11.5px] text-zinc-400 truncate">
+          <span className="block text-[12.5px] text-zinc-400 truncate">
             Assigned to {assignees.slice(0, 3).join(", ")}{assignees.length > 3 ? ` +${assignees.length - 3}` : ""}
           </span>
         ) : (
-          <span className="block text-[11.5px] text-zinc-400">No active assignees</span>
+          <span className="block text-[12.5px] text-zinc-400">No active assignees</span>
         )}
       </span>
 
@@ -510,7 +510,7 @@ function OrphanRow({
           type="button"
           disabled={busy}
           onClick={() => void attach(o.suggestedRole!.id, o.suggestedRole!.title)}
-          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[#0073EA]/30 bg-[#0073EA]/5 text-[12px] font-medium text-[#0073EA] hover:bg-[#0073EA]/10 disabled:opacity-50 shrink-0"
+          className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[#0073EA]/30 bg-[#0073EA]/5 text-[13px] font-medium text-[#0073EA] hover:bg-[#0073EA]/10 disabled:opacity-50 shrink-0"
           title="All active assignees hold this job title"
         >
           Attach to {o.suggestedRole.title}
@@ -523,7 +523,7 @@ function OrphanRow({
           onChange={(e) => setRoleId(e.target.value)}
           disabled={busy}
           aria-label={`Job title for ${o.name}`}
-          className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700 focus:outline-none focus:border-[#0073EA]"
+          className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[13px] text-zinc-700 focus:outline-none focus:border-[#0073EA]"
         >
           <option value="">Choose job title…</option>
           {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
@@ -535,7 +535,7 @@ function OrphanRow({
             const picked = roles.find((r) => r.id === roleId);
             if (picked) void attach(picked.id, picked.title);
           }}
-          className="h-7 px-2.5 rounded-md bg-zinc-900 text-white text-[12px] font-medium hover:bg-zinc-800 disabled:opacity-40"
+          className="h-7 px-2.5 rounded-md bg-zinc-900 text-white text-[13px] font-medium hover:bg-zinc-800 disabled:opacity-40"
         >
           Attach
         </button>
@@ -544,7 +544,7 @@ function OrphanRow({
           disabled={busy}
           onClick={() => void remove()}
           title="Not a KRA — delete it"
-          className="h-7 px-2.5 rounded-md text-[12px] font-medium text-[#E2445C] hover:bg-[#E2445C]/10 disabled:opacity-40"
+          className="h-7 px-2.5 rounded-md text-[13px] font-medium text-[#E2445C] hover:bg-[#E2445C]/10 disabled:opacity-40"
         >
           Not a KRA
         </button>

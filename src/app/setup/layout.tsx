@@ -47,7 +47,7 @@ export default function SetupLayout({
             />
             workwrk
           </Link>
-          <span className="border-l border-zinc-200 pl-4 text-[11px] uppercase tracking-wide text-zinc-400">
+          <span className="border-l border-zinc-200 pl-4 text-[12px] uppercase tracking-wide text-zinc-400">
             Setup your workspace
           </span>
         </div>

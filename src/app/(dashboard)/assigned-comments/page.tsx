@@ -44,7 +44,7 @@ export default function AssignedCommentsPage() {
     <div className="flex flex-col h-full bg-white">
       {/* Top bar */}
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 bg-white !px-4 z-10">
-        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-normal leading-5 text-zinc-500">
+        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-normal leading-5 text-zinc-500">
           <h1 className="truncate font-semibold text-zinc-900" style={{ fontSize: "13px" }}>Assigned Comments</h1>
         </div>
       </header>
@@ -62,7 +62,7 @@ export default function AssignedCommentsPage() {
 
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 bg-white !px-3 text-[13px] text-zinc-600 hover:bg-zinc-50"
+          className="inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 bg-white !px-3 text-[14px] text-zinc-600 hover:bg-zinc-50"
         >
           <ListFilter className="w-3.5 h-3.5" />
           Filter
@@ -72,7 +72,7 @@ export default function AssignedCommentsPage() {
           type="button"
           onClick={() => setResolved((v) => !v)}
           aria-pressed={resolved}
-          className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[13px] transition-colors ${
+          className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[14px] transition-colors ${
             resolved
               ? "font-medium"
               : "text-zinc-600 hover:bg-zinc-50 bg-white"
@@ -94,14 +94,14 @@ export default function AssignedCommentsPage() {
               onChange={(e) => setQuery(e.target.value)}
               onBlur={() => { if (!query) setSearchOpen(false); }}
               placeholder="Search"
-              className="h-8 w-[180px] rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-[12.5px] focus:border-zinc-400 focus:outline-none"
+              className="h-8 w-[180px] rounded-md border border-zinc-200 bg-white pl-8 pr-3 text-[13.5px] focus:border-zinc-400 focus:outline-none"
             />
           </div>
         ) : (
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md !px-2.5 text-[13px] text-zinc-500 hover:bg-zinc-100"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md !px-2.5 text-[14px] text-zinc-500 hover:bg-zinc-100"
           >
             <Search className="w-3.5 h-3.5" />
             Search
@@ -117,7 +117,7 @@ export default function AssignedCommentsPage() {
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-md border border-zinc-200 bg-white !px-4 py-2 text-[13px] text-zinc-700 hover:bg-zinc-50"
+          className="rounded-md border border-zinc-200 bg-white !px-4 py-2 text-[14px] text-zinc-700 hover:bg-zinc-50"
         >
           Clear filters
         </button>
@@ -139,7 +139,7 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[13px] transition-colors ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-full border border-zinc-200 !px-3 text-[14px] transition-colors ${
         active
           ? "font-medium"
           : "text-zinc-600 hover:bg-zinc-50 bg-white"
@@ -165,7 +165,7 @@ function DateRangeDropdown({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-7 items-center gap-1.5 rounded-full border !px-3 text-[13px]"
+        className="inline-flex h-7 items-center gap-1.5 rounded-full border !px-3 text-[14px]"
         style={brandTintStyle(0.12, "soft")}
       >
         <Calendar className="w-3.5 h-3.5" />
@@ -183,7 +183,7 @@ function DateRangeDropdown({
                     onChange(opt);
                     setOpen(false);
                   }}
-                  className={`w-full text-left !px-3 py-1.5 text-[12.5px] hover:bg-zinc-50 ${
+                  className={`w-full text-left !px-3 py-1.5 text-[13.5px] hover:bg-zinc-50 ${
                     value === opt ? "text-zinc-900 font-medium" : "text-zinc-700"
                   }`}
                 >

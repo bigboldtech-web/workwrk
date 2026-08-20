@@ -221,18 +221,18 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
           type="button"
           disabled={isCurrentMonth}
           onClick={() => setMonth({ y: now.getFullYear(), m: now.getMonth() })}
-          className="inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-[11.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:text-zinc-400 disabled:hover:bg-white dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5 dark:disabled:text-zinc-600"
+          className="inline-flex h-7 items-center rounded-md border border-zinc-200 bg-white px-2.5 text-[12.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:text-zinc-400 disabled:hover:bg-white dark:border-zinc-700 dark:bg-transparent dark:text-zinc-300 dark:hover:bg-white/5 dark:disabled:text-zinc-600"
         >
           Today
         </button>
         <div className="flex-1" />
         {dateFields.length > 0 ? (
-          <label className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500">
+          <label className="inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
             <span className="hidden sm:inline">Date field</span>
             <select
               value={dateSourceLocal}
               onChange={(e) => persistDateSource(e.target.value)}
-              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[11.5px] text-zinc-700 transition-colors hover:border-zinc-300 focus:outline-none focus:border-[var(--os-brand)]"
+              className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-700 transition-colors hover:border-zinc-300 focus:outline-none focus:border-[var(--os-brand)]"
             >
               <option value="__auto">Auto (Due + date fields)</option>
               <option value="__due">Due date</option>
@@ -242,7 +242,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
             </select>
           </label>
         ) : null}
-        <span className="text-[10.5px] text-zinc-400 hidden lg:inline">
+        <span className="text-[11.5px] text-zinc-400 hidden lg:inline">
           {datedCount} dated item{datedCount === 1 ? "" : "s"}
         </span>
       </div>
@@ -250,7 +250,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="grid grid-cols-7 border-b border-zinc-200">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
+            <div key={d} className="px-2.5 py-1.5 text-[12px] font-medium text-zinc-500">
               {d}
             </div>
           ))}
@@ -288,7 +288,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                 {cell.day !== null ? (
                   <div className="mb-1.5 flex items-center justify-between">
                     <span
-                      className={`text-[11px] tabular-nums leading-5 ${
+                      className={`text-[12px] tabular-nums leading-5 ${
                         isToday
                           ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-[var(--os-brand)] font-semibold text-white"
                           : cell.inMonth
@@ -300,7 +300,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                     </span>
                     <span className="inline-flex items-center gap-1">
                       {dayItems.length > 0 ? (
-                        <span className="text-[10px] font-medium tabular-nums text-zinc-400">{dayItems.length}</span>
+                        <span className="text-[11px] font-medium tabular-nums text-zinc-400">{dayItems.length}</span>
                       ) : null}
                       {canEdit && cell.inMonth ? (
                         <button
@@ -333,7 +333,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           onDragEnd={() => { setDragId(null); setDragOverDay(null); }}
                           onClick={() => onOpenItem?.(it.id)}
                           onContextMenu={(e) => menu.openItemMenu(e, it)}
-                          className={`flex w-full items-center gap-1.5 rounded-[4px] border-l-2 px-1.5 py-[3px] text-left text-[11px] font-medium leading-4 text-zinc-700 transition-[filter] hover:brightness-[0.96] ${
+                          className={`flex w-full items-center gap-1.5 rounded-[4px] border-l-2 px-1.5 py-[3px] text-left text-[12px] font-medium leading-4 text-zinc-700 transition-[filter] hover:brightness-[0.96] ${
                             canEdit ? "cursor-grab active:cursor-grabbing" : ""
                           } ${dragId === it.id ? "opacity-40" : ""}`}
                           style={{ borderLeftColor: dot, backgroundColor: `${dot}14` }}
@@ -353,7 +353,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                     );
                   })}
                   {dayItems.length > 4 ? (
-                    <li className="px-1.5 pt-0.5 text-[10.5px] font-medium text-zinc-500 hover:text-zinc-700 cursor-default">+ {dayItems.length - 4} more</li>
+                    <li className="px-1.5 pt-0.5 text-[11.5px] font-medium text-zinc-500 hover:text-zinc-700 cursor-default">+ {dayItems.length - 4} more</li>
                   ) : null}
                 </ul>
               </div>

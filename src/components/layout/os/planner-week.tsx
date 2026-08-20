@@ -151,10 +151,10 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
         <div className="text-[15px] font-semibold text-zinc-900 dark:text-zinc-100">Planner</div>
         <div className="flex items-center gap-1 ml-2">
           <button type="button" onClick={() => setAnchor(addDays(weekStart, -7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Previous week"><ChevronLeft className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
-          <button type="button" onClick={() => setAnchor(new Date())} className="h-7 px-2.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-[12.5px] text-zinc-700 dark:text-zinc-200">Today</button>
+          <button type="button" onClick={() => setAnchor(new Date())} className="h-7 px-2.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-[13.5px] text-zinc-700 dark:text-zinc-200">Today</button>
           <button type="button" onClick={() => setAnchor(addDays(weekStart, 7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Next week"><ChevronRight className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
         </div>
-        <div className="text-[13.5px] font-medium text-zinc-700 dark:text-zinc-200">{label}</div>
+        <div className="text-[14.5px] font-medium text-zinc-700 dark:text-zinc-200">{label}</div>
         {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
       </div>
 
@@ -175,7 +175,7 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                   const today = sameDay(d, now);
                   return (
                     <div key={d.toISOString()} className="flex-1 py-2 text-center">
-                      <div className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{DOW[d.getDay()]}</div>
+                      <div className="text-[12px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{DOW[d.getDay()]}</div>
                       <div className={`text-[15px] font-semibold mt-0.5 inline-flex items-center justify-center ${today ? "h-7 w-7 rounded-full bg-[#2F8BF0] text-white" : "text-zinc-800 dark:text-zinc-100"}`}>{d.getDate()}</div>
                     </div>
                   );
@@ -186,7 +186,7 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                 <div className="flex" style={{ height: DAY_PX }}>
                   <div className="w-14 shrink-0 relative">
                     {Array.from({ length: 24 }, (_, h) => (
-                      <div key={h} className="absolute right-2 -translate-y-1/2 text-[10.5px] text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
+                      <div key={h} className="absolute right-2 -translate-y-1/2 text-[11.5px] text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
                     ))}
                   </div>
                   {days.map((day) => {
@@ -229,8 +229,8 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                               style={{ top, height, background: `${color}22`, borderLeft: `3px solid ${color}` }}
                               title={e.title}
                             >
-                              <div className="text-[11px] font-medium truncate" style={{ color }}>{e.title}</div>
-                              <div className="text-[10px] truncate" style={{ color: `${color}cc` }}>{s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+                              <div className="text-[12px] font-medium truncate" style={{ color }}>{e.title}</div>
+                              <div className="text-[11px] truncate" style={{ color: `${color}cc` }}>{s.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
                             </button>
                           );
                         })}
@@ -309,7 +309,7 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
         {/* tabs */}
         <div className="flex items-center gap-1 px-3 pt-3 pb-2">
           {CREATE_TABS.map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} className={`px-2.5 h-7 rounded-md text-[13px] font-medium ${tab === t ? "bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/5"}`}>{t}</button>
+            <button key={t} type="button" onClick={() => setTab(t)} className={`px-2.5 h-7 rounded-md text-[14px] font-medium ${tab === t ? "bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/5"}`}>{t}</button>
           ))}
           <button type="button" onClick={onClose} className="ml-auto w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
@@ -318,18 +318,18 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
           <input value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void create(); }} autoFocus placeholder={`${placeholder}, @ for people, @@ for tasks`} className="w-full h-11 px-3 rounded-lg border text-[14px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 outline-none" style={{ borderColor: accent }} />
 
           {/* date + time range */}
-          <div className="flex items-center gap-2 text-[13px] text-zinc-700 dark:text-zinc-200">
+          <div className="flex items-center gap-2 text-[14px] text-zinc-700 dark:text-zinc-200">
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-transparent px-2 h-8 outline-none" />
             {!allDay ? (
               <>
                 <input type="time" value={startT} onChange={(e) => setStartT(e.target.value)} className="rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-transparent px-2 h-8 outline-none" />
                 <span className="text-zinc-400">→</span>
                 <input type="time" value={endT} onChange={(e) => setEndT(e.target.value)} className="rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-transparent px-2 h-8 outline-none" />
-                <span className="text-[12px] text-zinc-400">{durLabel}</span>
+                <span className="text-[13px] text-zinc-400">{durLabel}</span>
               </>
             ) : null}
           </div>
-          <label className="flex items-center gap-2 text-[12.5px] text-zinc-600 dark:text-zinc-300 cursor-pointer">
+          <label className="flex items-center gap-2 text-[13.5px] text-zinc-600 dark:text-zinc-300 cursor-pointer">
             <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="accent-[#2F8BF0]" /> All day
           </label>
 
@@ -339,17 +339,17 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
             <Row icon={Users} label="Add participants" muted />
             <Row icon={Link2} label="Add tasks and docs" muted />
             <Row icon={MapPin} label="Add location or room" muted />
-            <button type="button" onClick={() => setShowDesc((v) => !v)} className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-[13px] text-zinc-500 dark:text-zinc-400">
+            <button type="button" onClick={() => setShowDesc((v) => !v)} className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-[14px] text-zinc-500 dark:text-zinc-400">
               <AlignLeft className="w-4 h-4" /> {showDesc ? "Hide description" : "Add description"}
             </button>
             {showDesc ? (
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Add a description…" className="w-full rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-transparent px-2.5 py-2 text-[13px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none resize-none" />
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Add a description…" className="w-full rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-transparent px-2.5 py-2 text-[14px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400 outline-none resize-none" />
             ) : null}
           </div>
 
           <div className="flex justify-end gap-2 pt-1">
-            <button type="button" onClick={onClose} className="px-3 h-9 rounded-md text-[13px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
-            <button type="button" onClick={() => void create()} disabled={saving} className="px-4 h-9 rounded-md text-[13px] font-medium text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: accent }}>
+            <button type="button" onClick={onClose} className="px-3 h-9 rounded-md text-[14px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
+            <button type="button" onClick={() => void create()} disabled={saving} className="px-4 h-9 rounded-md text-[14px] font-medium text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: accent }}>
               {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Create
             </button>
           </div>
@@ -361,7 +361,7 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
 
 function Row({ icon: Icon, label, muted }: { icon: typeof Video; label: string; muted?: boolean }) {
   return (
-    <div className={`flex items-center gap-2.5 px-1.5 py-1.5 rounded-md text-[13px] ${muted ? "text-zinc-400 dark:text-zinc-500" : "text-zinc-700 dark:text-zinc-200"}`}>
+    <div className={`flex items-center gap-2.5 px-1.5 py-1.5 rounded-md text-[14px] ${muted ? "text-zinc-400 dark:text-zinc-500" : "text-zinc-700 dark:text-zinc-200"}`}>
       <Icon className="w-4 h-4" /> {label}
     </div>
   );

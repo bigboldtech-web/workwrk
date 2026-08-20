@@ -75,7 +75,7 @@ export default function BlogPage() {
           >
             <div className="bg-white rounded-[1.4rem] p-8 lg:p-12">
               <div className="flex items-center gap-3">
-                <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${fHue.bgTint} ${fHue.text} border ${fHue.border}`}>
+                <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${fHue.bgTint} ${fHue.text} border ${fHue.border}`}>
                   Featured · {featured.category}
                 </span>
                 <span className="text-xs text-slate-500">{featured.date} · {featured.readMins} min</span>
@@ -103,7 +103,7 @@ export default function BlogPage() {
                   href={`/blog/${p.slug}`}
                   className="group p-7 bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:-translate-y-0.5 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
                 >
-                  <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-[0.16em] px-2.5 h-6 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                  <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-2.5 h-6 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                     {p.category}
                   </span>
                   <h3 className="mt-4 font-bold text-slate-900 text-xl tracking-tight leading-snug">{p.title}</h3>

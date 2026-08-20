@@ -67,7 +67,7 @@ export function StatusDistribution({ segs, total }: { segs: StatusSeg[]; total: 
       </div>
       <ul className="space-y-1.5">
         {segs.map((s) => (
-          <li key={s.key} className="flex items-center gap-2 text-[12px]">
+          <li key={s.key} className="flex items-center gap-2 text-[13px]">
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
             <span className="min-w-0 flex-1 truncate text-zinc-600">{s.label}</span>
             <span className="tabular-nums text-zinc-700">{s.count}</span>
@@ -93,7 +93,7 @@ export function BatteryWidget({ widget }: { widget: DashWidget }) {
   }
   if (error) {
     return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
+      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
         Couldn&apos;t load tasks
       </div>
     );
@@ -102,7 +102,7 @@ export function BatteryWidget({ widget }: { widget: DashWidget }) {
   const segs = buildStatusSegs(list);
   if (list.length === 0 || segs.length === 0) {
     return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
+      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
         No tasks here yet
       </div>
     );

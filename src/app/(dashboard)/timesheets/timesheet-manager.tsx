@@ -359,7 +359,7 @@ function MyWeek({
           <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="text-base flex items-center gap-2">
               Week of {week[0]?.toLocaleDateString()} → {week[6]?.toLocaleDateString()}
-              <Badge variant="outline" className={`text-[10px] ${STATUS_STYLE[data.status]}`}>
+              <Badge variant="outline" className={`text-[11px] ${STATUS_STYLE[data.status]}`}>
                 {data.status}
               </Badge>
             </CardTitle>
@@ -474,7 +474,7 @@ function DayRow({
                 {!e.task && !e.description && <span className="italic">(no description)</span>}
               </span>
               {e.source === "PUNCH" && (
-                <span className="text-[10px] uppercase tracking-wide opacity-60">punched</span>
+                <span className="text-[11px] uppercase tracking-wide opacity-60">punched</span>
               )}
               {!locked && (
                 <button

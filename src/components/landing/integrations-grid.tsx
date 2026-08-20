@@ -81,7 +81,7 @@ export function IntegrationsGrid() {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             Integrations
@@ -140,7 +140,7 @@ export function IntegrationsGrid() {
           transition={{ duration: 0.7, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[10.5px] font-bold uppercase tracking-[0.22em] mb-5"
+            className="text-[11.5px] font-bold uppercase tracking-[0.22em] mb-5"
             style={{ color: "var(--m-text-soft)" }}
           >
             Browse by category
@@ -155,7 +155,7 @@ export function IntegrationsGrid() {
 
         {/* Trademark disclaimer */}
         <p
-          className="mt-10 text-[11px] leading-relaxed max-w-3xl"
+          className="mt-10 text-[12px] leading-relaxed max-w-3xl"
           style={{ color: "var(--m-text-soft)" }}
         >
           All third-party product names, logos, and brands are property
@@ -233,7 +233,7 @@ function IntegrationChip({ integration }: { integration: Integration }) {
     >
       <BrandLogo integration={integration} size={32} />
       <span
-        className="text-[12.5px] font-bold"
+        className="text-[13.5px] font-bold"
         style={{ color: "var(--m-text)", fontVariant: "small-caps", letterSpacing: "0.02em" }}
       >
         {integration.name}
@@ -260,12 +260,12 @@ function IntegrationCard({ integration, delay }: { integration: Integration; del
       <BrandLogo integration={integration} size={32} />
       <div className="min-w-0 flex-1">
         <p
-          className="text-[12.5px] font-bold truncate"
+          className="text-[13.5px] font-bold truncate"
           style={{ color: "var(--m-text)", fontVariant: "small-caps", letterSpacing: "0.02em" }}
         >
           {integration.name}
         </p>
-        <p className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>
           {CATEGORY_LABELS[integration.category]}
         </p>
       </div>

@@ -57,7 +57,7 @@ export default async function SpacesIndexPage() {
                   {s.description ? (
                     <p className="text-xs text-zinc-500 line-clamp-2">{s.description}</p>
                   ) : null}
-                  <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-500">
+                  <div className="mt-2 flex items-center gap-3 text-[12px] text-zinc-500">
                     <span>{s.memberCount} member{s.memberCount === 1 ? "" : "s"}</span>
                     <span>{s.folderCount} folder{s.folderCount === 1 ? "" : "s"}</span>
                     <span>{s.boardCount} board{s.boardCount === 1 ? "" : "s"}</span>

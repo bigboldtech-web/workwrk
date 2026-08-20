@@ -45,7 +45,7 @@ export function TopPinsStrip() {
       {pins.map((p) => (
         <span
           key={`${p.kind}:${p.id}`}
-          className="group inline-flex items-center gap-1 h-6 pl-1 pr-0.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 text-[12px] text-zinc-700 shrink-0"
+          className="group inline-flex items-center gap-1 h-6 pl-1 pr-0.5 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 text-[13px] text-zinc-700 shrink-0"
         >
           <Link href={p.href} className="inline-flex items-center gap-1.5 min-w-0" title={p.label}>
             <EntityTile size="sm" icon={p.icon} color={p.color ?? undefined} name={p.label} />

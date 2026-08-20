@@ -161,7 +161,7 @@ export function Eyebrow({
   const color = invert ? "text-white/70" : HUES[hue].text;
   return (
     <span
-      className={`inline-block text-[11px] font-bold uppercase tracking-[0.18em] ${color} ${className}`}
+      className={`inline-block text-[12px] font-bold uppercase tracking-[0.18em] ${color} ${className}`}
     >
       {children}
     </span>
@@ -298,7 +298,7 @@ export function Button({
   leftIcon?: ReactNode;
 }) {
   const sizeCls =
-    size === "sm" ? "h-9 px-4 text-[13px]" :
+    size === "sm" ? "h-9 px-4 text-[14px]" :
     size === "lg" ? "h-12 px-6 text-[15px]" :
                     "h-10 px-5 text-sm";
 
@@ -465,7 +465,7 @@ export function StatCard({
   const t = HUES[hue];
   return (
     <div className={`${invert ? "border-white/10" : "border-slate-200"} border-t pt-6`}>
-      <p className={`text-[10px] font-bold uppercase tracking-[0.18em] ${invert ? "text-white/60" : t.text}`}>
+      <p className={`text-[11px] font-bold uppercase tracking-[0.18em] ${invert ? "text-white/60" : t.text}`}>
         {label}
       </p>
       <p className={`mt-3 text-5xl lg:text-6xl font-bold tracking-tight ${invert ? "text-white" : "text-slate-900"}`}>
@@ -646,7 +646,7 @@ export function LogoCloud({
 }) {
   return (
     <div className="text-center">
-      <p className={`text-[11px] font-bold uppercase tracking-[0.22em] ${invert ? "text-white/50" : "text-slate-400"}`}>{title}</p>
+      <p className={`text-[12px] font-bold uppercase tracking-[0.22em] ${invert ? "text-white/50" : "text-slate-400"}`}>{title}</p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-x-12 gap-y-5">
         {brands.map((b) => (
           <span

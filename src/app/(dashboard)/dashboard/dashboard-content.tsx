@@ -164,7 +164,7 @@ function EmployeeOfMonthCard() {
           </div>
           <div className="text-right">
             <p className="text-2xl font-bold font-mono text-yellow-400">{Math.round(eom.score)}</p>
-            <p className="text-[10px] text-muted">Score</p>
+            <p className="text-[11px] text-muted">Score</p>
           </div>
         </div>
       </CardContent>
@@ -432,9 +432,9 @@ export default function DashboardContent() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{record.kpiName}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-muted">{record.userName}</span>
+                      <span className="text-[11px] text-muted">{record.userName}</span>
                       {achievement != null && (
-                        <span className={`text-[10px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[color:var(--accent-strong)]" : "text-orange-400"}`}>
+                        <span className={`text-[11px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[color:var(--accent-strong)]" : "text-orange-400"}`}>
                           {achievement}%
                         </span>
                       )}
@@ -466,7 +466,7 @@ export default function DashboardContent() {
                 className={`rounded-lg border-l-2 p-3 ${getAlertStyle(alert.type)}`}
               >
                 <p className="text-sm">{alert.message}</p>
-                <p className="text-[10px] text-muted mt-1">{alert.time}</p>
+                <p className="text-[11px] text-muted mt-1">{alert.time}</p>
               </div>
             ))}
             {alerts.length === 0 && (
@@ -511,7 +511,7 @@ export default function DashboardContent() {
                     <Icon size={12} className="text-[color:var(--accent-strong)] mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs leading-snug line-clamp-2">{item.description}</p>
-                      <p className="text-[10px] text-muted mt-0.5">
+                      <p className="text-[11px] text-muted mt-0.5">
                         {item.actor?.firstName} {item.actor?.lastName} · {timeAgo}
                       </p>
                     </div>
@@ -547,7 +547,7 @@ export default function DashboardContent() {
                   >
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium truncate">{s.title}</p>
-                      <p className="text-[11px] text-muted">{qCount} question{qCount === 1 ? "" : "s"} · takes ~{Math.max(1, qCount)} min</p>
+                      <p className="text-[12px] text-muted">{qCount} question{qCount === 1 ? "" : "s"} · takes ~{Math.max(1, qCount)} min</p>
                     </div>
                     <span className="text-xs text-[color:var(--accent-strong)] font-medium flex-shrink-0">Respond →</span>
                   </Link>
@@ -592,9 +592,9 @@ export default function DashboardContent() {
                         <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#0073EA]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-[11px] uppercase tracking-wider border-[#0073EA]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                           )}
-                          <span className="text-[10px] text-muted">{timeAgo}</span>
+                          <span className="text-[11px] text-muted">{timeAgo}</span>
                         </div>
                       </div>
                     </div>

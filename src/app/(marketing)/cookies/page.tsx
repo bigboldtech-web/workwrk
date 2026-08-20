@@ -68,7 +68,7 @@ export default function CookiesPage() {
                       <td className="p-3 text-slate-700">{c.purpose}</td>
                       <td className="p-3 text-slate-500">{c.duration}</td>
                       <td className="p-3">
-                        <span className={`inline-flex text-[10px] font-bold uppercase tracking-[0.14em] px-2 h-5 items-center rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                        <span className={`inline-flex text-[11px] font-bold uppercase tracking-[0.14em] px-2 h-5 items-center rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                           {c.type}
                         </span>
                       </td>

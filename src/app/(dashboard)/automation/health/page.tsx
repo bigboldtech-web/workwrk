@@ -72,7 +72,7 @@ function SuccessDonut({ rate, size = 148 }: { rate: number; size?: number }) {
         <span className="text-[24px] font-semibold leading-none tabular-nums text-zinc-900">
           {rate}%
         </span>
-        <span className="mt-1 text-[10.5px] uppercase tracking-wide text-zinc-400">success</span>
+        <span className="mt-1 text-[11.5px] uppercase tracking-wide text-zinc-400">success</span>
       </div>
     </div>
   );
@@ -122,9 +122,9 @@ export default function AutomationHealthPage() {
 
       <div className="flex-1 overflow-y-auto p-4">
         {error ? (
-          <div className="p-6 text-[13px] text-zinc-500">Couldn&apos;t load automation health.</div>
+          <div className="p-6 text-[14px] text-zinc-500">Couldn&apos;t load automation health.</div>
         ) : health === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
@@ -135,7 +135,7 @@ export default function AutomationHealthPage() {
                 const count = health.failuresBySeverity[s.key] ?? 0;
                 return (
                   <div key={s.key} className={`${CARD} p-4`}>
-                    <div className="flex items-center gap-1.5 text-[12px] font-medium text-zinc-500">
+                    <div className="flex items-center gap-1.5 text-[13px] font-medium text-zinc-500">
                       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
                       {s.label} failures
                     </div>
@@ -145,7 +145,7 @@ export default function AutomationHealthPage() {
                     >
                       <span className={count > 0 ? "" : "text-zinc-900"}>{count}</span>
                     </div>
-                    <div className="mt-1 text-[11.5px] text-zinc-400">
+                    <div className="mt-1 text-[12.5px] text-zinc-400">
                       failed runs of {s.label.toLowerCase()}-severity workflows
                     </div>
                   </div>
@@ -160,12 +160,12 @@ export default function AutomationHealthPage() {
                   <Activity className="h-5 w-5 text-zinc-500" />
                 </span>
                 <div className="mt-3 text-[14px] font-semibold text-zinc-900">No runs yet</div>
-                <p className="mt-1 max-w-sm text-center text-[12.5px] text-zinc-500">
+                <p className="mt-1 max-w-sm text-center text-[13.5px] text-zinc-500">
                   Success rate and failure breakdowns appear here after your first automation runs.
                 </p>
                 <Link
                   href="/automation/workflows"
-                  className="mt-4 text-[12.5px] font-medium text-[#0073EA] hover:underline"
+                  className="mt-4 text-[13.5px] font-medium text-[#0073EA] hover:underline"
                 >
                   Go to workflows →
                 </Link>
@@ -174,13 +174,13 @@ export default function AutomationHealthPage() {
               <div className="grid grid-cols-1 gap-3 lg:grid-cols-[300px_1fr]">
                 {/* Success donut */}
                 <div className={`${CARD} flex flex-col items-center p-4`}>
-                  <div className="self-start text-[12.5px] font-semibold text-zinc-900">
+                  <div className="self-start text-[13.5px] font-semibold text-zinc-900">
                     Success rate
                   </div>
                   <div className="mt-3">
                     <SuccessDonut rate={health.successRate ?? 0} />
                   </div>
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[12px] text-zinc-500">
                     {statusLegend.map((s) => (
                       <span key={s.key} className="inline-flex items-center gap-1.5 tabular-nums">
                         <span
@@ -197,16 +197,16 @@ export default function AutomationHealthPage() {
                 {/* Recent failures */}
                 <div className={`${CARD} p-4`}>
                   <div className="flex items-baseline justify-between">
-                    <div className="text-[12.5px] font-semibold text-zinc-900">Recent failures</div>
+                    <div className="text-[13.5px] font-semibold text-zinc-900">Recent failures</div>
                     <Link
                       href="/automation/logs"
-                      className="text-[11.5px] font-medium text-zinc-500 hover:text-zinc-900"
+                      className="text-[12.5px] font-medium text-zinc-500 hover:text-zinc-900"
                     >
                       View all logs →
                     </Link>
                   </div>
                   {failures === null || failures.length === 0 ? (
-                    <div className="py-8 text-center text-[12.5px] text-zinc-400">
+                    <div className="py-8 text-center text-[13.5px] text-zinc-400">
                       No failed runs in this window. All clear.
                     </div>
                   ) : (
@@ -222,13 +222,13 @@ export default function AutomationHealthPage() {
                             style={{ backgroundColor: RUN_STATUS_COLORS[run.status] ?? "#A1A1AA" }}
                             aria-hidden
                           />
-                          <span className="w-44 shrink-0 truncate text-[12.5px] font-medium text-zinc-900">
+                          <span className="w-44 shrink-0 truncate text-[13.5px] font-medium text-zinc-900">
                             {run.workflow?.name ?? "Deleted workflow"}
                           </span>
-                          <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-500">
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-500">
                             {run.errorMessage ?? (run.status === "PARTIAL" ? "Some actions failed" : "Run failed")}
                           </span>
-                          <span className="shrink-0 text-[11.5px] tabular-nums text-zinc-400">
+                          <span className="shrink-0 text-[12.5px] tabular-nums text-zinc-400">
                             {relTime(run.createdAt)}
                           </span>
                         </Link>

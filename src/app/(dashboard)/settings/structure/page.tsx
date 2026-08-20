@@ -67,7 +67,7 @@ export default async function StructurePage() {
             <Lock className="h-5 w-5" />
           </div>
           <h1 className="text-[15px] font-semibold text-zinc-900">Org structure is an admin area</h1>
-          <p className="max-w-sm text-[13px] leading-relaxed text-zinc-500">
+          <p className="max-w-sm text-[14px] leading-relaxed text-zinc-500">
             Shaping functions, roles, offices and the access ladder is limited to Company Admins.
             You can still explore the org in{" "}
             <Link href="/people" className="font-medium text-[#0073EA] hover:underline">People</Link>.
@@ -97,7 +97,7 @@ export default async function StructurePage() {
     <div className="mx-auto w-full max-w-4xl px-6 py-6">
       {/* Header */}
       <header className="mb-6">
-        <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-400">
+        <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
           <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Org structure</span>
@@ -106,7 +106,7 @@ export default async function StructurePage() {
           <Layers className="h-5 w-5 text-[#0073EA]" />
           Org structure
         </h1>
-        <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500">
+        <p className="mt-1 max-w-2xl text-[14px] leading-relaxed text-zinc-500">
           How the company is shaped: the functions people belong to, the roles they hold, the
           offices they work from, and the access ladder that decides what each person can reach.
         </p>
@@ -114,7 +114,7 @@ export default async function StructurePage() {
 
       {/* Building blocks */}
       <section className="mb-8">
-        <h2 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Building blocks</h2>
+        <h2 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Building blocks</h2>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <BlockTile
             href="/people/departments"
@@ -148,13 +148,13 @@ export default async function StructurePage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
-                <span className="text-[13px] font-semibold text-zinc-700">Offices</span>
-                <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">Coming soon</span>
+                <span className="text-[14px] font-semibold text-zinc-700">Offices</span>
+                <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">Coming soon</span>
               </div>
-              <div className="mt-0.5 text-[12px] text-zinc-400">
+              <div className="mt-0.5 text-[13px] text-zinc-400">
                 {officeCount > 0 ? `${officeCount} location${officeCount === 1 ? "" : "s"} on file` : "No locations yet"} · directory in progress
               </div>
-              <p className="mt-1 text-[12px] leading-relaxed text-zinc-400">
+              <p className="mt-1 text-[13px] leading-relaxed text-zinc-400">
                 Where people work. The location viewer is not built yet.
               </p>
             </div>
@@ -164,13 +164,13 @@ export default async function StructurePage() {
 
       {/* Access levels explainer */}
       <section id="levels" className="scroll-mt-6">
-        <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Access levels</h2>
+        <h2 className="mb-2 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Access levels</h2>
 
         <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-[#0073EA]/20 bg-[#0073EA]/[0.04] p-3.5">
           <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#0073EA]" />
-          <p className="text-[12.5px] leading-relaxed text-zinc-600">
+          <p className="text-[13.5px] leading-relaxed text-zinc-600">
             <span className="font-semibold text-zinc-800">Levels are a fixed ladder, not org-editable.</span>{" "}
-            Each level is a value of the <code className="rounded bg-zinc-100 px-1 py-0.5 text-[11px] text-zinc-700">AccessLevel</code> enum
+            Each level is a value of the <code className="rounded bg-zinc-100 px-1 py-0.5 text-[12px] text-zinc-700">AccessLevel</code> enum
             that the permission matrix is built on, so the rungs can&apos;t be renamed, reordered or added from here.
             You place people on a rung (on their profile or via a role); you tune what a rung can do in{" "}
             <Link href="/settings/permissions" className="font-medium text-[#0073EA] hover:underline">Roles &amp; permissions</Link>.
@@ -185,27 +185,27 @@ export default async function StructurePage() {
                 key={t.value}
                 className={`flex items-start gap-3 px-4 py-3 ${i > 0 ? "border-t border-zinc-100" : ""}`}
               >
-                <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-zinc-100 text-[11px] font-semibold text-zinc-500">
+                <span className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-zinc-100 text-[12px] font-semibold text-zinc-500">
                   {i + 1}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-semibold text-zinc-900">{t.label}</span>
+                    <span className="text-[14px] font-semibold text-zinc-900">{t.label}</span>
                     {t.adminDoor && (
-                      <span className="rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#0073EA]">Admin door</span>
+                      <span className="rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#0073EA]">Admin door</span>
                     )}
-                    <span className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[10.5px] font-medium text-zinc-500">
+                    <span className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-[11.5px] font-medium text-zinc-500">
                       <Users className="h-3 w-3" />
                       {count} {count === 1 ? "person" : "people"}
                     </span>
                   </div>
-                  <p className="mt-0.5 text-[12.5px] leading-relaxed text-zinc-500">{t.sees}</p>
+                  <p className="mt-0.5 text-[13.5px] leading-relaxed text-zinc-500">{t.sees}</p>
                 </div>
               </li>
             );
           })}
         </ol>
-        <p className="mt-2 text-[11.5px] text-zinc-400">
+        <p className="mt-2 text-[12.5px] text-zinc-400">
           Everyone, on every rung, gets the Personal door (<Link href="/account/profile" className="text-[#0073EA] hover:underline">/account</Link>): profile, notifications, appearance and their own security posture.
         </p>
       </section>
@@ -233,11 +233,11 @@ function BlockTile({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-[13px] font-semibold text-zinc-900">{title}</span>
+          <span className="text-[14px] font-semibold text-zinc-900">{title}</span>
           <ChevronRight className="h-3.5 w-3.5 text-zinc-300 transition group-hover:translate-x-0.5 group-hover:text-zinc-500" />
         </div>
-        <div className="mt-0.5 text-[12px] font-medium text-zinc-400">{meta}</div>
-        <p className="mt-1 text-[12px] leading-relaxed text-zinc-500">{desc}</p>
+        <div className="mt-0.5 text-[13px] font-medium text-zinc-400">{meta}</div>
+        <p className="mt-1 text-[13px] leading-relaxed text-zinc-500">{desc}</p>
       </div>
     </Link>
   );

@@ -170,7 +170,7 @@ export default function PricingPage() {
                   }`}
                 >
                   {tier.featured && (
-                    <span className="absolute -top-3 left-7 inline-flex items-center text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full bg-slate-900 text-white">
+                    <span className="absolute -top-3 left-7 inline-flex items-center text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full bg-slate-900 text-white">
                       Most chosen
                     </span>
                   )}
@@ -245,7 +245,7 @@ export default function PricingPage() {
               <tbody>
                 {COMPARE_GROUPS.flatMap((group) => [
                   <tr key={`g-${group.name}`}>
-                    <td colSpan={4} className="pt-8 pb-3 px-4 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                    <td colSpan={4} className="pt-8 pb-3 px-4 text-[12px] font-bold uppercase tracking-[0.16em] text-slate-500">
                       {group.name}
                     </td>
                   </tr>,

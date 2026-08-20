@@ -218,7 +218,7 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
             />
           </>
         ) : null}
-        <span className="ml-auto text-[11px] text-zinc-400">
+        <span className="ml-auto text-[12px] text-zinc-400">
           {initialItems.length} item{initialItems.length === 1 ? "" : "s"}
         </span>
       </div>
@@ -231,13 +231,13 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
             <div className="text-[42px] font-semibold tabular-nums text-zinc-900 leading-none">
               {Number.isInteger(total) ? total : total.toFixed(2)}
             </div>
-            <div className="mt-2 text-[12.5px] text-zinc-500">{metricLabel} · all items</div>
+            <div className="mt-2 text-[13.5px] text-zinc-500">{metricLabel} · all items</div>
             <div className="mt-6 mx-auto flex h-3 w-full max-w-md rounded-sm overflow-hidden ring-1 ring-black/5">
               {slices.map((s) => (
                 <span key={s.key} style={{ width: `${total ? (s.value / total) * 100 : 0}%`, background: s.color }} title={`${s.label}: ${s.value}`} aria-hidden />
               ))}
             </div>
-            <div className="mt-3 flex items-center justify-center gap-3 flex-wrap text-[11px] text-zinc-500">
+            <div className="mt-3 flex items-center justify-center gap-3 flex-wrap text-[12px] text-zinc-500">
               {slices.map((s) => (
                 <span key={s.key} className="inline-flex items-center gap-1.5">
                   <span className="h-2 w-2 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
@@ -298,7 +298,7 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
           </div>
         )}
         {chartType === "bar" || chartType === "pie" ? (
-          <p className="mt-1 text-center text-[11px] text-zinc-400">
+          <p className="mt-1 text-center text-[12px] text-zinc-400">
             {metricLabel} by {axisLabel}
           </p>
         ) : null}
@@ -323,7 +323,7 @@ function Select({
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className="h-7 rounded-md border border-zinc-200 bg-white px-1.5 text-[11.5px] text-zinc-700 outline-none hover:bg-zinc-50 focus:border-zinc-400 disabled:opacity-60"
+      className="h-7 rounded-md border border-zinc-200 bg-white px-1.5 text-[12.5px] text-zinc-700 outline-none hover:bg-zinc-50 focus:border-zinc-400 disabled:opacity-60"
     >
       {options.map((o) => (
         <option key={o.key} value={o.key}>{o.label}</option>

@@ -141,13 +141,13 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
       ref={panelRef}
       role="menu"
       aria-label="Account menu"
-      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-white text-zinc-900 rounded-xl shadow-xl border border-zinc-200 overflow-hidden text-[13px]"
+      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-white text-zinc-900 rounded-xl shadow-xl border border-zinc-200 overflow-hidden text-[14px]"
     >
       {/* User header */}
       <div className="px-3 py-3 flex items-center gap-2.5">
         <div className="relative">
           <span
-            className="w-9 h-9 rounded-full text-white flex items-center justify-center text-[12px] font-semibold"
+            className="w-9 h-9 rounded-full text-white flex items-center justify-center text-[13px] font-semibold"
             style={{ background: "var(--os-brand)" }}
           >
             {initials}
@@ -156,7 +156,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-zinc-900 truncate">{displayName}</div>
-          <div className="text-zinc-400 text-[11.5px] truncate flex items-center gap-1">
+          <div className="text-zinc-400 text-[12.5px] truncate flex items-center gap-1">
             {presenceStatus.emoji ? <span>{presenceStatus.emoji}</span> : null}
             <span>{statusLabel}</span>
           </div>
@@ -209,7 +209,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
       <Divider />
 
       <div className="px-1.5 pt-2 pb-1.5">
-        <div className="px-2 text-[10.5px] uppercase tracking-wide text-zinc-500 mb-1">Personal Tools</div>
+        <div className="px-2 text-[11.5px] uppercase tracking-wide text-zinc-500 mb-1">Personal Tools</div>
         <div className="max-h-[260px] overflow-y-auto">
           {PROFILE_TOOLS.map((tool) => {
             const pinned = profileToolPins.includes(tool.key);

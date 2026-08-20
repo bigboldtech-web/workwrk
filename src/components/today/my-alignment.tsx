@@ -326,11 +326,11 @@ function KraColumn({ kras, loading }: { kras: KraRow[]; loading: boolean }) {
               <div className="flex items-center gap-2 text-sm">
                 <span className="truncate flex-1">{row.kra.name}</span>
                 {row.weightage > 0 ? (
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-500">{Math.round(row.weightage)}%</span>
+                  <span className="text-[11px] uppercase tracking-wide text-zinc-500">{Math.round(row.weightage)}%</span>
                 ) : null}
               </div>
               {row.kra.category || row.kra.kpis.length > 0 ? (
-                <div className="text-[11px] text-zinc-500 truncate">
+                <div className="text-[12px] text-zinc-500 truncate">
                   {row.kra.category ? <span>{row.kra.category}</span> : null}
                   {row.kra.category && row.kra.kpis.length > 0 ? <span> · </span> : null}
                   {row.kra.kpis.length > 0 ? <span>{row.kra.kpis.length} KPI{row.kra.kpis.length === 1 ? "" : "s"}</span> : null}
@@ -372,7 +372,7 @@ function KpiColumn({
                 <div className="flex items-center gap-2 text-sm">
                   <span className="truncate flex-1">{p.kpi.name}</span>
                   <span
-                    className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                    className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
                       p.status === "REJECTED"
                         ? "bg-red-500/15 text-red-600"
                         : "bg-amber-500/15 text-amber-700"
@@ -381,7 +381,7 @@ function KpiColumn({
                     {p.status === "REJECTED" ? "Rework" : "Score"}
                   </span>
                 </div>
-                <div className="text-[11px] text-zinc-500 truncate">
+                <div className="text-[12px] text-zinc-500 truncate">
                   {p.period} · target {p.targetValue ?? "—"}{p.kpi.unit ? ` ${p.kpi.unit}` : ""} · {p.kpi.frequency.toLowerCase()}
                 </div>
               </button>
@@ -421,12 +421,12 @@ function SopColumn({
                 <div className="flex items-center gap-2 text-sm">
                   <span className="truncate flex-1">{row.sop.title}</span>
                   {row.mandatory ? (
-                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-600">
+                    <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-600">
                       Mandatory
                     </span>
                   ) : null}
                 </div>
-                <div className="text-[11px] text-zinc-500 truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
+                <div className="text-[12px] text-zinc-500 truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
               </button>
             </li>
           ))}

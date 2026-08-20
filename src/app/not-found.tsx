@@ -23,13 +23,13 @@ export default function NotFound() {
         <h1 className="text-[17px] font-semibold text-zinc-900 dark:text-zinc-100">
           Page not found
         </h1>
-        <p className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+        <p className="text-[14px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
           The link may be broken, or the page may have moved.
         </p>
         <div className="mt-6 flex items-center justify-center gap-2">
           <Link
             href="/"
-            className="inline-flex items-center h-9 px-4 rounded-full bg-zinc-900 text-white text-[13px] font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            className="inline-flex items-center h-9 px-4 rounded-full bg-zinc-900 text-white text-[14px] font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
             Back home
           </Link>

@@ -218,10 +218,10 @@ export default function TimesheetsPage() {
 
 function SheetDetailPanel({ detail }: { detail: SheetDetail | "loading" | undefined }) {
   if (!detail || detail === "loading") {
-    return <div className="px-4 py-3 text-[12.5px] text-zinc-400">Loading entries…</div>;
+    return <div className="px-4 py-3 text-[13.5px] text-zinc-400">Loading entries…</div>;
   }
   if (!detail.entries || detail.entries.length === 0) {
-    return <div className="px-4 py-3 text-[12.5px] text-zinc-400">No entries yet. Track time on a card and it lands here.</div>;
+    return <div className="px-4 py-3 text-[13.5px] text-zinc-400">No entries yet. Track time on a card and it lands here.</div>;
   }
   const byDay = new Map<string, DetailEntry[]>();
   for (const e of detail.entries) {
@@ -237,19 +237,19 @@ function SheetDetailPanel({ detail }: { detail: SheetDetail | "loading" | undefi
         return (
           <div key={d} className="border-b border-zinc-100 last:border-b-0">
             <div className="flex items-center justify-between px-3 py-1.5 bg-white">
-              <span className="text-[11.5px] font-semibold text-zinc-600">
+              <span className="text-[12.5px] font-semibold text-zinc-600">
                 {new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
               </span>
-              <span className="text-[11.5px] font-semibold text-zinc-500 tabular-nums">{dayTotal.toFixed(2)}h</span>
+              <span className="text-[12.5px] font-semibold text-zinc-500 tabular-nums">{dayTotal.toFixed(2)}h</span>
             </div>
             <ul>
               {entries.map((e) => {
                 const title = e.item?.title ?? e.task?.title ?? e.description ?? "Time entry";
                 return (
-                  <li key={e.id} className="flex items-center gap-2 px-3 py-1.5 text-[12.5px]">
+                  <li key={e.id} className="flex items-center gap-2 px-3 py-1.5 text-[13.5px]">
                     <span className="h-1.5 w-1.5 rounded-full bg-[#0073EA] shrink-0" />
                     <span className="text-zinc-700 truncate flex-1">{title}</span>
-                    {e.source === "TIMER" ? <span className="text-[10px] text-zinc-400 shrink-0">from timer</span> : null}
+                    {e.source === "TIMER" ? <span className="text-[11px] text-zinc-400 shrink-0">from timer</span> : null}
                     <span className="font-semibold text-zinc-600 tabular-nums shrink-0">{(e.hours ?? 0).toFixed(2)}h</span>
                   </li>
                 );

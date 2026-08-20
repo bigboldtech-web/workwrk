@@ -33,7 +33,7 @@ interface GanttBacklogPanelProps {
 
 function CountBadge({ count }: { count: number }) {
   return (
-    <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-100 px-1 text-[10px] font-semibold tabular-nums text-zinc-500">
+    <span className="ml-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-zinc-100 px-1 text-[11px] font-semibold tabular-nums text-zinc-500">
       {count}
     </span>
   );
@@ -61,7 +61,7 @@ export function GanttBacklogPanel({
   return (
     <aside className="w-[260px] shrink-0 border-l border-zinc-200 bg-white flex flex-col">
       <div className="flex h-[44px] items-center justify-between border-b border-zinc-200 pl-3 pr-2">
-        <span className="text-[12px] font-semibold text-zinc-800 dark:text-zinc-100">Tasks</span>
+        <span className="text-[13px] font-semibold text-zinc-800 dark:text-zinc-100">Tasks</span>
         <button
           type="button"
           aria-label="Close backlog"
@@ -86,7 +86,7 @@ export function GanttBacklogPanel({
         />
       </ViewTabStrip>
       {rows.length === 0 ? (
-        <div className="px-3 py-8 text-center text-[11px] text-zinc-400">
+        <div className="px-3 py-8 text-center text-[12px] text-zinc-400">
           {tab === "unscheduled" ? "All tasks are scheduled" : "Nothing overdue"}
         </div>
       ) : (
@@ -112,7 +112,7 @@ export function GanttBacklogPanel({
                   <button
                     type="button"
                     onClick={() => onOpenItem?.(it.id)}
-                    className="min-w-0 flex-1 truncate text-left text-[12px] font-medium text-zinc-800 hover:text-[var(--os-brand-ink)]"
+                    className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-zinc-800 hover:text-[var(--os-brand-ink)]"
                     title={it.title}
                   >
                     {it.title}
@@ -122,13 +122,13 @@ export function GanttBacklogPanel({
                       type="button"
                       onClick={() => onScheduleToday(it.id)}
                       title="Schedule for today"
-                      className="h-5 rounded px-1.5 text-[10px] font-semibold text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-100 hover:text-zinc-700"
+                      className="h-5 rounded px-1.5 text-[11px] font-semibold text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-zinc-100 hover:text-zinc-700"
                     >
                       Today
                     </button>
                   ) : null}
                   {tab === "overdue" ? (
-                    <span className="shrink-0 text-[10px] tabular-nums text-rose-500">{daysLate}d late</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-rose-500">{daysLate}d late</span>
                   ) : null}
                 </div>
               </li>

@@ -100,7 +100,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <section>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Details</h3>
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Details</h3>
             <div className="space-y-3">
               {fields.map((f) => {
                 const value = getValue(item, f.key);
@@ -119,7 +119,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           </section>
 
           <section>
-            <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Custom fields</h3>
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Custom fields</h3>
             <CustomFieldsPanel entityType={entityType} entityId={id} showEmptyState />
           </section>
 

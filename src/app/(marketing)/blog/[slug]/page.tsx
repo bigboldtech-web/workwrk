@@ -177,7 +177,7 @@ export default async function BlogPostPage({
                     href={`/blog/${r.slug}`}
                     className="group p-6 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 hover:-translate-y-0.5 transition shadow-sm"
                   >
-                    <span className={`inline-flex items-center text-[10px] font-bold uppercase tracking-[0.16em] px-2.5 h-6 rounded-full ${rt.bgTint} ${rt.text} border ${rt.border}`}>
+                    <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-2.5 h-6 rounded-full ${rt.bgTint} ${rt.text} border ${rt.border}`}>
                       {r.category}
                     </span>
                     <p className="mt-4 font-bold text-slate-900 text-lg tracking-tight leading-snug">{r.title}</p>

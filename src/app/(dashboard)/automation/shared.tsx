@@ -47,7 +47,7 @@ export const SEVERITY_META: Array<{ key: string; label: string; color: string }>
 
 /** Dark primary pill — same recipe as the Dashboards "New Dashboard" CTA. */
 export const DARK_PILL =
-  "inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800";
+  "inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[13.5px] font-semibold text-white hover:bg-zinc-800";
 
 /** Flat white card — the hub's only container chrome. */
 export const CARD = "rounded-xl border border-zinc-200 bg-white";
@@ -68,7 +68,7 @@ export function relTime(iso: string): string {
 export function StatusPill({ color, label }: { color: string; label: string }) {
   return (
     <span
-      className="inline-flex h-[18px] items-center gap-1 rounded-md px-1.5 text-[10.5px] font-semibold uppercase tracking-wide"
+      className="inline-flex h-[18px] items-center gap-1 rounded-md px-1.5 text-[11.5px] font-semibold uppercase tracking-wide"
       style={{ backgroundColor: `${color}14`, color, border: `1px solid ${color}33` }}
     >
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} aria-hidden />
@@ -95,7 +95,7 @@ export function AutomationHeader({
         <Icon className="h-4 w-4 text-zinc-500" />
         <span>{title}</span>
       </h1>
-      {meta ? <span className="text-[12px] text-zinc-500">{meta}</span> : null}
+      {meta ? <span className="text-[13px] text-zinc-500">{meta}</span> : null}
       {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
     </div>
   );

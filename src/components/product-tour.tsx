@@ -85,7 +85,7 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
 
         {/* Header */}
         <div className="px-6 pt-7 pb-3">
-          <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-[#0073EA] mb-1.5">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#0073EA] mb-1.5">
             <Sparkles size={11} />
             <span>{title}</span>
             <span className="text-muted">·</span>

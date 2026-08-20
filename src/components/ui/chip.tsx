@@ -28,8 +28,8 @@ const chipVariants = cva(
         danger: "border-red-300 bg-white text-red-500 hover:bg-red-50",
       },
       size: {
-        default: "h-[30px] px-2.5 text-[13px]",
-        icon: "h-[30px] w-[30px] justify-center px-0 text-[13px]",
+        default: "h-[30px] px-2.5 text-[14px]",
+        icon: "h-[30px] w-[30px] justify-center px-0 text-[14px]",
       },
     },
     defaultVariants: { state: "idle", size: "default" },
@@ -74,7 +74,7 @@ const StatusChip = React.forwardRef<HTMLButtonElement, StatusChipProps>(
       ref={ref}
       type="button"
       className={cn(
-        "inline-flex items-center gap-1.5 h-[30px] px-2.5 rounded-lg text-[12px] font-semibold uppercase tracking-wide transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-zinc-300/60 disabled:opacity-50",
+        "inline-flex items-center gap-1.5 h-[30px] px-2.5 rounded-lg text-[13px] font-semibold uppercase tracking-wide transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-zinc-300/60 disabled:opacity-50",
         className,
       )}
       style={{ backgroundColor: `${color}14`, color, border: `1px solid ${color}33` }}

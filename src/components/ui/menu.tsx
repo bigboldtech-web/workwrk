@@ -5,13 +5,13 @@
 //
 // Before this, ~25 surfaces each re-implemented their own row with
 // drifting `gap-2 / gap-2.5 / gap-3`, `px-2 / px-2.5 / px-3`,
-// `py-1 / py-1.5 / py-2` and `text-[12.5px] / text-[13px] / text-sm`.
+// `py-1 / py-1.5 / py-2` and `text-[13.5px] / text-[14px] / text-sm`.
 // That is the "unaligned options" the redesign is fixing.
 //
 // Canonical row (variant="flush", the dense menu default):
-//   gap-2.5 · px-3 py-1.5 · text-[12.5px] · 14px icon · full-bleed hover
+//   gap-2.5 · px-3 py-1.5 · text-[13.5px] · 14px icon · full-bleed hover
 // Comfortable row (variant="inset", create-style with descriptions):
-//   gap-2 · rounded-lg px-2 · min-h-9 · text-[13px] · 16px icon
+//   gap-2 · rounded-lg px-2 · min-h-9 · text-[14px] · 16px icon
 //
 // IMPORTANT: these render real <button>/<a> elements. Inside the OS
 // shell (`.workwrk-os`) a global reset strips button border/padding/bg,
@@ -92,7 +92,7 @@ export function MenuSectionLabel({
   return (
     <div
       className={cn(
-        "px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500",
+        "px-3 pt-1 pb-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500",
         className,
       )}
     >
@@ -112,8 +112,8 @@ const rowVariants = cva(
   {
     variants: {
       variant: {
-        flush: "gap-2.5 px-3 py-1.5 text-[12.5px]",
-        inset: "gap-2 rounded-lg px-2 py-1.5 min-h-9 text-[13px]",
+        flush: "gap-2.5 px-3 py-1.5 text-[13.5px]",
+        inset: "gap-2 rounded-lg px-2 py-1.5 min-h-9 text-[14px]",
       },
       tone: {
         default: "text-zinc-800 dark:text-zinc-200",
@@ -219,7 +219,7 @@ export function MenuItem({
   const labelBlock = description ? (
     <span className="min-w-0 flex-1">
       <span className="block truncate font-medium">{label}</span>
-      <span className="block truncate text-[12px] font-normal text-zinc-500 dark:text-zinc-400">{description}</span>
+      <span className="block truncate text-[13px] font-normal text-zinc-500 dark:text-zinc-400">{description}</span>
     </span>
   ) : (
     <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -228,7 +228,7 @@ export function MenuItem({
   const trailingNode = (
     <>
       {badge}
-      {shortcut ? <span className="text-[12px] text-zinc-400 dark:text-zinc-500">{shortcut}</span> : null}
+      {shortcut ? <span className="text-[13px] text-zinc-400 dark:text-zinc-500">{shortcut}</span> : null}
       {trailing}
       {selected ? <Check className="h-3.5 w-3.5 text-zinc-900 dark:text-zinc-100 shrink-0" /> : null}
       {submenu ? <ChevronRight className="h-3 w-3 text-zinc-400 dark:text-zinc-500 shrink-0" /> : null}

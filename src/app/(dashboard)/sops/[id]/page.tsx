@@ -219,7 +219,7 @@ function AutosaveIndicator({
 
   if (status === "idle") return null;
 
-  const common = "inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border";
+  const common = "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border";
   if (status === "saving") {
     return <span className={`${common} border-blue-200 bg-blue-50 text-blue-700`}>
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#0073EA] animate-pulse" />
@@ -292,14 +292,14 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
           <button
             type="button"
             onClick={handleUrl}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
+            className="text-[11px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
           >
             Replace
           </button>
           <button
             type="button"
             onClick={() => onChange("")}
-            className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
+            className="text-[11px] px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-black/80"
             aria-label="Remove image"
           >
             ×
@@ -315,14 +315,14 @@ function StepImageEditor({ image, onChange }: { image?: string; onChange: (img: 
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
-        className="text-[11px] px-2 py-1 rounded border border-dashed border-zinc-200 text-zinc-500 hover:text-[#0073EA] hover:border-blue-300"
+        className="text-[12px] px-2 py-1 rounded border border-dashed border-zinc-200 text-zinc-500 hover:text-[#0073EA] hover:border-blue-300"
       >
         + Upload image
       </button>
       <button
         type="button"
         onClick={handleUrl}
-        className="text-[11px] px-2 py-1 rounded text-zinc-500 hover:text-[#0073EA]"
+        className="text-[12px] px-2 py-1 rounded text-zinc-500 hover:text-[#0073EA]"
       >
         or paste URL
       </button>
@@ -442,7 +442,7 @@ function SopKraPicker({
           setOpen(next);
           if (next && (kras === null || loadFailed)) { setKras(null); loadKras(); }
         }}
-        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-[13px] hover:bg-zinc-50 disabled:opacity-50"
+        className="inline-flex items-center gap-1 h-7 -ml-1.5 px-1.5 rounded-md text-[14px] hover:bg-zinc-50 disabled:opacity-50"
         title="Link this SOP to a Key Responsibility Area"
       >
         <span className={currentName ? "text-zinc-700" : "text-zinc-400"}>{currentName ?? "None"}</span>
@@ -454,11 +454,11 @@ function SopKraPicker({
           <MorePortal anchorRef={anchorRef} width={240} open={open} placement="below">
             <MenuList>
               {kras === null ? (
-                <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+                <div className="px-3 py-2 text-[13px] text-zinc-400">Loading…</div>
               ) : loadFailed ? (
-                <div className="px-3 py-2 text-[12px] text-zinc-500">Couldn&rsquo;t load KRAs. Reopen to retry.</div>
+                <div className="px-3 py-2 text-[13px] text-zinc-500">Couldn&rsquo;t load KRAs. Reopen to retry.</div>
               ) : kras.length === 0 ? (
-                <div className="px-3 py-2 text-[12px] text-zinc-500">No KRAs in this workspace yet.</div>
+                <div className="px-3 py-2 text-[13px] text-zinc-500">No KRAs in this workspace yet.</div>
               ) : (
                 <>
                   <MenuItem label={<span className="text-zinc-500">No linked KRA</span>} selected={!kraId} onClick={() => void pick(null)} />
@@ -531,7 +531,7 @@ function VersionHistoryTab({ sopId, currentVersion, onRollback }: { sopId: strin
               <p className="text-sm font-medium">Current Version</p>
               <p className="text-xs text-zinc-500">Live version</p>
             </div>
-            <Badge variant="outline" className="text-[10px]">Latest</Badge>
+            <Badge variant="outline" className="text-[11px]">Latest</Badge>
           </div>
 
           {/* Past versions */}
@@ -1378,10 +1378,10 @@ export default function SOPDetailPage() {
               )}
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 {getStatusBadge(sop.status)}
-                <Badge variant="secondary" className="text-[10px]">
+                <Badge variant="secondary" className="text-[11px]">
                   {getSopKindLabel(sop)}
                 </Badge>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-[11px]">
                   v{sop.version}
                 </Badge>
                 {editing && sop.status === "DRAFT" && (
@@ -1397,7 +1397,7 @@ export default function SOPDetailPage() {
               including non-managers who get no other header actions. */}
           {myAssignment && !editing && (
             myAssignment.status === "COMPLETED" ? (
-              <span className="inline-flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[11px] text-green-600">
+              <span className="inline-flex items-center gap-1.5 rounded-md border border-green-500/30 bg-green-500/10 px-2 py-1 text-[12px] text-green-600">
                 <CheckCircle size={12} />
                 Acknowledged{(() => {
                   const at = myAssignment.completedAt
@@ -1656,7 +1656,7 @@ export default function SOPDetailPage() {
                             />
                             {u.firstName} {u.lastName}
                             {u.department?.name && <span className="text-zinc-500 text-xs ml-auto">{u.department.name}</span>}
-                            {alreadyAssigned && <span className="text-[10px] text-zinc-500 ml-auto">Already assigned</span>}
+                            {alreadyAssigned && <span className="text-[11px] text-zinc-500 ml-auto">Already assigned</span>}
                           </label>
                         );
                       })}
@@ -1820,7 +1820,7 @@ export default function SOPDetailPage() {
                   </CardContent>
                 </Card>
               ) : sop.description ? (
-                <p className="text-[13.5px] leading-relaxed text-zinc-500">{sop.description}</p>
+                <p className="text-[14.5px] leading-relaxed text-zinc-500">{sop.description}</p>
               ) : null}
 
               {/* Legacy rich-html written SOPs — read-only reader. Editing
@@ -2320,7 +2320,7 @@ export default function SOPDetailPage() {
                                         {record.user.firstName}{" "}
                                         {record.user.lastName}
                                       </p>
-                                      <p className="text-[10px] text-zinc-500">
+                                      <p className="text-[11px] text-zinc-500">
                                         {record.user.email}
                                       </p>
                                     </div>
@@ -2328,11 +2328,11 @@ export default function SOPDetailPage() {
                                 </td>
                                 <td className="py-3 pr-4">
                                   {isComplete ? (
-                                    <Badge variant="success" className="text-[10px]">
+                                    <Badge variant="success" className="text-[11px]">
                                       Completed
                                     </Badge>
                                   ) : (
-                                    <Badge variant="warning" className="text-[10px]">
+                                    <Badge variant="warning" className="text-[11px]">
                                       Pending
                                     </Badge>
                                   )}
@@ -2415,21 +2415,21 @@ export default function SOPDetailPage() {
                                     </div>
                                     <div>
                                       <p className="font-medium text-xs">{a.user.firstName} {a.user.lastName}</p>
-                                      <p className="text-[10px] text-zinc-500">{a.user.department?.name || "—"}</p>
+                                      <p className="text-[11px] text-zinc-500">{a.user.department?.name || "—"}</p>
                                     </div>
                                   </div>
                                 </td>
                                 <td className="py-3 pr-4">
                                   {a.status === "COMPLETED" ? (
-                                    <Badge variant="success" className="text-[10px]">Completed</Badge>
+                                    <Badge variant="success" className="text-[11px]">Completed</Badge>
                                   ) : isOverdue ? (
-                                    <Badge variant="destructive" className="text-[10px]">Overdue</Badge>
+                                    <Badge variant="destructive" className="text-[11px]">Overdue</Badge>
                                   ) : a.status === "IN_PROGRESS" ? (
-                                    <Badge variant="warning" className="text-[10px]">In Progress</Badge>
+                                    <Badge variant="warning" className="text-[11px]">In Progress</Badge>
                                   ) : (
-                                    <Badge variant="secondary" className="text-[10px]">Assigned</Badge>
+                                    <Badge variant="secondary" className="text-[11px]">Assigned</Badge>
                                   )}
-                                  {a.mandatory && <Badge variant="outline" className="text-[10px] ml-1">Required</Badge>}
+                                  {a.mandatory && <Badge variant="outline" className="text-[11px] ml-1">Required</Badge>}
                                 </td>
                                 <td className="py-3 pr-4 min-w-[120px]">
                                   <div className="flex items-center gap-2">
@@ -2476,7 +2476,7 @@ export default function SOPDetailPage() {
               <div className="flex items-start gap-3">
                 <Tag size={14} className="text-zinc-500 shrink-0 mt-1" />
                 <div className="min-w-0 flex-1">
-                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                     Category {savingMeta && <span className="normal-case ml-1">· saving…</span>}
                   </Label>
                   {canManageSOPs ? (
@@ -2501,7 +2501,7 @@ export default function SOPDetailPage() {
                 <div className="flex items-start gap-3">
                   <Hash size={14} className="text-zinc-500 shrink-0 mt-1" />
                   <div className="min-w-0 flex-1">
-                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                       Tags
                     </Label>
                     {canManageSOPs ? (
@@ -2514,7 +2514,7 @@ export default function SOPDetailPage() {
                     ) : (sop.tags?.length ?? 0) > 0 ? (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {(sop.tags ?? []).map((t) => (
-                          <span key={t} className="inline-flex items-center rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                          <span key={t} className="inline-flex items-center rounded bg-zinc-100 px-1.5 py-0.5 text-[12px] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
                             {t}
                           </span>
                         ))}
@@ -2529,7 +2529,7 @@ export default function SOPDetailPage() {
               <div className="flex items-center gap-3">
                 <Activity size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                     Status
                   </Label>
                   <div className="mt-0.5">{getStatusBadge(sop.status)}</div>
@@ -2539,7 +2539,7 @@ export default function SOPDetailPage() {
               <div className="flex items-center gap-3">
                 <FileText size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                     Type
                   </Label>
                   <p className="text-sm">{getSopKindLabel(sop)}</p>
@@ -2549,7 +2549,7 @@ export default function SOPDetailPage() {
               <div className="flex items-center gap-3">
                 <GitBranch size={14} className="text-zinc-500 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                     Linked KRA
                   </Label>
                   <div className="mt-0.5">
@@ -2566,7 +2566,7 @@ export default function SOPDetailPage() {
               <div className="flex items-center gap-3">
                 <Hash size={14} className="text-zinc-500 shrink-0" />
                 <div>
-                  <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                  <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                     Version
                   </Label>
                   <p className="text-sm font-mono">v{sop.version}</p>
@@ -2577,7 +2577,7 @@ export default function SOPDetailPage() {
                 <div className="flex items-center gap-3">
                   <Calendar size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                       Created
                     </Label>
                     <p className="text-sm">{formatDate(sop.createdAt)}</p>
@@ -2587,7 +2587,7 @@ export default function SOPDetailPage() {
                 <div className="flex items-center gap-3">
                   <Calendar size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                       Published
                     </Label>
                     <p className="text-sm">{formatDate(sop.publishedAt)}</p>
@@ -2597,7 +2597,7 @@ export default function SOPDetailPage() {
                 <div className="flex items-center gap-3">
                   <Clock size={14} className="text-zinc-500 shrink-0" />
                   <div>
-                    <Label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    <Label className="text-[11px] text-zinc-500 uppercase tracking-wider">
                       Last Updated
                     </Label>
                     <p className="text-sm">{formatDate(sop.updatedAt)}</p>
@@ -2620,7 +2620,7 @@ export default function SOPDetailPage() {
                   <Link
                     key={t.sourceId}
                     href={t.href || "#"}
-                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] text-zinc-700 ${t.href ? "hover:bg-zinc-50 hover:text-[#0073EA]" : "pointer-events-none opacity-70"}`}
+                    className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-[14px] text-zinc-700 ${t.href ? "hover:bg-zinc-50 hover:text-[#0073EA]" : "pointer-events-none opacity-70"}`}
                   >
                     <Link2 size={13} className="shrink-0 text-zinc-400" />
                     <span className="truncate">{t.title}</span>

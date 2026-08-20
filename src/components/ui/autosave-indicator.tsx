@@ -42,7 +42,7 @@ export function AutosaveIndicator({ status, lastSavedAt, labels, className }: Pr
         } />;
 
   return (
-    <span className={`inline-flex items-center gap-1.5 text-[11px] text-muted ${className ?? ""}`}>
+    <span className={`inline-flex items-center gap-1.5 text-[12px] text-muted ${className ?? ""}`}>
       {icon}
       <span>{text}</span>
     </span>

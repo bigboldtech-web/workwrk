@@ -136,7 +136,7 @@ export default function ChangelogPage() {
                     const Icon = meta.icon;
                     return (
                       <li key={i} className="flex items-start gap-3 p-4 bg-white border border-slate-200 rounded-xl">
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.14em] px-2 h-5 rounded-full ${t.bgTint} ${t.text} border ${t.border} flex-shrink-0`}>
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.14em] px-2 h-5 rounded-full ${t.bgTint} ${t.text} border ${t.border} flex-shrink-0`}>
                           <Icon size={10} /> {meta.label}
                         </span>
                         <span className="text-[15px] text-slate-700 leading-snug">{item.text}</span>

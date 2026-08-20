@@ -181,12 +181,12 @@ export default function AccountProfilePage() {
         <User className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Profile</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Your personal details. Update your name and photo — everyone manages their own profile.
       </p>
 
       {!loaded ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading profile…
         </div>
       ) : (
@@ -206,8 +206,8 @@ export default function AccountProfilePage() {
               </span>
             )}
             <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-medium text-zinc-900">Profile photo</div>
-              <div className="text-[12px] text-zinc-500">PNG, JPEG or WebP. Up to 2MB.</div>
+              <div className="text-[14px] font-medium text-zinc-900">Profile photo</div>
+              <div className="text-[13px] text-zinc-500">PNG, JPEG or WebP. Up to 2MB.</div>
               <div className="mt-2 flex items-center gap-2">
                 <input
                   ref={fileRef}
@@ -220,7 +220,7 @@ export default function AccountProfilePage() {
                   type="button"
                   onClick={pickPhoto}
                   disabled={uploading}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
                 >
                   {uploading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -234,7 +234,7 @@ export default function AccountProfilePage() {
                     type="button"
                     onClick={removePhoto}
                     disabled={uploading}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 disabled:opacity-40"
                   >
                     <Trash2 className="h-3.5 w-3.5" /> Remove
                   </button>
@@ -247,7 +247,7 @@ export default function AccountProfilePage() {
           <div className="rounded-xl border border-zinc-200 bg-white p-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <label className="block">
-                <span className="mb-1.5 block text-[12px] font-medium text-zinc-700">First name</span>
+                <span className="mb-1.5 block text-[13px] font-medium text-zinc-700">First name</span>
                 <div className="flex h-9 items-center rounded-md border border-zinc-200 bg-white px-2.5">
                   <input
                     value={firstName}
@@ -258,7 +258,7 @@ export default function AccountProfilePage() {
                 </div>
               </label>
               <label className="block">
-                <span className="mb-1.5 block text-[12px] font-medium text-zinc-700">Last name</span>
+                <span className="mb-1.5 block text-[13px] font-medium text-zinc-700">Last name</span>
                 <div className="flex h-9 items-center rounded-md border border-zinc-200 bg-white px-2.5">
                   <input
                     value={lastName}
@@ -269,12 +269,12 @@ export default function AccountProfilePage() {
                 </div>
               </label>
               <label className="block sm:col-span-2">
-                <span className="mb-1.5 block text-[12px] font-medium text-zinc-700">Email</span>
+                <span className="mb-1.5 block text-[13px] font-medium text-zinc-700">Email</span>
                 <div className="flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-2.5">
                   <Mail className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
                   <span className="truncate text-sm text-zinc-500">{me.email ?? "—"}</span>
                 </div>
-                <span className="mt-1 block text-[11px] text-zinc-400">
+                <span className="mt-1 block text-[12px] text-zinc-400">
                   Your email is managed by your administrator.
                 </span>
               </label>
@@ -282,18 +282,18 @@ export default function AccountProfilePage() {
 
             {/* Read-only info chips */}
             <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-4">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] text-zinc-700">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[13px] text-zinc-700">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
                 {accessLabel(me.accessLevel)}
               </span>
               {me.role?.title ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] text-zinc-700">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[13px] text-zinc-700">
                   <User className="h-3.5 w-3.5 text-zinc-400" />
                   {me.role.title}
                 </span>
               ) : null}
               {me.department?.name ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] text-zinc-700">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[13px] text-zinc-700">
                   <Building2 className="h-3.5 w-3.5 text-zinc-400" />
                   {me.department.name}
                 </span>
@@ -307,7 +307,7 @@ export default function AccountProfilePage() {
               type="button"
               onClick={save}
               disabled={busy || !me.id}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               {saving ? "Saving…" : "Save changes"}

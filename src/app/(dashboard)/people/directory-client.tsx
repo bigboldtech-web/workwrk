@@ -217,10 +217,10 @@ export default function PeopleDirectoryPage() {
           <h1 className="text-base font-semibold text-zinc-900">Directory</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">{users === null ? "loading…" : `${stats.total} people · ${stats.depts} departments`}</span>
           <div className="flex-1" />
-          <Link href="/organization" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/organization" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Network className="w-3.5 h-3.5 text-zinc-400" /> Org chart
           </Link>
-          <Link href="/people/roles" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/people/roles" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Briefcase className="w-3.5 h-3.5 text-zinc-400" /> Roles
           </Link>
         </div>
@@ -238,14 +238,14 @@ export default function PeopleDirectoryPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <div className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 flex-1 min-w-[220px]">
             <Search className="w-3.5 h-3.5 text-zinc-400" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find anyone by name, role, dept, email…" aria-label="Search people" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find anyone by name, role, dept, email…" aria-label="Search people" className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
           </div>
           <div className="inline-flex items-center gap-1">
             {([["all", "All"], ["active", "Active"], ["new", "New"], ["former", "Former"]] as const).map(([k, label]) => (
-              <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[12.5px] ${filter === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
+              <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[13.5px] ${filter === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
             ))}
           </div>
-          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 outline-none">
+          <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-zinc-200 text-[13.5px] text-zinc-600 outline-none">
             <option value="name">A–Z</option>
             <option value="recent">Recently joined</option>
             <option value="tenure">Longest tenure</option>
@@ -256,11 +256,11 @@ export default function PeopleDirectoryPage() {
         {/* Department chips (actives only — hidden on the Former tab) */}
         {filter !== "former" && depts.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" onClick={() => setActiveDept(null)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border ${activeDept === null ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+            <button type="button" onClick={() => setActiveDept(null)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === null ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
               All <span className="opacity-60">{stats.total}</span>
             </button>
             {depts.map((d) => (
-              <button key={d.id} type="button" onClick={() => setActiveDept(d.id)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border ${activeDept === d.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+              <button key={d.id} type="button" onClick={() => setActiveDept(d.id)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === d.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
                 <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
                 {d.name}
                 <span className="opacity-60">{d.count}</span>
@@ -273,7 +273,7 @@ export default function PeopleDirectoryPage() {
             directory by tag (union). Hidden on Former and when no tags exist. */}
         {filter !== "former" && allTags.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-400 font-semibold mr-0.5">
+            <span className="inline-flex items-center gap-1 text-[12px] uppercase tracking-wide text-zinc-400 font-semibold mr-0.5">
               <TagIcon className="w-3 h-3" /> Tags
             </span>
             {allTags.map((t) => {
@@ -289,7 +289,7 @@ export default function PeopleDirectoryPage() {
                       return n;
                     })
                   }
-                  className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[12px] border transition ${on ? "border-transparent text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
+                  className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border transition ${on ? "border-transparent text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}
                   style={on ? { background: t.color ?? "#18181b" } : t.color ? { color: t.color } : undefined}
                 >
                   <span className="w-2 h-2 rounded-full" style={{ background: on ? "rgba(255,255,255,0.85)" : (t.color ?? "#a1a1aa") }} />
@@ -299,7 +299,7 @@ export default function PeopleDirectoryPage() {
               );
             })}
             {activeTags.size > 0 ? (
-              <button type="button" onClick={() => setActiveTags(new Set())} className="text-[11.5px] text-zinc-500 hover:text-zinc-800 ml-1">
+              <button type="button" onClick={() => setActiveTags(new Set())} className="text-[12.5px] text-zinc-500 hover:text-zinc-800 ml-1">
                 Clear tags
               </button>
             ) : null}
@@ -345,7 +345,7 @@ export default function PeopleDirectoryPage() {
               <div className="flex items-center gap-2 mb-2">
                 <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
                 <h2 className="text-xs uppercase tracking-wide text-zinc-500 font-semibold">{g.name}</h2>
-                <span className="text-[11px] text-zinc-400">{g.people.length}</span>
+                <span className="text-[12px] text-zinc-400">{g.people.length}</span>
                 <span className="flex-1 h-px bg-zinc-100" />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -385,13 +385,13 @@ function FormerPersonCard({ user: u, onRestore, restoring }: { user: ApiUser; on
       <div className="flex items-center gap-3">
         <div className="opacity-50 grayscale shrink-0"><TeamAvatar name={name} avatar={u.avatar} size={40} /></div>
         <div className="min-w-0 flex-1">
-          <Link href={`/people/${u.id}`} className="block text-[13.5px] font-medium text-zinc-500 truncate hover:text-zinc-800">
+          <Link href={`/people/${u.id}`} className="block text-[14.5px] font-medium text-zinc-500 truncate hover:text-zinc-800">
             {name}
           </Link>
-          <div className="text-[12px] text-zinc-400 truncate">{u.role?.title || u.email || ""}</div>
+          <div className="text-[13px] text-zinc-400 truncate">{u.role?.title || u.email || ""}</div>
         </div>
       </div>
-      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-[12px]">
         <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#E2445C]/10 text-[#E2445C]">
           Removed {u.deletedAt ? new Date(u.deletedAt).toLocaleDateString() : ""}
         </span>
@@ -400,7 +400,7 @@ function FormerPersonCard({ user: u, onRestore, restoring }: { user: ApiUser; on
           type="button"
           onClick={onRestore}
           disabled={restoring}
-          className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 disabled:opacity-50"
+          className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 disabled:opacity-50"
         >
           <RotateCcw className="w-3 h-3" /> {restoring ? "Restoring…" : "Restore"}
         </button>
@@ -419,14 +419,14 @@ function PersonCard({ user: u }: { user: ApiUser }) {
       <div className="flex items-center gap-3">
         <TeamAvatar name={name} avatar={u.avatar} size={40} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] font-medium text-zinc-900 truncate flex items-center gap-1.5">
+          <div className="text-[14.5px] font-medium text-zinc-900 truncate flex items-center gap-1.5">
             <span className="truncate">{name}</span>
-            {isNew ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 shrink-0">New</span> : null}
+            {isNew ? <span className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 shrink-0">New</span> : null}
           </div>
-          {u.role?.title ? <div className="text-[12px] text-zinc-500 truncate">{u.role.title}</div> : null}
+          {u.role?.title ? <div className="text-[13px] text-zinc-500 truncate">{u.role.title}</div> : null}
         </div>
       </div>
-      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+      <div className="mt-2.5 flex items-center gap-1.5 flex-wrap text-[12px]">
         {u.department?.name ? (
           <span className="inline-flex items-center px-1.5 py-0.5 rounded" style={{ background: `${deptColor(u.department.name)}1a`, color: deptColor(u.department.name) }}>{u.department.name}</span>
         ) : null}
@@ -438,18 +438,18 @@ function PersonCard({ user: u }: { user: ApiUser }) {
           {u.tags.slice(0, 4).map((t) => (
             <span
               key={t.id}
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10.5px]"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11.5px]"
               style={t.color ? { background: `${t.color}1a`, color: t.color } : { background: "#f4f4f5", color: "#52525b" }}
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ background: t.color ?? "#a1a1aa" }} />
               {t.name}
             </span>
           ))}
-          {u.tags.length > 4 ? <span className="text-[10.5px] text-zinc-400">+{u.tags.length - 4}</span> : null}
+          {u.tags.length > 4 ? <span className="text-[11.5px] text-zinc-400">+{u.tags.length - 4}</span> : null}
         </div>
       ) : null}
       {u.manager ? (
-        <div className="mt-1.5 text-[11px] text-zinc-400 truncate flex items-center gap-1">
+        <div className="mt-1.5 text-[12px] text-zinc-400 truncate flex items-center gap-1">
           <Briefcase className="w-3 h-3 shrink-0" /> Reports to {[u.manager.firstName, u.manager.lastName].filter(Boolean).join(" ") || "Manager"}
         </div>
       ) : null}

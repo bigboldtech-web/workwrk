@@ -152,22 +152,22 @@ export default function MembersPage() {
           <button
             type="button"
             onClick={() => setInviteOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12.5px] font-medium text-white hover:bg-zinc-800"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13.5px] font-medium text-white hover:bg-zinc-800"
           >
             <UserPlus className="h-3.5 w-3.5" /> Invite
           </button>
         ) : null}
       </header>
-      <p className="mb-4 text-[12px] text-zinc-500">
+      <p className="mb-4 text-[13px] text-zinc-500">
         Set each person’s access level and who they report to.
         {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
       </p>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] text-zinc-700">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[13px] text-zinc-700">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> {managerCount} managers &amp; admins
         </span>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] text-zinc-700">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-[13px] text-zinc-700">
           <Users className="h-3.5 w-3.5 text-zinc-400" /> {memberCount} members
         </span>
         <div className="ml-auto inline-flex h-8 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5">
@@ -176,24 +176,24 @@ export default function MembersPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search people…"
-            className="w-48 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400"
+            className="w-48 bg-transparent text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400"
           />
         </div>
       </div>
 
       {err ? (
-        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700">{err}</div>
+        <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">{err}</div>
       ) : null}
 
       {members === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading members…
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[14px]">
             <thead>
-              <tr className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-400">
+              <tr className="border-b border-zinc-200 text-left text-[12px] uppercase tracking-wide text-zinc-400">
                 <th className="px-3 py-2 font-semibold">Person</th>
                 <th className="px-3 py-2 font-semibold">Access level</th>
                 <th className="px-3 py-2 font-semibold">Reports to</th>
@@ -210,13 +210,13 @@ export default function MembersPage() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={m.avatar} alt="" className="h-7 w-7 rounded-full object-cover" />
                       ) : (
-                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-[11px] font-semibold text-zinc-600">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-200 text-[12px] font-semibold text-zinc-600">
                           {(m.firstName?.[0] ?? "?").toUpperCase()}
                         </span>
                       )}
                       <div className="min-w-0">
                         <div className="truncate font-medium text-zinc-900">{nameOf(m)}</div>
-                        <div className="truncate text-[12px] text-zinc-500">{m.email ?? m.department?.name ?? ""}</div>
+                        <div className="truncate text-[13px] text-zinc-500">{m.email ?? m.department?.name ?? ""}</div>
                       </div>
                     </div>
                   </td>
@@ -225,7 +225,7 @@ export default function MembersPage() {
                       value={m.accessLevel}
                       disabled={!canEdit || savingId === m.id}
                       onChange={(e) => patch(m.id, { accessLevel: e.target.value })}
-                      className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-800 disabled:opacity-60"
+                      className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-800 disabled:opacity-60"
                     >
                       {ACCESS_LEVELS.map((l) => (
                         <option key={l.value} value={l.value}>{l.label}</option>
@@ -237,7 +237,7 @@ export default function MembersPage() {
                       value={m.managerId ?? ""}
                       disabled={!canEdit || savingId === m.id}
                       onChange={(e) => patch(m.id, { managerId: e.target.value || null })}
-                      className="h-8 max-w-[200px] rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-800 disabled:opacity-60"
+                      className="h-8 max-w-[200px] rounded-md border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-800 disabled:opacity-60"
                     >
                       <option value="">— None —</option>
                       {(members ?? [])
@@ -253,7 +253,7 @@ export default function MembersPage() {
               ))}
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-[13px] text-zinc-400">
+                  <td colSpan={5} className="px-3 py-6 text-center text-[14px] text-zinc-400">
                     No people match “{q}”.
                   </td>
                 </tr>
@@ -265,13 +265,13 @@ export default function MembersPage() {
 
       {invites.length > 0 ? (
         <section className="mt-6">
-          <h2 className="mb-2 text-[13px] font-semibold text-zinc-900">
+          <h2 className="mb-2 text-[14px] font-semibold text-zinc-900">
             Pending invites <span className="font-normal text-zinc-400">({invites.length})</span>
           </h2>
           <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            <table className="w-full text-[13px]">
+            <table className="w-full text-[14px]">
               <thead>
-                <tr className="border-b border-zinc-200 text-left text-[11px] uppercase tracking-wide text-zinc-400">
+                <tr className="border-b border-zinc-200 text-left text-[12px] uppercase tracking-wide text-zinc-400">
                   <th className="px-3 py-2 font-semibold">Email</th>
                   <th className="px-3 py-2 font-semibold">Access level</th>
                   <th className="px-3 py-2 font-semibold">Invited</th>
@@ -291,11 +291,11 @@ export default function MembersPage() {
                       <td className="px-3 py-2 text-zinc-600">{timeAgo(inv.createdAt)}</td>
                       <td className="px-3 py-2">
                         {expired ? (
-                          <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-[11.5px] font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400">
+                          <span className="inline-flex rounded-full bg-red-50 px-2 py-0.5 text-[12.5px] font-medium text-red-700 dark:bg-red-500/15 dark:text-red-400">
                             Expired
                           </span>
                         ) : (
-                          <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11.5px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                          <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[12.5px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
                             Pending
                           </span>
                         )}
@@ -306,7 +306,7 @@ export default function MembersPage() {
                             type="button"
                             onClick={() => void revoke(inv)}
                             disabled={revokingId === inv.id}
-                            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[12px] font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/15 dark:hover:text-red-400"
+                            className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-[13px] font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/15 dark:hover:text-red-400"
                           >
                             {revokingId === inv.id ? (
                               <Loader2 className="h-3.5 w-3.5 animate-spin" />

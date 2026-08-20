@@ -311,7 +311,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500"><Globe className="h-5 w-5" /></span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[15px] font-semibold text-zinc-900">{tool.name}</div>
-            {tool.url ? <div className="truncate text-[12px] text-zinc-400">{getDomain(tool.url)}</div> : null}
+            {tool.url ? <div className="truncate text-[13px] text-zinc-400">{getDomain(tool.url)}</div> : null}
           </div>
           {!editing ? (
             <button type="button" onClick={() => setEditing(true)} title="Edit credentials" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><Pencil className="h-4 w-4" /></button>
@@ -320,10 +320,10 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
         </div>
 
         <div className="space-y-3 px-4 py-4">
-          {tool.description ? <p className="text-[13px] text-zinc-600">{tool.description}</p> : null}
-          {tool.category ? <div className="text-[12px] text-zinc-400">Category · <span className="text-zinc-600">{tool.category}</span></div> : null}
+          {tool.description ? <p className="text-[14px] text-zinc-600">{tool.description}</p> : null}
+          {tool.category ? <div className="text-[13px] text-zinc-400">Category · <span className="text-zinc-600">{tool.category}</span></div> : null}
 
-          <div className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Credentials</div>
+          <div className="pt-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Credentials</div>
 
           {editing ? (
             <div className="space-y-2.5">
@@ -331,13 +331,13 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
               <Field label="Password" value={draft.password} onChange={(v) => setDraft((d) => ({ ...d, password: v }))} placeholder="••••••••" type="password" />
               <Field label="API key" value={draft.apiKey} onChange={(v) => setDraft((d) => ({ ...d, apiKey: v }))} placeholder="optional" />
               <div>
-                <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">Notes</div>
-                <textarea value={draft.notes} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} rows={2} placeholder="2FA, seat owner, plan…" className="w-full rounded-md border border-zinc-200 px-2.5 py-1.5 text-[13px] outline-none focus:border-zinc-300" />
+                <div className="mb-1 text-[12px] font-medium uppercase tracking-wide text-zinc-400">Notes</div>
+                <textarea value={draft.notes} onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))} rows={2} placeholder="2FA, seat owner, plan…" className="w-full rounded-md border border-zinc-200 px-2.5 py-1.5 text-[14px] outline-none focus:border-zinc-300" />
               </div>
-              {err ? <div className="text-[12px] text-red-600">{err}</div> : null}
+              {err ? <div className="text-[13px] text-red-600">{err}</div> : null}
               <div className="flex justify-end gap-2 pt-1">
-                <button type="button" onClick={() => { setEditing(false); setErr(null); }} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
-                <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+                <button type="button" onClick={() => { setEditing(false); setErr(null); }} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[14px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
+                <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                   {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
                 </button>
               </div>
@@ -347,13 +347,13 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
               {fields.map((f) => <CredRow key={f.key} label={f.label} value={String(creds[f.key])} Icon={f.Icon} secret={f.secret} />)}
               {notes ? (
                 <div className="rounded-lg border border-zinc-200 px-3 py-2">
-                  <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400"><StickyNote className="h-3 w-3" /> Notes</div>
-                  <p className="whitespace-pre-wrap text-[13px] text-zinc-700">{notes}</p>
+                  <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-wide text-zinc-400"><StickyNote className="h-3 w-3" /> Notes</div>
+                  <p className="whitespace-pre-wrap text-[14px] text-zinc-700">{notes}</p>
                 </div>
               ) : null}
             </div>
           ) : (
-            <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[12.5px] text-zinc-500 hover:border-blue-300 hover:bg-blue-50/40">
+            <button type="button" onClick={() => setEditing(true)} className="w-full rounded-lg border border-dashed border-zinc-200 px-3 py-4 text-center text-[13.5px] text-zinc-500 hover:border-blue-300 hover:bg-blue-50/40">
               No credentials yet — click to add an ID &amp; password.
             </button>
           )}
@@ -361,7 +361,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
 
         {tool.url ? (
           <div className="border-t border-zinc-100 px-4 py-3">
-            <a href={tool.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-zinc-900 text-[13px] font-medium text-white hover:bg-zinc-800">
+            <a href={tool.url} target="_blank" rel="noopener noreferrer" className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md bg-zinc-900 text-[14px] font-medium text-white hover:bg-zinc-800">
               <ExternalLink className="h-3.5 w-3.5" /> Open website
             </a>
           </div>
@@ -374,8 +374,8 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
 function Field({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; type?: string }) {
   return (
     <div>
-      <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400">{label}</div>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9 w-full rounded-md border border-zinc-200 px-2.5 text-[13px] outline-none focus:border-zinc-300" />
+      <div className="mb-1 text-[12px] font-medium uppercase tracking-wide text-zinc-400">{label}</div>
+      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="h-9 w-full rounded-md border border-zinc-200 px-2.5 text-[14px] outline-none focus:border-zinc-300" />
     </div>
   );
 }
@@ -388,9 +388,9 @@ function CredRow({ label, value, Icon, secret }: { label: string; value: string;
   };
   return (
     <div className="rounded-lg border border-zinc-200 px-3 py-2">
-      <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-zinc-400"><Icon className="h-3 w-3" /> {label}</div>
+      <div className="mb-1 flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-wide text-zinc-400"><Icon className="h-3 w-3" /> {label}</div>
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-zinc-800">{show ? value : "•".repeat(Math.min(value.length || 8, 16))}</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[14px] text-zinc-800">{show ? value : "•".repeat(Math.min(value.length || 8, 16))}</span>
         {secret ? (
           <button type="button" onClick={() => setShow((s) => !s)} title={show ? "Hide" : "Show"} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
             {show ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}

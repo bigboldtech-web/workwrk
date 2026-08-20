@@ -306,7 +306,7 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: S
 
 // ── FilterMenu — the toolbar chip + ClickUp-style rule panel ───────
 
-const selectCls = "h-7 rounded-md border border-zinc-200 bg-white text-[12px] px-1.5 focus:outline-none focus:border-zinc-400";
+const selectCls = "h-7 rounded-md border border-zinc-200 bg-white text-[13px] px-1.5 focus:outline-none focus:border-zinc-400";
 
 interface FilterMenuProps {
   filters: BoardFilters;
@@ -411,7 +411,7 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
         title="Filter"
         aria-label="Filter"
         aria-expanded={open}
-        className={`inline-flex items-center gap-1 h-7 px-1.5 rounded-md text-[11.5px] font-medium transition-colors ${
+        className={`inline-flex items-center gap-1 h-7 px-1.5 rounded-md text-[12.5px] font-medium transition-colors ${
           active
             ? "text-[var(--os-brand-ink)] bg-[color-mix(in_srgb,var(--os-brand)_12%,transparent)] dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)]"
             : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100"
@@ -425,9 +425,9 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
           clamps to the viewport (was: absolute right-0, clipped left). */}
       <MorePortal anchorRef={anchorRef} panelRef={panelRef} width={480} open={open} placement="below">
         <div className="rounded-lg border border-zinc-200 bg-white shadow-xl p-2.5">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Filters</div>
+          <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-2">Filters</div>
           {filters.rules.length === 0 ? (
-            <p className="text-[12px] text-zinc-500 px-0.5 pb-2">No filters. Add one to narrow the list.</p>
+            <p className="text-[13px] text-zinc-500 px-0.5 pb-2">No filters. Add one to narrow the list.</p>
           ) : null}
 
           <div className="space-y-1.5">
@@ -438,13 +438,13 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
                 <div key={rule.id} className="flex items-center gap-1.5">
                   <div className="w-[52px] shrink-0">
                     {i === 0 ? (
-                      <span className="text-[11px] text-zinc-400 pl-0.5">Where</span>
+                      <span className="text-[12px] text-zinc-400 pl-0.5">Where</span>
                     ) : (
                       <button
                         type="button"
                         onClick={() => onChange({ ...filters, connector: filters.connector === "AND" ? "OR" : "AND" })}
                         title="Toggle AND / OR"
-                        className="h-7 w-full rounded-md border border-zinc-200 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50"
+                        className="h-7 w-full rounded-md border border-zinc-200 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50"
                       >
                         {filters.connector}
                       </button>
@@ -511,33 +511,33 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
             <button
               type="button"
               onClick={() => onChange({ ...filters, rules: [...filters.rules, mkRule("status", "is", "")] })}
-              className="inline-flex items-center gap-1.5 text-[12px] text-zinc-600 hover:text-zinc-900"
+              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-600 hover:text-zinc-900"
             >
               <Plus className="w-3.5 h-3.5" /> Add filter
             </button>
             {filters.rules.length > 0 ? (
-              <button type="button" onClick={() => onChange({ ...filters, rules: [] })} className="text-[12px] text-zinc-500 hover:text-zinc-800">
+              <button type="button" onClick={() => onChange({ ...filters, rules: [] })} className="text-[13px] text-zinc-500 hover:text-zinc-800">
                 Clear all
               </button>
             ) : null}
           </div>
 
           <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-zinc-100">
-            <span className="text-[12px] text-zinc-600">Hide closed tasks</span>
+            <span className="text-[13px] text-zinc-600">Hide closed tasks</span>
             <Switch checked={filters.hideDone} onChange={(v) => onChange({ ...filters, hideDone: v })} />
           </div>
 
           {onSavedFiltersChange ? (
             <div className="mt-2.5 pt-2 border-t border-zinc-100">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">Saved filters</div>
+              <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-1">Saved filters</div>
               {savedFilters.length === 0 ? (
-                <p className="text-[12px] text-zinc-500 px-0.5 pb-1">No saved filters yet.</p>
+                <p className="text-[13px] text-zinc-500 px-0.5 pb-1">No saved filters yet.</p>
               ) : (
                 savedFilters.map((s) => (
                   <div key={s.name} className="group flex items-center gap-1 h-7 px-1 rounded-md hover:bg-zinc-50">
-                    <button type="button" onClick={() => applySaved(s)} className="flex-1 min-w-0 text-left text-[12.5px] text-zinc-700 hover:text-zinc-900 truncate" title={`Apply "${s.name}"`}>
+                    <button type="button" onClick={() => applySaved(s)} className="flex-1 min-w-0 text-left text-[13.5px] text-zinc-700 hover:text-zinc-900 truncate" title={`Apply "${s.name}"`}>
                       {s.name}
-                      <span className="ml-1.5 text-[11px] text-zinc-400 tabular-nums">{s.rules.length} rule{s.rules.length === 1 ? "" : "s"}</span>
+                      <span className="ml-1.5 text-[12px] text-zinc-400 tabular-nums">{s.rules.length} rule{s.rules.length === 1 ? "" : "s"}</span>
                     </button>
                     <button
                       type="button"
@@ -563,7 +563,7 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
                   type="button"
                   onClick={saveCurrent}
                   disabled={!saveName.trim() || activeRuleCount(filters) === 0}
-                  className="h-7 px-2.5 rounded-md text-[12px] font-medium bg-zinc-900 hover:bg-zinc-800 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-7 px-2.5 rounded-md text-[13px] font-medium bg-zinc-900 hover:bg-zinc-800 text-white disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Save
                 </button>

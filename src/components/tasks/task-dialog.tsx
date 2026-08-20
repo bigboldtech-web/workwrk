@@ -375,13 +375,13 @@ export function TaskDialog({
                 <button className="flex items-center gap-2 px-3 py-1.5 bg-transparent hover:bg-surface-2 border border-border rounded-md text-xs font-medium text-foreground transition-all shadow-sm">
                   {assigneeId && assigneeId !== "self" ? (
                     <div className="flex -space-x-1">
-                       <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[10px] text-white">
+                       <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[11px] text-white">
                          {teamMembers.find(m => m.id === assigneeId)?.firstName[0]}
                        </span>
                     </div>
                   ) : assigneeId === "self" ? (
                     <div className="flex -space-x-1">
-                       <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-[10px] text-white">M</span>
+                       <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-[11px] text-white">M</span>
                     </div>
                   ) : (
                     <User size={14} className="text-muted-foreground" />
@@ -395,12 +395,12 @@ export function TaskDialog({
                 </div>
                 <DropdownMenuLabel>People</DropdownMenuLabel>
                 <DropdownMenuItem onClick={() => setAssigneeId("self")}>
-                  <div className="w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center text-[11px] text-white">M</div>
+                  <div className="w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center text-[12px] text-white">M</div>
                   <span>Me</span>
                 </DropdownMenuItem>
                 {teamMembers.filter((m) => m.id !== currentUserId).map((m) => (
                   <DropdownMenuItem key={m.id} onClick={() => setAssigneeId(m.id)}>
-                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-[11px] text-white">
+                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-[12px] text-white">
                       {m.firstName[0]}{m.lastName[0]}
                     </div>
                     <span>{m.firstName} {m.lastName}</span>
@@ -420,11 +420,11 @@ export function TaskDialog({
               <DropdownMenuContent align="start" className="w-[280px] p-4">
                  <div className="grid grid-cols-2 gap-4 mb-4">
                    <div>
-                     <label className="text-[11px] text-muted-foreground mb-1.5 block">Start date</label>
+                     <label className="text-[12px] text-muted-foreground mb-1.5 block">Start date</label>
                      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
                    </div>
                    <div>
-                     <label className="text-[11px] text-muted-foreground mb-1.5 block">Due date</label>
+                     <label className="text-[12px] text-muted-foreground mb-1.5 block">Due date</label>
                      <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={date} className="text-sm bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
                    </div>
                  </div>
@@ -552,7 +552,7 @@ export function TaskDialog({
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-4 bg-surface-2/30 border-t border-border mt-2">
           <div className="flex items-center gap-2">
-             <button className="flex items-center gap-2 px-3 py-1.5 text-[13px] font-medium text-foreground hover:bg-surface-2 rounded-lg border border-border transition-colors shadow-sm bg-surface">
+             <button className="flex items-center gap-2 px-3 py-1.5 text-[14px] font-medium text-foreground hover:bg-surface-2 rounded-lg border border-border transition-colors shadow-sm bg-surface">
                <LayoutTemplate size={14} className="text-muted-foreground" />
                Templates
              </button>

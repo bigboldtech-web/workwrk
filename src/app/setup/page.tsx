@@ -432,7 +432,7 @@ export default function SetupPage() {
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold">{mod.name}</span>
                         {mod.default && (
-                          <Badge variant="secondary" className="text-[10px]">Required</Badge>
+                          <Badge variant="secondary" className="text-[11px]">Required</Badge>
                         )}
                       </div>
                       <span className="text-xs text-muted mt-0.5 block">{mod.desc}</span>

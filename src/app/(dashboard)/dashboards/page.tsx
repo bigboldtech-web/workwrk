@@ -115,7 +115,7 @@ export default function DashboardsPage() {
           <button
             type="button"
             onClick={() => setCreating(true)}
-            className="inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
+            className="inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[13.5px] font-semibold text-white hover:bg-zinc-800"
           >
             <Plus className="h-3.5 w-3.5" />
             New Dashboard
@@ -126,7 +126,7 @@ export default function DashboardsPage() {
       <div className="flex-1 overflow-y-auto p-4">
         {creating ? (
           <div className="mb-4 max-w-md rounded-xl border border-zinc-200 bg-white p-3 shadow-sm">
-            <div className="mb-2 text-[13px] font-semibold text-zinc-900">New dashboard</div>
+            <div className="mb-2 text-[14px] font-semibold text-zinc-900">New dashboard</div>
             <input
               ref={nameRef}
               type="text"
@@ -137,14 +137,14 @@ export default function DashboardsPage() {
                 if (e.key === "Escape") setCreating(false);
               }}
               placeholder="Dashboard name"
-              className="h-8 w-full rounded-lg border bg-white px-2.5 text-[13px] outline-none"
+              className="h-8 w-full rounded-lg border bg-white px-2.5 text-[14px] outline-none"
               style={{ borderColor: TAUPE.ring }}
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setCreating(false)}
-                className="h-8 rounded-lg border border-zinc-200 px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50"
+                className="h-8 rounded-lg border border-zinc-200 px-3 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50"
               >
                 Cancel
               </button>
@@ -152,7 +152,7 @@ export default function DashboardsPage() {
                 type="button"
                 onClick={() => void create()}
                 disabled={!name.trim() || busy}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[13px] text-white ${taupeButton}`}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[14px] text-white ${taupeButton}`}
               >
                 {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                 Create
@@ -162,7 +162,7 @@ export default function DashboardsPage() {
         ) : null}
 
         {dashboards === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : dashboards.length === 0 && !creating ? (
@@ -170,7 +170,7 @@ export default function DashboardsPage() {
           // every card opens the same create flow for now).
           <div className="flex flex-col items-center pt-16">
             <h2 className="text-[20px] font-semibold text-zinc-900">Choose a Dashboard template</h2>
-            <p className="mt-1 max-w-md text-center text-[13px] text-zinc-500">
+            <p className="mt-1 max-w-md text-center text-[14px] text-zinc-500">
               Get started with a Dashboard template or create a custom Dashboard to fit your exact needs.
             </p>
             <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -190,8 +190,8 @@ export default function DashboardsPage() {
                   <span className="grid h-9 w-9 place-items-center rounded-full bg-zinc-50">
                     <t.Icon className="h-4 w-4 text-zinc-600" />
                   </span>
-                  <div className="mt-3 text-[13px] font-semibold text-zinc-900">{t.name}</div>
-                  <p className="mt-0.5 text-[12px] text-zinc-500">{t.desc}</p>
+                  <div className="mt-3 text-[14px] font-semibold text-zinc-900">{t.name}</div>
+                  <p className="mt-0.5 text-[13px] text-zinc-500">{t.desc}</p>
                 </button>
               ))}
             </div>
@@ -206,12 +206,12 @@ export default function DashboardsPage() {
               >
                 <div className="mb-2 flex items-center gap-2">
                   <LayoutDashboard className="h-4 w-4 text-zinc-500" />
-                  <span className="truncate text-[13.5px] font-semibold text-zinc-900">{d.name}</span>
+                  <span className="truncate text-[14.5px] font-semibold text-zinc-900">{d.name}</span>
                 </div>
                 {d.description ? (
-                  <p className="mb-2 line-clamp-2 text-[12px] text-zinc-500">{d.description}</p>
+                  <p className="mb-2 line-clamp-2 text-[13px] text-zinc-500">{d.description}</p>
                 ) : null}
-                <div className="text-[11.5px] text-zinc-400">
+                <div className="text-[12.5px] text-zinc-400">
                   {Array.isArray(d.widgets) ? d.widgets.length : 0} widgets · edited {relTime(d.updatedAt)}
                 </div>
               </Link>

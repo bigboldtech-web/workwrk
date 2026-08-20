@@ -38,7 +38,7 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
           <Link href="/today" aria-label="WorkwrK home" className="flex items-center">
             <LogoLockup size={19} textColor="#181B34" />
           </Link>
-          <Link href="/today" className="ml-auto rounded-md px-3 py-1.5 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+          <Link href="/today" className="ml-auto rounded-md px-3 py-1.5 text-[14px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
             Skip for now
           </Link>
         </div>

@@ -76,7 +76,7 @@ export function WorkloadHeatmap({
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
           <thead>
-            <tr className="text-[10px] text-muted">
+            <tr className="text-[11px] text-muted">
               <th className="text-left px-3 py-1.5 font-medium">Person</th>
               {days.map((d) => (
                 <th key={formatISODate(d)} className="px-1.5 py-1.5 font-medium text-center">
@@ -99,7 +99,7 @@ export function WorkloadHeatmap({
                     <div className="flex items-center gap-2">
                       <Avatar className="h-5 w-5">
                         {m.avatar ? <AvatarImage src={m.avatar} alt="" /> : null}
-                        <AvatarFallback className="text-[9px]">
+                        <AvatarFallback className="text-[10px]">
                           {m.firstName[0]}{m.lastName[0]}
                         </AvatarFallback>
                       </Avatar>
@@ -121,7 +121,7 @@ export function WorkloadHeatmap({
                       <td key={key} className="p-0.5">
                         <button
                           onClick={() => onDrill(m.id, key)}
-                          className="w-full h-7 rounded text-[10px] text-foreground/90 hover:ring-1 hover:ring-[#d4ff2e] transition"
+                          className="w-full h-7 rounded text-[11px] text-foreground/90 hover:ring-1 hover:ring-[#d4ff2e] transition"
                           style={{ backgroundColor: bg }}
                           title={hours > 0 ? `${hours.toFixed(1)}h · ${row?.taskCount ?? 0} tasks` : "—"}
                         >

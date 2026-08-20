@@ -158,7 +158,7 @@ export function BoardItemDetail({
             className="flex w-full items-center gap-2 h-9 px-3 rounded-lg text-left transition-colors bg-[color-mix(in_srgb,var(--os-brand)_5%,transparent)] hover:bg-[color-mix(in_srgb,var(--os-brand)_9%,transparent)]"
           >
             <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--os-brand)]" />
-            <span className="truncate text-[12.5px] text-zinc-500">
+            <span className="truncate text-[13.5px] text-zinc-500">
               <span className="font-medium text-[var(--os-brand)]">Ask Brain</span>
               {" "}to plan, summarize or draft next steps for this task
             </span>
@@ -210,7 +210,7 @@ export function BoardItemDetail({
         </FieldRow>
       </div>
 
-      <div className="text-[11px] text-zinc-400">
+      <div className="text-[12px] text-zinc-400">
         Created {fmtStamp(item.createdAt)} <span className="mx-1 text-zinc-300">·</span> Updated {fmtStamp(item.updatedAt)}
       </div>
 
@@ -227,7 +227,7 @@ export function BoardItemDetail({
             <button
               type="button"
               onClick={() => setFieldsCollapsed((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-zinc-800"
+              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-800"
             >
               <ChevronDown className={`h-3.5 w-3.5 text-zinc-400 transition-transform ${fieldsCollapsed ? "-rotate-90" : ""}`} />
               Custom Fields
@@ -236,10 +236,10 @@ export function BoardItemDetail({
               <div className="flex items-center gap-1.5">
                 <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200">
                   <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                  <input value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search fields…" className="w-[110px] text-[12px] bg-transparent outline-none" />
+                  <input value={fieldSearch} onChange={(e) => setFieldSearch(e.target.value)} placeholder="Search fields…" className="w-[110px] text-[13px] bg-transparent outline-none" />
                 </div>
                 {emptyCount > 0 ? (
-                  <button type="button" onClick={() => setHideEmpty((v) => !v)} className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[11.5px] text-zinc-500 hover:bg-zinc-100">
+                  <button type="button" onClick={() => setHideEmpty((v) => !v)} className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12.5px] text-zinc-500 hover:bg-zinc-100">
                     {hideEmpty ? <Eye className="h-3.5 w-3.5 shrink-0 text-zinc-400" /> : <EyeOff className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
                     {hideEmpty ? `Show ${emptyCount} empty` : `Hide ${emptyCount} empty`}
                   </button>
@@ -248,7 +248,7 @@ export function BoardItemDetail({
             ) : null}
           </div>
           {fieldsCollapsed ? null : shown.length === 0 ? (
-            <p className="text-[12.5px] text-zinc-400">{fieldSearch ? "No matching fields." : "All fields empty."}</p>
+            <p className="text-[13.5px] text-zinc-400">{fieldSearch ? "No matching fields." : "All fields empty."}</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-10 gap-y-0.5">
               {shown.map((f) => (
@@ -303,7 +303,7 @@ export function BoardItemDetail({
               key={r.key}
               type="button"
               onClick={r.onClick}
-              className="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[13px] text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
+              className="flex h-8 items-center gap-2 rounded-md px-2 text-left text-[14px] text-zinc-600 transition-colors hover:bg-zinc-50 hover:text-zinc-900"
             >
               <r.icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
               {r.label}
@@ -336,7 +336,7 @@ function FieldRow({ icon: Icon, label, children }: { icon?: LucideIcon; label: s
             <span className="h-1 w-1 rounded-full bg-zinc-300" />
           </span>
         )}
-        <span className="truncate text-[12.5px] text-zinc-500">{label}</span>
+        <span className="truncate text-[13.5px] text-zinc-500">{label}</span>
       </div>
       <div className="flex min-h-[30px] min-w-0 flex-1 items-center rounded-md px-2 py-1 transition-colors hover:bg-zinc-50">
         {children}
@@ -398,20 +398,20 @@ function TimeEstimateField({ item, canEdit, onPatch }: { item: BoardItemRow; can
         onBlur={commit}
         onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditing(false); }}
         placeholder="e.g. 2h 30m"
-        className="h-7 w-[110px] rounded-md border border-[var(--os-brand)] bg-white px-2 text-[13px] outline-none placeholder:text-zinc-400"
+        className="h-7 w-[110px] rounded-md border border-[var(--os-brand)] bg-white px-2 text-[14px] outline-none placeholder:text-zinc-400"
       />
     );
   }
 
   if (!canEdit) {
-    return minutes ? <span className="text-[13px] text-zinc-700 tabular-nums">{formatMinutes(minutes)}</span> : <span className="text-[13px] text-zinc-400">Empty</span>;
+    return minutes ? <span className="text-[14px] text-zinc-700 tabular-nums">{formatMinutes(minutes)}</span> : <span className="text-[14px] text-zinc-400">Empty</span>;
   }
 
   return (
     <button
       type="button"
       onClick={() => { setDraft(minutes ? formatMinutes(minutes) : ""); setEditing(true); }}
-      className="text-left text-[13px]"
+      className="text-left text-[14px]"
       title="Set time estimate"
     >
       {minutes ? (
@@ -529,7 +529,7 @@ function TrackTimeField({ itemId, canEdit }: { itemId: string; canEdit: boolean 
         type="button"
         onClick={() => (open ? closePopover() : setOpen(true))}
         title="Time entries"
-        className="text-left text-[13px] tabular-nums"
+        className="text-left text-[14px] tabular-nums"
       >
         {running && state?.active ? (
           <span className="font-mono text-red-600">{formatRunningClock(state.active.startedAt, now)}</span>
@@ -614,7 +614,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
           <Flag className="w-3 h-3" />{kraName ?? "KRA"}
         </span>
       ) : null}
-      {!kraId && !kpiId ? <span className="text-[13px] text-zinc-400">Empty</span> : null}
+      {!kraId && !kpiId ? <span className="text-[14px] text-zinc-400">Empty</span> : null}
     </span>
   );
 
@@ -632,34 +632,34 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
           <div className="absolute z-20 mt-1 right-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] p-2">
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
               <Search className="w-3.5 h-3.5 text-zinc-400" />
-              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+              <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
             </div>
             <div className="max-h-[240px] overflow-y-auto">
-              <div className="px-1 pb-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
+              <div className="px-1 pb-1 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
               {fKpis.length === 0 ? (
-                <div className="px-2 py-1.5 text-[12px] text-zinc-400">{ready ? "No KPIs — pick a KRA below." : "Loading…"}</div>
+                <div className="px-2 py-1.5 text-[13px] text-zinc-400">{ready ? "No KPIs — pick a KRA below." : "Loading…"}</div>
               ) : (
                 fKpis.map((k) => (
-                  <button key={k.id} type="button" onClick={() => commit(k.kra?.id ?? null, k.id)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                  <button key={k.id} type="button" onClick={() => commit(k.kra?.id ?? null, k.id)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded">
                     <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
                     <span className="flex-1 min-w-0">
                       <span className="block truncate text-zinc-700">{k.name}</span>
-                      {k.kra ? <span className="block text-[11px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
+                      {k.kra ? <span className="block text-[12px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
                     </span>
                     {kpiId === k.id ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
                   </button>
                 ))
               )}
-              <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
+              <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
               {fKras.length === 0 ? (
-                <div className="px-2 py-1.5 text-[12px] text-zinc-400">{ready ? "No KRAs available." : "Loading…"}</div>
+                <div className="px-2 py-1.5 text-[13px] text-zinc-400">{ready ? "No KRAs available." : "Loading…"}</div>
               ) : (
                 fKras.map((k) => (
-                  <button key={k.id} type="button" onClick={() => commit(k.id, null)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                  <button key={k.id} type="button" onClick={() => commit(k.id, null)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded">
                     <Flag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                     <span className="flex-1 min-w-0">
                       <span className="block truncate text-zinc-700">{k.name}</span>
-                      {k.category ? <span className="block text-[11px] text-zinc-400 truncate">{k.category}</span> : null}
+                      {k.category ? <span className="block text-[12px] text-zinc-400 truncate">{k.category}</span> : null}
                     </span>
                     {kraId === k.id && !kpiId ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
                   </button>
@@ -667,7 +667,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
               )}
             </div>
             {(kraId || kpiId) ? (
-              <button type="button" onClick={() => commit(null, null)} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
+              <button type="button" onClick={() => commit(null, null)} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[14px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
                 <Ban className="w-3.5 h-3.5 text-zinc-400" /> Clear alignment
               </button>
             ) : null}
@@ -740,13 +740,13 @@ function StatusPicker({ value, statuses, canEdit, onChange }: { value: string | 
   const isDone = current?.group === "DONE";
   const pill = current ? (
     <span
-      className={`inline-flex items-center h-5 ${showAdvance && canEdit ? "rounded-l-[5px]" : "rounded-[5px]"} px-2 text-[10.5px] font-bold uppercase tracking-wider text-white whitespace-nowrap shrink-0`}
+      className={`inline-flex items-center h-5 ${showAdvance && canEdit ? "rounded-l-[5px]" : "rounded-[5px]"} px-2 text-[11.5px] font-bold uppercase tracking-wider text-white whitespace-nowrap shrink-0`}
       style={{ background: current.color }}
     >
       {current.label}
     </span>
   ) : (
-    <span className="text-[13px] text-zinc-400">Empty</span>
+    <span className="text-[14px] text-zinc-400">Empty</span>
   );
   if (!canEdit) return pill;
   return (

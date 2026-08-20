@@ -125,7 +125,7 @@ export default function LibraryPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`Search ${tab}…`}
-              className="w-full h-8 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
+              className="w-full h-8 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[13.5px] focus:outline-none focus:border-zinc-400"
             />
           </div>
         </div>
@@ -156,7 +156,7 @@ function TabPill({
     <button
       type="button"
       onClick={onClick}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12.5px] font-medium transition-colors ${
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13.5px] font-medium transition-colors ${
         active
           ? "bg-zinc-900 text-white"
           : "text-zinc-600 hover:bg-zinc-100"
@@ -241,14 +241,14 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       ) : null}
 
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[12.5px] text-zinc-500">
+        <div className="text-[13.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} note${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
           onClick={newNote}
           disabled={creating}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
           {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           New note
@@ -256,7 +256,7 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       </div>
 
       {rows === null ? (
-        <div className="text-zinc-400 text-[13px]">Loading notes…</div>
+        <div className="text-zinc-400 text-[14px]">Loading notes…</div>
       ) : filtered.length === 0 ? (
         <EmptyTab
           icon={<FileText className="h-8 w-8 text-zinc-300" />}
@@ -275,18 +275,18 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
                 <div className="flex items-center gap-2 mb-2 pr-7">
                   <FileText className="h-3.5 w-3.5 text-zinc-400" />
                   {d.entityType ? (
-                    <span className="text-[10px] uppercase tracking-wide text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100">
+                    <span className="text-[11px] uppercase tracking-wide text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100">
                       {d.entityType.toLowerCase()}
                     </span>
                   ) : (
-                    <span className="text-[10px] uppercase tracking-wide text-zinc-400">Standalone</span>
+                    <span className="text-[11px] uppercase tracking-wide text-zinc-400">Standalone</span>
                   )}
                 </div>
-                <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{d.title || "Untitled"}</div>
+                <div className="text-[14px] font-medium text-zinc-900 line-clamp-1">{d.title || "Untitled"}</div>
                 {d.excerpt ? (
-                  <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{d.excerpt}</div>
+                  <div className="mt-1 text-[13px] text-zinc-500 line-clamp-2">{d.excerpt}</div>
                 ) : null}
-                <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                <div className="mt-2 flex items-center gap-1 text-[12px] text-zinc-400">
                   <Clock className="h-3 w-3" />
                   {relTime(d.updatedAt)}
                 </div>
@@ -377,14 +377,14 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
       ) : null}
 
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[12.5px] text-zinc-500">
+        <div className="text-[13.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} whiteboard${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
           onClick={newBoard}
           disabled={creating}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
           {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           New whiteboard
@@ -392,7 +392,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
       </div>
 
       {rows === null ? (
-        <div className="text-zinc-400 text-[13px]">Loading whiteboards…</div>
+        <div className="text-zinc-400 text-[14px]">Loading whiteboards…</div>
       ) : filtered.length === 0 ? (
         <EmptyTab
           icon={<Frame className="h-8 w-8 text-zinc-300" />}
@@ -419,11 +419,11 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
                 )}
               </div>
               <div className="p-3">
-                <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{b.name}</div>
+                <div className="text-[14px] font-medium text-zinc-900 line-clamp-1">{b.name}</div>
                 {b.description ? (
-                  <div className="mt-1 text-[12px] text-zinc-500 line-clamp-1">{b.description}</div>
+                  <div className="mt-1 text-[13px] text-zinc-500 line-clamp-1">{b.description}</div>
                 ) : null}
-                <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                <div className="mt-2 flex items-center gap-1 text-[12px] text-zinc-400">
                   <Clock className="h-3 w-3" />
                   {relTime(b.lastEditedAt ?? b.updatedAt)}
                 </div>
@@ -621,7 +621,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       ) : null}
 
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[12.5px] text-zinc-500">
+        <div className="text-[13.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}
         </div>
         <div className="flex items-center gap-2">
@@ -636,7 +636,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
           >
             {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
             Upload
@@ -645,7 +645,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       </div>
 
       {rows === null ? (
-        <div className="text-zinc-400 text-[13px]">Loading files…</div>
+        <div className="text-zinc-400 text-[14px]">Loading files…</div>
       ) : filtered.length === 0 ? (
         <EmptyTab
           icon={<Folder className="h-8 w-8 text-zinc-300" />}
@@ -683,12 +683,12 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
                         href={f.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="block text-[13px] font-medium text-zinc-900 truncate hover:text-zinc-700"
+                        className="block text-[14px] font-medium text-zinc-900 truncate hover:text-zinc-700"
                         title={f.name}
                       >
                         {f.name}
                       </a>
-                      <div className="mt-1 flex items-center gap-1 text-[11px] text-zinc-400">
+                      <div className="mt-1 flex items-center gap-1 text-[12px] text-zinc-400">
                         <Clock className="h-3 w-3" />
                         {relTime(f.updatedAt)}
                         <span className="text-zinc-300">·</span>
@@ -813,14 +813,14 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       ) : null}
 
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[12.5px] text-zinc-500">
+        <div className="text-[13.5px] text-zinc-500">
           {rows === null ? "Loading…" : `${filtered.length} table${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
           onClick={newTable}
           disabled={creating}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
           {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           New table
@@ -828,7 +828,7 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
       </div>
 
       {rows === null ? (
-        <div className="text-zinc-400 text-[13px]">Loading tables…</div>
+        <div className="text-zinc-400 text-[14px]">Loading tables…</div>
       ) : filtered.length === 0 ? (
         <EmptyTab
           icon={<Database className="h-8 w-8 text-zinc-300" />}
@@ -846,15 +846,15 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
               >
                 <div className="flex items-center gap-2 mb-2 pr-7">
                   <Database className="h-3.5 w-3.5 text-zinc-400" />
-                  <span className="text-[10px] uppercase tracking-wide text-zinc-400">
+                  <span className="text-[11px] uppercase tracking-wide text-zinc-400">
                     {t.columns.length} column{t.columns.length === 1 ? "" : "s"}
                   </span>
                 </div>
-                <div className="text-[13px] font-medium text-zinc-900 line-clamp-1">{t.name}</div>
+                <div className="text-[14px] font-medium text-zinc-900 line-clamp-1">{t.name}</div>
                 {t.description ? (
-                  <div className="mt-1 text-[12px] text-zinc-500 line-clamp-2">{t.description}</div>
+                  <div className="mt-1 text-[13px] text-zinc-500 line-clamp-2">{t.description}</div>
                 ) : null}
-                <div className="mt-2 flex items-center gap-1 text-[11px] text-zinc-400">
+                <div className="mt-2 flex items-center gap-1 text-[12px] text-zinc-400">
                   <Clock className="h-3 w-3" />
                   {relTime(t.updatedAt)}
                   <span className="text-zinc-300">·</span>
@@ -885,7 +885,7 @@ function EmptyTab({
     <div className="rounded-xl border border-dashed border-zinc-200 bg-white p-12 text-center">
       <div className="inline-flex items-center justify-center mb-3">{icon}</div>
       <div className="text-[14px] font-medium text-zinc-900 mb-1">{title}</div>
-      <div className="text-[12.5px] text-zinc-500 max-w-sm mx-auto">{subtitle}</div>
+      <div className="text-[13.5px] text-zinc-500 max-w-sm mx-auto">{subtitle}</div>
     </div>
   );
 }
@@ -905,7 +905,7 @@ function FileSpaceChip({
     <button
       type="button"
       onClick={onClick}
-      className="text-[11.5px] px-2 py-1 rounded-full border transition inline-flex items-center gap-1.5"
+      className="text-[12.5px] px-2 py-1 rounded-full border transition inline-flex items-center gap-1.5"
       style={{
         backgroundColor: active ? (color ?? "#18181b") : "white",
         borderColor: active ? (color ?? "#18181b") : "rgb(228 228 231)",

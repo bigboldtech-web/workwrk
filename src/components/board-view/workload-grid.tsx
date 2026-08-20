@@ -327,7 +327,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
           type="button"
           disabled={isCurrentWindow}
           onClick={() => setAnchor(startOfWeek(new Date()))}
-          className="h-7 px-2.5 rounded-md border border-zinc-200 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-transparent"
+          className="h-7 px-2.5 rounded-md border border-zinc-200 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-300 disabled:hover:bg-transparent"
         >
           Today
         </button>
@@ -347,12 +347,12 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
         >
           <ChevronRight className="w-3.5 h-3.5" />
         </button>
-        <span className="text-[12.5px] font-semibold text-zinc-900">{rangeLabel}</span>
+        <span className="text-[13.5px] font-semibold text-zinc-900">{rangeLabel}</span>
         <select
           value={s.mode}
           onChange={(e) => change({ mode: e.target.value === "hours" ? "hours" : "tasks" })}
           aria-label="Workload mode"
-          className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12px] text-zinc-700"
+          className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700"
         >
           <option value="tasks">Task count</option>
           <option value="hours">Time estimates</option>
@@ -364,7 +364,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
             change({ windowDays: v === 7 ? 7 : v === 28 ? 28 : 14 });
           }}
           aria-label="Window size"
-          className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[12px] text-zinc-700"
+          className="h-7 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700"
         >
           <option value="7">1 week</option>
           <option value="14">2 weeks</option>
@@ -384,9 +384,9 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
             </button>
             <MorePortal anchorRef={gearRef} panelRef={panelRef} width={300} open={panelOpen} placement="below">
               <div className="rounded-xl border border-zinc-200 bg-white shadow-2xl p-3 space-y-2.5">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Capacity</div>
+                <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Capacity</div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[12.5px] text-zinc-700 flex-1">Daily hours</span>
+                  <span className="text-[13.5px] text-zinc-700 flex-1">Daily hours</span>
                   <input
                     type="number"
                     min={1}
@@ -396,11 +396,11 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                       const v = Number(e.target.value);
                       if (Number.isFinite(v) && v >= 1 && v <= 24) change({ dailyHours: v });
                     }}
-                    className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[12px] tabular-nums text-right"
+                    className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[13px] tabular-nums text-right"
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[12.5px] text-zinc-700 flex-1">Daily tasks</span>
+                  <span className="text-[13.5px] text-zinc-700 flex-1">Daily tasks</span>
                   <input
                     type="number"
                     min={1}
@@ -410,11 +410,11 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                       const v = Number(e.target.value);
                       if (Number.isFinite(v) && v >= 1 && v <= 99) change({ dailyTasks: v });
                     }}
-                    className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[12px] tabular-nums text-right"
+                    className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[13px] tabular-nums text-right"
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[12.5px] text-zinc-700 flex-1">Count weekends</span>
+                  <span className="text-[13.5px] text-zinc-700 flex-1">Count weekends</span>
                   <Switch
                     checked={s.countWeekends}
                     onChange={(v) => change({ countWeekends: v })}
@@ -422,12 +422,12 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                   />
                 </div>
                 <div className="h-px bg-zinc-100" />
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Per-person hours</div>
+                <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Per-person hours</div>
                 <div className="space-y-1 max-h-[200px] overflow-y-auto">
                   {people.map((p) => (
                     <div key={p.id} className="flex items-center gap-2 h-7">
                       <PersonAvatar person={{ ...p, email: null }} size={20} />
-                      <span className="flex-1 min-w-0 truncate text-[12px] text-zinc-700">{personName(p)}</span>
+                      <span className="flex-1 min-w-0 truncate text-[13px] text-zinc-700">{personName(p)}</span>
                       <input
                         type="number"
                         min={1}
@@ -440,12 +440,12 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                           const v = Number(raw);
                           if (Number.isFinite(v) && v >= 1 && v <= 24) setPerPerson(p.id, v);
                         }}
-                        className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[12px] tabular-nums text-right"
+                        className="h-7 w-16 rounded-md border border-zinc-200 px-2 text-[13px] tabular-nums text-right"
                       />
                     </div>
                   ))}
                   {people.length === 0 ? (
-                    <div className="text-[12px] text-zinc-400">No members</div>
+                    <div className="text-[13px] text-zinc-400">No members</div>
                   ) : null}
                 </div>
               </div>
@@ -458,12 +458,12 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
       <div className="relative rounded-xl border border-zinc-200 bg-white overflow-x-auto">
         {visible.length === 0 ? (
           <div className="px-8 py-10 text-center">
-            <p className="text-[12.5px] text-zinc-500">No scheduled work in this window.</p>
+            <p className="text-[13.5px] text-zinc-500">No scheduled work in this window.</p>
             {hiddenCount > 0 ? (
               <button
                 type="button"
                 onClick={() => change({ showAllPeople: true })}
-                className="mt-2 h-7 px-2 text-[12px] text-zinc-500 hover:text-zinc-700"
+                className="mt-2 h-7 px-2 text-[13px] text-zinc-500 hover:text-zinc-700"
               >
                 Show {hiddenCount} {hiddenCount === 1 ? "person" : "people"} without tasks
               </button>
@@ -474,7 +474,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
             {/* Left People column (sticky) */}
             <div className="shrink-0 sticky left-0 z-20 bg-white border-r border-zinc-200" style={{ width: NAME_W }}>
               <div
-                className="flex items-center px-3 border-b border-zinc-200 bg-white text-[10.5px] font-semibold uppercase tracking-wide text-zinc-500"
+                className="flex items-center px-3 border-b border-zinc-200 bg-white text-[11.5px] font-semibold uppercase tracking-wide text-zinc-500"
                 style={{ height: HEAD_H }}
               >
                 People
@@ -504,15 +504,15 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                         </span>
                       )}
                       <span
-                        className={`flex-1 min-w-0 truncate text-[12.5px] font-medium ${r.person ? "text-zinc-800" : "text-zinc-500"}`}
+                        className={`flex-1 min-w-0 truncate text-[13.5px] font-medium ${r.person ? "text-zinc-800" : "text-zinc-500"}`}
                         title={personName(r.person)}
                       >
                         {personName(r.person)}
                       </span>
-                      <span className="text-[11px] tabular-nums text-zinc-500">{summary}</span>
+                      <span className="text-[12px] tabular-nums text-zinc-500">{summary}</span>
                       {r.backlog.length > 0 ? (
                         <span
-                          className="inline-flex items-center h-5 rounded-full bg-zinc-100 px-2 text-[10.5px] font-medium text-zinc-500"
+                          className="inline-flex items-center h-5 rounded-full bg-zinc-100 px-2 text-[11.5px] font-medium text-zinc-500"
                           title={`${r.backlog.length} open task${r.backlog.length === 1 ? "" : "s"} with no dates`}
                         >
                           {r.backlog.length} unscheduled
@@ -533,19 +533,19 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                               <button
                                 type="button"
                                 onClick={() => onOpenItem?.(it.id)}
-                                className="flex-1 min-w-0 truncate text-left text-[12px] text-zinc-700 hover:text-[var(--os-brand)]"
+                                className="flex-1 min-w-0 truncate text-left text-[13px] text-zinc-700 hover:text-[var(--os-brand)]"
                                 title={it.title}
                               >
                                 {it.title}
                               </button>
-                              <span className="text-[11px] tabular-nums text-zinc-400">
+                              <span className="text-[12px] tabular-nums text-zinc-400">
                                 {due ? due.toLocaleString("default", { month: "short", day: "numeric" }) : ""}
                               </span>
                             </div>
                           );
                         })}
                         {r.windowItems.length > ITEM_CAP ? (
-                          <div className="flex items-center pl-10 pr-3 h-7 border-b border-zinc-100 bg-zinc-50/50 dark:bg-white/[0.02] text-[11px] text-zinc-400">
+                          <div className="flex items-center pl-10 pr-3 h-7 border-b border-zinc-100 bg-zinc-50/50 dark:bg-white/[0.02] text-[12px] text-zinc-400">
                             +{r.windowItems.length - ITEM_CAP} more
                           </div>
                         ) : null}
@@ -558,7 +558,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                 <button
                   type="button"
                   onClick={() => change({ showAllPeople: !s.showAllPeople })}
-                  className="h-7 px-2 text-[12px] text-zinc-500 hover:text-zinc-700 text-left w-full"
+                  className="h-7 px-2 text-[13px] text-zinc-500 hover:text-zinc-700 text-left w-full"
                 >
                   {s.showAllPeople
                     ? "Hide people without tasks"
@@ -575,7 +575,7 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                   {monthBands.map((band, i) => (
                     <div
                       key={`${band.label}-${i}`}
-                      className="px-2 flex items-center text-[10.5px] font-medium text-zinc-500 truncate"
+                      className="px-2 flex items-center text-[11.5px] font-medium text-zinc-500 truncate"
                       style={{ gridColumn: `span ${band.span}` }}
                     >
                       {band.label}
@@ -588,11 +588,11 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                     return (
                       <div
                         key={i}
-                        className="border-l first:border-l-0 border-zinc-100 flex items-center justify-center gap-1 text-[10.5px]"
+                        className="border-l first:border-l-0 border-zinc-100 flex items-center justify-center gap-1 text-[11.5px]"
                       >
                         <span className="text-zinc-300 font-medium">{WEEKDAY_INITIALS[d.getDay()]}</span>
                         {isToday ? (
-                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#E2445C] text-white text-[10px] font-semibold">
+                          <span className="inline-flex items-center justify-center w-[18px] h-[18px] rounded-full bg-[#E2445C] text-white text-[11px] font-semibold">
                             {d.getDate()}
                           </span>
                         ) : (
@@ -663,7 +663,7 @@ function DayCell({ day, load, cap, mode, onToggle }: {
         {loadVal > 0 ? (
           <>
             <span aria-hidden className="absolute inset-x-0 bottom-0 h-1 bg-zinc-300 dark:bg-zinc-600" />
-            <span className="absolute top-1 left-1.5 text-[10.5px] font-semibold tabular-nums text-zinc-500">{label}</span>
+            <span className="absolute top-1 left-1.5 text-[11.5px] font-semibold tabular-nums text-zinc-500">{label}</span>
           </>
         ) : null}
       </>
@@ -671,7 +671,7 @@ function DayCell({ day, load, cap, mode, onToggle }: {
   } else if (loadVal <= 0) {
     block = (
       <>
-        <span className="absolute top-1 left-1.5 text-[10.5px] font-semibold tabular-nums text-zinc-400">
+        <span className="absolute top-1 left-1.5 text-[11.5px] font-semibold tabular-nums text-zinc-400">
           {mode === "hours" ? "0h" : "0"}
         </span>
         {/* Tasks scheduled but none estimated — the 0h is a floor, flag it. */}
@@ -684,8 +684,8 @@ function DayCell({ day, load, cap, mode, onToggle }: {
     block = (
       <>
         <span aria-hidden className="absolute inset-0 bg-red-500" />
-        <span className="absolute top-1 left-1.5 text-[10.5px] font-semibold tabular-nums text-white">{label}</span>
-        <span className="absolute top-0 right-0 m-0.5 inline-flex items-center h-3.5 min-w-[14px] justify-center rounded-full bg-red-600 px-1 text-[9px] font-bold text-white tabular-nums">
+        <span className="absolute top-1 left-1.5 text-[11.5px] font-semibold tabular-nums text-white">{label}</span>
+        <span className="absolute top-0 right-0 m-0.5 inline-flex items-center h-3.5 min-w-[14px] justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold text-white tabular-nums">
           +{mode === "hours" ? `${fmtH(over)}h` : over}
         </span>
       </>
@@ -698,7 +698,7 @@ function DayCell({ day, load, cap, mode, onToggle }: {
           className="absolute inset-x-0 bottom-0 bg-emerald-500"
           style={{ height: `${Math.min(loadVal / cap, 1) * 100}%` }}
         />
-        <span className="absolute top-1 left-1.5 text-[10.5px] font-semibold tabular-nums text-emerald-900 dark:text-emerald-200">
+        <span className="absolute top-1 left-1.5 text-[11.5px] font-semibold tabular-nums text-emerald-900 dark:text-emerald-200">
           {label}
         </span>
         {mode === "hours" && load.unestimated > 0 ? (

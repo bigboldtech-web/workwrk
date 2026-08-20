@@ -117,7 +117,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
   const display = value.length ? (
     <span className="inline-flex items-center gap-1 flex-wrap">
       {shown.map((t) => <TagChip key={t.id} tag={t} />)}
-      {overflow > 0 ? <span className="text-[11px] text-zinc-500">+{overflow}</span> : null}
+      {overflow > 0 ? <span className="text-[12px] text-zinc-500">+{overflow}</span> : null}
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 text-xs text-zinc-400">
@@ -157,12 +157,12 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
                 }
               }}
               placeholder="Search or add a tag…"
-              className="flex-1 text-[13px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-[14px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
           <div className="max-h-[220px] overflow-y-auto py-1.5">
             {all === null ? (
-              <div className="px-3 py-4 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-[13px] text-zinc-400">Loading…</div>
             ) : (
               <>
                 {filtered.map((t) => {
@@ -189,7 +189,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
                   </>
                 ) : null}
                 {!filtered.length && !q ? (
-                  <div className="px-3 py-4 text-[12px] text-zinc-400">No tags yet — type to create one</div>
+                  <div className="px-3 py-4 text-[13px] text-zinc-400">No tags yet — type to create one</div>
                 ) : null}
               </>
             )}

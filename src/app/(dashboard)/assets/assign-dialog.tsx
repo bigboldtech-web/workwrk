@@ -120,7 +120,7 @@ export function AssignDialog({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search people…"
             autoFocus
-            className="flex h-9 w-full rounded-lg border border-border bg-white dark:bg-surface-2 pl-9 pr-3 text-[13px] text-foreground placeholder:text-muted-2 focus-visible:outline-none focus-visible:border-[color:var(--accent)] focus-visible:ring-[3px] focus-visible:ring-[color:var(--accent)]/15"
+            className="flex h-9 w-full rounded-lg border border-border bg-white dark:bg-surface-2 pl-9 pr-3 text-[14px] text-foreground placeholder:text-muted-2 focus-visible:outline-none focus-visible:border-[color:var(--accent)] focus-visible:ring-[3px] focus-visible:ring-[color:var(--accent)]/15"
           />
         </div>
 
@@ -137,11 +137,11 @@ export function AssignDialog({
 
         <div className="max-h-[46vh] overflow-y-auto -mx-1 px-1">
           {people === null && !loadErr ? (
-            <div className="py-8 text-center text-[12.5px] text-muted-2">Loading people…</div>
+            <div className="py-8 text-center text-[13.5px] text-muted-2">Loading people…</div>
           ) : loadErr ? (
-            <div className="py-8 text-center text-[12.5px] text-[#E2445C]">Could not load people.</div>
+            <div className="py-8 text-center text-[13.5px] text-[#E2445C]">Could not load people.</div>
           ) : filtered.length === 0 ? (
-            <div className="py-8 text-center text-[12.5px] text-muted-2">No people match.</div>
+            <div className="py-8 text-center text-[13.5px] text-muted-2">No people match.</div>
           ) : (
             <ul className="flex flex-col gap-0.5">
               {filtered.map((p) => {
@@ -154,24 +154,24 @@ export function AssignDialog({
                       disabled={busyId !== null || isCurrent}
                       className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left appearance-none bg-transparent hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60 disabled:cursor-default transition-colors"
                     >
-                      <span className="shrink-0 h-7 w-7 rounded-full bg-[color:var(--os-brand)]/12 text-[color:var(--os-brand)] grid place-items-center text-[10.5px] font-semibold overflow-hidden">
+                      <span className="shrink-0 h-7 w-7 rounded-full bg-[color:var(--os-brand)]/12 text-[color:var(--os-brand)] grid place-items-center text-[11.5px] font-semibold overflow-hidden">
                         {p.avatar ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={p.avatar} alt="" className="h-full w-full object-cover" />
                         ) : initials(p)}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium text-foreground">
+                        <span className="block truncate text-[14px] font-medium text-foreground">
                           {personName(p) || p.email || "Unnamed"}
                         </span>
                         {(p.department?.name || p.email) && (
-                          <span className="block truncate text-[11.5px] text-muted-2">
+                          <span className="block truncate text-[12.5px] text-muted-2">
                             {p.department?.name || p.email}
                           </span>
                         )}
                       </span>
                       {isCurrent && (
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] text-muted-2">
+                        <span className="shrink-0 inline-flex items-center gap-1 text-[12px] text-muted-2">
                           <UserRound className="h-3 w-3" /> current
                         </span>
                       )}

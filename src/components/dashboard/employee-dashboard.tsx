@@ -119,7 +119,7 @@ export function EmployeeDashboard() {
             <CardTitle className="text-sm flex items-center gap-2">
               <Target size={14} className="text-[color:var(--accent-strong)]" /> My KRAs & KPIs
             </CardTitle>
-            <Badge variant="outline" className="text-[10px]">{stats.completionRate}% complete this month</Badge>
+            <Badge variant="outline" className="text-[11px]">{stats.completionRate}% complete this month</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -132,7 +132,7 @@ export function EmployeeDashboard() {
                   <div className="flex items-center gap-2">
                     <Target size={12} className="text-[color:var(--accent-strong)]" />
                     <span className="text-sm font-medium">{a.kra.name}</span>
-                    <Badge variant="outline" className="text-[9px]">{a.weightage}%</Badge>
+                    <Badge variant="outline" className="text-[10px]">{a.weightage}%</Badge>
                   </div>
                 </div>
                 {a.kra.kpis.length === 0 ? (
@@ -185,7 +185,7 @@ export function EmployeeDashboard() {
               <div key={okr.id} className="flex items-center gap-3 p-2 rounded-lg border border-border">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{okr.title}</p>
-                  <p className="text-[10px] text-muted">{okr.quarter}</p>
+                  <p className="text-[11px] text-muted">{okr.quarter}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Progress value={okr.progress} className="w-16 h-1.5" />
@@ -213,10 +213,10 @@ export function EmployeeDashboard() {
                 <div className="flex items-center justify-between p-2 rounded-lg hover:bg-surface-2 transition-colors">
                   <div>
                     <p className="text-sm">{a.sop.title}</p>
-                    <p className="text-[10px] text-muted">{a.sop.category}</p>
+                    <p className="text-[11px] text-muted">{a.sop.category}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="warning" className="text-[10px]">{a.status}</Badge>
+                    <Badge variant="warning" className="text-[11px]">{a.status}</Badge>
                     <ArrowRight size={12} className="text-muted" />
                   </div>
                 </div>
@@ -239,9 +239,9 @@ export function EmployeeDashboard() {
               <div key={r.id} className="flex items-center justify-between p-2 rounded-lg border border-border">
                 <div>
                   <p className="text-sm">{r.cycle?.name}</p>
-                  <p className="text-[10px] text-muted">{r.cycle?.type?.replace(/_/g, " ")}</p>
+                  <p className="text-[11px] text-muted">{r.cycle?.type?.replace(/_/g, " ")}</p>
                 </div>
-                <Badge variant="secondary" className="text-[10px]">{r.status.replace(/_/g, " ")}</Badge>
+                <Badge variant="secondary" className="text-[11px]">{r.status.replace(/_/g, " ")}</Badge>
               </div>
             ))}
           </CardContent>

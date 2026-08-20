@@ -28,7 +28,7 @@ export default async function EverythingPage() {
           <Layers className="w-4 h-4 text-zinc-500" />
           <span>Everything</span>
         </h1>
-        <span className="text-[12px] text-zinc-500 tabular-nums">
+        <span className="text-[13px] text-zinc-500 tabular-nums">
           {items.length === 500 ? "500+" : items.length} item{items.length === 1 ? "" : "s"}
         </span>
       </div>

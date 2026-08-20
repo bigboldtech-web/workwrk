@@ -67,11 +67,11 @@ export default function PolicyLedgerPage() {
         actions={
           <div className="flex items-center gap-2">
             {data ? (
-              <a href={`/api/policies/${id}/ledger/export`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]">
+              <a href={`/api/policies/${id}/ledger/export`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9]">
                 <Download className="h-3.5 w-3.5" /> Export CSV
               </a>
             ) : null}
-            <Link href={`/policies/${id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href={`/policies/${id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               <ArrowLeft className="h-3.5 w-3.5" /> Back to policy
             </Link>
           </div>
@@ -93,8 +93,8 @@ export default function PolicyLedgerPage() {
             </div>
 
             <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
-              <table className="w-full text-left text-[13px]">
-                <thead className="border-b border-zinc-100 text-[11px] uppercase tracking-wide text-zinc-400">
+              <table className="w-full text-left text-[14px]">
+                <thead className="border-b border-zinc-100 text-[12px] uppercase tracking-wide text-zinc-400">
                   <tr>
                     <th className="px-3 py-2 font-medium">Person</th>
                     <th className="px-3 py-2 font-medium">Dept</th>
@@ -113,7 +113,7 @@ export default function PolicyLedgerPage() {
                       <tr key={r.userId} className="hover:bg-zinc-50/60">
                         <td className="px-3 py-2">
                           <div className="font-medium text-zinc-800">{r.name}</div>
-                          {r.email ? <div className="text-[11px] text-zinc-400">{r.email}</div> : null}
+                          {r.email ? <div className="text-[12px] text-zinc-400">{r.email}</div> : null}
                         </td>
                         <td className="px-3 py-2 text-zinc-500">{r.department}</td>
                         <td className="px-3 py-2 text-zinc-500">{r.required ? "Assigned" : "Org-wide"}</td>
@@ -125,15 +125,15 @@ export default function PolicyLedgerPage() {
                         </td>
                         <td className="px-3 py-2 text-zinc-500">{r.versionAcked ? `v${r.versionAcked}` : "—"}</td>
                         <td className="px-3 py-2 text-zinc-500">{fmt(r.acknowledgedAt)}</td>
-                        <td className="px-3 py-2 font-mono text-[11px] text-zinc-400">{r.ipAddress ?? "—"}</td>
-                        <td className="max-w-[260px] px-3 py-2 text-[11px] text-zinc-400" title={r.attestation ?? ""}><span className="line-clamp-1">{r.attestation ?? "—"}</span></td>
+                        <td className="px-3 py-2 font-mono text-[12px] text-zinc-400">{r.ipAddress ?? "—"}</td>
+                        <td className="max-w-[260px] px-3 py-2 text-[12px] text-zinc-400" title={r.attestation ?? ""}><span className="line-clamp-1">{r.attestation ?? "—"}</span></td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
             </div>
-            <p className="mt-3 text-[11px] text-zinc-400">Each acknowledgement is pinned to the policy version, hashed (sha256 of the exact content shown), and stamped with time, IP, and the attestation statement the person agreed to.</p>
+            <p className="mt-3 text-[12px] text-zinc-400">Each acknowledgement is pinned to the policy version, hashed (sha256 of the exact content shown), and stamped with time, IP, and the attestation statement the person agreed to.</p>
           </>
         )}
       </div>
@@ -144,9 +144,9 @@ export default function PolicyLedgerPage() {
 function Stat({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-3">
-      <div className="text-[11px] uppercase tracking-wide text-zinc-400">{label}</div>
+      <div className="text-[12px] uppercase tracking-wide text-zinc-400">{label}</div>
       <div className="mt-1 text-2xl font-semibold" style={{ color }}>{value}</div>
-      <div className="text-[11px] text-zinc-400">{sub}</div>
+      <div className="text-[12px] text-zinc-400">{sub}</div>
     </div>
   );
 }

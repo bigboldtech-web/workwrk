@@ -264,7 +264,7 @@ export function ShareBoardDialog({
         </div>
 
         <div className="px-6 pb-3">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             Visibility
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -280,17 +280,17 @@ export function ShareBoardDialog({
                     active ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200 hover:bg-zinc-50"
                   } disabled:opacity-60`}
                 >
-                  <div className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold">
+                  <div className="inline-flex items-center gap-1.5 text-[13.5px] font-semibold">
                     <opt.Icon className="h-3.5 w-3.5" />
                     {opt.label}
                   </div>
-                  <div className="text-[11px] text-zinc-500 mt-0.5 leading-snug">{opt.blurb}</div>
+                  <div className="text-[12px] text-zinc-500 mt-0.5 leading-snug">{opt.blurb}</div>
                 </button>
               );
             })}
           </div>
           {!membersNeeded ? (
-            <div className="mt-2 text-[11px] text-zinc-500 inline-flex items-start gap-1.5">
+            <div className="mt-2 text-[12px] text-zinc-500 inline-flex items-start gap-1.5">
               <Info className="h-3 w-3 mt-0.5 shrink-0" />
               The members list below only applies when visibility is set to Private.
             </div>
@@ -298,7 +298,7 @@ export function ShareBoardDialog({
         </div>
 
         <div className="px-6 pb-3 border-t border-zinc-100 pt-4">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             Add people
           </div>
           <div className="relative" ref={pickerRef}>
@@ -309,12 +309,12 @@ export function ShareBoardDialog({
               onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
               onFocus={() => setPickerOpen(true)}
               placeholder="Type a name or email…"
-              className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+              className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
             />
             {pickerOpen ? (
               <div className="absolute left-0 right-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
                 {candidates.length === 0 ? (
-                  <div className="px-3 py-3 text-[12px] text-zinc-400">
+                  <div className="px-3 py-3 text-[13px] text-zinc-400">
                     {query ? `No match for "${query}"` : "Start typing to find people"}
                   </div>
                 ) : (
@@ -328,8 +328,8 @@ export function ShareBoardDialog({
                     >
                       <Avatar user={u} />
                       <span className="flex-1 min-w-0">
-                        <span className="block text-[12.5px] font-medium truncate">{displayName(u)}</span>
-                        <span className="block text-[11px] text-zinc-500 truncate">{u.email}</span>
+                        <span className="block text-[13.5px] font-medium truncate">{displayName(u)}</span>
+                        <span className="block text-[12px] text-zinc-500 truncate">{u.email}</span>
                       </span>
                       {busyAddId === u.id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
@@ -345,13 +345,13 @@ export function ShareBoardDialog({
         </div>
 
         <div className="px-6 pb-5 border-t border-zinc-100 pt-4">
-          <div className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             {members === null ? "Members" : `Members · ${members.length}`}
           </div>
           {members === null ? (
-            <div className="text-[12px] text-zinc-400">Loading…</div>
+            <div className="text-[13px] text-zinc-400">Loading…</div>
           ) : members.length === 0 ? (
-            <div className="text-[12px] text-zinc-400">
+            <div className="text-[13px] text-zinc-400">
               {membersNeeded
                 ? "No members yet — add someone above. Board owner + Space OWNER always retain access."
                 : "Only matters when visibility is Private."}
@@ -364,14 +364,14 @@ export function ShareBoardDialog({
                   <li key={m.user.id} className="flex items-center gap-2.5 px-3 py-2">
                     <Avatar user={m.user} />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[12.5px] font-medium truncate">{displayName(m.user)}</span>
-                      <span className="block text-[11px] text-zinc-500 truncate">{m.user.email}</span>
+                      <span className="block text-[13.5px] font-medium truncate">{displayName(m.user)}</span>
+                      <span className="block text-[12px] text-zinc-500 truncate">{m.user.email}</span>
                     </span>
                     <select
                       value={m.role}
                       onChange={(e) => changeRole(m, e.target.value as BoardRole)}
                       disabled={busy}
-                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[11.5px] focus:outline-none focus:border-zinc-400"
+                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
                     >
                       {ROLE_OPTIONS.map((r) => (
                         <option key={r.value} value={r.value}>{r.label}</option>
@@ -403,7 +403,7 @@ export function ShareBoardDialog({
 
 function Avatar({ user }: { user: UserOption }) {
   return (
-    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[10px] font-semibold text-zinc-600 shrink-0">
+    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[11px] font-semibold text-zinc-600 shrink-0">
       {avatarInitials(user)}
     </span>
   );

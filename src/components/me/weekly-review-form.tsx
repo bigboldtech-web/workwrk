@@ -97,7 +97,7 @@ export function WeeklyReviewForm({ initialReview, kras }: FormProps) {
                 <li key={k.id} className="rounded-md border border-zinc-200 bg-white px-4 py-3">
                   <div className="flex items-center gap-3 mb-2">
                     <span className="text-sm font-medium flex-1 truncate">{k.name}</span>
-                    {k.category ? <span className="text-[10px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
+                    {k.category ? <span className="text-[11px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
                     <span className="text-xs text-zinc-500">{entry.progressPct}%</span>
                   </div>
                   <input
@@ -145,7 +145,7 @@ export function WeeklyReviewForm({ initialReview, kras }: FormProps) {
                   <li key={kpi.id} className="flex items-center gap-3 px-4 py-2 rounded-md border border-zinc-200 bg-white">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm truncate">{kpi.name}</div>
-                      <div className="text-[11px] text-zinc-500 truncate">
+                      <div className="text-[12px] text-zinc-500 truncate">
                         Target {kpi.targetValue ?? "—"}{kpi.unit ? ` ${kpi.unit}` : ""} · {kpi.frequency.toLowerCase()}
                         {kpi.lowerIsBetter ? " · lower is better" : ""}
                       </div>
@@ -249,7 +249,7 @@ function NarrativeField({
   return (
     <div className="rounded-md border border-zinc-200 bg-white px-3 py-3">
       <div className="text-xs font-medium">{label}</div>
-      <div className="text-[11px] text-zinc-500 mb-2">{subtitle}</div>
+      <div className="text-[12px] text-zinc-500 mb-2">{subtitle}</div>
       <textarea
         rows={5}
         value={value}
@@ -276,7 +276,7 @@ function StatusBanner({ review }: { review: WeeklyReviewDoc }) {
       <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center gap-2 text-sm">
         <Clock className="w-4 h-4 text-amber-700" />
         <span className="flex-1">Submitted — awaiting manager review.</span>
-        {review.managerStatus === "PENDING" ? <span className="text-[11px] text-amber-700">Pending</span> : null}
+        {review.managerStatus === "PENDING" ? <span className="text-[12px] text-amber-700">Pending</span> : null}
       </div>
     );
   }

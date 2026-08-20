@@ -33,7 +33,7 @@ export function StatWidget({
       {loading ? (
         <Loader2 className="h-5 w-5 animate-spin text-zinc-300" />
       ) : error ? (
-        <span className="text-[12px] text-zinc-400">Couldn&apos;t load</span>
+        <span className="text-[13px] text-zinc-400">Couldn&apos;t load</span>
       ) : (
         <span className={`text-[28px] font-semibold leading-none ${scope === "overdue" && countForScope(items ?? [], scope) > 0 ? "text-red-600" : "text-zinc-900"}`}>
           {countForScope(items ?? [], scope)}
@@ -44,14 +44,14 @@ export function StatWidget({
           value={scope}
           onChange={(e) => onConfigChange({ statScope: e.target.value as StatScope })}
           aria-label="Calculation scope"
-          className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[11.5px] text-zinc-600 outline-none focus:border-zinc-300"
+          className="h-6 rounded-md border border-zinc-200 bg-white px-1.5 text-[12.5px] text-zinc-600 outline-none focus:border-zinc-300"
         >
           {SCOPES.map((s) => (
             <option key={s.value} value={s.value}>{s.label}</option>
           ))}
         </select>
       ) : (
-        <span className="text-[11px] uppercase tracking-wide text-zinc-400">{scopeLabel}</span>
+        <span className="text-[12px] uppercase tracking-wide text-zinc-400">{scopeLabel}</span>
       )}
     </div>
   );

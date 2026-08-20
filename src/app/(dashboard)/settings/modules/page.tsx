@@ -85,13 +85,13 @@ export default function ModulesSettingsPage() {
         <Boxes className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Enabled modules</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Turn product modules on or off for your whole organization.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
       {enabled === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading modules…
         </div>
       ) : (
@@ -107,8 +107,8 @@ export default function ModulesSettingsPage() {
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="text-[13.5px] font-medium text-zinc-900">{m.label}</div>
-                    <div className="truncate text-[12px] text-zinc-500">{m.desc}</div>
+                    <div className="text-[14.5px] font-medium text-zinc-900">{m.label}</div>
+                    <div className="truncate text-[13px] text-zinc-500">{m.desc}</div>
                   </div>
                   <button
                     type="button"
@@ -137,7 +137,7 @@ export default function ModulesSettingsPage() {
               type="button"
               onClick={save}
               disabled={!canEdit || saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Save changes

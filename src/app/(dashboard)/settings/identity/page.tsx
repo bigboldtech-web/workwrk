@@ -160,7 +160,7 @@ export default function IdentitySettingsPage() {
           Identity &amp; company profile
         </h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Your organization&apos;s name, logo, and the mission/vision that grounds AI.
         Timezone, currency and fiscal year live under{" "}
         <a href="/settings/locale" className="text-[var(--os-brand,#0073EA)] hover:underline">Locale &amp; finance</a>.
@@ -168,7 +168,7 @@ export default function IdentitySettingsPage() {
       </p>
 
       {state === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
         </div>
       ) : (
@@ -179,7 +179,7 @@ export default function IdentitySettingsPage() {
 
             {/* Logo */}
             <div>
-              <label className="mb-1.5 block text-[12px] font-medium text-zinc-700">Organization logo</label>
+              <label className="mb-1.5 block text-[13px] font-medium text-zinc-700">Organization logo</label>
               <div className="flex items-center gap-3">
                 <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50">
                   {state.logo ? (
@@ -194,7 +194,7 @@ export default function IdentitySettingsPage() {
                     type="button"
                     disabled={!canEdit || uploading}
                     onClick={() => fileRef.current?.click()}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40"
                   >
                     {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
                     {state.logo ? "Replace" : "Upload"}
@@ -204,7 +204,7 @@ export default function IdentitySettingsPage() {
                       type="button"
                       disabled={!canEdit || uploading}
                       onClick={removeLogo}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[12px] font-medium text-[#E2445C] hover:bg-zinc-50 disabled:opacity-40"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3 text-[13px] font-medium text-[#E2445C] hover:bg-zinc-50 disabled:opacity-40"
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Remove
                     </button>
@@ -218,7 +218,7 @@ export default function IdentitySettingsPage() {
                   />
                 </div>
               </div>
-              <p className="mt-1.5 text-[11px] text-zinc-400">PNG, JPEG, WebP or SVG · up to 2MB · saved instantly.</p>
+              <p className="mt-1.5 text-[12px] text-zinc-400">PNG, JPEG, WebP or SVG · up to 2MB · saved instantly.</p>
             </div>
 
             <TextField
@@ -242,7 +242,7 @@ export default function IdentitySettingsPage() {
               icon={<Sparkles className="h-4 w-4 text-zinc-500" />}
               title="Company profile"
             />
-            <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[11.5px] text-zinc-600">
+            <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[12.5px] text-zinc-600">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
               <span>This profile feeds AI KRA &amp; KPI generation. The richer it is, the more relevant the suggested accountabilities.</span>
             </div>
@@ -280,7 +280,7 @@ export default function IdentitySettingsPage() {
               type="button"
               onClick={save}
               disabled={!canEdit || saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Save changes
@@ -309,7 +309,7 @@ function SectionHead({ icon, title }: { icon: React.ReactNode; title: string }) 
   return (
     <div className="flex items-center gap-1.5">
       {icon}
-      <h2 className="text-[13px] font-semibold text-zinc-800">{title}</h2>
+      <h2 className="text-[14px] font-semibold text-zinc-800">{title}</h2>
     </div>
   );
 }
@@ -322,7 +322,7 @@ function TextField({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[12px] font-medium text-zinc-700">{label}</label>
+      <label className="mb-1 block text-[13px] font-medium text-zinc-700">{label}</label>
       <div className="relative">
         {icon && <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2">{icon}</span>}
         <input
@@ -331,10 +331,10 @@ function TextField({
           disabled={disabled}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
-          className={`h-8 w-full rounded-md border border-zinc-200 bg-white ${icon ? "pl-8" : "px-2.5"} pr-2.5 text-[12.5px] text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60`}
+          className={`h-8 w-full rounded-md border border-zinc-200 bg-white ${icon ? "pl-8" : "px-2.5"} pr-2.5 text-[13.5px] text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60`}
         />
       </div>
-      {hint && <p className="mt-1 text-[11px] text-zinc-400">{hint}</p>}
+      {hint && <p className="mt-1 text-[12px] text-zinc-400">{hint}</p>}
     </div>
   );
 }
@@ -347,14 +347,14 @@ function AreaField({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[12px] font-medium text-zinc-700">{label}</label>
+      <label className="mb-1 block text-[13px] font-medium text-zinc-700">{label}</label>
       <textarea
         value={value}
         disabled={disabled}
         placeholder={placeholder}
         rows={2}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full resize-y rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[12.5px] leading-relaxed text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60"
+        className="w-full resize-y rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[13.5px] leading-relaxed text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)] disabled:opacity-60"
       />
     </div>
   );

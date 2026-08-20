@@ -107,7 +107,7 @@ export function WidgetShell({
           <MenuSeparator />
           <div className="max-h-60 overflow-y-auto">
             {boards.length === 0 ? (
-              <div className="px-2 py-1.5 text-[12px] text-zinc-400">No Lists yet</div>
+              <div className="px-2 py-1.5 text-[13px] text-zinc-400">No Lists yet</div>
             ) : (
               boards.map((b) => {
                 const active = source.kind === "board" && source.boardId === b.id;

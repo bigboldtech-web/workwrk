@@ -140,7 +140,7 @@ export function RemindersBell() {
   const Group = ({ label, rows, tone = "amber" }: { label: string; rows: Reminder[]; tone?: "amber" | "brand" }) =>
     rows.length === 0 ? null : (
       <div className="py-1">
-        <div className="px-3 pt-1 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">{label}</div>
+        <div className="px-3 pt-1 pb-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">{label}</div>
         <ul>
           {rows.map((r) => {
             const isTask = r.entityType === "BOARD_ITEM" && r.entityId;
@@ -150,8 +150,8 @@ export function RemindersBell() {
               <div className="group flex items-center gap-2 px-3 py-1.5 hover:bg-zinc-50">
                 <Icon className={`w-3.5 h-3.5 flex-shrink-0 ${iconColor}`} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-[12.5px] text-zinc-800 truncate">{r.title}</div>
-                  <div className="text-[11px] text-zinc-400">{fmtTime(r.remindAt)}</div>
+                  <div className="text-[13.5px] text-zinc-800 truncate">{r.title}</div>
+                  <div className="text-[12px] text-zinc-400">{fmtTime(r.remindAt)}</div>
                 </div>
                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
@@ -199,7 +199,7 @@ export function RemindersBell() {
       >
         <AlarmClock className="w-[15px] h-[15px]" />
         {badge > 0 ? (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#FB5A6F] text-white text-[9px] font-bold leading-[14px] text-center">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-[#FB5A6F] text-white text-[10px] font-bold leading-[14px] text-center">
             {badge > 9 ? "9+" : badge}
           </span>
         ) : null}
@@ -216,11 +216,11 @@ export function RemindersBell() {
             >
               <div className="flex items-center gap-2 px-3 h-10 border-b border-zinc-100">
                 <AlarmClock className="w-4 h-4 text-[#FB5A6F]" />
-                <span className="text-[13px] font-semibold text-zinc-900 flex-1">Reminders</span>
+                <span className="text-[14px] font-semibold text-zinc-900 flex-1">Reminders</span>
                 <button
                   type="button"
                   onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })); }}
-                  className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-zinc-600 hover:bg-zinc-100"
+                  className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-[13px] text-zinc-600 hover:bg-zinc-100"
                 >
                   <Plus className="w-3.5 h-3.5" /> New
                 </button>
@@ -229,8 +229,8 @@ export function RemindersBell() {
                 {nothing ? (
                   <div className="px-3 py-8 text-center">
                     <AlarmClock className="w-6 h-6 text-zinc-300 mx-auto mb-2" />
-                    <p className="text-[12.5px] text-zinc-500">No reminders</p>
-                    <p className="text-[11px] text-zinc-400 mt-0.5">Schedule one on a task or add a personal reminder.</p>
+                    <p className="text-[13.5px] text-zinc-500">No reminders</p>
+                    <p className="text-[12px] text-zinc-400 mt-0.5">Schedule one on a task or add a personal reminder.</p>
                   </div>
                 ) : (
                   <>
@@ -240,14 +240,14 @@ export function RemindersBell() {
                     <Group label="Upcoming" rows={upcoming} />
                     {history.length > 0 ? (
                       <div className="py-1 border-t border-zinc-100">
-                        <div className="px-3 pt-1.5 pb-0.5 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">Recently done</div>
+                        <div className="px-3 pt-1.5 pb-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">Recently done</div>
                         <ul>
                           {history.map((r) => (
                             <li key={r.id} className="flex items-center gap-2 px-3 py-1.5">
                               <Check className="w-3.5 h-3.5 flex-shrink-0 text-zinc-300" />
                               <div className="flex-1 min-w-0">
-                                <div className="text-[12.5px] text-zinc-500 truncate line-through">{r.title}</div>
-                                <div className="text-[11px] text-zinc-400">{fmtTime(r.updatedAt || r.firedAt || r.remindAt)}</div>
+                                <div className="text-[13.5px] text-zinc-500 truncate line-through">{r.title}</div>
+                                <div className="text-[12px] text-zinc-400">{fmtTime(r.updatedAt || r.firedAt || r.remindAt)}</div>
                               </div>
                             </li>
                           ))}

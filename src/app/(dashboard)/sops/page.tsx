@@ -156,14 +156,14 @@ export default function SopsPage() {
             {canManageSOPs && (
               <Link
                 href="/sops/manage"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50"
               >
                 <FolderTree className="h-3.5 w-3.5" /> Organize
               </Link>
             )}
             <Link
               href="/sops/new"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium hover:opacity-90"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[14px] font-medium hover:opacity-90"
               style={{ background: "var(--os-brand)", color: "#fff" }}
             >
               <Plus className="h-3.5 w-3.5" /> New SOP
@@ -182,7 +182,7 @@ export default function SopsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search title, description, tags…"
-              className="h-full w-full bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
+              className="h-full w-full bg-transparent text-[14px] text-zinc-900 outline-none placeholder:text-zinc-400"
             />
           </div>
 
@@ -192,7 +192,7 @@ export default function SopsPage() {
               <select
                 value={activeCategory ?? ""}
                 onChange={(e) => setActiveCategory(e.target.value || null)}
-                className="h-9 cursor-pointer appearance-none rounded-lg border border-zinc-200 bg-white pl-3 pr-8 text-[13px] text-zinc-700 outline-none hover:bg-zinc-50"
+                className="h-9 cursor-pointer appearance-none rounded-lg border border-zinc-200 bg-white pl-3 pr-8 text-[14px] text-zinc-700 outline-none hover:bg-zinc-50"
               >
                 <option value="">All categories ({stats.total})</option>
                 {categories.map(([cat, n]) => (
@@ -285,8 +285,8 @@ export default function SopsPage() {
               {grouped.map((g) => (
                 <section key={g.name}>
                   <header className="mb-2.5 flex items-center gap-2">
-                    <h2 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h2>
-                    <span className="rounded-full bg-zinc-100 px-1.5 text-[11px] tabular-nums text-zinc-500">{g.items.length}</span>
+                    <h2 className="text-[13px] font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h2>
+                    <span className="rounded-full bg-zinc-100 px-1.5 text-[12px] tabular-nums text-zinc-500">{g.items.length}</span>
                     <span className="h-px flex-1 bg-zinc-100" />
                   </header>
                   {view === "list" ? (
@@ -310,8 +310,8 @@ export default function SopsPage() {
           <div className="fixed inset-0 z-[140]" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div className="fixed z-[141] w-44 overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-xl"
             style={{ left: Math.min(menu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 184), top: menu.y }}>
-            <button type="button" onClick={() => { const s = menu.s; setMenu(null); window.location.href = `/sops/${s.id}`; }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"><FileText className="h-3.5 w-3.5" /> Open</button>
-            <button type="button" onClick={() => { const s = menu.s; setMenu(null); void deleteSop(s); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /> Delete</button>
+            <button type="button" onClick={() => { const s = menu.s; setMenu(null); window.location.href = `/sops/${s.id}`; }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50"><FileText className="h-3.5 w-3.5" /> Open</button>
+            <button type="button" onClick={() => { const s = menu.s; setMenu(null); void deleteSop(s); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[14px] text-red-600 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" /> Delete</button>
           </div>
         </>
       ) : null}
@@ -329,27 +329,27 @@ function SopCard({ s, onMenu }: { s: ApiSop; onMenu: (e: React.MouseEvent, s: Ap
     >
       <button type="button" onClick={(e) => { e.preventDefault(); onMenu(e, s); }} className="absolute right-2 top-2 z-10 rounded p-1 text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100" title="More"><MoreHorizontal className="h-4 w-4" /></button>
       <div className="flex items-center justify-between gap-2">
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_PILL[s.status]}`}>
+        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${STATUS_PILL[s.status]}`}>
           <Icon className="h-3 w-3" /> {STATUS_LABEL[s.status]}
         </span>
-        <span className="text-[11px] text-zinc-400">v{s.version}</span>
+        <span className="text-[12px] text-zinc-400">v{s.version}</span>
       </div>
 
       <h3 className="mt-2.5 line-clamp-1 text-[14px] font-semibold text-zinc-900 group-hover:text-zinc-950">{s.title}</h3>
       {s.description && (
-        <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-zinc-500">{s.description}</p>
+        <p className="mt-1 line-clamp-2 text-[13.5px] leading-relaxed text-zinc-500">{s.description}</p>
       )}
 
       {s.tags && s.tags.length > 0 && (
         <div className="mt-2.5 flex flex-wrap gap-1">
           {s.tags.slice(0, 3).map((t) => (
-            <span key={t} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10.5px] text-zinc-500">{t}</span>
+            <span key={t} className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11.5px] text-zinc-500">{t}</span>
           ))}
-          {s.tags.length > 3 && <span className="text-[10.5px] text-zinc-400">+{s.tags.length - 3}</span>}
+          {s.tags.length > 3 && <span className="text-[11.5px] text-zinc-400">+{s.tags.length - 3}</span>}
         </div>
       )}
 
-      <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-2.5 text-[11px] text-zinc-400">
+      <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-2.5 text-[12px] text-zinc-400">
         {s.kra && (
           <span className="inline-flex items-center gap-1 truncate" title={`Measures KRA: ${s.kra.name}`}>
             <Target className="h-3 w-3 shrink-0" /> <span className="truncate">{s.kra.name}</span>
@@ -374,20 +374,20 @@ function SopRow({ s, onMenu }: { s: ApiSop; onMenu: (e: React.MouseEvent, s: Api
   const Icon = STATUS_ICON[s.status];
   return (
     <Link href={`/sops/${s.id}`} onContextMenu={(e) => onMenu(e, s)} className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-zinc-50">
-      <span className={`inline-flex w-[92px] shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_PILL[s.status]}`}>
+      <span className={`inline-flex w-[92px] shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-medium ${STATUS_PILL[s.status]}`}>
         <Icon className="h-3 w-3" /> {STATUS_LABEL[s.status]}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13.5px] font-medium text-zinc-900">{s.title}</span>
-        {s.description && <span className="block truncate text-[12px] text-zinc-400">{s.description}</span>}
+        <span className="block truncate text-[14.5px] font-medium text-zinc-900">{s.title}</span>
+        {s.description && <span className="block truncate text-[13px] text-zinc-400">{s.description}</span>}
       </span>
       {s._count?.steps != null && (
-        <span className="hidden shrink-0 items-center gap-1 text-[11px] text-zinc-400 sm:inline-flex"><BookOpen className="h-3 w-3" /> {s._count.steps}</span>
+        <span className="hidden shrink-0 items-center gap-1 text-[12px] text-zinc-400 sm:inline-flex"><BookOpen className="h-3 w-3" /> {s._count.steps}</span>
       )}
       {s._count?.assignments != null && (
-        <span className="hidden shrink-0 items-center gap-1 text-[11px] text-zinc-400 sm:inline-flex"><ClipboardCheck className="h-3 w-3" /> {s._count.assignments}</span>
+        <span className="hidden shrink-0 items-center gap-1 text-[12px] text-zinc-400 sm:inline-flex"><ClipboardCheck className="h-3 w-3" /> {s._count.assignments}</span>
       )}
-      <span className="shrink-0 text-[11px] tabular-nums text-zinc-400">{fmtDate(s.updatedAt)}</span>
+      <span className="shrink-0 text-[12px] tabular-nums text-zinc-400">{fmtDate(s.updatedAt)}</span>
       <button type="button" onClick={(e) => { e.preventDefault(); onMenu(e, s); }} className="shrink-0 rounded p-1 text-zinc-300 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100" title="More"><MoreHorizontal className="h-3.5 w-3.5" /></button>
       <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 group-hover:text-zinc-500" />
     </Link>

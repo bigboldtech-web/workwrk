@@ -134,7 +134,7 @@ export function InboxAiAssistPanel({ items }: Props) {
             <Sparkles size={14} className="text-[color:var(--accent-strong)]" />
             AI triage
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap text-[10px]">
+          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
             {(Object.entries(counts) as [SuggestedAction, number][])
               .filter(([, n]) => n > 0)
               .map(([action, n]) => (
@@ -142,7 +142,7 @@ export function InboxAiAssistPanel({ items }: Props) {
                   {n} {ACTION_LABEL[action].toLowerCase()}
                 </span>
               ))}
-            <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={run}>
+            <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={run}>
               Refresh
             </Button>
           </div>
@@ -152,13 +152,13 @@ export function InboxAiAssistPanel({ items }: Props) {
             <li key={`${item.type}:${item.id}`} className="py-2 flex items-start gap-3">
               {sug ? (
                 <span
-                  className={`text-[10px] uppercase tracking-wide rounded-md border px-1.5 py-0.5 shrink-0 ${ACTION_COLOR[sug.action]}`}
+                  className={`text-[11px] uppercase tracking-wide rounded-md border px-1.5 py-0.5 shrink-0 ${ACTION_COLOR[sug.action]}`}
                   title={`Confidence ${(sug.confidence * 100).toFixed(0)}%`}
                 >
                   {ACTION_LABEL[sug.action]}
                 </span>
               ) : (
-                <span className="text-[10px] uppercase tracking-wide rounded-md border border-white/20 px-1.5 py-0.5 text-muted shrink-0">—</span>
+                <span className="text-[11px] uppercase tracking-wide rounded-md border border-white/20 px-1.5 py-0.5 text-muted shrink-0">—</span>
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -169,14 +169,14 @@ export function InboxAiAssistPanel({ items }: Props) {
                   ) : (
                     <span className="text-sm font-medium truncate">{item.title}</span>
                   )}
-                  <span className="text-[10px] text-muted-2 uppercase">{item.type}</span>
+                  <span className="text-[11px] text-muted-2 uppercase">{item.type}</span>
                 </div>
                 {sug && <p className="text-xs text-muted line-clamp-2">{sug.rationale}</p>}
               </div>
             </li>
           ))}
         </ul>
-        <p className="text-[10px] text-muted-2">
+        <p className="text-[11px] text-muted-2">
           AI suggestions are advisory. Verify before acting on anything financial or sensitive.
         </p>
       </CardContent>

@@ -137,12 +137,12 @@ export default function BuildAppPage() {
             {app.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-[10px] font-medium mb-1">
+            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-[11px] font-medium mb-1">
               <Wand2 size={10} /> Built with Vibe
             </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
             {app.description && <p className="text-sm text-zinc-500">{app.description}</p>}
-            <p className="text-[10px] text-zinc-500-2 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
+            <p className="text-[11px] text-zinc-500-2 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -256,14 +256,14 @@ function CellValue({ field, value }: { field: AppField; value: unknown }) {
       return (
         <div className="flex flex-wrap gap-1">
           {arr.map((v) => (
-            <span key={v} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
+            <span key={v} className="text-[11px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
           ))}
         </div>
       );
     }
     case "SELECT": {
       const label = field.options?.choices?.find((c) => c.value === value)?.label ?? String(value);
-      return <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
+      return <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
     }
     case "URL":
       return <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;

@@ -148,7 +148,7 @@ export function CustomerOutcomes() {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             Customer outcomes
@@ -257,7 +257,7 @@ function CyclingTestimonial() {
       <div className="relative px-8 lg:px-16 py-12 lg:py-20">
         <div className="flex items-center justify-between gap-4 flex-wrap mb-8">
           <p
-            className="text-[10px] font-bold uppercase tracking-[0.22em]"
+            className="text-[11px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--m-text-soft)" }}
           >
             Featured stories
@@ -346,14 +346,14 @@ function CyclingTestimonial() {
                   <p className="text-[15px] font-bold truncate" style={{ color: "var(--m-text)" }}>
                     {active.name}
                   </p>
-                  <p className="text-[12px]" style={{ color: "var(--m-text-soft)" }}>
+                  <p className="text-[13px]" style={{ color: "var(--m-text-soft)" }}>
                     {active.role} &middot; {active.company}
                   </p>
                 </div>
               </div>
 
               <p
-                className="mt-3 text-[10px] font-bold uppercase tracking-[0.14em]"
+                className="mt-3 text-[11px] font-bold uppercase tracking-[0.14em]"
                 style={{ color: active.hue }}
               >
                 {active.industry}
@@ -366,7 +366,7 @@ function CyclingTestimonial() {
                 {active.miniStats.map((s) => (
                   <div key={s.label}>
                     <p
-                      className="text-[9px] font-bold uppercase tracking-[0.14em]"
+                      className="text-[10px] font-bold uppercase tracking-[0.14em]"
                       style={{ color: "var(--m-text-soft)" }}
                     >
                       {s.label}
@@ -449,7 +449,7 @@ function MetricCard({ metric, delay }: { metric: Metric; delay: number }) {
       </p>
 
       <p
-        className="relative mt-2 text-[13px] leading-relaxed"
+        className="relative mt-2 text-[14px] leading-relaxed"
         style={{ color: "var(--m-text-muted)" }}
       >
         {metric.body}
@@ -461,7 +461,7 @@ function MetricCard({ metric, delay }: { metric: Metric; delay: number }) {
       >
         <div className="min-w-0">
           <p
-            className="text-[10px] font-bold uppercase tracking-[0.16em]"
+            className="text-[11px] font-bold uppercase tracking-[0.16em]"
             style={{ color: "var(--m-text-soft)" }}
           >
             {metric.industry}
@@ -527,7 +527,7 @@ function LiveSignupTicker() {
           />
         </span>
 
-        <span className="text-[12.5px]" style={{ color: "var(--m-text)" }}>
+        <span className="text-[13.5px]" style={{ color: "var(--m-text)" }}>
           <AnimatePresence mode="popLayout">
             <motion.span
               key={count}

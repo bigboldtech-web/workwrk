@@ -88,7 +88,7 @@ function Section({
 }) {
   return (
     <section>
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-muted-2 mb-2 px-1">{title}</h4>
+      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-2 px-1">{title}</h4>
       <div className="grid grid-cols-2 gap-1.5">
         {options.map((o) => {
           const Icon = o.Icon;
@@ -111,7 +111,7 @@ function Section({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-xs font-medium text-foreground truncate">{o.label}</span>
-                <span className="block text-[10px] text-muted-2 truncate">{o.tagline}</span>
+                <span className="block text-[11px] text-muted-2 truncate">{o.tagline}</span>
               </span>
             </button>
           );

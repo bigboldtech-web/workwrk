@@ -218,7 +218,7 @@ export default function DashboardDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-[13px] text-zinc-500">
+      <div className="flex h-full items-center justify-center gap-2 text-[14px] text-zinc-500">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading dashboard…
       </div>
     );
@@ -226,7 +226,7 @@ export default function DashboardDetailPage() {
 
   if (!dashboard) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13px] text-zinc-500">
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[14px] text-zinc-500">
         Dashboard not found.
         <button
           type="button"
@@ -243,7 +243,7 @@ export default function DashboardDetailPage() {
     <button
       type="button"
       onClick={() => setAddOpen(true)}
-      className="inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[12.5px] font-semibold text-white hover:bg-zinc-800"
+      className="inline-flex h-7 items-center gap-1 rounded-md bg-zinc-900 px-3 text-[13.5px] font-semibold text-white hover:bg-zinc-800"
     >
       <Plus className="h-3.5 w-3.5" /> Add card
     </button>
@@ -256,7 +256,7 @@ export default function DashboardDetailPage() {
         <button
           type="button"
           onClick={() => router.push("/dashboards")}
-          className="shrink-0 text-[12.5px] text-zinc-500 hover:text-zinc-800"
+          className="shrink-0 text-[13.5px] text-zinc-500 hover:text-zinc-800"
         >
           Dashboards
         </button>
@@ -268,7 +268,7 @@ export default function DashboardDetailPage() {
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={() => void rename()}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-1.5 text-[13.5px] font-semibold text-zinc-900 outline-none hover:bg-zinc-50 focus:bg-white focus:ring-1 focus:ring-zinc-300"
+          className="h-7 min-w-0 flex-1 rounded-md bg-transparent px-1.5 text-[14.5px] font-semibold text-zinc-900 outline-none hover:bg-zinc-50 focus:bg-white focus:ring-1 focus:ring-zinc-300"
         />
         <button
           type="button"
@@ -283,7 +283,7 @@ export default function DashboardDetailPage() {
           <button
             type="button"
             onClick={copyLink}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12.5px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[13.5px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
           >
             <Share2 className="h-3.5 w-3.5" /> Share
           </button>
@@ -308,25 +308,25 @@ export default function DashboardDetailPage() {
 
       {/* Edit-mode toolbar */}
       <div className="flex h-10 items-center gap-2 border-b border-zinc-200 bg-white px-3">
-        <span className="text-[12.5px] text-zinc-600">Edit mode</span>
+        <span className="text-[13.5px] text-zinc-600">Edit mode</span>
         <Switch checked={editMode} onChange={setEditMode} aria-label="Edit mode" />
         <div className="ml-auto flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => { void load(); toast("Refreshed"); }}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-zinc-500 hover:bg-zinc-100"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[13px] text-zinc-500 hover:bg-zinc-100"
           >
             <RefreshCw className="h-3.5 w-3.5" /> Refreshed just now
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[12px] text-zinc-600 hover:bg-zinc-50"
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-600 hover:bg-zinc-50"
           >
             Auto refresh: On
           </button>
           <button
             type="button"
-            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-zinc-500 hover:bg-zinc-100"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[13px] text-zinc-500 hover:bg-zinc-100"
           >
             <Filter className="h-3.5 w-3.5" /> Filters
           </button>
@@ -339,8 +339,8 @@ export default function DashboardDetailPage() {
         {widgets.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <LayoutDashboard className="h-8 w-8 text-zinc-300" />
-            <div className="text-[13.5px] font-semibold text-zinc-800">This Dashboard is empty</div>
-            <p className="max-w-sm text-[12.5px] text-zinc-500">
+            <div className="text-[14.5px] font-semibold text-zinc-800">This Dashboard is empty</div>
+            <p className="max-w-sm text-[13.5px] text-zinc-500">
               Add cards to visualize work across your boards.
             </p>
             <div className="mt-1">{addCardPill}</div>

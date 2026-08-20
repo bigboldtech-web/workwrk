@@ -142,7 +142,7 @@ function WebhookForm({
         onChange={(e) => setUrl(e.target.value)}
         placeholder="https://example.com/hooks/workwrk"
         aria-label="Webhook URL"
-        className="h-7 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-[12px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
+        className="h-7 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
       />
       <button type="button" onClick={() => void connect()} disabled={busy} className={DARK_PILL}>
         {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -221,7 +221,7 @@ export default function AutomationConnectionsPage() {
 
       <div className="flex-1 overflow-y-auto p-4">
         {connections === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
@@ -238,18 +238,18 @@ export default function AutomationConnectionsPage() {
                       <p.Icon className="h-4.5 w-4.5 text-zinc-600" />
                     </span>
                     <div className="min-w-0">
-                      <div className="text-[13px] font-semibold text-zinc-900">{p.name}</div>
+                      <div className="text-[14px] font-semibold text-zinc-900">{p.name}</div>
                       <StatusPill color={statusMeta.color} label={statusMeta.label} />
                     </div>
                   </div>
-                  <p className="mt-2.5 flex-1 text-[12px] leading-relaxed text-zinc-500">
+                  <p className="mt-2.5 flex-1 text-[13px] leading-relaxed text-zinc-500">
                     {p.description}
                   </p>
                   {row?.errorMessage ? (
-                    <p className="mt-1.5 text-[11.5px] text-[#E2445C]">{row.errorMessage}</p>
+                    <p className="mt-1.5 text-[12.5px] text-[#E2445C]">{row.errorMessage}</p>
                   ) : null}
                   {row?.lastSyncAt ? (
-                    <p className="mt-1.5 text-[11px] text-zinc-400">
+                    <p className="mt-1.5 text-[12px] text-zinc-400">
                       Last synced {relTime(row.lastSyncAt)}
                     </p>
                   ) : null}
@@ -261,7 +261,7 @@ export default function AutomationConnectionsPage() {
                         type="button"
                         onClick={() => void connectStub(p.key, p.name)}
                         disabled={connectingKey === p.key}
-                        className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+                        className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-[13.5px] font-medium text-zinc-700 hover:bg-zinc-50"
                       >
                         {connectingKey === p.key ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -59,7 +59,7 @@ export default function PublicDocPage() {
     <div className="min-h-screen bg-white">
       <div className="mx-auto w-full max-w-[820px] px-6 py-10">
         <h1 className="text-[22px] font-bold text-zinc-900">{data.title || "Untitled note"}</h1>
-        <p className="mt-1 text-[12.5px] text-zinc-500">Shared read-only</p>
+        <p className="mt-1 text-[13.5px] text-zinc-500">Shared read-only</p>
         <div className="mt-6">
           <BlockNoteCanvas
             initialBnDoc={content.bnDoc ?? null}

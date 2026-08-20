@@ -27,7 +27,7 @@ export function OverviewCustomizeBanner() {
 
   return (
     <div
-      className="flex items-center gap-3 px-3 py-2 rounded-md text-[12.5px] border"
+      className="flex items-center gap-3 px-3 py-2 rounded-md text-[13.5px] border"
       style={{
         background: "color-mix(in srgb, var(--os-brand) 8%, transparent)",
         borderColor: "color-mix(in srgb, var(--os-brand) 24%, transparent)",
@@ -69,7 +69,7 @@ export function OverviewToolbar() {
   }, []);
 
   return (
-    <div className="flex items-center gap-2 text-[12px]">
+    <div className="flex items-center gap-2 text-[13px]">
       <div className="flex items-center gap-1.5 text-zinc-500">
         <RefreshCcw className="w-3 h-3" />
         <span>Refreshed: {refreshedAt ? relTime(refreshedAt) : "just now"}</span>
@@ -110,7 +110,7 @@ export function OverviewToolbar() {
             window.dispatchEvent(new CustomEvent("workwrk:overview-add-card"));
           }
         }}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[12px] text-white"
+        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[13px] text-white"
         style={{ background: "var(--os-brand)" }}
         title="Add a card"
       >

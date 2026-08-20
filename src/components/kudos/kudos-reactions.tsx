@@ -103,7 +103,7 @@ export function KudosReactions({
             aria-label={`React ${c.emoji} (${c.count})`}
           >
             <span className="text-sm leading-none">{c.emoji}</span>
-            <span className="font-mono text-[11px]">{c.count}</span>
+            <span className="font-mono text-[12px]">{c.count}</span>
           </button>
         );
       })}
@@ -150,7 +150,7 @@ export function KudosReactions({
       </div>
 
       {totalReactions > 0 && !compact && (
-        <span className="text-[11px] text-muted ml-auto">
+        <span className="text-[12px] text-muted ml-auto">
           {totalReactions} reaction{totalReactions === 1 ? "" : "s"}
         </span>
       )}

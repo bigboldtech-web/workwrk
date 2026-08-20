@@ -168,7 +168,7 @@ function Avatar({ person, size = 24 }: { person: Person; size?: number }) {
   return (
     <span
       style={{ ...s, backgroundColor: hueFor(person.id) }}
-      className="rounded-full flex items-center justify-center text-white font-semibold text-[10px] shrink-0"
+      className="rounded-full flex items-center justify-center text-white font-semibold text-[11px] shrink-0"
     >
       {initials(person)}
     </span>
@@ -200,24 +200,24 @@ function PeoplePicker({
       <div className="p-2 border-b border-zinc-100">
         <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c]">
           <Search className="w-3.5 h-3.5 text-zinc-400" />
-          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search or enter email..." className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search or enter email..." className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
         </div>
       </div>
       <div className="max-h-[260px] overflow-y-auto px-1.5 py-1">
-        <div className="px-2.5 py-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">People</div>
+        <div className="px-2.5 py-1 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">People</div>
         {ordered.map((p) => (
           <button
             key={p.id}
             type="button"
             onClick={() => onToggle(p.id)}
-            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"
+            className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"
           >
             <Avatar person={p} />
             <span className="flex-1 truncate">{me && p.id === me.id ? "Me" : personName(p)}</span>
             {selected.includes(p.id) && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
           </button>
         ))}
-        {ordered.length === 0 && <div className="px-4 py-4 text-center text-[13px] text-zinc-400">No people found.</div>}
+        {ordered.length === 0 && <div className="px-4 py-4 text-center text-[14px] text-zinc-400">No people found.</div>}
       </div>
     </div>
   );
@@ -861,27 +861,27 @@ export function CreateTaskModal() {
                   <div className="p-2 border-b border-zinc-100">
                     <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c]">
                       <Search className="w-3.5 h-3.5 text-zinc-400" />
-                      <input autoFocus value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Search..." className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+                      <input autoFocus value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Search..." className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
                     </div>
                   </div>
                   <div className="max-h-[280px] overflow-y-auto py-1">
                     {loadingLists ? (
-                      <div className="flex items-center justify-center gap-2 py-6 text-[13px] text-zinc-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading lists…</div>
+                      <div className="flex items-center justify-center gap-2 py-6 text-[14px] text-zinc-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading lists…</div>
                     ) : grouped.length === 0 ? (
-                      <div className="px-4 py-6 text-center text-[13px] text-zinc-400">No lists found.</div>
+                      <div className="px-4 py-6 text-center text-[14px] text-zinc-400">No lists found.</div>
                     ) : (
                       grouped.map(({ space, boards: sb }) => (
                         <div key={space?.id ?? "__none__"} className="px-1 pb-1">
                           <div className="flex items-center gap-2 px-2.5 py-1.5">
                             <EntityTile size="sm" color={space?.color ?? "#a1a1aa"} name={space?.name ?? "·"} />
-                            <span className="text-[12px] font-medium text-zinc-500 truncate">{space?.name ?? "Other"}</span>
+                            <span className="text-[13px] font-medium text-zinc-500 truncate">{space?.name ?? "Other"}</span>
                           </div>
                           {sb.map((b) => (
                             <button
                               key={b.id}
                               type="button"
                               onClick={() => { setSelectedList({ id: b.id, slug: b.slug, name: b.name, spaceId: b.spaceId }); setOpenMenu(null); setListSearch(""); setError(null); }}
-                              className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 rounded-md text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
+                              className="w-full flex items-center gap-2 pl-8 pr-3 py-1.5 rounded-md text-left text-[14px] text-zinc-700 hover:bg-zinc-50"
                             >
                               <ListChecks className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                               <span className="truncate flex-1">{b.name}</span>
@@ -905,20 +905,20 @@ export function CreateTaskModal() {
               </Chip>
               {openMenu === "type" && (
                 <div className="absolute top-full left-0 mt-1 w-[240px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[70] py-2 max-h-[320px] overflow-y-auto">
-                  <div className="px-3 pb-1.5 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">Task Types</div>
+                  <div className="px-3 pb-1.5 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">Task Types</div>
                   {itemTypes.map((t) => {
                     const Icon = itemTypeIcon(t.icon);
                     const selected = (itemTypeId ?? activeType?.id) === t.id;
                     return (
-                      <button key={t.id} type="button" onClick={() => { setItemTypeId(t.id); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] ${selected ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
+                      <button key={t.id} type="button" onClick={() => { setItemTypeId(t.id); setOpenMenu(null); }} className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] ${selected ? "bg-zinc-50 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"}`}>
                         <Icon className="w-4 h-4 text-zinc-500" />
                         <span className="flex-1 truncate">{t.singular}</span>
-                        {t.isDefault && <span className="text-[11px] text-zinc-400">(default)</span>}
+                        {t.isDefault && <span className="text-[12px] text-zinc-400">(default)</span>}
                         {selected && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
                       </button>
                     );
                   })}
-                  <Link href="/settings/task-types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-[12px] text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
+                  <Link href="/settings/task-types" onClick={() => setOpenMenu(null)} className="mt-1 flex items-center gap-2 px-3 py-2 text-[13px] text-zinc-500 hover:bg-zinc-50 border-t border-zinc-100">
                     <SettingsIcon className="w-3.5 h-3.5" /> Manage task types
                   </Link>
                 </div>
@@ -972,7 +972,7 @@ export function CreateTaskModal() {
           {extras.length > 0 && (
             <div className="px-6 py-2 flex flex-col gap-3">
               {extras.includes("TIME_ESTIMATE") && (
-                <div className="flex items-center gap-2 text-[13px]">
+                <div className="flex items-center gap-2 text-[14px]">
                   <Hourglass className="w-4 h-4 text-zinc-400" />
                   <span className="text-zinc-500 w-28">Time estimate</span>
                   <input value={timeEstimate.h} onChange={(e) => setTimeEstimate((p) => ({ ...p, h: e.target.value.replace(/\D/g, "") }))} placeholder="0" className="w-12 px-2 py-1 border border-zinc-200 rounded text-center outline-none focus:border-[#a78b80]" />
@@ -983,9 +983,9 @@ export function CreateTaskModal() {
               )}
               {extras.includes("SUBTASKS") && (
                 <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2 text-[13px] text-zinc-500"><ListTree className="w-4 h-4 text-zinc-400" /> Subtasks</div>
+                  <div className="flex items-center gap-2 text-[14px] text-zinc-500"><ListTree className="w-4 h-4 text-zinc-400" /> Subtasks</div>
                   {subtasks.map((s, i) => (
-                    <div key={i} className="flex items-center gap-2 pl-6 text-[13px] text-zinc-700">
+                    <div key={i} className="flex items-center gap-2 pl-6 text-[14px] text-zinc-700">
                       <CircleDot className="w-3.5 h-3.5 text-zinc-300" />
                       <span className="flex-1">{s}</span>
                       <button type="button" onClick={() => setSubtasks((p) => p.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
@@ -993,15 +993,15 @@ export function CreateTaskModal() {
                   ))}
                   <div className="flex items-center gap-2 pl-6">
                     <Plus className="w-3.5 h-3.5 text-zinc-400" />
-                    <input value={subtaskDraft} onChange={(e) => setSubtaskDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && subtaskDraft.trim()) { setSubtasks((p) => [...p, subtaskDraft.trim()]); setSubtaskDraft(""); } }} placeholder="Add subtask…" className="flex-1 text-[13px] py-1 bg-transparent outline-none placeholder:text-zinc-400" />
+                    <input value={subtaskDraft} onChange={(e) => setSubtaskDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && subtaskDraft.trim()) { setSubtasks((p) => [...p, subtaskDraft.trim()]); setSubtaskDraft(""); } }} placeholder="Add subtask…" className="flex-1 text-[14px] py-1 bg-transparent outline-none placeholder:text-zinc-400" />
                   </div>
                 </div>
               )}
               {extras.includes("CHECKLIST") && (
                 <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2 text-[13px] text-zinc-500"><ChecklistIcon className="w-4 h-4 text-zinc-400" /> Checklist</div>
+                  <div className="flex items-center gap-2 text-[14px] text-zinc-500"><ChecklistIcon className="w-4 h-4 text-zinc-400" /> Checklist</div>
                   {checklist.map((c, i) => (
-                    <div key={i} className="flex items-center gap-2 pl-6 text-[13px] text-zinc-700">
+                    <div key={i} className="flex items-center gap-2 pl-6 text-[14px] text-zinc-700">
                       <button type="button" onClick={() => setChecklist((p) => p.map((x, idx) => idx === i ? { ...x, done: !x.done } : x))} className={`w-4 h-4 rounded border flex items-center justify-center ${c.done ? "bg-emerald-500 border-emerald-500 text-white" : "border-zinc-300"}`}>{c.done && <Check className="w-3 h-3" />}</button>
                       <span className={`flex-1 ${c.done ? "line-through text-zinc-400" : ""}`}>{c.text}</span>
                       <button type="button" onClick={() => setChecklist((p) => p.filter((_, idx) => idx !== i))} className="text-zinc-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button>
@@ -1009,12 +1009,12 @@ export function CreateTaskModal() {
                   ))}
                   <div className="flex items-center gap-2 pl-6">
                     <Plus className="w-3.5 h-3.5 text-zinc-400" />
-                    <input value={checklistDraft} onChange={(e) => setChecklistDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && checklistDraft.trim()) { setChecklist((p) => [...p, { text: checklistDraft.trim(), done: false }]); setChecklistDraft(""); } }} placeholder="Add checklist item…" className="flex-1 text-[13px] py-1 bg-transparent outline-none placeholder:text-zinc-400" />
+                    <input value={checklistDraft} onChange={(e) => setChecklistDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && checklistDraft.trim()) { setChecklist((p) => [...p, { text: checklistDraft.trim(), done: false }]); setChecklistDraft(""); } }} placeholder="Add checklist item…" className="flex-1 text-[14px] py-1 bg-transparent outline-none placeholder:text-zinc-400" />
                   </div>
                 </div>
               )}
               {extras.includes("DEPENDENCIES") && (
-                <div className="flex items-center gap-2 text-[13px] text-zinc-400 pl-0">
+                <div className="flex items-center gap-2 text-[14px] text-zinc-400 pl-0">
                   <GitFork className="w-4 h-4" />
                   <span>Dependencies link to other tasks — add them from the task page once it exists.</span>
                 </div>
@@ -1026,14 +1026,14 @@ export function CreateTaskModal() {
           {(stagedFiles.length > 0 || uploading > 0) && (
             <div className="px-6 py-2 flex flex-wrap items-center gap-2">
               {stagedFiles.map((f) => (
-                <span key={f.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-[12px] text-zinc-700 max-w-[200px]">
+                <span key={f.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-100 text-[13px] text-zinc-700 max-w-[200px]">
                   <Paperclip className="w-3 h-3 text-zinc-400 shrink-0" />
                   <span className="truncate">{f.name}</span>
                   <button type="button" onClick={() => setStagedFiles((p) => p.filter((x) => x.id !== f.id))} className="text-zinc-400 hover:text-red-500"><X className="w-3 h-3" /></button>
                 </span>
               ))}
               {uploading > 0 && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-50 text-[12px] text-zinc-500">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-50 text-[13px] text-zinc-500">
                   <Loader2 className="w-3 h-3 animate-spin" /> Uploading {uploading}…
                 </span>
               )}
@@ -1056,9 +1056,9 @@ export function CreateTaskModal() {
                     if (gs.length === 0) return null;
                     return (
                       <div key={group} className="pb-1">
-                        <div className="px-3 py-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">{STATUS_GROUP_LABEL[group]}</div>
+                        <div className="px-3 py-1 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">{STATUS_GROUP_LABEL[group]}</div>
                         {gs.map((s) => (
-                          <button key={s.key} type="button" onClick={() => { setSelectedStatus(s.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                          <button key={s.key} type="button" onClick={() => { setSelectedStatus(s.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                             <span className="flex-1 truncate">{s.label}</span>
                             {selectedStatus === s.key && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
@@ -1094,7 +1094,7 @@ export function CreateTaskModal() {
                     {(["start", "due"] as const).map((f) => {
                       const val = f === "start" ? startAt : dueAt;
                       return (
-                        <button key={f} type="button" onClick={() => setDateField(f)} className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-md border text-[13px] ${dateField === f ? "border-[#c39b8c] text-zinc-800" : "border-zinc-200 text-zinc-500"}`}>
+                        <button key={f} type="button" onClick={() => setDateField(f)} className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-md border text-[14px] ${dateField === f ? "border-[#c39b8c] text-zinc-800" : "border-zinc-200 text-zinc-500"}`}>
                           <Calendar className="w-3.5 h-3.5" />
                           {val ? fmtDate(val) : f === "start" ? "Start date" : "Due date"}
                         </button>
@@ -1102,27 +1102,27 @@ export function CreateTaskModal() {
                     })}
                   </div>
                   <div className="flex gap-3">
-                    <div className="w-[160px] flex flex-col text-[13px]">
+                    <div className="w-[160px] flex flex-col text-[14px]">
                       {([["Today", 0], ["Tomorrow", 1], ["This weekend", (6 - today.getDay() + 7) % 7 || 6], ["Next week", (8 - today.getDay()) % 7 || 7], ["2 weeks", 14], ["4 weeks", 28]] as [string, number][]).map(([label, offset]) => {
                         const d = addDays(today, offset);
                         return (
                           <button key={label} type="button" onClick={() => applyDate(d)} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-zinc-50 text-left">
                             <span className="text-zinc-700">{label}</span>
-                            <span className="text-zinc-400 text-[12px]">{fmtDate(d)}</span>
+                            <span className="text-zinc-400 text-[13px]">{fmtDate(d)}</span>
                           </button>
                         );
                       })}
                     </div>
                     <div className="flex-1 border-l border-zinc-100 pl-3">
                       <div className="flex items-center justify-between mb-2">
-                        <span className="text-[13px] font-medium text-zinc-700">{new Date(calMonth.y, calMonth.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+                        <span className="text-[14px] font-medium text-zinc-700">{new Date(calMonth.y, calMonth.m, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
                         <div className="flex items-center gap-1">
                           <button type="button" onClick={() => setCalMonth((c) => ({ y: c.m === 0 ? c.y - 1 : c.y, m: c.m === 0 ? 11 : c.m - 1 }))} className="p-1 rounded hover:bg-zinc-100 text-zinc-500"><ChevronLeft className="w-4 h-4" /></button>
-                          <button type="button" onClick={() => setCalMonth({ y: today.getFullYear(), m: today.getMonth() })} className="text-[12px] text-zinc-500 px-1.5 hover:text-zinc-800">Today</button>
+                          <button type="button" onClick={() => setCalMonth({ y: today.getFullYear(), m: today.getMonth() })} className="text-[13px] text-zinc-500 px-1.5 hover:text-zinc-800">Today</button>
                           <button type="button" onClick={() => setCalMonth((c) => ({ y: c.m === 11 ? c.y + 1 : c.y, m: c.m === 11 ? 0 : c.m + 1 }))} className="p-1 rounded hover:bg-zinc-100 text-zinc-500"><ChevronRight className="w-4 h-4" /></button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-7 gap-0.5 text-center text-[11px] text-zinc-400 mb-1">
+                      <div className="grid grid-cols-7 gap-0.5 text-center text-[12px] text-zinc-400 mb-1">
                         {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => <span key={d}>{d}</span>)}
                       </div>
                       <div className="grid grid-cols-7 gap-0.5">
@@ -1131,15 +1131,15 @@ export function CreateTaskModal() {
                           const isToday = d.getTime() === today.getTime();
                           const active = (dateField === "start" ? startAt : dueAt)?.getTime() === d.getTime();
                           return (
-                            <button key={i} type="button" onClick={() => applyDate(d)} style={active ? { backgroundColor: TAUPE.soft } : undefined} className={`h-7 rounded text-[12px] ${active ? "text-white" : isToday ? "bg-red-500 text-white" : inMonth ? "text-zinc-700 hover:bg-zinc-100" : "text-zinc-300 hover:bg-zinc-50"}`}>
+                            <button key={i} type="button" onClick={() => applyDate(d)} style={active ? { backgroundColor: TAUPE.soft } : undefined} className={`h-7 rounded text-[13px] ${active ? "text-white" : isToday ? "bg-red-500 text-white" : inMonth ? "text-zinc-700 hover:bg-zinc-100" : "text-zinc-300 hover:bg-zinc-50"}`}>
                               {d.getDate()}
                             </button>
                           );
                         })}
                       </div>
                       <div className="flex justify-between mt-2">
-                        <button type="button" onClick={() => { setStartAt(null); setDueAt(null); }} className="text-[12px] text-zinc-500 hover:text-red-500">Clear</button>
-                        <button type="button" onClick={() => setOpenMenu(null)} className="text-[12px] font-medium text-[#9d7d70] hover:text-[#8e7165]">Done</button>
+                        <button type="button" onClick={() => { setStartAt(null); setDueAt(null); }} className="text-[13px] text-zinc-500 hover:text-red-500">Clear</button>
+                        <button type="button" onClick={() => setOpenMenu(null)} className="text-[13px] font-medium text-[#9d7d70] hover:text-[#8e7165]">Done</button>
                       </div>
                     </div>
                   </div>
@@ -1155,16 +1155,16 @@ export function CreateTaskModal() {
               </Chip>
               {openMenu === "priority" && (
                 <div className="absolute bottom-full left-0 mb-1 w-[180px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
-                  <div className="px-3 py-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">Priority</div>
+                  <div className="px-3 py-1 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">Priority</div>
                   {PRIORITIES.map((p) => (
-                    <button key={p.key} type="button" onClick={() => { setPriority(p.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                    <button key={p.key} type="button" onClick={() => { setPriority(p.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                       <Flag className="w-4 h-4" style={{ color: p.color }} />
                       <span className="flex-1">{p.label}</span>
                       {priority === p.key && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
                     </button>
                   ))}
                   <div className="border-t border-zinc-100 mt-1 pt-1">
-                    <button type="button" onClick={() => { setPriority(null); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50">
+                    <button type="button" onClick={() => { setPriority(null); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left text-[14px] text-zinc-500 hover:bg-zinc-50">
                       <Ban className="w-4 h-4 text-zinc-400" /> Clear
                     </button>
                   </div>
@@ -1199,12 +1199,12 @@ export function CreateTaskModal() {
                         }
                       }}
                       placeholder="Search or add a tag…"
-                      className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400"
+                      className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400"
                     />
                   </div>
                   <div className="max-h-[180px] overflow-y-auto">
                     {orgTags === null ? (
-                      <div className="px-2 py-2 text-[12px] text-zinc-400">Loading tags…</div>
+                      <div className="px-2 py-2 text-[13px] text-zinc-400">Loading tags…</div>
                     ) : (
                       (orgTags ?? [])
                         .filter((t) => !tagDraft.trim() || t.name.toLowerCase().includes(tagDraft.trim().toLowerCase()))
@@ -1216,9 +1216,9 @@ export function CreateTaskModal() {
                               key={t.id}
                               type="button"
                               onClick={() => setTags((p) => (active ? p.filter((x) => x.id !== t.id) : [...p, t]))}
-                              className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded"
+                              className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded"
                             >
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[12px] font-medium" style={{ background: `${color}22`, color }}>{t.name}</span>
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[13px] font-medium" style={{ background: `${color}22`, color }}>{t.name}</span>
                               {active && <Check className="w-3.5 h-3.5 ml-auto text-[#a78b80]" />}
                             </button>
                           );
@@ -1226,7 +1226,7 @@ export function CreateTaskModal() {
                     )}
                   </div>
                   {tagDraft.trim() && !(orgTags ?? []).some((t) => t.name.toLowerCase() === tagDraft.trim().toLowerCase()) && (
-                    <button type="button" disabled={creatingTag} onClick={() => void createWorkspaceTag(tagDraft.trim())} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50 rounded border-t border-zinc-100 mt-1 pt-1.5 disabled:opacity-50">
+                    <button type="button" disabled={creatingTag} onClick={() => void createWorkspaceTag(tagDraft.trim())} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50 rounded border-t border-zinc-100 mt-1 pt-1.5 disabled:opacity-50">
                       <Plus className="w-3.5 h-3.5 text-zinc-400" /> Create “{tagDraft.trim()}”
                     </button>
                   )}
@@ -1235,7 +1235,7 @@ export function CreateTaskModal() {
                       {tags.map((t) => {
                         const color = t.color || "#94a3b8";
                         return (
-                          <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[12px] font-medium" style={{ background: `${color}22`, color }}>
+                          <span key={t.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[13px] font-medium" style={{ background: `${color}22`, color }}>
                             {t.name}
                             <button type="button" onClick={() => setTags((p) => p.filter((x) => x.id !== t.id))} className="opacity-60 hover:opacity-100"><X className="w-3 h-3" /></button>
                           </span>
@@ -1257,39 +1257,39 @@ export function CreateTaskModal() {
                 <div className="absolute bottom-full left-0 mb-1 w-[300px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-2">
                   <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
                     <Search className="w-3.5 h-3.5 text-zinc-400" />
-                    <input autoFocus value={alignSearch} onChange={(e) => setAlignSearch(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400" />
+                    <input autoFocus value={alignSearch} onChange={(e) => setAlignSearch(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
                   </div>
                   <div className="max-h-[240px] overflow-y-auto">
-                    <div className="px-1 pb-1 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
+                    <div className="px-1 pb-1 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">KPIs</div>
                     {filteredKpis.length === 0 ? (
-                      <div className="px-2 py-1.5 text-[12px] text-zinc-400">No KPIs — pick a KRA below.</div>
+                      <div className="px-2 py-1.5 text-[13px] text-zinc-400">No KPIs — pick a KRA below.</div>
                     ) : (
                       filteredKpis.map((k) => {
                         const active = kpiId === k.id;
                         return (
-                          <button key={k.id} type="button" onClick={() => { setKpiId(k.id); setKraId(k.kra?.id ?? null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                          <button key={k.id} type="button" onClick={() => { setKpiId(k.id); setKraId(k.kra?.id ?? null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded">
                             <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
                             <span className="flex-1 min-w-0">
                               <span className="block truncate text-zinc-700">{k.name}</span>
-                              {k.kra ? <span className="block text-[11px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
+                              {k.kra ? <span className="block text-[12px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
                             </span>
                             {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
                           </button>
                         );
                       })
                     )}
-                    <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
+                    <div className="px-1 pt-2 pb-1 mt-1 border-t border-zinc-100 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">KRA only</div>
                     {filteredKras.length === 0 ? (
-                      <div className="px-2 py-1.5 text-[12px] text-zinc-400">No KRAs available.</div>
+                      <div className="px-2 py-1.5 text-[13px] text-zinc-400">No KRAs available.</div>
                     ) : (
                       filteredKras.map((k) => {
                         const active = kraId === k.id && !kpiId;
                         return (
-                          <button key={k.id} type="button" onClick={() => { setKraId(k.id); setKpiId(null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[13px] hover:bg-zinc-50 rounded">
+                          <button key={k.id} type="button" onClick={() => { setKraId(k.id); setKpiId(null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded">
                             <Flag className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                             <span className="flex-1 min-w-0">
                               <span className="block truncate text-zinc-700">{k.name}</span>
-                              {k.category ? <span className="block text-[11px] text-zinc-400 truncate">{k.category}</span> : null}
+                              {k.category ? <span className="block text-[12px] text-zinc-400 truncate">{k.category}</span> : null}
                             </span>
                             {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
                           </button>
@@ -1298,7 +1298,7 @@ export function CreateTaskModal() {
                     )}
                   </div>
                   {(kraId || kpiId) && (
-                    <button type="button" onClick={() => { setKraId(null); setKpiId(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
+                    <button type="button" onClick={() => { setKraId(null); setKpiId(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 mt-1 pt-1.5 text-left text-[14px] text-zinc-500 hover:bg-zinc-50 rounded border-t border-zinc-100">
                       <Ban className="w-3.5 h-3.5 text-zinc-400" /> Clear alignment
                     </button>
                   )}
@@ -1314,7 +1314,7 @@ export function CreateTaskModal() {
               {openMenu === "more" && (
                 <div className="absolute bottom-full left-0 mb-1 w-[200px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
                   {([["TIME_ESTIMATE", "Time Estimate", Hourglass], ["DEPENDENCIES", "Dependencies", GitFork], ["SUBTASKS", "Subtasks", ListTree], ["CHECKLIST", "Checklist", ChecklistIcon]] as [ExtraKey, string, typeof Hourglass][]).map(([k, label, Icon]) => (
-                    <button key={k} type="button" onClick={() => toggleExtra(k)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                    <button key={k} type="button" onClick={() => toggleExtra(k)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                       <Icon className="w-4 h-4 text-zinc-500" />
                       <span className="flex-1">{label}</span>
                       {extras.includes(k) && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
@@ -1331,36 +1331,36 @@ export function CreateTaskModal() {
           <div className="flex items-center gap-2">
             {/* Templates */}
             <div className="relative">
-              <button type="button" onClick={() => { setTplMode("root"); setOpenMenu(openMenu === "templates" ? null : "templates"); }} className="inline-flex items-center gap-1.5 px-2 py-1 text-[13px] font-medium text-zinc-600 bg-transparent rounded hover:bg-zinc-100 transition-colors">
+              <button type="button" onClick={() => { setTplMode("root"); setOpenMenu(openMenu === "templates" ? null : "templates"); }} className="inline-flex items-center gap-1.5 px-2 py-1 text-[14px] font-medium text-zinc-600 bg-transparent rounded hover:bg-zinc-100 transition-colors">
                 <Wand2 className="w-4 h-4 text-zinc-400" /> Templates
               </button>
               {openMenu === "templates" && (
                 <div className="absolute bottom-full left-0 mb-1 w-[280px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
                   {tplMode === "root" && (
                     <>
-                      <button type="button" onClick={() => setTplMode("use")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Wand2 className="w-4 h-4 text-zinc-500" /><span className="flex-1">Use Template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
-                      <button type="button" onClick={() => setTplMode("instant")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Wand2 className="w-4 h-4 text-zinc-500" /><span className="flex-1">Create instantly from template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
+                      <button type="button" onClick={() => setTplMode("use")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Wand2 className="w-4 h-4 text-zinc-500" /><span className="flex-1">Use Template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
+                      <button type="button" onClick={() => setTplMode("instant")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Wand2 className="w-4 h-4 text-zinc-500" /><span className="flex-1">Create instantly from template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
                       <div className="border-t border-zinc-100 my-1" />
-                      <button type="button" onClick={() => setTplMode("save")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Save className="w-4 h-4 text-zinc-500" /><span className="flex-1">Save as template</span></button>
-                      <button type="button" onClick={() => setTplMode("update")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><RefreshCw className="w-4 h-4 text-zinc-500" /><span className="flex-1">Update existing template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
+                      <button type="button" onClick={() => setTplMode("save")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Save className="w-4 h-4 text-zinc-500" /><span className="flex-1">Save as template</span></button>
+                      <button type="button" onClick={() => setTplMode("update")} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"><RefreshCw className="w-4 h-4 text-zinc-500" /><span className="flex-1">Update existing template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300" /></button>
                     </>
                   )}
 
                   {tplMode === "save" && (
                     <div className="px-3 py-2">
-                      <button type="button" onClick={() => setTplMode("root")} className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-800 mb-2"><ChevronLeft className="w-3.5 h-3.5" /> Back</button>
-                      <div className="text-[12px] text-zinc-500 mb-1.5">Save the current task setup as a reusable template.</div>
-                      <input autoFocus value={tplNameDraft} onChange={(e) => setTplNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveTemplate(tplNameDraft); }} placeholder="Template name…" className="w-full px-2.5 py-1.5 text-[13px] border border-[#c39b8c] rounded-md outline-none mb-2 placeholder:text-zinc-400" />
-                      <button type="button" onClick={() => saveTemplate(tplNameDraft)} disabled={!tplNameDraft.trim()} className="w-full px-3 py-1.5 text-[13px] font-medium text-white bg-[#9d7d70] hover:bg-[#8e7165] rounded-md disabled:opacity-50">Save template</button>
+                      <button type="button" onClick={() => setTplMode("root")} className="flex items-center gap-1 text-[13px] text-zinc-500 hover:text-zinc-800 mb-2"><ChevronLeft className="w-3.5 h-3.5" /> Back</button>
+                      <div className="text-[13px] text-zinc-500 mb-1.5">Save the current task setup as a reusable template.</div>
+                      <input autoFocus value={tplNameDraft} onChange={(e) => setTplNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveTemplate(tplNameDraft); }} placeholder="Template name…" className="w-full px-2.5 py-1.5 text-[14px] border border-[#c39b8c] rounded-md outline-none mb-2 placeholder:text-zinc-400" />
+                      <button type="button" onClick={() => saveTemplate(tplNameDraft)} disabled={!tplNameDraft.trim()} className="w-full px-3 py-1.5 text-[14px] font-medium text-white bg-[#9d7d70] hover:bg-[#8e7165] rounded-md disabled:opacity-50">Save template</button>
                     </div>
                   )}
 
                   {(tplMode === "use" || tplMode === "instant" || tplMode === "update") && (
                     <div>
-                      <button type="button" onClick={() => setTplMode("root")} className="flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-800 px-3 py-1.5"><ChevronLeft className="w-3.5 h-3.5" /> Back</button>
+                      <button type="button" onClick={() => setTplMode("root")} className="flex items-center gap-1 text-[13px] text-zinc-500 hover:text-zinc-800 px-3 py-1.5"><ChevronLeft className="w-3.5 h-3.5" /> Back</button>
                       <div className="max-h-[240px] overflow-y-auto">
                         {templates.length === 0 ? (
-                          <div className="px-4 py-5 text-center text-[13px] text-zinc-400">No templates yet.<br />Save one with “Save as template”.</div>
+                          <div className="px-4 py-5 text-center text-[14px] text-zinc-400">No templates yet.<br />Save one with “Save as template”.</div>
                         ) : (
                           templates.map((tpl) => (
                             <button
@@ -1371,7 +1371,7 @@ export function CreateTaskModal() {
                                 else if (tplMode === "instant") { createInstant(tpl); }
                                 else { updateTemplate(tpl); }
                               }}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"
+                              className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors"
                             >
                               <Wand2 className="w-4 h-4 text-zinc-400 shrink-0" />
                               <span className="flex-1 truncate">{tpl.name}</span>
@@ -1391,13 +1391,13 @@ export function CreateTaskModal() {
               <button type="button" onClick={() => setOpenMenu(openMenu === "attach" ? null : "attach")} className="text-zinc-500 hover:text-zinc-700 p-1.5 rounded hover:bg-zinc-100 transition-colors"><Paperclip className="w-5 h-5" /></button>
               {openMenu === "attach" && (
                 <div className="absolute bottom-full left-0 mb-1 w-[230px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
-                  <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                     <FileUp className="w-4 h-4 text-zinc-500" />
                     <span className="flex-1">Upload file</span>
                   </button>
                   <div className="border-t border-zinc-100 my-1" />
                   {["Dropbox", "OneDrive/SharePoint", "Box", "Google Drive", "New Google Doc"].map((label) => (
-                    <button key={label} type="button" onClick={() => void attachExternal(label)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                    <button key={label} type="button" onClick={() => void attachExternal(label)} className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                       {label === "New Google Doc" ? <FileText className="w-4 h-4 text-blue-500" /> : <Cloud className="w-4 h-4 text-zinc-500" />}
                       <span className="flex-1">{label}</span>
                     </button>
@@ -1410,7 +1410,7 @@ export function CreateTaskModal() {
             <div className="relative">
               <button type="button" onClick={() => setOpenMenu(openMenu === "followers" ? null : "followers")} className="flex items-center gap-1 text-zinc-500 hover:text-zinc-700 p-1.5 rounded hover:bg-zinc-100 transition-colors" title="Followers">
                 <Bell className="w-5 h-5" />
-                {followers.length > 0 && <span className="text-[12px] font-medium">{followers.length}</span>}
+                {followers.length > 0 && <span className="text-[13px] font-medium">{followers.length}</span>}
               </button>
               {openMenu === "followers" && (
                 <PeoplePicker people={people} me={me} selected={followers} onToggle={(id) => setFollowers((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]))} position="top" />
@@ -1419,12 +1419,12 @@ export function CreateTaskModal() {
           </div>
 
           <div className="flex items-center gap-3">
-            {error && <span className="text-[12px] font-medium text-red-500">{error}</span>}
-            {!error && notice && <span className="text-[12px] font-medium text-emerald-600">{notice}</span>}
+            {error && <span className="text-[13px] font-medium text-red-500">{error}</span>}
+            {!error && notice && <span className="text-[13px] font-medium text-emerald-600">{notice}</span>}
 
             {/* Create split button */}
             <div className="flex items-center rounded-lg shadow-sm overflow-visible ml-1 relative">
-              <button type="button" onClick={() => handleCreate("default")} disabled={submitting} className={`px-4 h-[34px] text-[13px] rounded-l-lg inline-flex items-center gap-2 ${taupeButton}`}>
+              <button type="button" onClick={() => handleCreate("default")} disabled={submitting} className={`px-4 h-[34px] text-[14px] rounded-l-lg inline-flex items-center gap-2 ${taupeButton}`}>
                 {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 Create {activeType?.singular ?? "Task"}
               </button>
@@ -1434,7 +1434,7 @@ export function CreateTaskModal() {
               {openMenu === "createMenu" && (
                 <div className="absolute bottom-full right-0 mb-1 w-[230px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
                   {([["open", "Create and open"], ["another", "Create and start another"], ["duplicate", "Create and duplicate"]] as [Variant, string][]).map(([v, label]) => (
-                    <button key={v} type="button" onClick={() => handleCreate(v)} className="w-full px-3 py-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">{label}</button>
+                    <button key={v} type="button" onClick={() => handleCreate(v)} className="w-full px-3 py-2 text-left text-[14px] text-zinc-700 hover:bg-zinc-100/70 transition-colors">{label}</button>
                   ))}
                 </div>
               )}

@@ -444,7 +444,7 @@ export default function ProcessRunPage() {
                     <CheckCircle2 size={20} className="text-green-400" />
                   ) : (
                     <div className="h-5 w-5 rounded-full border-2 border-muted-2 flex items-center justify-center">
-                      <span className="text-[10px] text-muted">{sectionProgress}%</span>
+                      <span className="text-[11px] text-muted">{sectionProgress}%</span>
                     </div>
                   )}
                   <span className="font-medium text-sm">{section.title}</span>
@@ -517,12 +517,12 @@ export default function ProcessRunPage() {
                                 {step.title}
                               </p>
                               {isApproval && !isStepComplete && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                   Approval
                                 </span>
                               )}
                               {hasRequiredInputs && !isStepComplete && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                   Has required fields
                                 </span>
                               )}

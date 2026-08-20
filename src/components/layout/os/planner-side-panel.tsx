@@ -35,12 +35,12 @@ export function PlannerSidePanel({ onCreated, autoFocusMeet }: { onCreated: () =
     <aside className="w-[256px] shrink-0 border-r border-zinc-200 dark:border-[#2A2F38] overflow-y-auto px-3 py-3 space-y-4">
       {/* Priorities */}
       <section>
-        <h3 className="px-1 mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Priorities</h3>
+        <h3 className="px-1 mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Priorities</h3>
         <div className="rounded-lg border border-dashed border-zinc-200 dark:border-[#2A2F38] px-3 py-4 text-center">
           <Flag className="w-4 h-4 mx-auto text-zinc-300 dark:text-zinc-600" />
-          <div className="mt-1.5 text-[11.5px] text-zinc-400 dark:text-zinc-500 leading-snug">Prioritize a task to see it appear here</div>
+          <div className="mt-1.5 text-[12.5px] text-zinc-400 dark:text-zinc-500 leading-snug">Prioritize a task to see it appear here</div>
         </div>
-        <button type="button" className="mt-1.5 w-full h-7 rounded-md text-[12px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 inline-flex items-center justify-center gap-1.5">
+        <button type="button" className="mt-1.5 w-full h-7 rounded-md text-[13px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10 inline-flex items-center justify-center gap-1.5">
           <Plus className="w-3.5 h-3.5" /> Add priority
         </button>
       </section>
@@ -60,23 +60,23 @@ function CollapsibleSection({ title, items, loading, onOpen, defaultOpen }: {
   const [open, setOpen] = useState(Boolean(defaultOpen));
   return (
     <section>
-      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-1 px-1 py-1 text-[12px] font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-1 px-1 py-1 text-[13px] font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white">
         {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
         <span className="flex-1 text-left">{title}</span>
-        {!loading ? <span className="text-[11px] text-zinc-400">{items.length}</span> : null}
+        {!loading ? <span className="text-[12px] text-zinc-400">{items.length}</span> : null}
       </button>
       {open ? (
         loading ? (
           <div className="py-2 flex justify-center"><Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" /></div>
         ) : items.length === 0 ? (
-          <div className="px-2 py-1.5 text-[11.5px] text-zinc-400 dark:text-zinc-500">Nothing here.</div>
+          <div className="px-2 py-1.5 text-[12.5px] text-zinc-400 dark:text-zinc-500">Nothing here.</div>
         ) : (
           <ul className="space-y-0.5 mt-0.5">
             {items.map((it) => (
               <li key={it.id}>
                 <button type="button" onClick={() => onOpen(it.url)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-left">
                   <span className="w-2 h-2 rounded-full border border-zinc-300 dark:border-zinc-600 shrink-0" />
-                  <span className="flex-1 min-w-0 truncate text-[12px] text-zinc-700 dark:text-zinc-200">{it.title}</span>
+                  <span className="flex-1 min-w-0 truncate text-[13px] text-zinc-700 dark:text-zinc-200">{it.title}</span>
                 </button>
               </li>
             ))}
@@ -121,15 +121,15 @@ function MeetWith({ onCreated, autoFocus }: { onCreated: () => void; autoFocus?:
 
   return (
     <section>
-      <h3 className="px-1 mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Meet with</h3>
+      <h3 className="px-1 mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Meet with</h3>
       <div className="flex items-center gap-2 h-8 rounded-lg border border-zinc-200 dark:border-[#2A2F38] px-2.5">
         <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-        <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search for people…" className="flex-1 min-w-0 bg-transparent outline-none text-[12.5px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400" />
+        <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search for people…" className="flex-1 min-w-0 bg-transparent outline-none text-[13.5px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400" />
       </div>
       {people !== null && q.trim().length >= 2 ? (
         <ul className="mt-1 rounded-lg border border-zinc-200 dark:border-[#2A2F38] p-1 max-h-[200px] overflow-y-auto">
           {people.length === 0 ? (
-            <li className="px-2 py-2 text-[11.5px] text-zinc-400 text-center">No teammates found.</li>
+            <li className="px-2 py-2 text-[12.5px] text-zinc-400 text-center">No teammates found.</li>
           ) : people.map((p) => (
             <li key={p.id}>
               <button type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-left">
@@ -137,10 +137,10 @@ function MeetWith({ onCreated, autoFocus }: { onCreated: () => void; autoFocus?:
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.avatar} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
                 ) : (
-                  <span className="w-5 h-5 rounded-full bg-[#2F8BF0] text-white text-[9px] font-semibold flex items-center justify-center shrink-0">{personInitials(p)}</span>
+                  <span className="w-5 h-5 rounded-full bg-[#2F8BF0] text-white text-[10px] font-semibold flex items-center justify-center shrink-0">{personInitials(p)}</span>
                 )}
-                <span className="flex-1 min-w-0 truncate text-[12px] text-zinc-700 dark:text-zinc-200">{personName(p)}</span>
-                {busy === p.id ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : <span className="text-[10.5px] text-[#0073EA] font-medium shrink-0">Meet</span>}
+                <span className="flex-1 min-w-0 truncate text-[13px] text-zinc-700 dark:text-zinc-200">{personName(p)}</span>
+                {busy === p.id ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : <span className="text-[11.5px] text-[#0073EA] font-medium shrink-0">Meet</span>}
               </button>
             </li>
           ))}

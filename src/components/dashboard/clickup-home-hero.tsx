@@ -275,7 +275,7 @@ export async function ClickupHomeHero() {
               <p className="text-3xl font-bold tabular-nums tracking-tight leading-none mb-1.5">
                 {t.n}
               </p>
-              <p className="text-[12.5px] text-muted leading-snug">{t.label}</p>
+              <p className="text-[13.5px] text-muted leading-snug">{t.label}</p>
             </Link>
           );
         })}
@@ -291,7 +291,7 @@ export async function ClickupHomeHero() {
             <h2 className="text-base font-semibold">What needs you</h2>
             <Link
               href="/inbox"
-              className="text-[12.5px] font-medium text-[color:var(--accent-strong)] hover:underline inline-flex items-center gap-1"
+              className="text-[13.5px] font-medium text-[color:var(--accent-strong)] hover:underline inline-flex items-center gap-1"
             >
               Open Inbox
               {inboxTotal > 0 && <span className="text-muted-2">· {inboxTotal}</span>}
@@ -320,8 +320,8 @@ export async function ClickupHomeHero() {
                       >
                         <Icon size={14} />
                       </span>
-                      <span className="text-[13.5px] font-medium truncate flex-1">{p.title}</span>
-                      <span className="text-[11.5px] text-muted-2 flex-shrink-0">{p.meta}</span>
+                      <span className="text-[14.5px] font-medium truncate flex-1">{p.title}</span>
+                      <span className="text-[12.5px] text-muted-2 flex-shrink-0">{p.meta}</span>
                     </Link>
                   </li>
                 );
@@ -347,7 +347,7 @@ export async function ClickupHomeHero() {
                   <span className="w-8 h-8 rounded-lg flex items-center justify-center bg-[color:var(--accent-soft)] text-[color:var(--accent-strong)] flex-shrink-0">
                     <Icon size={14} />
                   </span>
-                  <span className="text-[13.5px] flex-1">{q.label}</span>
+                  <span className="text-[14.5px] flex-1">{q.label}</span>
                   <Plus
                     size={12}
                     className="text-muted-2 opacity-0 group-hover:opacity-100 transition-fast"

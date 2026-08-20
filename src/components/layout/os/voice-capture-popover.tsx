@@ -147,30 +147,30 @@ export function VoiceCapturePopover() {
       </div>
 
       <div className="p-4">
-        <div className="min-h-[88px] max-h-[200px] overflow-y-auto rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-zinc-50 dark:bg-[#14171D] px-3 py-2.5 text-[13.5px] leading-relaxed text-zinc-800 dark:text-zinc-100">
+        <div className="min-h-[88px] max-h-[200px] overflow-y-auto rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-zinc-50 dark:bg-[#14171D] px-3 py-2.5 text-[14.5px] leading-relaxed text-zinc-800 dark:text-zinc-100">
           {text ? text : <span className="text-zinc-400 dark:text-zinc-500">{recording ? "Speak now…" : "No speech captured."}</span>}
         </div>
 
         <div className="mt-3 flex items-center gap-2">
           {recording ? (
-            <button type="button" onClick={stop} className="flex-1 h-9 rounded-md bg-[#FB5A6F] text-white text-[13px] font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90">
+            <button type="button" onClick={stop} className="flex-1 h-9 rounded-md bg-[#FB5A6F] text-white text-[14px] font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90">
               <Square className="w-3.5 h-3.5" /> Stop
             </button>
           ) : (
             <div className="w-full flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <button type="button" onClick={() => void saveAsNote()} disabled={!text || saving} className="flex-1 h-9 rounded-md bg-[#0073EA] text-white text-[13px] font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#0060B9] disabled:opacity-40">
+                <button type="button" onClick={() => void saveAsNote()} disabled={!text || saving} className="flex-1 h-9 rounded-md bg-[#0073EA] text-white text-[14px] font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#0060B9] disabled:opacity-40">
                   <StickyNote className="w-3.5 h-3.5" /> {saving ? "Saving…" : "Save as note"}
                 </button>
-                <button type="button" onClick={() => void createTask()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
+                <button type="button" onClick={() => void createTask()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[14px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
                   <CheckSquare className="w-3.5 h-3.5" /> Create task
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <button type="button" onClick={() => void copy()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
+                <button type="button" onClick={() => void copy()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[14px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">
                   <Copy className="w-3.5 h-3.5" /> Copy text
                 </button>
-                <button type="button" onClick={start} className="h-9 px-3 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[13px] inline-flex items-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
+                <button type="button" onClick={start} className="h-9 px-3 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-[14px] inline-flex items-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
                   <RotateCcw className="w-3.5 h-3.5" /> Retry
                 </button>
               </div>
@@ -178,7 +178,7 @@ export function VoiceCapturePopover() {
           )}
         </div>
         {!recording && !text ? (
-          <button type="button" onClick={start} className="mt-2 w-full h-9 rounded-md border border-dashed border-zinc-300 dark:border-[#2A2F38] text-zinc-600 dark:text-zinc-300 text-[13px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
+          <button type="button" onClick={start} className="mt-2 w-full h-9 rounded-md border border-dashed border-zinc-300 dark:border-[#2A2F38] text-zinc-600 dark:text-zinc-300 text-[14px] inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10">
             <Mic className="w-3.5 h-3.5" /> Start again
           </button>
         ) : null}

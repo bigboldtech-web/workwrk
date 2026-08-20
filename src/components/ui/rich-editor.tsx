@@ -350,7 +350,7 @@ export function RichEditor({
         {slashOpen && editable && (
           <div className="absolute left-4 top-8 z-30 w-64 max-h-72 overflow-y-auto rounded-lg border border-border bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted">Insert</span>
+              <span className="text-[11px] uppercase tracking-wider text-muted">Insert</span>
               <button onClick={() => setSlashOpen(false)} className="text-muted hover:text-foreground">
                 <X size={12} />
               </button>

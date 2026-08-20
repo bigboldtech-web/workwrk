@@ -246,7 +246,7 @@ export default function SettingsPage() {
     <>
       <div className="px-6 pb-2 pt-6">
         <h1 className="text-[16px] font-bold text-zinc-900">Overview</h1>
-        <p className="mt-0.5 text-[12px] text-zinc-500">
+        <p className="mt-0.5 text-[13px] text-zinc-500">
           {data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
         </p>
       </div>

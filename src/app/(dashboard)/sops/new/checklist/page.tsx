@@ -155,7 +155,7 @@ export default function ChecklistSopEditor() {
             type="button"
             onClick={() => save()}
             disabled={saving}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
           >
             <Save className="h-3.5 w-3.5" /> Save
           </button>
@@ -164,12 +164,12 @@ export default function ChecklistSopEditor() {
               type="button"
               onClick={() => save({ publish: true })}
               disabled={saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
             >
               <Send className="h-3.5 w-3.5" /> Publish
             </button>
           ) : (
-            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-[13px] font-medium text-emerald-700">Published</span>
+            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-[14px] font-medium text-emerald-700">Published</span>
           )}
         </div>
       }
@@ -179,7 +179,7 @@ export default function ChecklistSopEditor() {
       <button
         type="button"
         onClick={() => router.push("/sops")}
-        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-[13px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-[14px] text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
       >
         <ArrowLeft className="h-4 w-4" /> All SOPs
       </button>

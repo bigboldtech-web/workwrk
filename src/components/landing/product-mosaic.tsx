@@ -49,7 +49,7 @@ export function ProductMosaic() {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
-          <p className="text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
+          <p className="text-[12px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
             One canvas
           </p>
           <h2
@@ -155,7 +155,7 @@ function Tile({
     >
       {chrome && (
         <div
-          className="flex items-center gap-3 px-3.5 h-9 text-[11px]"
+          className="flex items-center gap-3 px-3.5 h-9 text-[12px]"
           style={{ borderBottom: `1px solid ${dividerColor}` }}
         >
           {chrome.brand && (
@@ -331,7 +331,7 @@ function StatusPill({ kind, label }: { kind: keyof typeof STATUS; label?: string
   const s = STATUS[kind];
   return (
     <span
-      className="inline-flex items-center justify-center text-[10px] font-bold text-white px-2 h-[22px] rounded-md min-w-[60px]"
+      className="inline-flex items-center justify-center text-[11px] font-bold text-white px-2 h-[22px] rounded-md min-w-[60px]"
       style={{ backgroundColor: s.bg }}
     >
       {label ?? s.label}
@@ -381,7 +381,7 @@ function TileQResults() {
       }}
     >
       <div className="relative">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
           Q3 Results
         </p>
         <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "var(--m-text)" }}>
@@ -395,7 +395,7 @@ function TileQResults() {
             { label: "Monthly revenue",     color: "#00C875" },
           ].map((c, i) => (
             <div key={i} className="rounded-lg p-2.5" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-              <p className="text-[9px] font-bold uppercase tracking-[0.12em] mb-1.5" style={{ color: "var(--m-text-soft)" }}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] mb-1.5" style={{ color: "var(--m-text-soft)" }}>
                 {c.label}
               </p>
               <BarChartMini
@@ -408,7 +408,7 @@ function TileQResults() {
         </div>
 
         <div className="mt-3 rounded-lg overflow-hidden relative" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-          <div className="px-2.5 pt-2 text-[9px] font-bold uppercase tracking-[0.12em]" style={{ color: "var(--m-text-soft)" }}>
+          <div className="px-2.5 pt-2 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: "var(--m-text-soft)" }}>
             Event location
           </div>
           <StylizedMap height={68} />
@@ -440,7 +440,7 @@ function TileTickets() {
         <div className="mt-3 grid grid-cols-[120px_1fr_1fr] gap-2.5">
           {/* Donut */}
           <div className="rounded-lg p-2 flex flex-col items-center" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em] mb-1 self-start" style={{ color: "var(--m-text-soft)" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em] mb-1 self-start" style={{ color: "var(--m-text-soft)" }}>
               By urgency
             </p>
             <DonutChart
@@ -460,7 +460,7 @@ function TileTickets() {
 
           {/* Avg time KPI */}
           <div className="rounded-lg p-3 flex flex-col justify-between" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>
               Avg resolution
             </p>
             <p className="text-[26px] font-extrabold tabular-nums tracking-tight" style={{ color: "var(--m-text)" }}>
@@ -470,18 +470,18 @@ function TileTickets() {
 
           {/* Open tickets KPI */}
           <div className="rounded-lg p-3 flex flex-col justify-between" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>
               Open
             </p>
             <p className="text-[26px] font-extrabold tabular-nums tracking-tight" style={{ color: "#579BFC" }}>
-              2 <span className="text-[12px] font-bold" style={{ color: "var(--m-text-soft)" }}>tickets</span>
+              2 <span className="text-[13px] font-bold" style={{ color: "var(--m-text-soft)" }}>tickets</span>
             </p>
           </div>
         </div>
 
         {/* Tickets table */}
         <div className="mt-3 rounded-lg overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
-          <div className="grid grid-cols-[1.4fr_60px_64px] gap-2 px-3 py-1.5 text-[9px] font-bold uppercase tracking-[0.12em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
+          <div className="grid grid-cols-[1.4fr_60px_64px] gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
             <span>Open ticket</span>
             <span>Status</span>
             <span>Urgency</span>
@@ -491,9 +491,9 @@ function TileTickets() {
             { t: "Wifi is super slow today",   s: "working" as const, u: "Working",  uHue: "#FDAB3D" },
           ].map((r, i) => (
             <div key={i} className="grid grid-cols-[1.4fr_60px_64px] gap-2 px-3 py-1.5 items-center border-t" style={{ borderColor: "var(--m-border)" }}>
-              <span className="text-[10.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
+              <span className="text-[11.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
               <StatusPill kind={r.s} label={STATUS[r.s].label} />
-              <span className="text-[9.5px] font-bold text-white text-center px-1.5 h-[20px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.uHue }}>{r.u}</span>
+              <span className="text-[10px] font-bold text-white text-center px-1.5 h-[20px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.uHue }}>{r.u}</span>
             </div>
           ))}
         </div>
@@ -515,16 +515,16 @@ function TileFinance() {
     <Tile dark width={520}>
       <div>
         <div className="flex items-baseline justify-between mb-1">
-          <span className="inline-flex items-center gap-1 text-[8.5px] font-bold uppercase tracking-[0.14em]" style={{ color: "#E2445C" }}>
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "#E2445C" }}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#E2445C" }} />
             Responsible Adult · Feb 2026
           </span>
-          <span className="text-[9px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>14-day streak · 1240 SP</span>
+          <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>14-day streak · 1240 SP</span>
         </div>
         <p className="font-extrabold text-[18px] tracking-tight" style={{ color: "white" }}>
           Your finances <span style={{ color: "#00C875" }}>are thriving.</span>
         </p>
-        <p className="text-[10px] mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
+        <p className="text-[11px] mt-1" style={{ color: "rgba(255,255,255,0.55)" }}>
           You've only burned 15% of your budget. Record-breaking surplus.
         </p>
 
@@ -558,9 +558,9 @@ function TileFinance() {
 function DarkKPI({ label, value, sub, hue }: { label: string; value: string; sub: string; hue: string }) {
   return (
     <div className="rounded-lg p-2.5 relative overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
-      <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "rgba(255,255,255,0.5)" }}>{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "rgba(255,255,255,0.5)" }}>{label}</p>
       <p className="mt-1 font-extrabold tabular-nums tracking-tight" style={{ color: hue, fontSize: 18, lineHeight: 1 }}>{value}</p>
-      <p className="text-[8.5px] mt-1" style={{ color: "rgba(255,255,255,0.45)" }}>{sub}</p>
+      <p className="text-[10px] mt-1" style={{ color: "rgba(255,255,255,0.45)" }}>{sub}</p>
     </div>
   );
 }
@@ -581,7 +581,7 @@ function TilePortfolioKanban() {
     >
       <div>
         <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "white" }}>Portfolio</p>
-        <p className="text-[9.5px]" style={{ color: "rgba(255,255,255,0.5)" }}>Eng team · Sprint 47</p>
+        <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.5)" }}>Eng team · Sprint 47</p>
 
         <div className="mt-2.5 grid grid-cols-4 gap-1.5">
           {[
@@ -594,14 +594,14 @@ function TilePortfolioKanban() {
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-1">
                   <span className="w-1 h-1 rounded-full" style={{ backgroundColor: c.hue }} />
-                  <span className="text-[8.5px] font-bold uppercase" style={{ color: c.hue }}>{c.name}</span>
+                  <span className="text-[10px] font-bold uppercase" style={{ color: c.hue }}>{c.name}</span>
                 </div>
-                <span className="text-[8.5px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>{c.cards.length}</span>
+                <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>{c.cards.length}</span>
               </div>
               <div className="space-y-1 flex-1">
                 {c.cards.map((card, j) => (
                   <div key={j} className="rounded p-1.5" style={{ backgroundColor: "rgba(255,255,255,0.06)", borderLeft: `2px solid ${c.hue}` }}>
-                    <p className="text-[9px] font-semibold leading-tight" style={{ color: "white" }}>{card.t}</p>
+                    <p className="text-[10px] font-semibold leading-tight" style={{ color: "white" }}>{card.t}</p>
                     <p className="text-[7.5px] mt-0.5" style={{ color: "rgba(255,255,255,0.55)" }}>{card.v}</p>
                   </div>
                 ))}
@@ -622,11 +622,11 @@ function TileWorkFocus() {
     <Tile width={460}>
       <div>
         <div className="flex items-center justify-between mb-2">
-          <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold" style={{ color: "var(--m-text-muted)" }}>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: "var(--m-text-muted)" }}>
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#A25DDC" }} />
             Focus
           </span>
-          <div className="flex items-center gap-2 text-[9px] font-mono" style={{ color: "var(--m-text-soft)" }}>
+          <div className="flex items-center gap-2 text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>
             <span>Day</span><span>Week</span><span className="font-bold" style={{ color: "var(--m-text)" }}>Month</span>
           </div>
         </div>
@@ -634,7 +634,7 @@ function TileWorkFocus() {
         <div className="grid grid-cols-[120px_1fr] gap-3">
           {/* Gauge */}
           <div className="rounded-2xl p-3 flex flex-col items-center relative" style={{ backgroundColor: "#F2EAFE" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em] self-start" style={{ color: "#5b21b6" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em] self-start" style={{ color: "#5b21b6" }}>
               Work focus
             </p>
             <div className="relative mt-1">
@@ -644,24 +644,24 @@ function TileWorkFocus() {
                 <p className="text-[8px] font-medium" style={{ color: "#5b21b6" }}>Min left</p>
               </div>
             </div>
-            <p className="text-[8.5px] mt-1" style={{ color: "#5b21b6" }}>New client web design</p>
+            <p className="text-[10px] mt-1" style={{ color: "#5b21b6" }}>New client web design</p>
           </div>
 
           {/* Up next */}
           <div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.12em] mb-1.5" style={{ color: "var(--m-text-soft)" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] mb-1.5" style={{ color: "var(--m-text-soft)" }}>
               Up next
             </p>
             <div className="space-y-1.5">
               <FocusCard color="#FFF9CC" label="Social media" sub="45:21 / 70 min" hue="#9a8800" />
               <FocusCard color="#DCFCE7" label="Project plan" sub="28 min" hue="#15803d" />
             </div>
-            <p className="text-[9px] font-bold uppercase tracking-[0.12em] mt-3 mb-1" style={{ color: "var(--m-text-soft)" }}>
+            <p className="text-[10px] font-bold uppercase tracking-[0.12em] mt-3 mb-1" style={{ color: "var(--m-text-soft)" }}>
               Today
             </p>
-            <div className="flex items-center justify-between text-[9.5px] px-2 py-1.5 rounded-md" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
+            <div className="flex items-center justify-between text-[10px] px-2 py-1.5 rounded-md" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
               <span style={{ color: "var(--m-text)" }}>Social media gantt</span>
-              <span className="text-white px-1.5 rounded text-[8.5px] font-bold" style={{ backgroundColor: "#00C875" }}>Done</span>
+              <span className="text-white px-1.5 rounded text-[10px] font-bold" style={{ backgroundColor: "#00C875" }}>Done</span>
             </div>
           </div>
         </div>
@@ -672,8 +672,8 @@ function TileWorkFocus() {
 function FocusCard({ color, label, sub, hue }: { color: string; label: string; sub: string; hue: string }) {
   return (
     <div className="rounded-lg px-2.5 py-1.5" style={{ backgroundColor: color }}>
-      <p className="text-[9.5px] font-bold" style={{ color: hue }}>{label}</p>
-      <p className="text-[8.5px] font-medium" style={{ color: hue, opacity: 0.75 }}>{sub}</p>
+      <p className="text-[10px] font-bold" style={{ color: hue }}>{label}</p>
+      <p className="text-[10px] font-medium" style={{ color: hue, opacity: 0.75 }}>{sub}</p>
     </div>
   );
 }
@@ -693,7 +693,7 @@ function TilePipeline() {
     >
       <div>
         <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "var(--m-text)" }}>Deals pipeline</p>
-        <p className="text-[9.5px]" style={{ color: "var(--m-text-soft)" }}>AI Lead Experts</p>
+        <p className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>AI Lead Experts</p>
 
         <div className="mt-3 grid grid-cols-4 gap-1.5">
           {[
@@ -704,12 +704,12 @@ function TilePipeline() {
           ].map((s, i) => (
             <div key={i} className="rounded-md p-1.5" style={{ backgroundColor: "var(--m-surface)" }}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[9px] font-bold uppercase" style={{ color: s.hue }}>{s.name} / {s.count}</span>
+                <span className="text-[10px] font-bold uppercase" style={{ color: s.hue }}>{s.name} / {s.count}</span>
               </div>
-              <p className="text-[10.5px] font-bold tabular-nums mb-1" style={{ color: "var(--m-text)" }}>{s.val}</p>
+              <p className="text-[11.5px] font-bold tabular-nums mb-1" style={{ color: "var(--m-text)" }}>{s.val}</p>
               {s.cards.map((card, j) => (
                 <div key={j} className="bg-white rounded p-1.5" style={{ border: "1px solid var(--m-border)", borderLeft: `2px solid ${s.hue}` }}>
-                  <p className="text-[9px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{card.c}</p>
+                  <p className="text-[10px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{card.c}</p>
                   <p className="text-[8px]" style={{ color: "var(--m-text-soft)" }}>
                     {card.v} · <span style={{ color: s.hue }}>{card.lvl}</span>
                   </p>
@@ -722,8 +722,8 @@ function TilePipeline() {
         <div className="mt-2.5 rounded-md p-2.5 flex items-start gap-2" style={{ backgroundColor: "var(--m-surface)" }}>
           <span className="w-1 h-1 rounded-full mt-1.5" style={{ backgroundColor: "var(--brand-red)" }} />
           <div>
-            <p className="text-[9.5px] font-bold" style={{ color: "var(--m-text)" }}>Send greetings email</p>
-            <p className="text-[8.5px]" style={{ color: "var(--m-text-soft)" }}>Critical · Marketing</p>
+            <p className="text-[10px] font-bold" style={{ color: "var(--m-text)" }}>Send greetings email</p>
+            <p className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Critical · Marketing</p>
           </div>
         </div>
       </div>
@@ -739,7 +739,7 @@ function TileTeamTasks() {
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "var(--brand-red)" }} />
-            <span className="text-[10px] font-bold" style={{ color: "var(--m-text)" }}>TaskFlow</span>
+            <span className="text-[11px] font-bold" style={{ color: "var(--m-text)" }}>TaskFlow</span>
           </div>
           <div className="flex items-center gap-1.5">
             <Search size={11} style={{ color: "var(--m-text-soft)" }} />
@@ -750,7 +750,7 @@ function TileTeamTasks() {
 
         <div className="flex items-center justify-between mb-2.5">
           <p className="font-extrabold text-[16px] tracking-tight" style={{ color: "var(--m-text)" }}>Team tasks</p>
-          <button className="text-[9.5px] font-bold text-white px-2.5 h-[22px] inline-flex items-center gap-1 rounded-md" style={{ backgroundColor: "var(--m-text)" }}>
+          <button className="text-[10px] font-bold text-white px-2.5 h-[22px] inline-flex items-center gap-1 rounded-md" style={{ backgroundColor: "var(--m-text)" }}>
             <Plus size={9} /> New
           </button>
         </div>
@@ -765,13 +765,13 @@ function TileTeamTasks() {
             <div key={i} className="rounded-md p-1.5" style={{ backgroundColor: "var(--m-surface)" }}>
               <div className="flex items-center gap-1 mb-1.5">
                 <span className="w-1 h-1 rounded-full" style={{ backgroundColor: c.hue }} />
-                <span className="text-[8.5px] font-bold uppercase" style={{ color: c.hue }}>{c.name}</span>
+                <span className="text-[10px] font-bold uppercase" style={{ color: c.hue }}>{c.name}</span>
               </div>
               <div className="space-y-1">
                 {c.cards.map((card, j) => (
                   <div key={j} className="bg-white rounded p-1.5" style={{ border: "1px solid var(--m-border)" }}>
                     <div className="aspect-[3/2] rounded mb-1" style={{ background: `linear-gradient(135deg, ${c.hue}26, ${c.hue}10)` }} />
-                    <p className="text-[8.5px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{card.t}</p>
+                    <p className="text-[10px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{card.t}</p>
                     <div className="flex items-center justify-between mt-0.5">
                       <span className="text-[7.5px] font-bold text-white px-1 rounded" style={{ backgroundColor: c.hue }}>{card.size}</span>
                       <Avatar initials="DK" hue={c.hue} size={12} />
@@ -803,10 +803,10 @@ function TileActiveProjects() {
     >
       <div>
         <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "var(--m-text)" }}>Active projects</p>
-        <p className="text-[9px] font-bold uppercase tracking-[0.12em] mt-1.5 mb-1" style={{ color: "var(--m-text-soft)" }}>High priority projects</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] mt-1.5 mb-1" style={{ color: "var(--m-text-soft)" }}>High priority projects</p>
 
         <div className="rounded-md overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
-          <div className="grid grid-cols-[1.6fr_60px_50px_64px] gap-2 px-2.5 py-1 text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
+          <div className="grid grid-cols-[1.6fr_60px_50px_64px] gap-2 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
             <span>Asset</span><span>Status</span><span>Priority</span><span>Market</span>
           </div>
           {[
@@ -816,25 +816,25 @@ function TileActiveProjects() {
             { t: "QA future initiatives",   s: "review"  as const, p: "High", pHue: "#E2445C", m: "EMEA / US" },
           ].map((r, i) => (
             <div key={i} className="grid grid-cols-[1.6fr_60px_50px_64px] gap-2 px-2.5 py-1.5 items-center border-t" style={{ borderColor: "var(--m-border)" }}>
-              <span className="text-[10px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
+              <span className="text-[11px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
               <StatusPill kind={r.s} />
-              <span className="text-[9px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
-              <span className="text-[9px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
+              <span className="text-[10px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
+              <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
             </div>
           ))}
         </div>
 
-        <p className="text-[9px] font-bold uppercase tracking-[0.12em] mt-2 mb-1" style={{ color: "var(--m-text-soft)" }}>Ongoing</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] mt-2 mb-1" style={{ color: "var(--m-text-soft)" }}>Ongoing</p>
         <div className="rounded-md overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
           {[
             { t: "Update design guidelines", s: "review" as const, p: "Med", pHue: "#FDAB3D", m: "EMEA / US" },
             { t: "Product marketing dict",    s: "review" as const, p: "Med", pHue: "#FDAB3D", m: "EMEA / US" },
           ].map((r, i) => (
             <div key={i} className="grid grid-cols-[1.6fr_60px_50px_64px] gap-2 px-2.5 py-1.5 items-center" style={{ borderTop: i > 0 ? "1px solid var(--m-border)" : "none" }}>
-              <span className="text-[10px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
+              <span className="text-[11px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
               <StatusPill kind={r.s} />
-              <span className="text-[9px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
-              <span className="text-[9px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
+              <span className="text-[10px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
+              <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
             </div>
           ))}
         </div>
@@ -861,10 +861,10 @@ function TileCampaigns() {
     >
       <div>
         <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "var(--m-text)" }}>Q1 Campaigns</p>
-        <p className="text-[9px] font-bold uppercase tracking-[0.12em] mt-2 mb-1" style={{ color: "#0073EA" }}>Social Campaigns</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] mt-2 mb-1" style={{ color: "#0073EA" }}>Social Campaigns</p>
 
         <div className="rounded-md overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
-          <div className="grid grid-cols-[1.4fr_70px_60px_60px] gap-2 px-2.5 py-1 text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
+          <div className="grid grid-cols-[1.4fr_70px_60px_60px] gap-2 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em]" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
             <span>Asset</span><span>Status</span><span>Priority</span><span>Market</span>
           </div>
           {[
@@ -875,10 +875,10 @@ function TileCampaigns() {
             { t: "Priority manager",       s: "Pending", sHue: "#FDAB3D", p: "Low",  pHue: "#00C875", m: "EMEA / US" },
           ].map((r, i) => (
             <div key={i} className="grid grid-cols-[1.4fr_70px_60px_60px] gap-2 px-2.5 py-1.5 items-center border-t" style={{ borderColor: "var(--m-border)" }}>
-              <span className="text-[10px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
-              <span className="text-[9px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.sHue }}>{r.s}</span>
-              <span className="text-[9px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
-              <span className="text-[9px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
+              <span className="text-[11px] font-medium truncate" style={{ color: "var(--m-text)" }}>{r.t}</span>
+              <span className="text-[10px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.sHue }}>{r.s}</span>
+              <span className="text-[10px] font-bold text-white text-center px-1.5 h-[18px] inline-flex items-center justify-center rounded" style={{ backgroundColor: r.pHue }}>{r.p}</span>
+              <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>{r.m}</span>
             </div>
           ))}
         </div>
@@ -896,34 +896,34 @@ function TileRecruiting() {
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <span className="text-[9.5px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text)" }}>Recruiting</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text)" }}>Recruiting</span>
             <span className="text-[8px] font-bold uppercase tracking-[0.14em] px-1.5 h-[16px] inline-flex items-center rounded" style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}>
               Inactive
             </span>
           </div>
-          <div className="flex items-center gap-2 text-[8.5px]" style={{ color: "var(--m-text-soft)" }}>
+          <div className="flex items-center gap-2 text-[10px]" style={{ color: "var(--m-text-soft)" }}>
             <span>Run history</span>
-            <span className="text-[9px] font-bold text-white px-2 h-[20px] inline-flex items-center rounded" style={{ backgroundColor: "var(--m-text)" }}>Activate</span>
+            <span className="text-[10px] font-bold text-white px-2 h-[20px] inline-flex items-center rounded" style={{ backgroundColor: "var(--m-text)" }}>Activate</span>
           </div>
         </div>
 
         <div className="rounded-xl p-3 relative" style={{ background: "linear-gradient(135deg, #F2EAFE 0%, #fce7f3 100%)" }}>
           <div className="flex items-center gap-2 mb-2">
             <Sparkles size={12} style={{ color: "#A25DDC" }} />
-            <span className="text-[10px] font-bold" style={{ color: "#5b21b6" }}>Candidate sourcing</span>
+            <span className="text-[11px] font-bold" style={{ color: "#5b21b6" }}>Candidate sourcing</span>
           </div>
-          <p className="text-[9.5px]" style={{ color: "#5b21b6" }}>
+          <p className="text-[10px]" style={{ color: "#5b21b6" }}>
             Finds the best candidate matches and adds them to open positions.
           </p>
           <div
             className="mt-2.5 rounded-md p-2 bg-white"
             style={{ border: "1px dashed #A25DDC" }}
           >
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "#5b21b6" }}>Choose status</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "#5b21b6" }}>Choose status</p>
             <div className="mt-1 flex gap-1.5">
-              <span className="text-[9px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#FDAB3D" }}>Working</span>
-              <span className="text-[9px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#579BFC" }}>Review</span>
-              <span className="text-[9px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#00C875" }}>Hired</span>
+              <span className="text-[10px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#FDAB3D" }}>Working</span>
+              <span className="text-[10px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#579BFC" }}>Review</span>
+              <span className="text-[10px] font-bold text-white px-2 h-[18px] inline-flex items-center rounded" style={{ backgroundColor: "#00C875" }}>Hired</span>
             </div>
           </div>
         </div>
@@ -940,10 +940,10 @@ function TileCompositeDashboard() {
     <Tile dark width={500}>
       <div>
         <div className="flex items-baseline justify-between mb-2">
-          <span className="text-[8.5px] font-bold uppercase tracking-[0.14em]" style={{ color: "rgba(255,255,255,0.55)" }}>
+          <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "rgba(255,255,255,0.55)" }}>
             People · Composite
           </span>
-          <span className="text-[8.5px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>Q3 cycle</span>
+          <span className="text-[10px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>Q3 cycle</span>
         </div>
 
         <div className="grid grid-cols-3 gap-2">
@@ -954,8 +954,8 @@ function TileCompositeDashboard() {
 
         <div className="mt-3 rounded-lg p-3" style={{ backgroundColor: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}>
           <div className="flex items-baseline justify-between mb-2">
-            <span className="text-[8.5px] font-bold uppercase tracking-[0.12em]" style={{ color: "rgba(255,255,255,0.55)" }}>Top performers</span>
-            <span className="text-[8.5px]" style={{ color: "rgba(255,255,255,0.4)" }}>by department</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: "rgba(255,255,255,0.55)" }}>Top performers</span>
+            <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.4)" }}>by department</span>
           </div>
           {[
             { initials: "SC", name: "Sarah Chen",   role: "CEO",  score: 96, hue: "#A25DDC" },
@@ -964,12 +964,12 @@ function TileCompositeDashboard() {
           ].map((p, i) => (
             <div key={i} className="flex items-center gap-2 mt-1.5">
               <Avatar initials={p.initials} hue={p.hue} size={20} />
-              <span className="flex-1 text-[10px] font-semibold truncate" style={{ color: "white" }}>{p.name}</span>
-              <span className="text-[9px]" style={{ color: "rgba(255,255,255,0.5)" }}>{p.role}</span>
+              <span className="flex-1 text-[11px] font-semibold truncate" style={{ color: "white" }}>{p.name}</span>
+              <span className="text-[10px]" style={{ color: "rgba(255,255,255,0.5)" }}>{p.role}</span>
               <div className="w-[50px] h-1 rounded-full overflow-hidden" style={{ backgroundColor: "rgba(255,255,255,0.1)" }}>
                 <div className="h-full rounded-full" style={{ width: `${p.score}%`, backgroundColor: p.hue }} />
               </div>
-              <span className="text-[10px] font-bold tabular-nums w-6 text-right" style={{ color: p.hue }}>{p.score}</span>
+              <span className="text-[11px] font-bold tabular-nums w-6 text-right" style={{ color: p.hue }}>{p.score}</span>
             </div>
           ))}
         </div>
@@ -994,14 +994,14 @@ function TileSalesReport() {
       <div>
         <div className="flex items-baseline justify-between mb-1">
           <p className="font-extrabold text-[15px] tracking-tight" style={{ color: "var(--m-text)" }}>Q3 sales report</p>
-          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-1.5 h-[18px] rounded" style={{ backgroundColor: "#dcfce7", color: "#15803d" }}>
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-1.5 h-[18px] rounded" style={{ backgroundColor: "#dcfce7", color: "#15803d" }}>
             +18% vs Q2
           </span>
         </div>
 
         <div className="mt-2 grid grid-cols-[1.2fr_1fr] gap-2.5">
           <div className="rounded-lg p-3" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>Closed revenue</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>Closed revenue</p>
             <p className="mt-1 text-[26px] font-extrabold tabular-nums tracking-tight" style={{ color: "var(--m-text)" }}>
               $2.4<span className="text-[14px]" style={{ color: "var(--m-text-soft)" }}>M</span>
             </p>
@@ -1015,7 +1015,7 @@ function TileSalesReport() {
             />
           </div>
           <div className="rounded-lg p-3 flex flex-col" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
-            <p className="text-[8.5px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>Quota attainment</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.1em]" style={{ color: "var(--m-text-soft)" }}>Quota attainment</p>
             <p className="mt-1 text-[26px] font-extrabold tabular-nums tracking-tight" style={{ color: "#FF3D57" }}>92%</p>
             <div className="mt-auto h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: "white" }}>
               <div className="h-full rounded-full" style={{ width: "92%", backgroundColor: "#FF3D57" }} />
@@ -1025,10 +1025,10 @@ function TileSalesReport() {
 
         <div className="mt-2.5 rounded-md p-2 flex items-center gap-2" style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}>
           <span className="text-[14px]">🎯</span>
-          <span className="text-[10px] flex-1" style={{ color: "var(--m-text)" }}>
+          <span className="text-[11px] flex-1" style={{ color: "var(--m-text)" }}>
             DP closed Brindle Estates · <span className="font-bold">$84k</span>
           </span>
-          <span className="text-[8.5px]" style={{ color: "var(--m-text-soft)" }}>12m ago</span>
+          <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>12m ago</span>
         </div>
       </div>
     </Tile>

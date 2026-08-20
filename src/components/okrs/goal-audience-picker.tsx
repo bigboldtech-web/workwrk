@@ -182,7 +182,7 @@ export function GoalAudiencePicker({
       : value.map((e) => e.label).slice(0, 3).join(", ") + (value.length > 3 ? ` +${value.length - 3}` : "");
 
   if (!canEdit) {
-    return <span className="text-[12.5px] text-zinc-500 truncate">{summary}</span>;
+    return <span className="text-[13.5px] text-zinc-500 truncate">{summary}</span>;
   }
 
   return (
@@ -190,7 +190,7 @@ export function GoalAudiencePicker({
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="flex h-8 w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-left text-[12.5px] text-zinc-800 hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+        className="flex h-8 w-full items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-left text-[13.5px] text-zinc-800 hover:border-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
         aria-label="Edit goal audience"
       >
         <UsersRound className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
@@ -217,7 +217,7 @@ export function GoalAudiencePicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search people, departments, roles…"
-              className="flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+              className="flex-1 bg-transparent text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
             />
             {query && (
               <button type="button" onClick={() => setQuery("")} className="text-zinc-400 hover:text-zinc-600" aria-label="Clear search">
@@ -229,9 +229,9 @@ export function GoalAudiencePicker({
           <div className="max-h-[300px] overflow-y-auto py-1.5">
             <MenuSectionLabel>People</MenuSectionLabel>
             {users === null ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">Loading…</div>
             ) : users.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">No people found</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">No people found</div>
             ) : (
               users.map((u) => (
                 <MenuItem
@@ -247,9 +247,9 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Departments</MenuSectionLabel>
             {depts === null ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">Loading…</div>
             ) : filteredDepts.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">No departments found</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">No departments found</div>
             ) : (
               filteredDepts.map((d) => (
                 <MenuItem
@@ -266,9 +266,9 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Roles</MenuSectionLabel>
             {roles === null ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">Loading…</div>
             ) : filteredRoles.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">No roles found</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">No roles found</div>
             ) : (
               filteredRoles.map((r) => (
                 <MenuItem
@@ -285,9 +285,9 @@ export function GoalAudiencePicker({
             <MenuSeparator />
             <MenuSectionLabel>Tags</MenuSectionLabel>
             {tags === null ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">Loading…</div>
             ) : filteredTags.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-zinc-400">No tags found</div>
+              <div className="px-3 py-2 text-[13px] text-zinc-400">No tags found</div>
             ) : (
               filteredTags.map((t) => (
                 <MenuItem

@@ -82,7 +82,7 @@ export function EnterpriseControl() {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             Full control
@@ -130,7 +130,7 @@ export function EnterpriseControl() {
           <div className="flex flex-wrap items-center justify-between gap-6">
             <div className="max-w-md">
               <p
-                className="text-[10.5px] font-bold uppercase tracking-[0.22em] mb-2"
+                className="text-[11.5px] font-bold uppercase tracking-[0.22em] mb-2"
                 style={{ color: "var(--m-text-soft)" }}
               >
                 Compliance posture
@@ -145,7 +145,7 @@ export function EnterpriseControl() {
               >
                 Audited, attested, and ready for review.
               </p>
-              <p className="mt-3 text-[13px] leading-relaxed" style={{ color: "var(--m-text-muted)" }}>
+              <p className="mt-3 text-[14px] leading-relaxed" style={{ color: "var(--m-text-muted)" }}>
                 Reports + DPAs available on request &mdash; usually one email
                 to{" "}
                 <a
@@ -225,7 +225,7 @@ function PillarCard({ pillar, delay }: { pillar: Pillar; delay: number }) {
         {pillar.title}
       </h3>
       <p
-        className="mt-2.5 text-[13.5px] leading-relaxed"
+        className="mt-2.5 text-[14.5px] leading-relaxed"
         style={{ color: "var(--m-text-muted)" }}
       >
         {pillar.body}
@@ -250,12 +250,12 @@ function ComplianceBadge({ label, sub, delay }: { label: string; sub: string; de
     >
       <ShieldCheck size={18} style={{ color: "var(--brand-red)" }} />
       <p
-        className="mt-1.5 text-[11.5px] font-bold tracking-tight tabular-nums"
+        className="mt-1.5 text-[12.5px] font-bold tracking-tight tabular-nums"
         style={{ color: "var(--m-text)" }}
       >
         {label}
       </p>
-      <p className="text-[9px] font-medium" style={{ color: "var(--m-text-soft)" }}>
+      <p className="text-[10px] font-medium" style={{ color: "var(--m-text-soft)" }}>
         {sub}
       </p>
     </motion.div>

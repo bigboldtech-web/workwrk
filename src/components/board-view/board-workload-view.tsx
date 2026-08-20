@@ -189,7 +189,7 @@ export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, s
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <Users className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">No items yet — assign work to see {variant === "team" ? "the team board" : "workload"}.</p>
+        <p className="text-[13.5px] text-zinc-500">No items yet — assign work to see {variant === "team" ? "the team board" : "workload"}.</p>
       </div>
     );
   }
@@ -215,7 +215,7 @@ export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, s
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       {opt ? (
                         <span
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium"
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[11.5px] font-medium"
                           style={{ background: `${opt.color}22`, color: opt.color }}
                         >
                           {opt.label}
@@ -223,7 +223,7 @@ export function BoardWorkloadView({ boardId, viewId, viewConfig, initialItems, s
                       ) : null}
                       {it.priority ? <PriorityFlag value={it.priority} /> : null}
                       {overdue ? (
-                        <span className="inline-flex items-center gap-0.5 text-[10.5px] font-medium text-red-600">
+                        <span className="inline-flex items-center gap-0.5 text-[11.5px] font-medium text-red-600">
                           <AlertTriangle className="w-3 h-3" /> overdue
                         </span>
                       ) : null}
@@ -258,14 +258,14 @@ function PersonHeader({ bucket, statuses }: { bucket: PersonBucket; statuses: St
         {bucket.owner ? (
           <>
             <PersonAvatar person={{ ...bucket.owner, email: null }} size={22} />
-            <span className="text-[12.5px] font-medium text-zinc-800 truncate">
+            <span className="text-[13.5px] font-medium text-zinc-800 truncate">
               {`${bucket.owner.firstName ?? ""} ${bucket.owner.lastName ?? ""}`.trim()}
             </span>
           </>
         ) : (
-          <span className="text-[12.5px] text-zinc-500">Unassigned</span>
+          <span className="text-[13.5px] text-zinc-500">Unassigned</span>
         )}
-        <span className="text-[11px] text-zinc-400 tabular-nums">{bucket.rows.length}</span>
+        <span className="text-[12px] text-zinc-400 tabular-nums">{bucket.rows.length}</span>
       </div>
       <div className="mt-1.5">
         <StatusBar rows={bucket.rows} statuses={statuses} />
@@ -287,7 +287,7 @@ function StatusBar({ rows, statuses }: { rows: BoardItemRow[]; statuses: StatusO
     return out;
   }, [rows, statuses]);
   const total = rows.length;
-  if (total === 0) return <span className="text-[11px] text-zinc-300">—</span>;
+  if (total === 0) return <span className="text-[12px] text-zinc-300">—</span>;
   return (
     <div
       className="flex h-3.5 w-full max-w-[420px] rounded-sm overflow-hidden ring-1 ring-black/5"

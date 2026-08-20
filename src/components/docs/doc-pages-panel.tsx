@@ -238,7 +238,7 @@ export function DocPagesPanel({
           onClick={() => onNavigate(row.id)}
           onKeyDown={(e) => { if (e.key === "Enter") onNavigate(row.id); }}
           onContextMenu={(e) => noteMenu.open(e, { id: row.id, title, favorite: favIds.has(row.id) })}
-          className={`group/prow flex items-center gap-1.5 h-7 pr-1 rounded-md text-[13px] cursor-pointer ${
+          className={`group/prow flex items-center gap-1.5 h-7 pr-1 rounded-md text-[14px] cursor-pointer ${
             active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
           }`}
           style={{ paddingLeft: 8 + depth * 14 }}
@@ -256,7 +256,7 @@ export function DocPagesPanel({
           ) : (
             <span className="w-3 shrink-0" aria-hidden />
           )}
-          <span className="w-4 shrink-0 grid place-items-center text-[13px] [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
+          <span className="w-4 shrink-0 grid place-items-center text-[14px] [&_svg]:w-3.5 [&_svg]:h-3.5 [&_img]:w-4 [&_img]:h-4 [&_img]:rounded-[3px] [&_img]:object-cover">
             {emoji ? renderNoteIcon(emoji) : <FileText className="w-3.5 h-3.5 text-zinc-400" />}
           </span>
           <span className="flex-1 truncate">{title}</span>
@@ -296,7 +296,7 @@ export function DocPagesPanel({
       }}
     >
       <div className="flex items-center justify-between px-2 pb-1">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Pages</span>
+        <span className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Pages</span>
         <button
           type="button"
           onClick={onCollapse}
@@ -311,7 +311,7 @@ export function DocPagesPanel({
       <button
         type="button"
         onClick={() => void addPage(docId)}
-        className="flex w-full items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] font-medium text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+        className="flex w-full items-center gap-1.5 h-7 px-2 rounded-md text-[13.5px] font-medium text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
       >
         <Plus className="w-3.5 h-3.5" /> Add page
       </button>

@@ -57,7 +57,7 @@ export function TopbarPopoverButton({ Icon, ariaLabel, title, badge, children }:
       >
         <Icon className="w-[14px] h-[14px]" />
         {badge && badge > 0 ? (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-red-500 text-white text-[9px] font-semibold flex items-center justify-center leading-none">
+          <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center leading-none">
             {badge > 99 ? "99+" : badge}
           </span>
         ) : null}

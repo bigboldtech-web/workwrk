@@ -101,20 +101,20 @@ export function CreateListModal() {
         <div className="px-5 pt-5 pb-3 flex items-start justify-between">
           <div>
             <h2 id="create-list-title" className="text-[16px] font-semibold text-zinc-900">Create List</h2>
-            <p className="text-[12.5px] text-zinc-500 mt-1">All Lists are located within a Space. Lists can house any type of task.</p>
+            <p className="text-[13.5px] text-zinc-500 mt-1">All Lists are located within a Space. Lists can house any type of task.</p>
           </div>
           <button type="button" onClick={doClose} className="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors shrink-0">
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {error ? <div className="mx-5 mb-2 text-[12px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div> : null}
+        {error ? <div className="mx-5 mb-2 text-[13px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div> : null}
 
         {/* Form Body */}
         <div className="px-5 py-3 flex flex-col gap-4">
           {/* Name */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12.5px] font-medium text-zinc-700">Name</label>
+            <label className="text-[13.5px] font-medium text-zinc-700">Name</label>
             <input
               type="text"
               value={listName}
@@ -122,25 +122,25 @@ export function CreateListModal() {
               onKeyDown={(e) => { if (e.key === "Enter") void handleCreate(); }}
               placeholder="Your list or project name"
               autoFocus
-              className="w-full h-8 px-3 text-[13px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
+              className="w-full h-8 px-3 text-[14px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
             />
           </div>
 
           {/* Description */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12.5px] font-medium text-zinc-700">Description</label>
+            <label className="text-[13.5px] font-medium text-zinc-700">Description</label>
             <input
               type="text"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Add a description"
-              className="w-full h-8 px-3 text-[13px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
+              className="w-full h-8 px-3 text-[14px] bg-white border border-zinc-200 rounded-md focus:outline-none focus:border-[var(--os-brand)] focus:ring-2 focus:ring-[var(--os-brand)]/20 transition-all placeholder:text-zinc-400"
             />
           </div>
 
           {/* Space (location) picker */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-[12.5px] font-medium text-zinc-700">Space (location)</label>
+            <label className="text-[13.5px] font-medium text-zinc-700">Space (location)</label>
             <div className="relative">
               <button
                 type="button"
@@ -151,10 +151,10 @@ export function CreateListModal() {
                   {selectedSpace ? (
                     <>
                       <SpaceGlyph space={selectedSpace} />
-                      <span className="text-[13px] text-zinc-900 font-medium truncate">{selectedSpace.name}</span>
+                      <span className="text-[14px] text-zinc-900 font-medium truncate">{selectedSpace.name}</span>
                     </>
                   ) : (
-                    <span className="text-[13px] text-zinc-400">{spaces.length ? "Select a Space…" : "No Spaces available"}</span>
+                    <span className="text-[14px] text-zinc-400">{spaces.length ? "Select a Space…" : "No Spaces available"}</span>
                   )}
                 </span>
                 <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
@@ -162,7 +162,7 @@ export function CreateListModal() {
               {spaceMenuOpen ? (
                 <div className="absolute z-10 mt-1 left-0 right-0 max-h-[240px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1">
                   {spaces.length === 0 ? (
-                    <div className="px-3 py-2 text-[12px] text-zinc-400">No Spaces yet.</div>
+                    <div className="px-3 py-2 text-[13px] text-zinc-400">No Spaces yet.</div>
                   ) : (
                     spaces.map((s) => (
                       <button
@@ -172,7 +172,7 @@ export function CreateListModal() {
                         className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-50"
                       >
                         <SpaceGlyph space={s} />
-                        <span className="flex-1 text-[13px] text-zinc-800 truncate">{s.name}</span>
+                        <span className="flex-1 text-[14px] text-zinc-800 truncate">{s.name}</span>
                         {s.id === spaceId ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
                       </button>
                     ))
@@ -185,8 +185,8 @@ export function CreateListModal() {
           {/* Privacy */}
           <div className="flex items-center justify-between pt-1">
             <div className="flex flex-col">
-              <span className="text-[12.5px] font-medium text-zinc-800">Make private</span>
-              <span className="text-[12px] text-zinc-500">Only you and invited members have access</span>
+              <span className="text-[13.5px] font-medium text-zinc-800">Make private</span>
+              <span className="text-[13px] text-zinc-500">Only you and invited members have access</span>
             </div>
             <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make list private" />
           </div>
@@ -194,10 +194,10 @@ export function CreateListModal() {
 
         {/* Footer — divider band, text-button Templates, dark Create pill. */}
         <div className="px-5 pt-3 pb-4 mt-1 border-t border-zinc-100 flex items-center justify-between bg-white">
-          <button type="button" onClick={browseTemplates} className="px-2.5 h-8 text-[12.5px] font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors">
+          <button type="button" onClick={browseTemplates} className="px-2.5 h-8 text-[13.5px] font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors">
             Use Templates
           </button>
-          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[12.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50">
+          <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-[13.5px] font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50">
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Create
           </button>
         </div>

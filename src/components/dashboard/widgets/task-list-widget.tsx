@@ -35,7 +35,7 @@ export function TaskListWidget({ widget }: { widget: DashWidget }) {
   }
   if (error) {
     return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
+      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
         Couldn&apos;t load tasks
       </div>
     );
@@ -43,7 +43,7 @@ export function TaskListWidget({ widget }: { widget: DashWidget }) {
   const list = items ?? [];
   if (list.length === 0) {
     return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[12px] text-zinc-400">
+      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
         No tasks here yet
       </div>
     );
@@ -66,20 +66,20 @@ export function TaskListWidget({ widget }: { widget: DashWidget }) {
               />
               <Link
                 href={`/item/${it.id}`}
-                className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-800 hover:text-zinc-950 hover:underline"
+                className="min-w-0 flex-1 truncate text-[13.5px] text-zinc-800 hover:text-zinc-950 hover:underline"
               >
                 {it.title}
               </Link>
               {it.owner ? (
                 <span
                   title={`${it.owner.firstName} ${it.owner.lastName}`.trim()}
-                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-zinc-100 text-[9px] font-semibold text-zinc-600"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-zinc-100 text-[10px] font-semibold text-zinc-600"
                 >
                   {initials(it.owner)}
                 </span>
               ) : null}
               {it.dueAt ? (
-                <span className={`w-12 shrink-0 text-right text-[11px] ${overdue ? "font-medium text-red-600" : "text-zinc-400"}`}>
+                <span className={`w-12 shrink-0 text-right text-[12px] ${overdue ? "font-medium text-red-600" : "text-zinc-400"}`}>
                   {shortDue(it.dueAt)}
                 </span>
               ) : null}
@@ -88,7 +88,7 @@ export function TaskListWidget({ widget }: { widget: DashWidget }) {
         })}
       </ul>
       {more > 0 ? (
-        <div className="shrink-0 pt-1 text-[11px] text-zinc-400">{more} more</div>
+        <div className="shrink-0 pt-1 text-[12px] text-zinc-400">{more} more</div>
       ) : null}
     </div>
   );

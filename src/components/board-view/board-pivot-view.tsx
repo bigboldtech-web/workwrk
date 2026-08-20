@@ -161,14 +161,14 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <Grid3X3 className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">No items to pivot yet.</p>
+        <p className="text-[13.5px] text-zinc-500">No items to pivot yet.</p>
       </div>
     );
   }
 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
-      <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2 flex-wrap text-[11.5px] text-zinc-500">
+      <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2 flex-wrap text-[12.5px] text-zinc-500">
         <span>Rows</span>
         <AxisSelect value={rowAxis} options={axisOptions} disabled={!canEdit} onChange={(v) => { setRowAxis(v); persist({ rowAxis: v }); }} />
         <span>Columns</span>
@@ -202,13 +202,13 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
                 <td className="px-4 py-2 whitespace-nowrap">
                   {r.color ? (
                     <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium"
+                      className="inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium"
                       style={{ background: `${r.color}22`, color: r.color }}
                     >
                       {r.label}
                     </span>
                   ) : (
-                    <span className="text-[12.5px] text-zinc-700">{r.label}</span>
+                    <span className="text-[13.5px] text-zinc-700">{r.label}</span>
                   )}
                 </td>
                 {pivot.cols.map((c) => {
@@ -224,7 +224,7 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
             ))}
           </tbody>
           <tfoot>
-            <tr className="bg-zinc-50/80 text-[12px]">
+            <tr className="bg-zinc-50/80 text-[13px]">
               <td className="px-4 py-2 font-medium text-zinc-500">Total</td>
               {pivot.cols.map((c) => (
                 <td key={c.key} className="px-3 py-2 tabular-nums font-medium text-zinc-900">{fmt(pivot.colTotal(c.key))}</td>
@@ -254,7 +254,7 @@ function AxisSelect({
       value={value}
       disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
-      className="h-7 rounded-md border border-zinc-200 bg-white px-1.5 text-[11.5px] text-zinc-700 outline-none hover:bg-zinc-50 focus:border-zinc-400 disabled:opacity-60"
+      className="h-7 rounded-md border border-zinc-200 bg-white px-1.5 text-[12.5px] text-zinc-700 outline-none hover:bg-zinc-50 focus:border-zinc-400 disabled:opacity-60"
     >
       {options.map((o) => (
         <option key={o.key} value={o.key}>{o.label}</option>

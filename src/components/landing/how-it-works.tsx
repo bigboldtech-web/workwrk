@@ -28,7 +28,7 @@ export function HowItWorks() {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             How it works
@@ -192,7 +192,7 @@ function Step({
           {num}
         </span>
         <span
-          className="inline-flex items-center text-[9px] font-bold uppercase tracking-[0.18em] px-2 h-5 rounded-full"
+          className="inline-flex items-center text-[10px] font-bold uppercase tracking-[0.18em] px-2 h-5 rounded-full"
           style={{ backgroundColor: hueSoft, color: hue }}
         >
           Step
@@ -254,7 +254,7 @@ function SignupMock() {
       style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}
     >
       <p
-        className="text-[9.5px] font-bold uppercase tracking-[0.18em]"
+        className="text-[10px] font-bold uppercase tracking-[0.18em]"
         style={{ color: "var(--m-text-soft)" }}
       >
         Get started
@@ -263,7 +263,7 @@ function SignupMock() {
         className="mt-2 px-3 h-10 rounded-md bg-white flex items-center"
         style={{ border: "1px solid var(--m-border)" }}
       >
-        <span className="text-[12.5px]" style={{ color: "var(--m-text)" }}>
+        <span className="text-[13.5px]" style={{ color: "var(--m-text)" }}>
           {typed}
         </span>
         <motion.span
@@ -273,14 +273,14 @@ function SignupMock() {
           transition={{ duration: 0.9, repeat: Infinity }}
         />
         <span
-          className="ml-auto text-[10px] font-mono"
+          className="ml-auto text-[11px] font-mono"
           style={{ color: "var(--m-text-soft)" }}
         >
           ENTER ↵
         </span>
       </div>
       <div
-        className="mt-2 inline-flex items-center justify-center w-full h-10 rounded-md text-white text-[12px] font-bold"
+        className="mt-2 inline-flex items-center justify-center w-full h-10 rounded-md text-white text-[13px] font-bold"
         style={{ backgroundColor: "var(--brand-red)" }}
       >
         Create workspace
@@ -296,7 +296,7 @@ function SignupCounter() {
     return () => clearInterval(t);
   }, []);
   return (
-    <div className="flex items-center gap-2 text-[11.5px]" style={{ color: "var(--m-text-muted)" }}>
+    <div className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--m-text-muted)" }}>
       <span
         className="w-1.5 h-1.5 rounded-full"
         style={{ backgroundColor: "var(--brand-red)" }}
@@ -346,7 +346,7 @@ function HubPickerMock() {
       style={{ backgroundColor: "var(--m-surface)", border: "1px solid var(--m-border)" }}
     >
       <p
-        className="text-[9.5px] font-bold uppercase tracking-[0.18em]"
+        className="text-[10px] font-bold uppercase tracking-[0.18em]"
         style={{ color: "var(--m-text-soft)" }}
       >
         Activate hubs
@@ -380,7 +380,7 @@ function HubPickerMock() {
                 )}
               </span>
               <span
-                className="text-[11px] font-semibold truncate"
+                className="text-[12px] font-semibold truncate"
                 style={{
                   color: isChecked ? "var(--m-text)" : "var(--m-text-muted)",
                 }}
@@ -397,7 +397,7 @@ function HubPickerMock() {
 
 function HubsCounter() {
   return (
-    <div className="flex items-center gap-2 text-[11.5px]" style={{ color: "var(--m-text-muted)" }}>
+    <div className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--m-text-muted)" }}>
       <span
         className="w-1.5 h-1.5 rounded-full"
         style={{ backgroundColor: "var(--brand-blue)" }}
@@ -451,12 +451,12 @@ function InviteMock() {
     >
       <div className="flex items-baseline justify-between">
         <p
-          className="text-[9.5px] font-bold uppercase tracking-[0.18em]"
+          className="text-[10px] font-bold uppercase tracking-[0.18em]"
           style={{ color: "var(--m-text-soft)" }}
         >
           Team invited
         </p>
-        <span className="text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>
+        <span className="text-[11px] font-mono" style={{ color: "var(--m-text-soft)" }}>
           {Math.min(visible, INVITEES.length)} / {INVITEES.length}
         </span>
       </div>
@@ -502,7 +502,7 @@ function InviteMock() {
 
 function AIAssignChip() {
   return (
-    <div className="flex items-center gap-2 text-[11.5px]" style={{ color: "var(--m-text-muted)" }}>
+    <div className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--m-text-muted)" }}>
       <span
         className="w-5 h-5 rounded-md flex items-center justify-center"
         style={{ backgroundColor: "var(--brand-yellow-soft)", color: "#92400e" }}

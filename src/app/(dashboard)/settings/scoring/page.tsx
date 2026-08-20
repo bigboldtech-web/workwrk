@@ -76,7 +76,7 @@ export default function ScoringSettingsPage() {
     return (
       <div>
         <OsTitleBar title="Scoring & reviews" Icon={Sparkles} iconGradient="" showInvite={false} starred={false} />
-        <div className="px-6 py-10 text-[13px] text-zinc-400">Loading…</div>
+        <div className="px-6 py-10 text-[14px] text-zinc-400">Loading…</div>
       </div>
     );
   }
@@ -92,7 +92,7 @@ export default function ScoringSettingsPage() {
         starred={false}
       />
       <div className="px-6">
-        <Link href="/settings" className="inline-flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-800 mb-4">
+        <Link href="/settings" className="inline-flex items-center gap-1 text-[13px] text-zinc-500 hover:text-zinc-800 mb-4">
           <ChevronLeft className="w-3.5 h-3.5" /> Back to settings
         </Link>
 
@@ -141,8 +141,8 @@ function SectionCard({
           <Icon className="w-4 h-4" />
         </span>
         <div className="min-w-0">
-          <h2 className="text-[13.5px] font-semibold text-zinc-900">{title}</h2>
-          <p className="text-[12px] text-zinc-500">{subtitle}</p>
+          <h2 className="text-[14.5px] font-semibold text-zinc-900">{title}</h2>
+          <p className="text-[13px] text-zinc-500">{subtitle}</p>
         </div>
       </header>
       <div className="p-4">{children}</div>
@@ -160,19 +160,19 @@ function SaveRow({
         type="button"
         onClick={onSave}
         disabled={!dirty || saving}
-        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[12px] font-medium disabled:opacity-40 hover:bg-zinc-800"
+        className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[13px] font-medium disabled:opacity-40 hover:bg-zinc-800"
       >
         {saving ? "Saving…" : "Save changes"}
       </button>
       <button
         type="button"
         onClick={onReset}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] text-zinc-500 hover:bg-zinc-100"
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] text-zinc-500 hover:bg-zinc-100"
       >
         <RotateCcw className="w-3.5 h-3.5" /> Reset to defaults
       </button>
       {banner ? (
-        <span className={`inline-flex items-center gap-1 text-[12px] ${banner.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>
+        <span className={`inline-flex items-center gap-1 text-[13px] ${banner.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>
           {banner.kind === "ok" ? <Check className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
           {banner.text}
         </span>
@@ -218,34 +218,34 @@ function CadencesSection({
             <div key={key} className={`rounded-lg border p-3 ${c.enabled ? "border-zinc-200" : "border-zinc-100 bg-zinc-50/60"}`}>
               <div className="flex items-center gap-3">
                 <Switch checked={c.enabled} onChange={() => patch(key, { enabled: !c.enabled })} />
-                <span className="text-[13px] font-medium text-zinc-800 flex-1">{CADENCE_LABELS[key]}</span>
+                <span className="text-[14px] font-medium text-zinc-800 flex-1">{CADENCE_LABELS[key]}</span>
               </div>
               {c.enabled ? (
                 <div className="mt-2.5 grid grid-cols-3 gap-3 pl-12">
-                  <label className="text-[11.5px] text-zinc-500">
+                  <label className="text-[12.5px] text-zinc-500">
                     Anchor
                     <input
                       type="number" min={1} value={c.anchor}
                       onChange={(e) => patch(key, { anchor: Number(e.target.value) })}
-                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800"
+                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800"
                     />
                   </label>
-                  <label className="text-[11.5px] text-zinc-500">
+                  <label className="text-[12.5px] text-zinc-500">
                     Reminder lead (days)
                     <input
                       type="number" min={0} value={c.reminderLeadDays}
                       onChange={(e) => patch(key, { reminderLeadDays: Number(e.target.value) })}
-                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800"
+                      className="mt-0.5 w-full h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800"
                     />
                   </label>
-                  <label className="flex items-end gap-1.5 text-[11.5px] text-zinc-600 pb-1">
+                  <label className="flex items-end gap-1.5 text-[12.5px] text-zinc-600 pb-1">
                     <input
                       type="checkbox" checked={c.autoOpen}
                       onChange={(e) => patch(key, { autoOpen: e.target.checked })}
                     />
                     Auto-open
                   </label>
-                  <p className="col-span-3 text-[11px] text-zinc-400 -mt-1">{ANCHOR_HINT[key]}</p>
+                  <p className="col-span-3 text-[12px] text-zinc-400 -mt-1">{ANCHOR_HINT[key]}</p>
                 </div>
               ) : null}
             </div>
@@ -294,7 +294,7 @@ function WeightsSection({
       <div className="space-y-2.5">
         {METRIC_KEYS.map((k) => (
           <div key={k} className="flex items-center gap-3">
-            <span className="text-[12.5px] text-zinc-700 w-40 shrink-0">{METRIC_LABELS[k]}</span>
+            <span className="text-[13.5px] text-zinc-700 w-40 shrink-0">{METRIC_LABELS[k]}</span>
             <input
               type="range" min={0} max={100} value={weights[k] ?? 0}
               onChange={(e) => set(k, Number(e.target.value))}
@@ -303,13 +303,13 @@ function WeightsSection({
             <input
               type="number" min={0} max={100} value={weights[k] ?? 0}
               onChange={(e) => set(k, Number(e.target.value))}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800 text-right"
+              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800 text-right"
             />
-            <span className="text-[12px] text-zinc-400 w-3">%</span>
+            <span className="text-[13px] text-zinc-400 w-3">%</span>
           </div>
         ))}
       </div>
-      <div className={`mt-3 text-[12px] font-medium ${valid ? "text-emerald-600" : "text-red-600"}`}>
+      <div className={`mt-3 text-[13px] font-medium ${valid ? "text-emerald-600" : "text-red-600"}`}>
         Total: {sum}% {valid ? "✓" : "— must equal 100%"}
       </div>
     </SectionCard>
@@ -363,25 +363,25 @@ function BandsSection({
             <input
               value={b.label}
               onChange={(e) => set(i, { label: e.target.value })}
-              className="flex-1 h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800"
+              className="flex-1 h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800"
               placeholder="Label"
             />
             <input
               type="number" min={0} max={100} value={b.min}
               onChange={(e) => set(i, { min: Number(e.target.value) })}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800 text-right"
+              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800 text-right"
             />
-            <span className="text-[11px] text-zinc-400">–</span>
+            <span className="text-[12px] text-zinc-400">–</span>
             <input
               type="number" min={0} max={100} value={b.max}
               onChange={(e) => set(i, { max: Number(e.target.value) })}
-              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[12px] text-zinc-800 text-right"
+              className="w-16 h-7 px-2 rounded border border-zinc-200 text-[13px] text-zinc-800 text-right"
             />
           </div>
         ))}
       </div>
       {!valid ? (
-        <p className="mt-2 text-[12px] text-red-600">Ranges must stay within 0–100 and not overlap.</p>
+        <p className="mt-2 text-[13px] text-red-600">Ranges must stay within 0–100 and not overlap.</p>
       ) : null}
     </SectionCard>
   );
@@ -421,11 +421,11 @@ function AnchorsSection({
       <div className="space-y-2">
         {anchors.map((a, i) => (
           <div key={i} className="flex items-center gap-2.5">
-            <span className="grid place-items-center w-6 h-6 rounded-full bg-zinc-100 text-[11px] font-semibold text-zinc-600 shrink-0">{i + 1}</span>
+            <span className="grid place-items-center w-6 h-6 rounded-full bg-zinc-100 text-[12px] font-semibold text-zinc-600 shrink-0">{i + 1}</span>
             <input
               value={a}
               onChange={(e) => set(i, e.target.value)}
-              className="flex-1 h-8 px-2.5 rounded border border-zinc-200 text-[12.5px] text-zinc-800"
+              className="flex-1 h-8 px-2.5 rounded border border-zinc-200 text-[13.5px] text-zinc-800"
             />
           </div>
         ))}

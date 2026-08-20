@@ -121,7 +121,7 @@ function DirectionIcon({ direction }: { direction: string }) {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-[11px] uppercase tracking-wide text-zinc-400 font-medium">{children}</p>
+    <p className="text-[12px] uppercase tracking-wide text-zinc-400 font-medium">{children}</p>
   );
 }
 
@@ -255,7 +255,7 @@ function AlignmentSection({
         <SectionLabel>{my ? "My KRAs & KPIs" : "KRAs & KPIs"}</SectionLabel>
         <div className="flex-1" />
         {kras.length > 0 ? (
-          <span className="text-[11px] text-zinc-400">
+          <span className="text-[12px] text-zinc-400">
             Weight {totalWeight}%{alignment ? ` · ${alignment.currentPeriod}` : ""}
           </span>
         ) : null}
@@ -263,7 +263,7 @@ function AlignmentSection({
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50"
           >
             <Settings2 size={12} /> Manage alignment
           </button>
@@ -272,7 +272,7 @@ function AlignmentSection({
           <button
             type="button"
             onClick={() => setRecorderOpen((v) => !v)}
-            className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12px] ${
+            className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] ${
               recorderOpen
                 ? "text-zinc-700 border border-zinc-200 hover:bg-zinc-50"
                 : "bg-[#0073EA] text-white hover:bg-[#0060c2]"
@@ -295,10 +295,10 @@ function AlignmentSection({
       ) : kras.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white px-4 py-8 text-center">
           <Target size={24} className="mx-auto text-zinc-300 mb-2" />
-          <p className="text-[13px] text-zinc-600">
+          <p className="text-[14px] text-zinc-600">
             {my ? "No KRAs assigned to you yet." : "No KRAs assigned yet."}
           </p>
-          <p className="text-[12px] text-zinc-400 mt-1">
+          <p className="text-[13px] text-zinc-400 mt-1">
             {my
               ? "KRAs come with your job title: once your role's template is defined, they appear here."
               : "Assign the role's template with Manage alignment, or define KRAs on the role first."}
@@ -310,29 +310,29 @@ function AlignmentSection({
             <div key={kra.assignmentId} className="rounded-lg border border-zinc-200 bg-white">
               <div className="flex items-center gap-2.5 px-4 pt-3 pb-2">
                 <Target size={14} className="text-[#0073EA] shrink-0" />
-                <p className="text-[13px] font-semibold text-zinc-900 truncate">{kra.name}</p>
+                <p className="text-[14px] font-semibold text-zinc-900 truncate">{kra.name}</p>
                 {kra.role ? (
                   <Link
                     href={`/people/roles/${kra.role.id}`}
-                    className="text-[11px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 hover:bg-zinc-200 truncate"
+                    className="text-[12px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 hover:bg-zinc-200 truncate"
                     title={`From job title: ${kra.role.title}`}
                   >
                     {kra.role.title}
                   </Link>
                 ) : (
-                  <span className="text-[11px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">
+                  <span className="text-[12px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">
                     No job title
                   </span>
                 )}
                 <div className="flex-1" />
-                <span className="text-[11px] text-zinc-400 shrink-0">Weight {kra.weightage}%</span>
+                <span className="text-[12px] text-zinc-400 shrink-0">Weight {kra.weightage}%</span>
               </div>
               {kra.description ? (
-                <p className="px-4 pb-2 text-[12px] text-zinc-500 leading-snug">{kra.description}</p>
+                <p className="px-4 pb-2 text-[13px] text-zinc-500 leading-snug">{kra.description}</p>
               ) : null}
               <div className="border-t border-zinc-100">
                 {kra.kpis.length === 0 ? (
-                  <p className="px-4 py-3 text-[12px] text-zinc-400">No KPIs under this KRA yet.</p>
+                  <p className="px-4 py-3 text-[13px] text-zinc-400">No KPIs under this KRA yet.</p>
                 ) : (
                   kra.kpis.map((kpi) => {
                     const health = HEALTH_META[kpi.health] ?? HEALTH_META.no_target;
@@ -345,7 +345,7 @@ function AlignmentSection({
                         ) : (
                           <Gauge size={12} className="text-zinc-300 shrink-0" />
                         )}
-                        <span className="text-[13px] text-zinc-800 truncate" title={kpi.description ?? undefined}>
+                        <span className="text-[14px] text-zinc-800 truncate" title={kpi.description ?? undefined}>
                           {kpi.name}
                         </span>
                         <DirectionIcon direction={kpi.direction} />
@@ -358,7 +358,7 @@ function AlignmentSection({
                           style={{ background: health.color }}
                           title={health.label}
                         />
-                        <span className="text-[12px] font-medium tabular-nums text-zinc-800 min-w-0">
+                        <span className="text-[13px] font-medium tabular-nums text-zinc-800 min-w-0">
                           {kpi.latestValue != null
                             ? `${kpi.latestValue}${kpi.unit ? ` ${kpi.unit}` : ""}`
                             : "No reading"}
@@ -366,7 +366,7 @@ function AlignmentSection({
                             <span className="text-zinc-400 font-normal"> · {kpi.latestPeriod}</span>
                           ) : null}
                         </span>
-                        <span className="text-[12px] text-zinc-400 tabular-nums">
+                        <span className="text-[13px] text-zinc-400 tabular-nums">
                           {kpi.targetValue != null
                             ? `target ${kpi.targetValue}${kpi.unit ? ` ${kpi.unit}` : ""}`
                             : "no baseline yet"}
@@ -374,7 +374,7 @@ function AlignmentSection({
                         {recMeta ? (
                           <StatusChip color={recMeta.color} label={recMeta.label} />
                         ) : (
-                          <span className="text-[11px] text-zinc-300">Not recorded</span>
+                          <span className="text-[12px] text-zinc-300">Not recorded</span>
                         )}
                       </div>
                     );
@@ -409,11 +409,11 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <SectionLabel>{my ? "My goals" : "Goals"}</SectionLabel>
-        {alignment ? <span className="text-[11px] text-zinc-400">{alignment.quarter}</span> : null}
+        {alignment ? <span className="text-[12px] text-zinc-400">{alignment.quarter}</span> : null}
         <div className="flex-1" />
         <Link
           href={my ? "/okrs?mine=1" : "/okrs"}
-          className="text-[12px] text-[#0073EA] hover:underline"
+          className="text-[13px] text-[#0073EA] hover:underline"
         >
           All goals
         </Link>
@@ -424,11 +424,11 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
       ) : okrs.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white px-4 py-6 text-center">
           <Trophy size={22} className="mx-auto text-zinc-300 mb-2" />
-          <p className="text-[13px] text-zinc-600">
+          <p className="text-[14px] text-zinc-600">
             {my ? "No goals this quarter yet." : "No goals this quarter."}
           </p>
           {my ? (
-            <Link href="/okrs?new=1" className="inline-block mt-2 text-[12px] text-[#0073EA] hover:underline">
+            <Link href="/okrs?new=1" className="inline-block mt-2 text-[13px] text-[#0073EA] hover:underline">
               Set a goal
             </Link>
           ) : null}
@@ -441,12 +441,12 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
               <div key={okr.id} className="rounded-lg border border-zinc-200 bg-white">
                 <Link href={`/okrs/${okr.id}`} className="flex items-center gap-2.5 px-4 pt-3 pb-2 group">
                   <Trophy size={14} className="text-[#0073EA] shrink-0" />
-                  <p className="text-[13px] font-semibold text-zinc-900 truncate group-hover:text-[#0073EA]">
+                  <p className="text-[14px] font-semibold text-zinc-900 truncate group-hover:text-[#0073EA]">
                     {okr.title}
                   </p>
                   <StatusChip color={meta.color} label={meta.label} />
                   <div className="flex-1" />
-                  <span className="text-[12px] font-semibold tabular-nums text-zinc-800" title={okr.progressSource === "NONE" ? "No key results yet" : undefined}>
+                  <span className="text-[13px] font-semibold tabular-nums text-zinc-800" title={okr.progressSource === "NONE" ? "No key results yet" : undefined}>
                     {okr.progressSource === "NONE" ? "—" : `${okr.progress}%`}
                   </span>
                   <ChevronRight size={14} className="text-zinc-300 group-hover:text-zinc-500" />
@@ -463,20 +463,20 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
                   <div className="mt-1 border-t border-zinc-100">
                     {okr.keyResults.map((kr) => (
                       <div key={kr.id} className="flex items-center gap-2 px-4 py-1.5 border-b border-zinc-100 last:border-b-0">
-                        <span className="text-[12px] text-zinc-700 truncate">{kr.title}</span>
+                        <span className="text-[13px] text-zinc-700 truncate">{kr.title}</span>
                         {kr.isDerived && kr.kpi ? (
                           <span
-                            className="text-[10px] text-[#0073EA] px-1.5 py-0.5 rounded bg-[#0073EA]/10 shrink-0"
+                            className="text-[11px] text-[#0073EA] px-1.5 py-0.5 rounded bg-[#0073EA]/10 shrink-0"
                             title={`Progress derives automatically from the KPI: ${kr.kpi.name}`}
                           >
                             Auto · from KPI
                           </span>
                         ) : null}
                         <div className="flex-1" />
-                        <span className="text-[11px] text-zinc-400 tabular-nums">
+                        <span className="text-[12px] text-zinc-400 tabular-nums">
                           {kr.currentValue}{kr.unit ? ` ${kr.unit}` : ""} / {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
                         </span>
-                        <span className="text-[12px] font-medium tabular-nums text-zinc-800 w-9 text-right">
+                        <span className="text-[13px] font-medium tabular-nums text-zinc-800 w-9 text-right">
                           {kr.progress}%
                         </span>
                       </div>
@@ -535,9 +535,9 @@ function AssetsTab({ userId }: { userId: string }) {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-medium truncate">{asset.name}</p>
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{asset.condition}</Badge>
+                    <Badge variant="outline" className="text-[11px] px-1.5 py-0">{asset.condition}</Badge>
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
+                  <div className="flex items-center gap-2 text-[12px] text-zinc-500 mt-0.5">
                     {asset.brand && <span>{asset.brand}</span>}
                     {asset.model && <span>· {asset.model}</span>}
                     {asset.serialNumber && <span>· S/N: {asset.serialNumber}</span>}
@@ -545,7 +545,7 @@ function AssetsTab({ userId }: { userId: string }) {
                   </div>
                 </div>
                 {asset.assignedAt && (
-                  <p className="text-[10px] text-zinc-500 shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
+                  <p className="text-[11px] text-zinc-500 shrink-0">Since {new Date(asset.assignedAt).toLocaleDateString()}</p>
                 )}
               </div>
             </CardContent>
@@ -622,7 +622,7 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
           : h.period;
         return (
           <div key={h.period} className="flex-1 flex flex-col items-center gap-1">
-            <span className={`text-[10px] font-mono font-bold ${getScoreColor(h.score)}`}>
+            <span className={`text-[11px] font-mono font-bold ${getScoreColor(h.score)}`}>
               {h.score}
             </span>
             <div className="w-full bg-zinc-100 rounded-t-md relative" style={{ height: "100%" }}>
@@ -631,7 +631,7 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
                 style={{ height: `${height}%` }}
               />
             </div>
-            <span className="text-[9px] text-zinc-500">{label}</span>
+            <span className="text-[10px] text-zinc-500">{label}</span>
           </div>
         );
       })}
@@ -912,8 +912,8 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             <TeamAvatar name={fullName} avatar={user.avatar} size={64} />
             <div className="flex-1 min-w-0">
               <h1 className="text-lg font-semibold text-zinc-900 truncate">{fullName}</h1>
-              <p className="text-[13px] text-zinc-600 mt-0.5">{user.role?.title || "No job title"}</p>
-              <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[12px] text-zinc-500">
+              <p className="text-[14px] text-zinc-600 mt-0.5">{user.role?.title || "No job title"}</p>
+              <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[13px] text-zinc-500">
                 {user.email ? <a href={`mailto:${user.email}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Mail size={12} /> {user.email}</a> : null}
                 {user.department ? <span className="inline-flex items-center gap-1"><Building2 size={12} /> {user.department.name}</span> : null}
                 {user.manager ? <span className="inline-flex items-center gap-1"><Users size={12} /> Reports to {user.manager.firstName} {user.manager.lastName}</span> : null}
@@ -953,7 +953,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                 Removed people can't get new photos. */}
             {(my || mode === "manage") && !user.deletedAt ? (
               <label className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-white border border-zinc-200 shadow-sm inline-flex items-center justify-center cursor-pointer text-zinc-500 hover:text-zinc-800" title={uploadingAvatar ? "Uploading…" : "Upload photo"}>
-                {uploadingAvatar ? <span className="text-[9px]">…</span> : <Edit3 size={12} />}
+                {uploadingAvatar ? <span className="text-[10px]">…</span> : <Edit3 size={12} />}
                 <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleAvatarUpload} disabled={uploadingAvatar} className="hidden" />
               </label>
             ) : null}
@@ -964,7 +964,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
               <div className="flex-1" />
               {mode === "manage" ? (
                 <>
-                  <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
+                  <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
                     <Edit3 size={13} /> Edit profile
                   </button>
                   <button
@@ -1001,7 +1001,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                   </MorePortal>
                 </>
               ) : (
-                <Link href="/account/profile" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
+                <Link href="/account/profile" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
                   <Edit3 size={13} /> Edit personal info
                 </Link>
               )}
@@ -1015,16 +1015,16 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                   title="No longer with the company. Restore from the actions menu."
                 />
               ) : null}
-              <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{String(user.accessLevel).replace(/_/g, " ")}</span>
+              <span className="text-[12px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{String(user.accessLevel).replace(/_/g, " ")}</span>
             </div>
             {role ? (
-              <Link href={`/people/roles/${role.id}`} className="inline-flex items-center gap-1 text-[13px] text-zinc-600 mt-1.5 hover:text-[#0073EA]">
+              <Link href={`/people/roles/${role.id}`} className="inline-flex items-center gap-1 text-[14px] text-zinc-600 mt-1.5 hover:text-[#0073EA]">
                 <Briefcase size={12} /> {role.title}
               </Link>
             ) : (
-              <p className="text-[13px] text-zinc-400 mt-1.5">No job title yet</p>
+              <p className="text-[14px] text-zinc-400 mt-1.5">No job title yet</p>
             )}
-            <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[12px] text-zinc-500">
+            <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[13px] text-zinc-500">
               <a href={`mailto:${user.email}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Mail size={12} /> {user.email}</a>
               {user.phone ? <a href={`tel:${user.phone}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Phone size={12} /> {user.phone}</a> : null}
               {user.department ? <span className="inline-flex items-center gap-1"><Building2 size={12} /> {user.department.name}</span> : null}
@@ -1070,7 +1070,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Access Level {!isAdmin && <span className="text-[10px] text-zinc-400">(admin only)</span>}</Label>
+                <Label>Access Level {!isAdmin && <span className="text-[11px] text-zinc-400">(admin only)</span>}</Label>
                 <Select value={editAccessLevel} onValueChange={setEditAccessLevel} disabled={!isAdmin}>
                   <SelectTrigger><SelectValue placeholder="Select level" /></SelectTrigger>
                   <SelectContent>
@@ -1201,22 +1201,22 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
             <div className="flex items-center gap-2">
               <Briefcase size={14} className="text-[#0073EA] shrink-0" />
-              <p className="text-[13px] font-semibold text-zinc-900 truncate">{role.title}</p>
+              <p className="text-[14px] font-semibold text-zinc-900 truncate">{role.title}</p>
               {role.level ? (
-                <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>
+                <span className="text-[12px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>
               ) : null}
               {role.department ? (
-                <span className="text-[11px] text-zinc-400">{role.department.name}</span>
+                <span className="text-[12px] text-zinc-400">{role.department.name}</span>
               ) : null}
               <div className="flex-1" />
-              <Link href={`/people/roles/${role.id}`} className="text-[12px] text-[#0073EA] hover:underline shrink-0">
+              <Link href={`/people/roles/${role.id}`} className="text-[13px] text-[#0073EA] hover:underline shrink-0">
                 View role definition
               </Link>
             </div>
             {role.description ? (
-              <p className="text-[12.5px] text-zinc-600 leading-relaxed mt-2">{role.description}</p>
+              <p className="text-[13.5px] text-zinc-600 leading-relaxed mt-2">{role.description}</p>
             ) : (
-              <p className="text-[12px] text-zinc-400 mt-2">
+              <p className="text-[13px] text-zinc-400 mt-2">
                 No role description yet. The job description lives on the role definition page.
               </p>
             )}
@@ -1224,10 +1224,10 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
         ) : (
           <div className="rounded-lg border border-zinc-200 bg-white px-4 py-5 text-center">
             <Briefcase size={20} className="mx-auto text-zinc-300 mb-1.5" />
-            <p className="text-[13px] text-zinc-600">
+            <p className="text-[14px] text-zinc-600">
               {my ? "You have no job title yet." : "No job title assigned yet."}
             </p>
-            <p className="text-[12px] text-zinc-400 mt-1">
+            <p className="text-[13px] text-zinc-400 mt-1">
               {my
                 ? "KRAs and KPIs come with a job title: ask your manager to assign yours."
                 : "Assign one with Edit profile, the role's KRAs and KPIs seed automatically."}
@@ -1304,14 +1304,14 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
               label={t.label}
               active={tab === t.k}
               onClick={() => setTab(t.k)}
-              trailing={t.k === "kudos" && user._count?.kudosReceived > 0 ? <span className="text-[10px] text-zinc-400">{user._count.kudosReceived}</span> : undefined}
+              trailing={t.k === "kudos" && user._count?.kudosReceived > 0 ? <span className="text-[11px] text-zinc-400">{user._count.kudosReceived}</span> : undefined}
             />
           ))}
         </ViewTabStrip>
 
         <TabsContent value="reviews" className="mt-4 space-y-2">
           {my ? (
-            <Link href="/me/weekly-review" className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/me/weekly-review" className="flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               <ClipboardCheck size={14} className="text-[#0073EA]" />
               <span className="flex-1">My weekly review</span>
               <ChevronRight size={14} className="text-zinc-300" />
@@ -1393,7 +1393,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                   </div>
                   <Progress value={s.selfRating * 10} className="h-1.5" indicatorClassName="bg-[#0073EA]" />
                   {s.managerRating && (
-                    <p className="text-[10px] text-zinc-500 mt-1">Manager rating: {s.managerRating}/10</p>
+                    <p className="text-[11px] text-zinc-500 mt-1">Manager rating: {s.managerRating}/10</p>
                   )}
                 </div>
               ))}
@@ -1417,9 +1417,9 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
                     <p className="text-sm mt-1 italic text-zinc-600">&ldquo;{k.message}&rdquo;</p>
                     <div className="flex items-center gap-2 mt-2">
                       {k.companyValue && (
-                        <Badge variant="outline" className="text-[10px] uppercase tracking-wider border-[#0073EA]/30 text-[#0073EA]">{k.companyValue}</Badge>
+                        <Badge variant="outline" className="text-[11px] uppercase tracking-wider border-[#0073EA]/30 text-[#0073EA]">{k.companyValue}</Badge>
                       )}
-                      <span className="text-[10px] text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</span>
+                      <span className="text-[11px] text-zinc-500">{new Date(k.createdAt).toLocaleDateString()}</span>
                     </div>
                     <div className="mt-3 pt-3 border-t border-zinc-100">
                       <KudosReactions

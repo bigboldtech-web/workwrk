@@ -145,7 +145,7 @@ export function AIAgents() {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
-          <span className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
+          <span className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
             <motion.span
               className="w-1.5 h-1.5 rounded-full"
               style={{ backgroundColor: "var(--brand-red)" }}
@@ -232,7 +232,7 @@ function AgentCard({ agent, delay }: { agent: Agent; delay: number }) {
 
         {/* Handle pill */}
         <span
-          className="absolute top-3 left-3 inline-flex items-center text-[9.5px] font-mono font-bold px-2 h-5 rounded-full text-white"
+          className="absolute top-3 left-3 inline-flex items-center text-[10px] font-mono font-bold px-2 h-5 rounded-full text-white"
           style={{ backgroundColor: "rgba(0,0,0,0.25)", backdropFilter: "blur(6px)" }}
         >
           {agent.handle}
@@ -249,14 +249,14 @@ function AgentCard({ agent, delay }: { agent: Agent; delay: number }) {
         <p className="font-bold text-[14px] tracking-tight" style={{ color: "white" }}>
           {agent.name}
         </p>
-        <p className="mt-1 text-[11.5px] leading-snug" style={{ color: "rgba(255,255,255,0.65)" }}>
+        <p className="mt-1 text-[12.5px] leading-snug" style={{ color: "rgba(255,255,255,0.65)" }}>
           {agent.role}
         </p>
         <div className="mt-3 flex flex-wrap gap-1">
           {agent.skills.map((skill) => (
             <span
               key={skill}
-              className="text-[9.5px] font-semibold px-1.5 h-[18px] inline-flex items-center rounded-md"
+              className="text-[10px] font-semibold px-1.5 h-[18px] inline-flex items-center rounded-md"
               style={{
                 backgroundColor: "rgba(255,255,255,0.06)",
                 color: "rgba(255,255,255,0.78)",
@@ -299,11 +299,11 @@ function BuildOwnCard({ delay }: { delay: number }) {
         <Plus size={28} strokeWidth={2.5} className="text-white" />
       </div>
       <p className="font-bold text-[15px] tracking-tight text-white">Build your own agent</p>
-      <p className="mt-2 text-[11.5px] leading-snug text-white/55 max-w-[180px]">
+      <p className="mt-2 text-[12.5px] leading-snug text-white/55 max-w-[180px]">
         Drag triggers, pick the actions, point at the data. Trained in
         under an hour.
       </p>
-      <span className="mt-4 inline-flex items-center gap-1 text-[11px] font-bold text-white/90 group-hover:gap-2 transition-all">
+      <span className="mt-4 inline-flex items-center gap-1 text-[12px] font-bold text-white/90 group-hover:gap-2 transition-all">
         Start building <ArrowRight size={11} />
       </span>
     </motion.a>
@@ -372,7 +372,7 @@ function AgentsAtWork() {
         viewport={{ once: true, margin: "-80px" }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-yellow)" }}>
+        <p className="text-[12px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-yellow)" }}>
           Agents at work
         </p>
         <h3
@@ -392,7 +392,7 @@ function AgentsAtWork() {
             <button
               key={w.id}
               onClick={() => setActiveId(w.id)}
-              className="relative inline-flex items-center px-4 py-2 rounded-full text-[12.5px] font-semibold transition-colors"
+              className="relative inline-flex items-center px-4 py-2 rounded-full text-[13.5px] font-semibold transition-colors"
               style={{
                 color: isActive ? "var(--brand-yellow)" : "rgba(255,255,255,0.65)",
               }}
@@ -442,13 +442,13 @@ function AgentsAtWork() {
                   {/* Step number + agent */}
                   <div className="flex items-center justify-between mb-3">
                     <span
-                      className="text-[9.5px] font-bold uppercase tracking-[0.18em]"
+                      className="text-[10px] font-bold uppercase tracking-[0.18em]"
                       style={{ color: s.agentHue }}
                     >
                       Step {i + 1}
                     </span>
                     <span
-                      className="inline-flex items-center gap-1.5 text-[10.5px] font-mono font-bold px-2 h-6 rounded-full"
+                      className="inline-flex items-center gap-1.5 text-[11.5px] font-mono font-bold px-2 h-6 rounded-full"
                       style={{
                         backgroundColor: `${s.agentHue}22`,
                         color: s.agentHue,
@@ -459,10 +459,10 @@ function AgentsAtWork() {
                     </span>
                   </div>
 
-                  <p className="text-[13px] font-semibold leading-snug text-white">
+                  <p className="text-[14px] font-semibold leading-snug text-white">
                     {s.action}
                   </p>
-                  <div className="mt-3 flex items-start gap-2 text-[11.5px]" style={{ color: "rgba(255,255,255,0.65)" }}>
+                  <div className="mt-3 flex items-start gap-2 text-[12.5px]" style={{ color: "rgba(255,255,255,0.65)" }}>
                     <ArrowRight size={11} className="mt-0.5 flex-shrink-0" style={{ color: s.agentHue }} />
                     <span>{s.outcome}</span>
                   </div>
@@ -490,7 +490,7 @@ function TrainYourOwn() {
           viewport={{ once: true, margin: "-80px" }}
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
-          <p className="text-[11px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
+          <p className="text-[12px] font-bold uppercase tracking-[0.22em]" style={{ color: "var(--brand-red)" }}>
             Train your own
           </p>
           <h3
@@ -524,7 +524,7 @@ function TrainYourOwn() {
                 </span>
                 <div>
                   <p className="text-[14px] font-semibold text-white">{b.title}</p>
-                  <p className="text-[12.5px] text-white/60">{b.body}</p>
+                  <p className="text-[13.5px] text-white/60">{b.body}</p>
                 </div>
               </li>
             ))}
@@ -575,7 +575,7 @@ function AgentBuilderMock() {
         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.2)" }} />
-        <span className="ml-2 text-[11px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>
+        <span className="ml-2 text-[12px] font-mono" style={{ color: "rgba(255,255,255,0.4)" }}>
           workwrk.com / agents / build
         </span>
       </div>
@@ -621,15 +621,15 @@ function AgentBuilderMock() {
 
       {/* Footer action */}
       <div className="p-4 flex items-center justify-between" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-        <span className="text-[10.5px]" style={{ color: "rgba(255,255,255,0.5)" }}>
+        <span className="text-[11.5px]" style={{ color: "rgba(255,255,255,0.5)" }}>
           Auto-saved 12s ago
         </span>
         <div className="flex items-center gap-2">
-          <button className="text-[11px] font-semibold px-3 h-7 rounded-md" style={{ color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.1)" }}>
+          <button className="text-[12px] font-semibold px-3 h-7 rounded-md" style={{ color: "rgba(255,255,255,0.7)", border: "1px solid rgba(255,255,255,0.1)" }}>
             Test run
           </button>
           <button
-            className="text-[11px] font-bold text-white px-3 h-7 rounded-md inline-flex items-center gap-1"
+            className="text-[12px] font-bold text-white px-3 h-7 rounded-md inline-flex items-center gap-1"
             style={{ background: "linear-gradient(135deg, var(--brand-red) 0%, var(--brand-yellow) 100%)" }}
           >
             Deploy <ArrowRight size={10} />
@@ -645,7 +645,7 @@ function BuilderBlock({
 }: { label: string; accent: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg p-3" style={{ backgroundColor: "rgba(255,255,255,0.04)", border: `1px solid ${accent}44`, borderLeft: `3px solid ${accent}` }}>
-      <p className="text-[9.5px] font-bold uppercase tracking-[0.18em] mb-2" style={{ color: accent }}>{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-[0.18em] mb-2" style={{ color: accent }}>{label}</p>
       <div className="space-y-1.5">{children}</div>
     </div>
   );
@@ -653,7 +653,7 @@ function BuilderBlock({
 
 function BuilderField({ k, v }: { k: string; v: string }) {
   return (
-    <div className="flex items-center gap-2 text-[11px]">
+    <div className="flex items-center gap-2 text-[12px]">
       <span className="font-mono w-[68px] flex-shrink-0" style={{ color: "rgba(255,255,255,0.5)" }}>{k}</span>
       <span
         className="flex-1 px-2 py-0.5 rounded-md truncate"

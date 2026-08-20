@@ -134,7 +134,7 @@ function FieldRowEditor({
         {field.required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
-      {justSaved && <span className="text-[10px] text-emerald-600 inline-flex items-center gap-0.5"><Save size={9} /> Saved</span>}
+      {justSaved && <span className="text-[11px] text-emerald-600 inline-flex items-center gap-0.5"><Save size={9} /> Saved</span>}
     </div>
   );
 
@@ -189,7 +189,7 @@ function FieldRowEditor({
             {field.required && <span className="text-red-500 ml-0.5">*</span>}
           </label>
           {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
-          {justSaved && <span className="text-[10px] text-emerald-600">Saved</span>}
+          {justSaved && <span className="text-[11px] text-emerald-600">Saved</span>}
         </div>
       );
     case "SELECT": {

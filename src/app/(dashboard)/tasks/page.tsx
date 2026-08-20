@@ -275,14 +275,14 @@ export default function MyTasksPage() {
     <div className="flex flex-col h-full bg-[#FAFAFA]">
       {/* Top header row */}
       <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 bg-white !px-4 z-10">
-        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[12px] font-normal leading-5 text-zinc-500">
+        <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] font-normal leading-5 text-zinc-500">
           <h1 className="truncate font-semibold text-zinc-900" style={{ fontSize: "13px" }}>My Wrk</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-[12px] bg-zinc-900 text-white hover:bg-zinc-800 font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-[13px] bg-zinc-900 text-white hover:bg-zinc-800 font-medium transition-colors"
           >
             Manage cards
           </button>
@@ -367,7 +367,7 @@ function RecentsCard({ recents }: { recents: RecentItem[] | null }) {
               <li key={r.id}>
                 <Link
                   href={r.href}
-                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[13.5px]"
                 >
                   <RowIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                   <span className="text-zinc-900 truncate">{r.title}</span>
@@ -393,13 +393,13 @@ function AgendaCard() {
           <button type="button" aria-label="Previous day" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
-          <span className="text-[12px] font-medium text-zinc-900">{todayLabel}</span>
+          <span className="text-[13px] font-medium text-zinc-900">{todayLabel}</span>
           <button type="button" aria-label="Next day" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
             <ChevronRight className="w-3.5 h-3.5" />
           </button>
         </div>
         <div className="flex items-center gap-1">
-          <button type="button" className="inline-flex items-center h-6 px-2 rounded border border-zinc-200 text-[11.5px] text-zinc-700 hover:bg-zinc-50">
+          <button type="button" className="inline-flex items-center h-6 px-2 rounded border border-zinc-200 text-[12.5px] text-zinc-700 hover:bg-zinc-50">
             Today
           </button>
           <button type="button" aria-label="Open calendar" className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-zinc-100">
@@ -411,7 +411,7 @@ function AgendaCard() {
         <span className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-zinc-100 mb-2">
           <CalendarIcon className="w-5 h-5 text-zinc-500" />
         </span>
-        <p className="text-[11.5px] text-zinc-600 mb-4 max-w-[260px]">
+        <p className="text-[12.5px] text-zinc-600 mb-4 max-w-[260px]">
           Connect your calendar to view upcoming events and join your next call
         </p>
         <div className="w-full space-y-2 max-w-[340px]">
@@ -430,12 +430,12 @@ function PersonalListCard() {
         <span className="inline-flex items-center justify-center w-11 h-11 rounded-lg border border-zinc-200 mb-2">
           <CheckSquare className="w-5 h-5 text-zinc-400" />
         </span>
-        <p className="text-[12px] text-zinc-600 mb-3 max-w-[260px]">
+        <p className="text-[13px] text-zinc-600 mb-3 max-w-[260px]">
           Personal List is a home for your tasks. <Link href="#" className="underline">Learn more</Link>
         </p>
         <button
           type="button"
-          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+          className="text-[13.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
         >
           <Plus className="w-3.5 h-3.5" />
           Create a task
@@ -453,7 +453,7 @@ function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
         <>
           <button
             type="button"
-            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-zinc-700 hover:bg-zinc-100"
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[12px] text-zinc-700 hover:bg-zinc-100"
             title="Due date"
           >
             <CalendarIcon className="w-3 h-3" />
@@ -474,7 +474,7 @@ function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
         assigned.length === 0 ? (
           <div className="flex flex-col items-center justify-center text-center py-4">
             <CheckSquare className="w-6 h-6 text-zinc-300 mb-2" />
-            <p className="text-[12px] text-zinc-500">
+            <p className="text-[13px] text-zinc-500">
               Tasks assigned to you will appear here.
             </p>
           </div>
@@ -484,7 +484,7 @@ function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
               <li key={it.id}>
                 <Link
                   href={it.board ? `/boards/${it.board.slug}?item=${it.id}` : "#"}
-                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[12.5px]"
+                  className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 rounded text-[13.5px]"
                 >
                   <span
                     className="w-2 h-2 rounded-full shrink-0"
@@ -492,10 +492,10 @@ function AssignedToMeCard({ assigned }: { assigned: MyItemRow[] | null }) {
                   />
                   <span className="text-zinc-900 truncate flex-1">{it.title}</span>
                   {it.board ? (
-                    <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">{it.board.name}</span>
+                    <span className="text-[12px] text-zinc-500 truncate max-w-[140px]">{it.board.name}</span>
                   ) : null}
                   {it.dueAt ? (
-                    <span className="text-[11px] text-zinc-500 shrink-0">
+                    <span className="text-[12px] text-zinc-500 shrink-0">
                       {new Date(it.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                     </span>
                   ) : null}
@@ -512,7 +512,7 @@ function RemindersCard({ dismissed, onDismiss }: { dismissed: boolean; onDismiss
   return (
     <DashCard title="Reminders">
       {!dismissed ? (
-        <div className="text-[11.5px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2 mb-3 flex items-start gap-2">
+        <div className="text-[12.5px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2 mb-3 flex items-start gap-2">
           <span className="flex-1">
             Note: You can still create legacy Reminders here, but Reminders created elsewhere will now go to Inbox.{" "}
             <Link href="#" className="underline">Learn more</Link>
@@ -529,12 +529,12 @@ function RemindersCard({ dismissed, onDismiss }: { dismissed: boolean; onDismiss
       ) : null}
       <div className="flex flex-col items-center justify-center text-center py-4">
         <Bell className="w-6 h-6 text-zinc-300 mb-2" />
-        <p className="text-[12px] text-zinc-500 mb-3">
+        <p className="text-[13px] text-zinc-500 mb-3">
           Added Reminders will show here. <Link href="#" className="underline">Learn more</Link>
         </p>
         <button
           type="button"
-          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+          className="text-[13.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
         >
           <Plus className="w-3.5 h-3.5" />
           Add reminder
@@ -549,7 +549,7 @@ function AssignedCommentsCard() {
     <DashCard title="Assigned comments">
       <div className="flex flex-col items-center justify-center text-center py-4">
         <MessageSquare className="w-6 h-6 text-zinc-300 mb-2" />
-        <p className="text-[12px] text-zinc-500">
+        <p className="text-[13px] text-zinc-500">
           You don&apos;t have any assigned comments.{" "}
           <Link href="/assigned-comments" className="underline">Learn more</Link>
         </p>
@@ -575,14 +575,14 @@ function AiStandUpCard({ firstName }: { firstName: string }) {
     >
       <div className="space-y-3">
         <div>
-          <p className="text-[12.5px] font-semibold text-zinc-900 mb-1">Overview</p>
-          <p className="text-[12.5px] text-zinc-700">
+          <p className="text-[13.5px] font-semibold text-zinc-900 mb-1">Overview</p>
+          <p className="text-[13.5px] text-zinc-700">
             There is no recorded activity for {firstName} in the last 7 days.
           </p>
         </div>
         <div>
-          <p className="text-[12.5px] font-semibold text-zinc-900 mb-1">Key Highlights</p>
-          <ul className="text-[12.5px] text-zinc-700 list-disc pl-4 space-y-0.5">
+          <p className="text-[13.5px] font-semibold text-zinc-900 mb-1">Key Highlights</p>
+          <ul className="text-[13.5px] text-zinc-700 list-disc pl-4 space-y-0.5">
             <li>No tasks or updates to report for this period.</li>
           </ul>
         </div>
@@ -598,13 +598,13 @@ function PrioritiesCard() {
         <span className="inline-flex items-center justify-center w-11 h-11 rounded-lg border border-zinc-200 mb-2">
           <CheckSquare className="w-5 h-5 text-zinc-400" />
         </span>
-        <p className="text-[12px] text-zinc-600 mb-3 max-w-[280px]">
+        <p className="text-[13px] text-zinc-600 mb-3 max-w-[280px]">
           Priorities keep your most important tasks in one list.{" "}
           <Link href="#" className="underline">Learn more</Link>
         </p>
         <button
           type="button"
-          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+          className="text-[13.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
         >
           <Plus className="w-3.5 h-3.5" />
           Create a task
@@ -632,7 +632,7 @@ function OkrsGoalsCard({ okrs }: { okrs: ApiMyOkr[] | null }) {
         okrs.length === 0 ? (
           <div className="flex flex-col items-center justify-center text-center py-4">
             <Target className="w-6 h-6 text-zinc-300 mb-2" />
-            <p className="text-[12px] text-zinc-500">
+            <p className="text-[13px] text-zinc-500">
               You don&apos;t have any active OKRs.
             </p>
           </div>
@@ -645,8 +645,8 @@ function OkrsGoalsCard({ okrs }: { okrs: ApiMyOkr[] | null }) {
                   className="flex flex-col gap-1.5 px-2 py-2 hover:bg-zinc-50 rounded"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[12.5px] font-medium text-zinc-900 truncate">{o.title}</span>
-                    <span className="text-[11px] font-medium text-zinc-500 shrink-0" title={o.progressSource === "NONE" ? "No key results yet" : undefined}>
+                    <span className="text-[13.5px] font-medium text-zinc-900 truncate">{o.title}</span>
+                    <span className="text-[12px] font-medium text-zinc-500 shrink-0" title={o.progressSource === "NONE" ? "No key results yet" : undefined}>
                       {o.progressSource === "NONE" ? "—" : `${o.progress}%`}
                     </span>
                   </div>
@@ -683,7 +683,7 @@ function KrasKpisCard({ kras }: { kras: ApiMyKra[] | null }) {
         kras.length === 0 ? (
           <div className="flex flex-col items-center justify-center text-center py-4">
             <Activity className="w-6 h-6 text-zinc-300 mb-2" />
-            <p className="text-[12px] text-zinc-500">
+            <p className="text-[13px] text-zinc-500">
               No KRAs or KPIs assigned to you.
             </p>
           </div>
@@ -691,15 +691,15 @@ function KrasKpisCard({ kras }: { kras: ApiMyKra[] | null }) {
           <ul className="-mx-2 space-y-1">
             {kras.map((kra) => (
               <li key={kra.kraId} className="px-2 py-1.5">
-                <div className="text-[12.5px] font-medium text-zinc-900 mb-1">{kra.kraName}</div>
+                <div className="text-[13.5px] font-medium text-zinc-900 mb-1">{kra.kraName}</div>
                 {kra.kpis.length === 0 ? (
-                  <div className="text-[11px] text-zinc-400">No KPIs defined.</div>
+                  <div className="text-[12px] text-zinc-400">No KPIs defined.</div>
                 ) : (
                   <ul className="space-y-1 mt-1">
                     {kra.kpis.map((kpi) => (
-                      <li key={kpi.kpiId} className="flex items-center justify-between gap-2 text-[12px] text-zinc-600 pl-2 border-l-2 border-zinc-200">
+                      <li key={kpi.kpiId} className="flex items-center justify-between gap-2 text-[13px] text-zinc-600 pl-2 border-l-2 border-zinc-200">
                         <span className="truncate">{kpi.name}</span>
-                        <span className="text-[11px] font-medium shrink-0">
+                        <span className="text-[12px] font-medium shrink-0">
                           {kpi.targetValue != null ? `${kpi.targetValue} ${kpi.targetLabel || ""}` : "N/A"}
                         </span>
                       </li>
@@ -725,7 +725,7 @@ function MyWorkCard() {
             key={key}
             type="button"
             onClick={() => setTab(key)}
-            className={`pb-1.5 text-[12px] border-b-2 -mb-px transition-colors ${tab === key ? "border-zinc-900 text-zinc-900 font-medium" : "border-transparent text-zinc-500 hover:text-zinc-700"}`}
+            className={`pb-1.5 text-[13px] border-b-2 -mb-px transition-colors ${tab === key ? "border-zinc-900 text-zinc-900 font-medium" : "border-transparent text-zinc-500 hover:text-zinc-700"}`}
           >
             {label}
           </button>
@@ -735,13 +735,13 @@ function MyWorkCard() {
         <span className="inline-flex items-center justify-center w-12 h-12 rounded-lg border border-zinc-200 mb-2">
           <UsersIcon className="w-5 h-5 text-zinc-400" />
         </span>
-        <p className="text-[12px] text-zinc-600 mb-3 max-w-[320px]">
+        <p className="text-[13px] text-zinc-600 mb-3 max-w-[320px]">
           Tasks and Reminders assigned to you will appear here.{" "}
           <Link href="#" className="underline">Learn more</Link>
         </p>
         <button
           type="button"
-          className="text-[12.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
+          className="text-[13.5px] px-3 py-1.5 rounded-md border border-zinc-200 text-zinc-700 hover:bg-zinc-50 inline-flex items-center gap-1.5"
         >
           <Plus className="w-3.5 h-3.5" />
           Add task or reminder
@@ -774,13 +774,13 @@ function DashCard({
         <div className="flex items-center gap-1.5 min-w-0">
           <GripVertical className="w-3 h-3 text-zinc-300 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity -ml-1" />
           {titleIcon}
-          <h2 className="text-[13px] font-semibold text-zinc-900 truncate">{title}</h2>
+          <h2 className="text-[14px] font-semibold text-zinc-900 truncate">{title}</h2>
           {subtitle ? (
-            <span className="text-[11.5px] text-zinc-500 truncate">({subtitle})</span>
+            <span className="text-[12.5px] text-zinc-500 truncate">({subtitle})</span>
           ) : null}
           {titleHint ? (
             <span
-              className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-zinc-300 text-[9px] text-zinc-400 shrink-0"
+              className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-zinc-300 text-[10px] text-zinc-400 shrink-0"
               title="Card info"
               aria-hidden
             >
@@ -811,11 +811,11 @@ function CardEyebrow() {
 }
 
 function CardLoading() {
-  return <div className="text-[12px] text-zinc-400 py-3 text-center">Loading…</div>;
+  return <div className="text-[13px] text-zinc-400 py-3 text-center">Loading…</div>;
 }
 
 function CardEmpty({ children }: { children: React.ReactNode }) {
-  return <p className="text-[12px] text-zinc-500 px-2 py-3">{children}</p>;
+  return <p className="text-[13px] text-zinc-500 px-2 py-3">{children}</p>;
 }
 
 // Flat per-card identity icons (Monday-clean, no gradients) — ClickUp's
@@ -855,7 +855,7 @@ function MyTasksSettingsPopover({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
       <div className="absolute right-0 top-full z-50 mt-2 w-[280px] rounded-xl border border-zinc-200 bg-white p-5 shadow-lg">
-        <p className="mb-4 text-[13px] font-medium text-zinc-500">Layout</p>
+        <p className="mb-4 text-[14px] font-medium text-zinc-500">Layout</p>
         <div className="flex items-center justify-between">
           <span className="text-[15px] text-zinc-900">Page greeting</span>
           <Switch checked={showGreeting} onChange={(v) => onShowGreetingChange(v)} />
@@ -909,7 +909,7 @@ function ManageCardsModal({
                     <Switch checked={!isHidden} onChange={() => onToggle(c.key)} />
                   </div>
                   <h3 className="mb-1 text-[14px] font-semibold text-zinc-900">{c.label}</h3>
-                  <p className="text-[12px] leading-5 text-zinc-500">{c.description}</p>
+                  <p className="text-[13px] leading-5 text-zinc-500">{c.description}</p>
                 </article>
               </li>
             );
@@ -929,13 +929,13 @@ function CalendarConnect({ provider, tone }: { provider: string; tone: "multicol
     <div className="flex items-center justify-between px-3 py-2 rounded-md border border-zinc-200">
       <span className="flex items-center gap-2 min-w-0">
         <span className={`w-4 h-4 rounded-sm ${dot} shrink-0`} aria-hidden />
-        <span className="text-[12.5px] text-zinc-800 truncate">{provider}</span>
+        <span className="text-[13.5px] text-zinc-800 truncate">{provider}</span>
       </span>
       <button
         type="button"
         disabled
         title="Coming soon"
-        className="text-[11.5px] font-medium text-[#0073EA] hover:underline disabled:opacity-60"
+        className="text-[12.5px] font-medium text-[#0073EA] hover:underline disabled:opacity-60"
       >
         Connect
       </button>

@@ -52,8 +52,8 @@ function UsageBar({ label, used, limit }: { label: string; used: number; limit: 
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between">
-        <span className="text-[12.5px] font-medium text-zinc-700">{label}</span>
-        <span className="text-[12px] tabular-nums text-zinc-500">
+        <span className="text-[13.5px] font-medium text-zinc-700">{label}</span>
+        <span className="text-[13px] tabular-nums text-zinc-500">
           {used.toLocaleString()} / {unlimited ? "∞" : limit.toLocaleString()}
         </span>
       </div>
@@ -107,12 +107,12 @@ export default function BillingPage() {
         <CreditCard className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Plan &amp; billing</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Review your current plan, usage against your limits, and manage payment details.
       </p>
 
       {data === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading billing…
         </div>
       ) : (
@@ -121,13 +121,13 @@ export default function BillingPage() {
           <div className="rounded-xl border border-zinc-200 bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Current plan</div>
+                <div className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Current plan</div>
                 <div className="mt-0.5 text-[18px] font-semibold tracking-[-0.01em] text-zinc-900">
                   {PLAN_LABEL[plan]}
                 </div>
               </div>
               <span
-                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${STATUS_STYLE[status]}`}
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[12px] font-medium ${STATUS_STYLE[status]}`}
               >
                 {STATUS_LABEL[status]}
               </span>
@@ -146,13 +146,13 @@ export default function BillingPage() {
             <button
               onClick={openPortal}
               disabled={opening}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
             >
               {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
               Manage billing
             </button>
           ) : (
-            <p className="text-[12.5px] text-zinc-400">
+            <p className="text-[13.5px] text-zinc-400">
               You need Company Admin to manage billing.
             </p>
           )}

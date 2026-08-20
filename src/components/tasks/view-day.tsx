@@ -92,8 +92,8 @@ export function DayView({
               >
                 {statusIcon(t.status)}
                 <span className="truncate flex-1">{t.title}</span>
-                {badgeText && <span className={`text-[9px] px-1 rounded ${badgeCls}`}>{badgeText}</span>}
-                {t.assignee && <span className="text-[10px] text-muted">{t.assignee.firstName}</span>}
+                {badgeText && <span className={`text-[10px] px-1 rounded ${badgeCls}`}>{badgeText}</span>}
+                {t.assignee && <span className="text-[11px] text-muted">{t.assignee.firstName}</span>}
               </button>
             );
           })}
@@ -103,7 +103,7 @@ export function DayView({
       {/* Hour grid */}
       <div className="relative flex">
         {/* Hour gutter */}
-        <div className="w-14 shrink-0 border-r border-border text-[10px] text-muted">
+        <div className="w-14 shrink-0 border-r border-border text-[11px] text-muted">
           {Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i).map((h) => (
             <div key={h} style={{ height: SLOT_PX * 2 }} className="flex items-start justify-end pr-1.5 pt-0.5">
               {formatHour(h)}
@@ -160,10 +160,10 @@ export function DayView({
                 <div className="flex items-center gap-1.5 text-xs font-medium">
                   {statusIcon(t.status)}
                   <span className="truncate">{t.title}</span>
-                  {badgeText && <span className={`ml-auto text-[9px] px-1 rounded ${badgeCls}`}>{badgeText}</span>}
+                  {badgeText && <span className={`ml-auto text-[10px] px-1 rounded ${badgeCls}`}>{badgeText}</span>}
                 </div>
                 {height > SLOT_PX * 1.2 && t.assignee && (
-                  <div className="text-[10px] text-muted mt-0.5">{t.assignee.firstName} {t.assignee.lastName}</div>
+                  <div className="text-[11px] text-muted mt-0.5">{t.assignee.firstName} {t.assignee.lastName}</div>
                 )}
               </button>
             );

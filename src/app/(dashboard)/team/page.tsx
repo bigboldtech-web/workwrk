@@ -94,7 +94,7 @@ export default async function TeamOverviewPage() {
         {/* What needs me */}
         <TeamCard title="Needs your attention">
           {queue.length === 0 ? (
-            <div className="flex items-center gap-2 text-[13px] text-zinc-500 py-2">
+            <div className="flex items-center gap-2 text-[14px] text-zinc-500 py-2">
               <CheckCircle2 className="h-4 w-4 text-emerald-500" /> You&rsquo;re all caught up.
             </div>
           ) : (
@@ -105,7 +105,7 @@ export default async function TeamOverviewPage() {
                     <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg shrink-0" style={{ background: `${q.accent}1a` }}>
                       <q.icon className="h-4 w-4" style={{ color: q.accent }} />
                     </span>
-                    <span className="text-[13px] text-zinc-800 flex-1">
+                    <span className="text-[14px] text-zinc-800 flex-1">
                       <span className="font-semibold tabular-nums">{q.n}</span> {q.n === 1 ? q.label : q.plural} {q.verb}
                     </span>
                     <ArrowRight className="h-4 w-4 text-zinc-300 group-hover:text-zinc-500" />
@@ -149,7 +149,7 @@ function ShortcutCard({ title, links }: { title: string; links: { label: string;
       <ul className="-mx-1">
         {links.map((l) => (
           <li key={l.href}>
-            <Link href={l.href} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-[13px] text-zinc-700">
+            <Link href={l.href} className="group flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-[14px] text-zinc-700">
               <l.icon className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
               <span className="flex-1">{l.label}</span>
               <ArrowRight className="h-3.5 w-3.5 text-zinc-300 group-hover:text-zinc-500" />

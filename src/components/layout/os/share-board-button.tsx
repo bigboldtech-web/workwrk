@@ -31,7 +31,7 @@ export function ShareBoardButton({ boardId, boardName, visibility, parentSpaceNa
           e.stopPropagation();
           setOpen(true);
         }}
-        className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-900 px-1.5 py-0.5 rounded hover:bg-zinc-100"
+        className="inline-flex items-center gap-1 text-[12px] text-zinc-500 hover:text-zinc-900 px-1.5 py-0.5 rounded hover:bg-zinc-100"
         title={visibility === "PRIVATE" ? "Private — manage members" : "Manage access"}
       >
         {visibility === "PRIVATE" ? (

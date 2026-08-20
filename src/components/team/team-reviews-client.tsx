@@ -178,9 +178,9 @@ function PendingCard({
                   <li key={kp.kraId} className="text-sm">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-zinc-500 w-12">{kp.progressPct}%</span>
-                      <span className="flex-1 truncate font-mono text-[11px] text-zinc-500">{kp.kraId}</span>
+                      <span className="flex-1 truncate font-mono text-[12px] text-zinc-500">{kp.kraId}</span>
                     </div>
-                    {kp.note ? <div className="text-[11px] text-zinc-500 ml-12">{kp.note}</div> : null}
+                    {kp.note ? <div className="text-[12px] text-zinc-500 ml-12">{kp.note}</div> : null}
                   </li>
                 ))}
               </ul>
@@ -194,7 +194,7 @@ function PendingCard({
               <ul className="space-y-1">
                 {review.kpiSnapshots.map((k) => (
                   <li key={k.kpiId} className="text-sm flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-zinc-500 flex-1 truncate">{k.kpiId}</span>
+                    <span className="font-mono text-[12px] text-zinc-500 flex-1 truncate">{k.kpiId}</span>
                     <span>{k.value ?? "—"}</span>
                   </li>
                 ))}
@@ -253,7 +253,7 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
       <div className="flex items-center gap-2 text-sm">
         <span className="font-medium flex-1 truncate">{subjectName}</span>
         <span className="text-xs text-zinc-500">{formatWeekRange(review.periodStart)}</span>
-        <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+        <span className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
           approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
         }`}>
           {approved ? "Approved" : "Changes"}
@@ -269,7 +269,7 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-[11px] uppercase tracking-wide text-zinc-500 mb-1.5">{title}</h3>
+      <h3 className="text-[12px] uppercase tracking-wide text-zinc-500 mb-1.5">{title}</h3>
       {children}
     </div>
   );
@@ -282,7 +282,7 @@ function Empty() {
 function Narrative({ label, body }: { label: string; body: string | null }) {
   return (
     <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-      <div className="text-[11px] text-zinc-500">{label}</div>
+      <div className="text-[12px] text-zinc-500">{label}</div>
       <div className="text-sm whitespace-pre-wrap break-words mt-1">{body || <span className="text-zinc-500">—</span>}</div>
     </div>
   );

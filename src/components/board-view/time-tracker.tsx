@@ -144,7 +144,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
           <button
             type="button"
             onClick={() => setAddingManual(true)}
-            className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+            className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
           >
             <Plus className="h-3 w-3" />
             Manual entry
@@ -159,12 +159,12 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
               type="button"
               onClick={stop}
               disabled={busy}
-              className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-red-500 hover:bg-red-600 text-white text-[12.5px] font-medium disabled:opacity-50"
+              className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-red-500 hover:bg-red-600 text-white text-[13.5px] font-medium disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
               Stop
               {state?.active ? (
-                <span className="font-mono tabular-nums text-[11.5px] opacity-90">
+                <span className="font-mono tabular-nums text-[12.5px] opacity-90">
                   {formatRunning(state.active.startedAt, now)}
                 </span>
               ) : null}
@@ -174,7 +174,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
               type="button"
               onClick={start}
               disabled={busy}
-              className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white text-[12.5px] font-medium disabled:opacity-50"
+              className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white text-[13.5px] font-medium disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3 w-3 fill-current" />}
               Start timer
@@ -206,7 +206,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
           {state.sessions.slice(0, 6).map((s) => (
             <li
               key={s.id}
-              className="flex items-center gap-2 text-[12px] text-zinc-600 px-2 py-1 rounded-md hover:bg-zinc-50"
+              className="flex items-center gap-2 text-[13px] text-zinc-600 px-2 py-1 rounded-md hover:bg-zinc-50"
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
@@ -220,7 +220,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
             </li>
           ))}
           {state.sessions.length > 6 ? (
-            <li className="text-[11px] text-zinc-400 px-2">
+            <li className="text-[12px] text-zinc-400 px-2">
               +{state.sessions.length - 6} earlier sessions
             </li>
           ) : null}
@@ -278,26 +278,26 @@ function ManualEntryForm({
           max={24}
           value={hours}
           onChange={(e) => setHours(e.target.value)}
-          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
+          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-[13.5px] focus:outline-none focus:border-zinc-400"
           aria-label="Hours"
         />
-        <span className="text-[11px] text-zinc-500">h</span>
+        <span className="text-[12px] text-zinc-500">h</span>
         <input
           type="number"
           min={0}
           max={59}
           value={minutes}
           onChange={(e) => setMinutes(e.target.value)}
-          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
+          className="h-7 w-12 px-1.5 text-center rounded border border-zinc-200 bg-white text-[13.5px] focus:outline-none focus:border-zinc-400"
           aria-label="Minutes"
         />
-        <span className="text-[11px] text-zinc-500">m</span>
+        <span className="text-[12px] text-zinc-500">m</span>
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="What you worked on (optional)"
-          className="flex-1 h-7 px-2 rounded border border-zinc-200 bg-white text-[12px] focus:outline-none focus:border-zinc-400"
+          className="flex-1 h-7 px-2 rounded border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
         />
       </div>
       <div className="flex items-center gap-1 justify-end">
@@ -314,7 +314,7 @@ function ManualEntryForm({
           type="button"
           onClick={submit}
           disabled={busy}
-          className="h-7 px-2.5 rounded bg-zinc-900 text-white text-[12px] font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+          className="h-7 px-2.5 rounded bg-zinc-900 text-white text-[13px] font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
         >
           {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           Log time

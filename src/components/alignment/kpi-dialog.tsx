@@ -138,26 +138,26 @@ export function KpiDialog({
           </span>
           <DialogTitle className="leading-none">{editing ? "Edit KPI" : "New KPI"}</DialogTitle>
         </div>
-        <p className="mt-2 text-[12.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+        <p className="mt-2 text-[13.5px] leading-relaxed text-zinc-500 dark:text-zinc-400">
           A running gauge under <span className="font-medium text-zinc-700 dark:text-zinc-300">{kraName}</span>.
           Every holder of the job title records their own readings against it.
         </p>
 
         <div className="mt-4 space-y-3">
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">Name</span>
+            <span className="text-[13px] font-medium text-zinc-600">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
               placeholder="e.g. Qualified demos booked"
               autoFocus
-              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] focus:outline-none focus:border-[#0073EA]"
             />
           </label>
 
           <div className="block">
-            <span className="text-[12px] font-medium text-zinc-600">Direction of good</span>
+            <span className="text-[13px] font-medium text-zinc-600">Direction of good</span>
             <div className="mt-1 grid grid-cols-3 gap-1.5">
               {DIRECTIONS.map((d) => {
                 const ActiveIcon = d.icon;
@@ -167,7 +167,7 @@ export function KpiDialog({
                     key={d.value}
                     type="button"
                     onClick={() => setDirection(d.value)}
-                    className={`inline-flex items-center justify-center gap-1.5 h-8 rounded-md border text-[12px] font-medium transition-colors ${
+                    className={`inline-flex items-center justify-center gap-1.5 h-8 rounded-md border text-[13px] font-medium transition-colors ${
                       active
                         ? "border-[#0073EA] bg-[#0073EA]/10 text-[#0073EA]"
                         : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
@@ -183,42 +183,42 @@ export function KpiDialog({
 
           <div className="grid grid-cols-3 gap-2.5">
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Healthy line</span>
+              <span className="text-[13px] font-medium text-zinc-600">Healthy line</span>
               <input
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 inputMode="decimal"
                 placeholder="blank = none yet"
-                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] font-mono focus:outline-none focus:border-[#0073EA]"
+                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] font-mono focus:outline-none focus:border-[#0073EA]"
               />
             </label>
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Baseline today</span>
+              <span className="text-[13px] font-medium text-zinc-600">Baseline today</span>
               <input
                 value={baseline}
                 onChange={(e) => setBaseline(e.target.value)}
                 inputMode="decimal"
                 placeholder="optional"
-                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] font-mono focus:outline-none focus:border-[#0073EA]"
+                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] font-mono focus:outline-none focus:border-[#0073EA]"
               />
             </label>
             <label className="block">
-              <span className="text-[12px] font-medium text-zinc-600">Unit</span>
+              <span className="text-[13px] font-medium text-zinc-600">Unit</span>
               <input
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
                 placeholder="%, ₹, deals…"
-                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-[#0073EA]"
+                className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] focus:outline-none focus:border-[#0073EA]"
               />
             </label>
           </div>
-          <p className="text-[11.5px] text-zinc-400 -mt-1">
+          <p className="text-[12.5px] text-zinc-400 -mt-1">
             Leave the healthy line blank until you have a baseline — the gauge
             reads &ldquo;no baseline yet&rdquo; instead of a made-up number.
           </p>
 
           <label className="block">
-            <span className="text-[12px] font-medium text-zinc-600">
+            <span className="text-[13px] font-medium text-zinc-600">
               Definition <span className="text-zinc-400 font-normal">(optional)</span>
             </span>
             <textarea
@@ -226,30 +226,30 @@ export function KpiDialog({
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
               placeholder="What exactly is counted, and where does the number come from?"
-              className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-[13px] resize-none focus:outline-none focus:border-[#0073EA]"
+              className="mt-1 w-full px-2.5 py-2 rounded-md border border-zinc-200 text-[14px] resize-none focus:outline-none focus:border-[#0073EA]"
             />
           </label>
 
           <div className="flex items-center justify-between gap-3 pt-1">
             <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-zinc-800 dark:text-zinc-200">Shared gauge</div>
-              <div className="text-[11.5px] text-zinc-400">Influenced by this role · reviewed, not graded</div>
+              <div className="text-[13.5px] font-medium text-zinc-800 dark:text-zinc-200">Shared gauge</div>
+              <div className="text-[12.5px] text-zinc-400">Influenced by this role · reviewed, not graded</div>
             </div>
             <Switch checked={shared} onChange={setShared} aria-label="Shared gauge" />
           </div>
 
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-[12.5px] font-medium text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1.5">
+              <div className="text-[13.5px] font-medium text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1.5">
                 <Star className="w-3.5 h-3.5 text-amber-400" style={{ fill: "currentColor" }} />
                 North-star gauge
               </div>
-              <div className="text-[11.5px] text-zinc-400">The headline number for this KRA — shown first</div>
+              <div className="text-[12.5px] text-zinc-400">The headline number for this KRA — shown first</div>
             </div>
             <Switch checked={northStar} onChange={setNorthStar} aria-label="North-star gauge" />
           </div>
 
-          {error ? <p className="text-[12px] text-red-600">{error}</p> : null}
+          {error ? <p className="text-[13px] text-red-600">{error}</p> : null}
         </div>
 
         <div className="mt-5 flex items-center justify-end gap-2">

@@ -70,14 +70,14 @@ export function OsTitleBar({
             {people.slice(0, 3).map((p, i) => (
               <span
                 key={i}
-                className="w-6 h-6 rounded-full border-2 border-white text-[10px] font-semibold text-white flex items-center justify-center"
+                className="w-6 h-6 rounded-full border-2 border-white text-[11px] font-semibold text-white flex items-center justify-center"
                 style={{ background: p.color }}
               >
                 {p.initials}
               </span>
             ))}
             {morePeople > 0 ? (
-              <span className="w-6 h-6 rounded-full border-2 border-white bg-zinc-100 text-[10px] font-medium text-zinc-700 flex items-center justify-center">
+              <span className="w-6 h-6 rounded-full border-2 border-white bg-zinc-100 text-[11px] font-medium text-zinc-700 flex items-center justify-center">
                 +{morePeople}
               </span>
             ) : null}

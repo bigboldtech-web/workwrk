@@ -63,7 +63,7 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
           {people === null ? (
             <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-zinc-300" /></div>
           ) : people.length === 0 ? (
-            <div className="px-3 py-4 text-center text-[12.5px] text-zinc-400 dark:text-zinc-500">Type a name to find a teammate.</div>
+            <div className="px-3 py-4 text-center text-[13.5px] text-zinc-400 dark:text-zinc-500">Type a name to find a teammate.</div>
           ) : (
             people.map((p) => (
               <button key={p.id} type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-white/5 text-left">
@@ -71,13 +71,13 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.avatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
                 ) : (
-                  <span className="w-6 h-6 rounded-full bg-[#2F8BF0] text-white text-[10px] font-semibold flex items-center justify-center shrink-0">{initials(p)}</span>
+                  <span className="w-6 h-6 rounded-full bg-[#2F8BF0] text-white text-[11px] font-semibold flex items-center justify-center shrink-0">{initials(p)}</span>
                 )}
                 <span className="flex-1 min-w-0">
-                  <span className="block truncate text-[12.5px] text-zinc-800 dark:text-zinc-100">{name(p)}</span>
-                  <span className="block truncate text-[11px] text-zinc-400 dark:text-zinc-500">{p.email}</span>
+                  <span className="block truncate text-[13.5px] text-zinc-800 dark:text-zinc-100">{name(p)}</span>
+                  <span className="block truncate text-[12px] text-zinc-400 dark:text-zinc-500">{p.email}</span>
                 </span>
-                {busy === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" /> : <span className="text-[11px] text-[#0073EA] font-medium shrink-0">Meet</span>}
+                {busy === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" /> : <span className="text-[12px] text-[#0073EA] font-medium shrink-0">Meet</span>}
               </button>
             ))
           )}
@@ -92,7 +92,7 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") runCommand(); }}
           placeholder="Search events, teammates, commands…"
-          className="flex-1 min-w-0 bg-transparent outline-none text-[13.5px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
+          className="flex-1 min-w-0 bg-transparent outline-none text-[14.5px] text-zinc-800 dark:text-zinc-100 placeholder:text-zinc-400"
         />
         <button type="button" onClick={runCommand} title="Ask the Brain" className="h-8 w-8 rounded-full bg-[#0073EA] text-white flex items-center justify-center hover:bg-[#0060B9] shrink-0">
           <Sparkles className="w-3.5 h-3.5" />

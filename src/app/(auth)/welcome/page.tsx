@@ -80,7 +80,7 @@ export default function OnboardingPage() {
       </Link>
 
       <div className="flex items-center justify-between gap-3 mb-6">
-        <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
           <Sparkles size={12} />
           Getting started · step {step + 1} of {totalSteps}
         </span>
@@ -104,27 +104,27 @@ export default function OnboardingPage() {
           </p>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 my-6">
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <Users size={16} />
               <span>People</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <Target size={16} />
               <span>KRAs</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <BookOpen size={16} />
               <span>SOPs</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <Star size={16} />
               <span>Reviews</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <Heart size={16} />
               <span>Kudos</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[13px] font-medium text-zinc-700">
+            <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 bg-white text-[14px] font-medium text-zinc-700">
               <Sparkles size={16} />
               <span>AI Engine</span>
             </div>
@@ -133,7 +133,7 @@ export default function OnboardingPage() {
           <div className="mt-7 flex items-center justify-between gap-3">
             <Link
               href="/dashboard"
-              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
+              className="inline-flex items-center gap-1.5 text-[14px] text-zinc-500 hover:text-zinc-800"
             >
               Skip
             </Link>
@@ -178,12 +178,12 @@ export default function OnboardingPage() {
                     </span>
                   )}
                 </div>
-                <p className="text-[13px] text-zinc-500 leading-relaxed m-0">{o.body}</p>
+                <p className="text-[14px] text-zinc-500 leading-relaxed m-0">{o.body}</p>
                 <div className="flex flex-wrap gap-1.5">
                   {o.modules.map((m) => (
                     <span
                       key={m}
-                      className={`h-5 inline-flex items-center px-2 rounded-[5px] text-[10.5px] font-medium ${
+                      className={`h-5 inline-flex items-center px-2 rounded-[5px] text-[11.5px] font-medium ${
                         focus === o.key
                           ? "bg-blue-50 text-[#0073EA]"
                           : "bg-zinc-100 text-zinc-600"
@@ -200,7 +200,7 @@ export default function OnboardingPage() {
           <div className="mt-7 flex items-center justify-between gap-3">
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
+              className="inline-flex items-center gap-1.5 text-[14px] text-zinc-500 hover:text-zinc-800"
               onClick={() => setStep(0)}
             >
               <ArrowLeft size={14} /> Back
@@ -243,8 +243,8 @@ export default function OnboardingPage() {
           </div>
 
           <div className="mt-4 px-4 py-3 rounded-lg border border-zinc-200 bg-zinc-50 flex items-center justify-between">
-            <span className="text-[11px] uppercase tracking-wide text-zinc-400">Focus</span>
-            <span className="text-[13px] font-medium text-zinc-900">
+            <span className="text-[12px] uppercase tracking-wide text-zinc-400">Focus</span>
+            <span className="text-[14px] font-medium text-zinc-900">
               {focus ? focusOptions.find((f) => f.key === focus)?.label : "Not set"}
             </span>
           </div>
@@ -252,7 +252,7 @@ export default function OnboardingPage() {
           <div className="mt-7 flex items-center justify-between gap-3">
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 text-[13px] text-zinc-500 hover:text-zinc-800"
+              className="inline-flex items-center gap-1.5 text-[14px] text-zinc-500 hover:text-zinc-800"
               onClick={() => setStep(1)}
             >
               <ArrowLeft size={14} /> Back

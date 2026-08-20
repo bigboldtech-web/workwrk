@@ -170,7 +170,7 @@ function FlatLink({ href, children }: { href: string; children: React.ReactNode 
 function ProductMenu() {
   return (
     <div className="w-[600px] p-5 grid grid-cols-2 gap-1">
-      <p className="col-span-2 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 px-3 pb-3">
+      <p className="col-span-2 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400 px-3 pb-3">
         7 hubs · one platform
       </p>
       {HUBS.map((hub) => {
@@ -221,7 +221,7 @@ const INDUSTRIES: readonly { slug: string; name: string; desc: string }[] = [
 function SolutionsMenu() {
   return (
     <div className="w-[520px] p-5">
-      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 px-3 pb-3">
+      <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400 px-3 pb-3">
         Built for your industry
       </p>
       <div className="grid grid-cols-2 gap-1">

@@ -72,11 +72,11 @@ export function OsSurveysPopover({ onClose }: { onClose: () => void }) {
       className="bg-white rounded-xl border border-zinc-200 shadow-2xl overflow-hidden"
     >
       <header className="px-3.5 py-2.5 border-b border-zinc-100 flex items-center justify-between">
-        <span className="text-[13px] font-semibold text-zinc-900 inline-flex items-center gap-2">
+        <span className="text-[14px] font-semibold text-zinc-900 inline-flex items-center gap-2">
           <FileSpreadsheet className="h-3.5 w-3.5 text-zinc-500" />
           Surveys
           {pending.length > 0 ? (
-            <span className="text-[10px] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+            <span className="text-[11px] font-medium text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
               {pending.length} pending
             </span>
           ) : null}
@@ -93,11 +93,11 @@ export function OsSurveysPopover({ onClose }: { onClose: () => void }) {
 
       <div className="max-h-[420px] overflow-y-auto">
         {rows === null ? (
-          <div className="px-4 py-8 text-center text-[12px] text-zinc-400">Loading…</div>
+          <div className="px-4 py-8 text-center text-[13px] text-zinc-400">Loading…</div>
         ) : pending.length === 0 && taken.length === 0 ? (
           <div className="px-4 py-8 text-center">
-            <div className="text-[12.5px] text-zinc-700 font-medium">You&rsquo;re all caught up</div>
-            <div className="mt-1 text-[11.5px] text-zinc-500 max-w-[260px] mx-auto">
+            <div className="text-[13.5px] text-zinc-700 font-medium">You&rsquo;re all caught up</div>
+            <div className="mt-1 text-[12.5px] text-zinc-500 max-w-[260px] mx-auto">
               No active surveys for you right now. New pulses arrive here as soon as they&rsquo;re open.
             </div>
           </div>
@@ -117,7 +117,7 @@ export function OsSurveysPopover({ onClose }: { onClose: () => void }) {
         <Link
           href="/surveys"
           onClick={onClose}
-          className="text-[12px] text-zinc-600 hover:text-zinc-900 inline-flex items-center gap-1"
+          className="text-[13px] text-zinc-600 hover:text-zinc-900 inline-flex items-center gap-1"
         >
           See all surveys
           <ExternalLink className="h-3 w-3" />
@@ -140,7 +140,7 @@ function SurveysSection({
 }) {
   return (
     <div className={subtle ? "border-t border-zinc-100" : ""}>
-      <div className="px-3.5 pt-3 pb-1 text-[10px] uppercase tracking-wide text-zinc-400 font-semibold">
+      <div className="px-3.5 pt-3 pb-1 text-[11px] uppercase tracking-wide text-zinc-400 font-semibold">
         {title}
       </div>
       <ul className="px-1.5 pb-2">
@@ -162,10 +162,10 @@ function SurveysSection({
                 )}
               </span>
               <span className="flex-1 min-w-0">
-                <span className="block text-[12.5px] font-medium text-zinc-900 truncate">
+                <span className="block text-[13.5px] font-medium text-zinc-900 truncate">
                   {s.title}
                 </span>
-                <span className="block text-[11px] text-zinc-500 truncate">
+                <span className="block text-[12px] text-zinc-500 truncate">
                   {subtle ? "Submitted · thanks!" : deadlineLabel(s.closesAt)}
                   {!subtle && s.audienceSize > 0
                     ? ` · ${s.totalResponses}/${s.audienceSize} responded`

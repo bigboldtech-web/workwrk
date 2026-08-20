@@ -122,7 +122,7 @@ export default function LocaleSettingsPage() {
   };
 
   const selectClass =
-    "h-8 w-full max-w-sm rounded-md border border-zinc-200 bg-white px-2 text-[12.5px] text-zinc-800 disabled:opacity-60";
+    "h-8 w-full max-w-sm rounded-md border border-zinc-200 bg-white px-2 text-[13.5px] text-zinc-800 disabled:opacity-60";
 
   return (
     <div className="px-6 pt-6">
@@ -130,21 +130,21 @@ export default function LocaleSettingsPage() {
         <Globe className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Locale & finance</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Default timezone, currency, fiscal year and language for your organization. Shared with
         Identity & profile.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
       {state === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading settings…
         </div>
       ) : (
         <>
           <div className="max-w-xl space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
             <div>
-              <label className="mb-1 block text-[12px] font-medium text-zinc-700">Timezone</label>
+              <label className="mb-1 block text-[13px] font-medium text-zinc-700">Timezone</label>
               <select
                 value={state.timezone}
                 disabled={!canEdit}
@@ -158,7 +158,7 @@ export default function LocaleSettingsPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-medium text-zinc-700">Currency</label>
+              <label className="mb-1 block text-[13px] font-medium text-zinc-700">Currency</label>
               <select
                 value={state.currency}
                 disabled={!canEdit}
@@ -172,7 +172,7 @@ export default function LocaleSettingsPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-medium text-zinc-700">Fiscal year start</label>
+              <label className="mb-1 block text-[13px] font-medium text-zinc-700">Fiscal year start</label>
               <select
                 value={state.fiscalYearStart}
                 disabled={!canEdit}
@@ -186,7 +186,7 @@ export default function LocaleSettingsPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-[12px] font-medium text-zinc-700">Default language</label>
+              <label className="mb-1 block text-[13px] font-medium text-zinc-700">Default language</label>
               <select
                 value={state.language}
                 disabled={!canEdit}
@@ -205,7 +205,7 @@ export default function LocaleSettingsPage() {
               type="button"
               onClick={save}
               disabled={!canEdit || saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
             >
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Save changes

@@ -208,7 +208,7 @@ export default function DefaultsPage() {
     <div className="mx-auto w-full max-w-3xl px-6 py-6">
       {/* Header */}
       <header className="mb-6">
-        <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-400">
+        <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
           <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Defaults &amp; locks</span>
@@ -217,7 +217,7 @@ export default function DefaultsPage() {
           <Sliders className="h-5 w-5 text-[#0073EA]" />
           Defaults &amp; locks
         </h1>
-        <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-zinc-500">
+        <p className="mt-1 max-w-2xl text-[14px] leading-relaxed text-zinc-500">
           Set the look every member starts with, then lock any control to keep it consistent org-wide.
           A default seeds new members and anyone who hasn&apos;t customized; a{" "}
           <span className="font-medium text-zinc-700">lock</span> re-stamps that setting on every load, so
@@ -226,20 +226,20 @@ export default function DefaultsPage() {
       </header>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading org defaults…
         </div>
       ) : (
         <div className="space-y-8">
           {/* ── Appearance defaults ─────────────────────────── */}
           <section>
-            <h2 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <h2 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Default appearance
             </h2>
             <div className="rounded-xl border border-zinc-200 bg-white p-4">
               {/* Appearance */}
               <div className="mb-5">
-                <h3 className="mb-2 text-[13px] font-semibold text-zinc-800">Theme</h3>
+                <h3 className="mb-2 text-[14px] font-semibold text-zinc-800">Theme</h3>
                 <div className="grid grid-cols-3 gap-3">
                   {APPEARANCE_CARDS.map((opt) => {
                     const active = state.appearance === opt.value;
@@ -259,7 +259,7 @@ export default function DefaultsPage() {
                         }`}
                       >
                         <opt.Icon className="h-4 w-4 text-zinc-600" />
-                        <span className="text-[13px] font-medium text-zinc-900">{opt.label}</span>
+                        <span className="text-[14px] font-medium text-zinc-900">{opt.label}</span>
                       </button>
                     );
                   })}
@@ -268,7 +268,7 @@ export default function DefaultsPage() {
 
               {/* Accent */}
               <div className="mb-5">
-                <h3 className="mb-2 text-[13px] font-semibold text-zinc-800">Accent color</h3>
+                <h3 className="mb-2 text-[14px] font-semibold text-zinc-800">Accent color</h3>
                 <div className="flex flex-wrap gap-2.5">
                   {ACCENT_OPTIONS.map((a) => {
                     const active = state.accent === a.key;
@@ -294,14 +294,14 @@ export default function DefaultsPage() {
                     );
                   })}
                 </div>
-                <p className="mt-2 text-[11.5px] text-zinc-400">
+                <p className="mt-2 text-[12.5px] text-zinc-400">
                   Brand-safe swatches only. WorkwrK is the default brand blue.
                 </p>
               </div>
 
               {/* Density */}
               <div>
-                <h3 className="mb-2 text-[13px] font-semibold text-zinc-800">Density</h3>
+                <h3 className="mb-2 text-[14px] font-semibold text-zinc-800">Density</h3>
                 <div
                   className="inline-flex rounded-lg p-0.5"
                   style={{ background: "#f4f4f5", border: "1px solid #e4e4e7" }}
@@ -318,7 +318,7 @@ export default function DefaultsPage() {
                           background: active ? "#fff" : "transparent",
                           boxShadow: active ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
                         }}
-                        className={`rounded-md px-4 py-1.5 text-[13px] font-medium transition-colors ${
+                        className={`rounded-md px-4 py-1.5 text-[14px] font-medium transition-colors ${
                           saving ? "opacity-60" : ""
                         } ${active ? "text-zinc-900" : "text-zinc-600 hover:text-zinc-900"}`}
                       >
@@ -333,13 +333,13 @@ export default function DefaultsPage() {
 
           {/* ── Locks ───────────────────────────────────────── */}
           <section>
-            <h2 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <h2 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Locked controls
             </h2>
 
             <div className="mb-3 flex items-start gap-2.5 rounded-xl border border-[#0073EA]/20 bg-[#0073EA]/[0.04] p-3.5">
               <Lock className="mt-0.5 h-4 w-4 shrink-0 text-[#0073EA]" />
-              <p className="text-[12.5px] leading-relaxed text-zinc-600">
+              <p className="text-[13.5px] leading-relaxed text-zinc-600">
                 <span className="font-semibold text-zinc-800">A lock freezes a setting for every member.</span>{" "}
                 While locked, that setting always resolves to the org default above: a member&apos;s own value is
                 overridden on every load, so their change never sticks. The Theme and Home locks also visibly
@@ -361,14 +361,14 @@ export default function DefaultsPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-semibold text-zinc-900">{g.label}</span>
+                        <span className="text-[14px] font-semibold text-zinc-900">{g.label}</span>
                         {locked && (
-                          <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[#0073EA]">
+                          <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#0073EA]">
                             <Lock className="h-2.5 w-2.5" /> Locked
                           </span>
                         )}
                       </div>
-                      <p className="mt-0.5 text-[12.5px] leading-relaxed text-zinc-500">{g.desc}</p>
+                      <p className="mt-0.5 text-[13.5px] leading-relaxed text-zinc-500">{g.desc}</p>
                     </div>
                     <div className="mt-0.5 shrink-0">
                       <Switch
@@ -382,7 +382,7 @@ export default function DefaultsPage() {
                 );
               })}
             </ul>
-            <p className="mt-2 text-[11.5px] text-zinc-400">
+            <p className="mt-2 text-[12.5px] text-zinc-400">
               Members tune their own look in{" "}
               <Link href="/account/appearance" className="text-[#0073EA] hover:underline">
                 Appearance

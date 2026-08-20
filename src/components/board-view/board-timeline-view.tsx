@@ -134,7 +134,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <CalendarRange className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <p className="text-[12.5px] text-zinc-500">No items yet — schedule work with start/due dates to see the timeline.</p>
+        <p className="text-[13.5px] text-zinc-500">No items yet — schedule work with start/due dates to see the timeline.</p>
       </div>
     );
   }
@@ -145,11 +145,11 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
         <div className="min-w-[860px]">
           {/* Week header */}
           <div className="grid border-b border-zinc-200" style={{ gridTemplateColumns: `160px repeat(${WEEK_COUNT}, 1fr)` }}>
-            <div className="px-3 py-2 text-[11px] font-medium text-zinc-400 uppercase tracking-wide">Status</div>
+            <div className="px-3 py-2 text-[12px] font-medium text-zinc-400 uppercase tracking-wide">Status</div>
             {weeks.map((w, i) => (
               <div
                 key={i}
-                className={`px-1.5 py-2 text-[10.5px] tabular-nums border-l border-zinc-100 ${
+                className={`px-1.5 py-2 text-[11.5px] tabular-nums border-l border-zinc-100 ${
                   w.isCurrent ? "bg-[var(--os-brand)]/[0.06] font-semibold text-[var(--os-brand)]" : "text-zinc-400"
                 }`}
               >
@@ -159,7 +159,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
           </div>
 
           {packedLanes.length === 0 ? (
-            <div className="px-4 py-10 text-center text-[12.5px] text-zinc-500">
+            <div className="px-4 py-10 text-center text-[13.5px] text-zinc-500">
               Nothing scheduled in this 12-week window.
             </div>
           ) : (
@@ -171,7 +171,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
               >
                 <div className="px-3 py-2 flex items-start">
                   <span
-                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10.5px] font-medium mt-0.5"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[11.5px] font-medium mt-0.5"
                     style={{ background: `${lane.color}22`, color: lane.color }}
                   >
                     {lane.label}
@@ -195,7 +195,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
                       type="button"
                       onClick={() => onOpenItem?.(r.item.id)}
                       onContextMenu={(e) => menu.openItemMenu(e, r.item)}
-                      className="absolute rounded text-left text-[10.5px] font-medium text-white px-1.5 truncate hover:brightness-95"
+                      className="absolute rounded text-left text-[11.5px] font-medium text-white px-1.5 truncate hover:brightness-95"
                       style={{
                         left: `calc(${(r.startCol / totalDays) * 100}% + 2px)`,
                         width: `calc(${(r.spanCols / totalDays) * 100}% - 4px)`,
@@ -218,7 +218,7 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
 
       {unscheduled.length > 0 ? (
         <div className="px-3 py-2 border-t border-zinc-100 flex items-center gap-2 flex-wrap">
-          <span className="text-[11px] text-zinc-400 uppercase tracking-wide font-medium">
+          <span className="text-[12px] text-zinc-400 uppercase tracking-wide font-medium">
             Unscheduled ({unscheduled.length})
           </span>
           {unscheduled.slice(0, 8).map((it) => (
@@ -227,14 +227,14 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
               type="button"
               onClick={() => onOpenItem?.(it.id)}
               onContextMenu={(e) => menu.openItemMenu(e, it)}
-              className="inline-flex items-center h-6 px-2 rounded-md border border-zinc-200 text-[11.5px] text-zinc-600 hover:bg-zinc-50 max-w-[200px] truncate"
+              className="inline-flex items-center h-6 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50 max-w-[200px] truncate"
               title={it.title}
             >
               {it.title}
             </button>
           ))}
           {unscheduled.length > 8 ? (
-            <span className="text-[11px] text-zinc-400">+{unscheduled.length - 8} more</span>
+            <span className="text-[12px] text-zinc-400">+{unscheduled.length - 8} more</span>
           ) : null}
         </div>
       ) : null}

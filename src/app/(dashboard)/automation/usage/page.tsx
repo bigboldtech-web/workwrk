@@ -49,15 +49,15 @@ function MiniTable({
 }) {
   return (
     <div className={`${CARD} p-4`}>
-      <div className="text-[12.5px] font-semibold text-zinc-900">{title}</div>
+      <div className="text-[13.5px] font-semibold text-zinc-900">{title}</div>
       {rows.length === 0 ? (
-        <div className="py-5 text-[12px] text-zinc-400">Nothing yet this month.</div>
+        <div className="py-5 text-[13px] text-zinc-400">Nothing yet this month.</div>
       ) : (
         <div className="mt-1.5">
           {rows.map((r) => (
             <div
               key={r.key}
-              className="flex h-7 items-center gap-2 border-b border-zinc-100 text-[12.5px] last:border-0"
+              className="flex h-7 items-center gap-2 border-b border-zinc-100 text-[13.5px] last:border-0"
             >
               <span className="min-w-0 flex-1 truncate text-zinc-700">{r.label}</span>
               <span className="shrink-0 tabular-nums text-zinc-500">{r.count}</span>
@@ -119,9 +119,9 @@ export default function AutomationUsagePage() {
 
       <div className="flex-1 overflow-y-auto p-4">
         {error ? (
-          <div className="p-6 text-[13px] text-zinc-500">Couldn&apos;t load automation usage.</div>
+          <div className="p-6 text-[14px] text-zinc-500">Couldn&apos;t load automation usage.</div>
         ) : usage === null ? (
-          <div className="flex items-center gap-2 p-6 text-[13px] text-zinc-500">
+          <div className="flex items-center gap-2 p-6 text-[14px] text-zinc-500">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </div>
         ) : (
@@ -129,8 +129,8 @@ export default function AutomationUsagePage() {
             {/* Actions used vs limit */}
             <div className={`${CARD} p-4`}>
               <div className="flex items-baseline justify-between">
-                <div className="text-[12.5px] font-semibold text-zinc-900">Actions used</div>
-                <div className="text-[12px] tabular-nums text-zinc-500">
+                <div className="text-[13.5px] font-semibold text-zinc-900">Actions used</div>
+                <div className="text-[13px] tabular-nums text-zinc-500">
                   {usage.month.used.toLocaleString()} / {usage.month.limit.toLocaleString()} · {pct}%
                 </div>
               </div>
@@ -143,7 +143,7 @@ export default function AutomationUsagePage() {
                   }}
                 />
               </div>
-              <p className="mt-2 text-[12px] text-zinc-500">
+              <p className="mt-2 text-[13px] text-zinc-500">
                 {usage.month.blocked ? (
                   <span className="font-medium text-[#E2445C]">
                     Limit reached — automations are paused until the counter resets on the 1st.
@@ -160,9 +160,9 @@ export default function AutomationUsagePage() {
 
             {/* Daily usage */}
             <div className={`${CARD} p-4`}>
-              <div className="text-[12.5px] font-semibold text-zinc-900">Daily usage</div>
+              <div className="text-[13.5px] font-semibold text-zinc-900">Daily usage</div>
               {usage.month.used === 0 ? (
-                <div className="flex h-[180px] items-center justify-center text-[12.5px] text-zinc-400">
+                <div className="flex h-[180px] items-center justify-center text-[13.5px] text-zinc-400">
                   No actions executed this month yet.
                 </div>
               ) : (

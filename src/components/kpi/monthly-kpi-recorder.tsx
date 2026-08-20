@@ -245,11 +245,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
           <div className="flex items-center justify-center gap-3">
             <Button onClick={() => setSelectedPeriod(lastPeriod)} variant="outline" className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(lastPeriod)}
-              <Badge variant="secondary" className="text-[10px]">Last Month</Badge>
+              <Badge variant="secondary" className="text-[11px]">Last Month</Badge>
             </Button>
             <Button onClick={() => setSelectedPeriod(currentPeriod)} className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(currentPeriod)}
-              <Badge variant="secondary" className="text-[10px]">This Month</Badge>
+              <Badge variant="secondary" className="text-[11px]">This Month</Badge>
             </Button>
           </div>
         </CardContent>
@@ -342,7 +342,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                   <p className="text-xs text-muted-2">{kraFilled}/{kra.kpis.length} KPIs filled</p>
                 </div>
               </div>
-              <Badge variant="outline" className="text-[10px]">{kra.kpis.length} KPIs</Badge>
+              <Badge variant="outline" className="text-[11px]">{kra.kpis.length} KPIs</Badge>
             </button>
 
             {isExpanded && (
@@ -393,7 +393,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="text-sm">{kpi.name}</p>
                             <span
-                              className={`text-[10px] px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
+                              className={`text-[11px] px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
                               title={isMonthly ? "Monthly KPI" : `Defined ${cadenceLabel.toLowerCase()} — recording the monthly slice`}
                             >
                               {cadenceLabel}
@@ -404,13 +404,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
                             {kpi.unit && (
-                              <span className="text-[10px] text-muted-2">Unit: {kpi.unit}</span>
+                              <span className="text-[11px] text-muted-2">Unit: {kpi.unit}</span>
                             )}
                             {kpi.lowerIsBetter && (
-                              <span className="text-[10px] text-amber-400">Lower is better</span>
+                              <span className="text-[11px] text-amber-400">Lower is better</span>
                             )}
                             {!isMonthly && (
-                              <span className="text-[10px] text-muted-2">
+                              <span className="text-[11px] text-muted-2">
                                 {definedFreq === "QUARTERLY" || definedFreq === "ANNUALLY"
                                   ? `Tracked ${cadenceLabel.toLowerCase()} — enter this month's contribution`
                                   : `Tracked ${cadenceLabel.toLowerCase()} — enter the month's rolled-up actual`}
@@ -425,7 +425,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                              means; the record stores rating / ceiling · 100
                              as its score. */
                           <div className="min-w-[220px]">
-                            <p className="text-[10px] text-muted-2 uppercase">
+                            <p className="text-[11px] text-muted-2 uppercase">
                               Rating
                               {kpi.targetValue && kpi.targetValue > 0 ? ` · target ${kpi.targetValue}` : ""}
                             </p>
@@ -451,7 +451,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                 );
                               })}
                             </div>
-                            <p className="text-[10px] text-muted-2 mt-0.5 h-3 leading-3">
+                            <p className="text-[11px] text-muted-2 mt-0.5 h-3 leading-3">
                               {actual != null && RATING_ANCHORS[actual] ? RATING_ANCHORS[actual] : " "}
                             </p>
                           </div>
@@ -462,12 +462,12 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                 number you enter under Actual compares apples
                                 to apples. */}
                             <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
-                              <p className="text-[10px] text-muted-2 uppercase">Target / month</p>
+                              <p className="text-[11px] text-muted-2 uppercase">Target / month</p>
                               <p className="text-sm font-mono font-bold">
                                 {adjTarget != null ? adjTarget : "—"}
                               </p>
                               {targetHint && (
-                                <p className="text-[9px] text-muted-2 leading-tight">
+                                <p className="text-[10px] text-muted-2 leading-tight">
                                   from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
                                 </p>
                               )}
@@ -475,7 +475,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                             {/* Actual Value Input */}
                             <div className="min-w-[100px]">
-                              <p className="text-[10px] text-muted-2 uppercase">Actual</p>
+                              <p className="text-[11px] text-muted-2 uppercase">Actual</p>
                               <Input
                                 type="number"
                                 value={fd.actualValue}
@@ -489,7 +489,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                         {/* Score */}
                         <div className="text-center min-w-[60px]">
-                          <p className="text-[10px] text-muted-2 uppercase">Score</p>
+                          <p className="text-[11px] text-muted-2 uppercase">Score</p>
                           <p className={`text-sm font-mono font-bold ${
                             score == null ? "text-muted-2"
                             : score >= 90 ? "text-green-400"

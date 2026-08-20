@@ -236,16 +236,16 @@ export default function RolesPage() {
               : `${stats.total} role${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.unfilled > 0 ? ` · ${stats.unfilled} unfilled` : ""}`}
           </span>
           <div className="flex-1" />
-          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
           </Link>
-          <Link href="/people/departments" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/people/departments" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Building2 className="w-3.5 h-3.5 text-zinc-400" /> Departments
           </Link>
-          <Link href="/people/skills" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/people/skills" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <GraduationCap className="w-3.5 h-3.5 text-zinc-400" /> Skills
           </Link>
-          <button type="button" onClick={quickAdd} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]">
+          <button type="button" onClick={quickAdd} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[14px] font-medium hover:bg-[#0060c2]">
             <Plus className="w-3.5 h-3.5" /> New role
           </button>
         </div>

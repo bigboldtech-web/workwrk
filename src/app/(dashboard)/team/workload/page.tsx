@@ -142,7 +142,7 @@ export default async function TeamWorkloadPage() {
           <GaugeCircle className="w-4 h-4 text-zinc-500" />
           <span>Workload</span>
         </h1>
-        <span className="text-[12px] text-zinc-500 tabular-nums">
+        <span className="text-[13px] text-zinc-500 tabular-nums">
           {people.length} people
         </span>
       </div>

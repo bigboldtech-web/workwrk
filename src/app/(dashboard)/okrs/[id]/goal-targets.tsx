@@ -286,21 +286,21 @@ function TargetComposer({ okrId, onDone }: { okrId: string; onDone: () => void }
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="What measurable result defines success?"
-          className="h-8 text-[13px]"
+          className="h-8 text-[14px]"
         />
       </div>
       <div className="okrd-composer__grid">
         <div>
           <label className="okrd-composer__label" htmlFor="okrd-target-start">Start</label>
-          <Input id="okrd-target-start" type="number" step="any" value={startValue} onChange={(e) => setStartValue(e.target.value)} className="h-8 text-[13px]" />
+          <Input id="okrd-target-start" type="number" step="any" value={startValue} onChange={(e) => setStartValue(e.target.value)} className="h-8 text-[14px]" />
         </div>
         <div>
           <label className="okrd-composer__label" htmlFor="okrd-target-target">Target</label>
-          <Input id="okrd-target-target" type="number" step="any" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} className="h-8 text-[13px]" />
+          <Input id="okrd-target-target" type="number" step="any" value={targetValue} onChange={(e) => setTargetValue(e.target.value)} className="h-8 text-[14px]" />
         </div>
         <div>
           <label className="okrd-composer__label" htmlFor="okrd-target-unit">Unit <em>(optional)</em></label>
-          <Input id="okrd-target-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="%, $, users…" className="h-8 text-[13px]" />
+          <Input id="okrd-target-unit" value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="%, $, users…" className="h-8 text-[14px]" />
         </div>
       </div>
       {error && <p className="okrd-composer__error">{error}</p>}

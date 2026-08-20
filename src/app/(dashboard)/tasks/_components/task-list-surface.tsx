@@ -915,7 +915,7 @@ export function TaskListSurface({
           <div className="relative">
             <button
               type="button"
-              className={`inline-flex h-[26px] items-center gap-1 rounded-md !px-2 text-[12px] font-medium ${
+              className={`inline-flex h-[26px] items-center gap-1 rounded-md !px-2 text-[13px] font-medium ${
                 viewMenuOpen ? "bg-zinc-100 text-zinc-900" : "text-zinc-600 hover:bg-zinc-100"
               }`}
               onClick={() => setViewMenuOpen((open) => !open)}
@@ -941,7 +941,7 @@ export function TaskListSurface({
             <div className="relative">
               <button
                 type="button"
-                className={`inline-flex h-6 items-center gap-1.5 rounded-full !px-2.5 text-[11px] font-medium ${
+                className={`inline-flex h-6 items-center gap-1.5 rounded-full !px-2.5 text-[12px] font-medium ${
                   groupMenuOpen || groupBy !== "none"
                     ? "border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] text-[var(--os-brand-ink)]"
                     : "text-zinc-600 hover:bg-zinc-100"
@@ -1021,7 +1021,7 @@ export function TaskListSurface({
                     }
                   }}
                   placeholder="Search tasks"
-                  className="h-full w-36 bg-transparent text-[12px] text-zinc-800 outline-none placeholder:text-zinc-400"
+                  className="h-full w-36 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400"
                   autoFocus
                 />
                 <button
@@ -1216,7 +1216,7 @@ function ViewTabButton({ view, active, onClick }: { view: ViewDef; active: boole
   return (
     <button
       type="button"
-      className={`relative inline-flex h-full items-center gap-1.5 !px-1.5 text-[12px] font-medium ${
+      className={`relative inline-flex h-full items-center gap-1.5 !px-1.5 text-[13px] font-medium ${
         active ? "text-zinc-900 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-zinc-900" : "text-zinc-600 hover:text-zinc-900"
       }`}
       onClick={onClick}
@@ -1257,7 +1257,7 @@ function ViewCreatePanel({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search or describe a view to create"
-            className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !pl-3 !pr-8 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+            className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !pl-3 !pr-8 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
             autoFocus
           />
           <button
@@ -1289,7 +1289,7 @@ function ViewCreatePanel({
           ))}
         </div>
       </div>
-      <div className="flex items-center gap-4 border-t border-zinc-100 !px-2.5 py-1.5 text-[11px] text-zinc-600">
+      <div className="flex items-center gap-4 border-t border-zinc-100 !px-2.5 py-1.5 text-[12px] text-zinc-600">
         <Checkbox checked={privateView} label="Private view" onChange={onPrivateChange} />
         <Checkbox checked={pinView} label="Pin view" onChange={onPinChange} />
       </div>
@@ -1302,7 +1302,7 @@ function ViewCatalogItem({ view, onClick }: { view: ViewDef; onClick: () => void
   return (
     <button
       type="button"
-      className="flex h-8 items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
+      className="flex h-8 items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-100"
       onClick={onClick}
     >
       <EntityTile size="sm" icon={view.Icon} color={view.swatch} name={view.label} />
@@ -1421,20 +1421,20 @@ function ListMode({
   return (
     <div className="min-w-[860px] !px-4 py-3">
       {error ? (
-        <div className="mb-3 rounded-lg border border-red-100 bg-red-50 !px-3 py-2 text-[12px] font-medium text-red-700">
+        <div className="mb-3 rounded-lg border border-red-100 bg-red-50 !px-3 py-2 text-[13px] font-medium text-red-700">
           {error}
         </div>
       ) : null}
       {loading ? (
-        <div className="mb-3 text-[12px] font-medium text-zinc-400">Loading tasks…</div>
+        <div className="mb-3 text-[13px] font-medium text-zinc-400">Loading tasks…</div>
       ) : null}
       {tasks.length > 0 ? (
-        <div className="mb-2 text-[12px] font-medium text-zinc-500">
+        <div className="mb-2 text-[13px] font-medium text-zinc-500">
           {tasks.length} Task{tasks.length === 1 ? "" : "s"}
         </div>
       ) : null}
       <div
-        className="grid h-8 items-center border-b border-zinc-200 text-[12px] font-medium text-zinc-500"
+        className="grid h-8 items-center border-b border-zinc-200 text-[13px] font-medium text-zinc-500"
         style={{ gridTemplateColumns: tableTemplate }}
       >
         <span>Name</span>
@@ -1520,7 +1520,7 @@ function ListMode({
                 <div className="mb-2 flex h-7 items-center gap-1.5">
                   <button
                     type="button"
-                    className="inline-flex h-7 items-center gap-2 rounded-md text-left text-[13px] font-medium text-zinc-700"
+                    className="inline-flex h-7 items-center gap-2 rounded-md text-left text-[14px] font-medium text-zinc-700"
                     onClick={() => onToggleGroup(group.label)}
                   >
                     <ChevronDown className={`h-4 w-4 text-zinc-400 transition-transform ${collapsed ? "-rotate-90" : ""}`} />
@@ -1570,7 +1570,7 @@ function ListMode({
                 {!collapsed ? (
                   <>
                     <div
-                      className="grid border-b border-zinc-100 pb-2 text-[12px] font-medium text-zinc-400"
+                      className="grid border-b border-zinc-100 pb-2 text-[13px] font-medium text-zinc-400"
                       style={{ gridTemplateColumns: tableTemplate }}
                     >
                       <span>Name</span>
@@ -1691,7 +1691,7 @@ function CreateTaskRow({
 
   return (
     <div
-      className="relative grid min-h-7 items-center border-b border-zinc-100 bg-white text-[12px]"
+      className="relative grid min-h-7 items-center border-b border-zinc-100 bg-white text-[13px]"
       style={{ gridTemplateColumns: tableTemplate }}
     >
       <span className="flex min-w-0 items-center gap-1.5 pr-2">
@@ -1704,7 +1704,7 @@ function CreateTaskRow({
             if (event.key === "Escape") onCancel();
           }}
           placeholder="Task Name or type '/' for commands"
-          className="min-w-0 flex-1 bg-transparent text-[12px] text-zinc-900 outline-none placeholder:text-zinc-400"
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
           autoFocus
         />
         <div className="relative flex shrink-0 items-center gap-0.5">
@@ -1741,14 +1741,14 @@ function CreateTaskRow({
           />
           <button
             type="button"
-            className="ml-1 inline-flex h-6 items-center rounded-md !px-2 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+            className="ml-1 inline-flex h-6 items-center rounded-md !px-2 text-[12px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
             onClick={onCancel}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="inline-flex h-6 items-center rounded-md bg-[var(--os-brand-rail)] !px-2 text-[11px] font-medium text-white disabled:opacity-60"
+            className="inline-flex h-6 items-center rounded-md bg-[var(--os-brand-rail)] !px-2 text-[12px] font-medium text-white disabled:opacity-60"
             onClick={() => {
               void onSave();
             }}
@@ -1869,7 +1869,7 @@ function TaskRow({
 
   return (
     <div
-      className="group grid min-h-7 items-center border-b border-zinc-100 text-[12px] text-zinc-700 hover:bg-zinc-50"
+      className="group grid min-h-7 items-center border-b border-zinc-100 text-[13px] text-zinc-700 hover:bg-zinc-50"
       style={{ gridTemplateColumns: tableTemplate }}
     >
       <span className={`flex min-w-0 items-center gap-1.5 ${task.parentId ? "pl-7" : ""}`}>
@@ -1926,7 +1926,7 @@ function TaskRow({
                 setEditing(false);
               }
             }}
-            className="min-w-0 flex-1 rounded-sm bg-white text-[12px] font-medium text-zinc-900 outline-none ring-1 ring-[var(--os-brand-rail)]"
+            className="min-w-0 flex-1 rounded-sm bg-white text-[13px] font-medium text-zinc-900 outline-none ring-1 ring-[var(--os-brand-rail)]"
             autoFocus
           />
         ) : (
@@ -2015,7 +2015,7 @@ function TaskFieldCell({
   const [tagQuery, setTagQuery] = useState("");
   const [customDraft, setCustomDraft] = useState(task.customFields?.[column.key] ?? "");
 
-  const buttonClass = "inline-flex h-6 max-w-full items-center gap-1.5 truncate rounded-md !px-1.5 text-left text-[12px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900";
+  const buttonClass = "inline-flex h-6 max-w-full items-center gap-1.5 truncate rounded-md !px-1.5 text-left text-[13px] text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900";
 
   const addTag = () => {
     const nextTag = tagQuery.trim();
@@ -2035,7 +2035,7 @@ function TaskFieldCell({
   };
 
   if (column.key === "dateCreated") {
-    return <span className="truncate pr-3 text-[12px] text-zinc-600">{task.dateCreated}</span>;
+    return <span className="truncate pr-3 text-[13px] text-zinc-600">{task.dateCreated}</span>;
   }
 
   if (column.custom || column.key === "notes" || column.key === "linkedDocs") {
@@ -2215,7 +2215,7 @@ function TaskFieldCell({
       );
     default:
       return (
-        <span className="truncate pr-3 text-[12px] text-zinc-600">
+        <span className="truncate pr-3 text-[13px] text-zinc-600">
           {renderTaskValue(task, column)}
         </span>
       );
@@ -2226,7 +2226,7 @@ function AddTaskRow({ tableTemplate, onClick }: { tableTemplate: string; onClick
   return (
     <button
       type="button"
-      className="grid min-h-7 w-full items-center border-b border-zinc-50 text-left text-[12px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-700"
+      className="grid min-h-7 w-full items-center border-b border-zinc-50 text-left text-[13px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-700"
       style={{ gridTemplateColumns: tableTemplate }}
       onClick={onClick}
     >
@@ -2257,7 +2257,7 @@ function ComposerButton({
       type="button"
       title={label}
       aria-label={label}
-      className={`inline-flex h-[22px] items-center justify-center gap-1 rounded-md border border-zinc-200 !px-1.5 text-[11px] shadow-sm ${
+      className={`inline-flex h-[22px] items-center justify-center gap-1 rounded-md border border-zinc-200 !px-1.5 text-[12px] shadow-sm ${
         active ? "bg-zinc-100 text-zinc-900" : "bg-white text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
       }`}
       onClick={onClick}
@@ -2300,7 +2300,7 @@ function StatusMenu({ onSelect, onClose }: { onSelect: (value: TaskItem["status"
           <button
             key={status.key}
             type="button"
-            className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+            className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
             onClick={() => onSelect(status.key)}
           >
             <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }} />
@@ -2338,7 +2338,7 @@ function TaskTypeMenu({
             <button
               key={option.label}
               type="button"
-              className={`flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] ${
+              className={`flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] ${
                 value === option.label ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
               onClick={() => onSelect(option.label)}
@@ -2382,7 +2382,7 @@ function AssigneeMenu({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search or enter email..."
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-500"
+            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-zinc-500"
             autoFocus
           />
         </div>
@@ -2393,20 +2393,20 @@ function AssigneeMenu({
               <button
                 key={option.id}
                 type="button"
-                className="mb-1 flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-100"
+                className="mb-1 flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-100"
                 onClick={() => onSelect(option)}
               >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-semibold text-white">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[11px] font-semibold text-white">
                   {option.initials}
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate">{option.name}</span>
-                  {option.email ? <span className="block truncate text-[10px] text-zinc-400">{option.email}</span> : null}
+                  {option.email ? <span className="block truncate text-[11px] text-zinc-400">{option.email}</span> : null}
                 </span>
               </button>
             ))}
             {filteredOptions.length === 0 ? (
-              <div className="rounded-md bg-zinc-50 !px-2 py-2 text-[12px] text-zinc-500">
+              <div className="rounded-md bg-zinc-50 !px-2 py-2 text-[13px] text-zinc-500">
                 No workspace people found.
               </div>
             ) : null}
@@ -2414,7 +2414,7 @@ function AssigneeMenu({
           <PanelLabel>Agents</PanelLabel>
           <button
             type="button"
-            className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-400"
+            className="flex h-8 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-400"
             disabled
           >
             <span className="h-6 w-6 rounded-full bg-gradient-to-br from-orange-200 to-amber-300" />
@@ -2422,7 +2422,7 @@ function AssigneeMenu({
           </button>
           <button
             type="button"
-            className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[12px] font-medium text-zinc-400"
+            className="flex h-7 w-full cursor-not-allowed items-center gap-2 rounded-md !px-2 text-left text-[13px] font-medium text-zinc-400"
             disabled
           >
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--os-brand-rail)_12%,white)] text-[var(--os-brand-ink)]">
@@ -2459,11 +2459,11 @@ function DateMenu({ onSelect, onClose }: { onSelect: (label: string, isoDate: st
       <div className="fixed inset-0 z-[84]" onClick={onClose} aria-hidden />
       <DropdownPanel className="right-0 top-7 w-[500px] max-w-[calc(100vw-420px)] overflow-hidden">
         <div className="grid grid-cols-2 border-b border-zinc-100 !p-1.5">
-          <button type="button" className="flex h-7 items-center gap-2 rounded-md bg-zinc-100 !px-2.5 text-[12px] text-zinc-500">
+          <button type="button" className="flex h-7 items-center gap-2 rounded-md bg-zinc-100 !px-2.5 text-[13px] text-zinc-500">
             <CalendarDays className="h-3.5 w-3.5" />
             Start date
           </button>
-          <button type="button" className="ml-1.5 flex h-7 items-center gap-2 rounded-md border border-[var(--os-brand-rail)] bg-white !px-2.5 text-[12px] text-zinc-700">
+          <button type="button" className="ml-1.5 flex h-7 items-center gap-2 rounded-md border border-[var(--os-brand-rail)] bg-white !px-2.5 text-[13px] text-zinc-700">
             <CalendarDays className="h-3.5 w-3.5 text-[var(--os-brand-ink)]" />
             Due date
           </button>
@@ -2474,28 +2474,28 @@ function DateMenu({ onSelect, onClose }: { onSelect: (label: string, isoDate: st
               <button
                 key={option.label}
                 type="button"
-                className="flex h-7 w-full items-center justify-between !px-3 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+                className="flex h-7 w-full items-center justify-between !px-3 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
                 onClick={() => onSelect(option.label, formatDateInput(option.date))}
               >
                 <span>{option.label}</span>
                 <span className="text-zinc-400">{option.hint}</span>
               </button>
             ))}
-            <button type="button" className="mt-1.5 flex h-8 w-full items-center justify-between border-t border-zinc-100 !px-3 text-[12px] text-zinc-800">
+            <button type="button" className="mt-1.5 flex h-8 w-full items-center justify-between border-t border-zinc-100 !px-3 text-[13px] text-zinc-800">
               Set Recurring
               <ChevronRight className="h-4 w-4 text-zinc-500" />
             </button>
           </div>
           <div className="!p-3">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-[13px] font-medium text-zinc-900">{monthLabel}</span>
-              <span className="inline-flex items-center gap-3 text-[12px] text-zinc-600">
+              <span className="text-[14px] font-medium text-zinc-900">{monthLabel}</span>
+              <span className="inline-flex items-center gap-3 text-[13px] text-zinc-600">
                 Today
                 <ChevronDown className="h-4 w-4 rotate-180" />
                 <ChevronDown className="h-4 w-4" />
               </span>
             </div>
-            <div className="grid grid-cols-7 gap-y-1.5 text-center text-[12px]">
+            <div className="grid grid-cols-7 gap-y-1.5 text-center text-[13px]">
               {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => (
                 <span key={day} className="text-zinc-400">{day}</span>
               ))}
@@ -2521,8 +2521,8 @@ function DateMenu({ onSelect, onClose }: { onSelect: (label: string, isoDate: st
         <div className="flex items-center gap-2.5 border-t border-zinc-100 bg-zinc-50 !px-3 py-2">
           <span className="text-xl">🏖️</span>
           <div>
-            <p className="text-[12px] font-semibold text-zinc-900">Set up your work schedule</p>
-            <p className="text-[11px] text-zinc-500">Set working days/hours and holidays for your workspace.</p>
+            <p className="text-[13px] font-semibold text-zinc-900">Set up your work schedule</p>
+            <p className="text-[12px] text-zinc-500">Set working days/hours and holidays for your workspace.</p>
           </div>
           <X className="ml-auto h-5 w-5 text-zinc-400" />
         </div>
@@ -2548,7 +2548,7 @@ function PriorityMenu({ onSelect, onClose }: { onSelect: (value: TaskPriority) =
             <button
               key={option.label}
               type="button"
-              className="flex h-7 w-full items-center gap-2.5 rounded-md !px-2 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+              className="flex h-7 w-full items-center gap-2.5 rounded-md !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
               onClick={() => onSelect(option.label)}
             >
               <Flag className="h-4 w-4 fill-current" style={{ color: option.color }} />
@@ -2558,7 +2558,7 @@ function PriorityMenu({ onSelect, onClose }: { onSelect: (value: TaskPriority) =
         </div>
         <button
           type="button"
-          className="flex h-8 w-full items-center gap-2.5 border-t border-zinc-100 !px-4 text-left text-[12px] text-zinc-800 hover:bg-zinc-50"
+          className="flex h-8 w-full items-center gap-2.5 border-t border-zinc-100 !px-4 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
           onClick={() => onSelect("")}
         >
           <CircleDashed className="h-4 w-4 text-zinc-500" />
@@ -2590,7 +2590,7 @@ function TagsMenu({
         onKeyDown={(event) => {
           if (event.key === "Enter") onCreate();
         }}
-        className="h-9 w-full border-b border-zinc-100 !px-2.5 text-[12px] outline-none"
+        className="h-9 w-full border-b border-zinc-100 !px-2.5 text-[13px] outline-none"
         placeholder="Search or create tag..."
         autoFocus
       />
@@ -2598,12 +2598,12 @@ function TagsMenu({
         <PanelLabel>Select an option</PanelLabel>
         <button
           type="button"
-          className="flex h-7 w-full items-center gap-2 rounded-md bg-zinc-100 !px-2 text-left text-[12px] text-zinc-600"
+          className="flex h-7 w-full items-center gap-2 rounded-md bg-zinc-100 !px-2 text-left text-[13px] text-zinc-600"
           onClick={onCreate}
         >
           Create
           {query.trim() ? (
-            <span className="rounded-full bg-blue-100 !px-2 py-0.5 text-[12px] font-medium text-blue-700">{query.trim()}</span>
+            <span className="rounded-full bg-blue-100 !px-2 py-0.5 text-[13px] font-medium text-blue-700">{query.trim()}</span>
           ) : null}
           <span className="ml-auto text-zinc-400">↵</span>
         </button>
@@ -2661,14 +2661,14 @@ function BoardMode({
       <div className="mb-3 flex items-center justify-between">
         <button
           type="button"
-          className="inline-flex h-6 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] !px-2 text-[11px] font-medium text-[var(--os-brand-ink)]"
+          className="inline-flex h-6 items-center gap-1.5 rounded-full border border-[color-mix(in_srgb,var(--os-brand-rail)_18%,transparent)] bg-[color-mix(in_srgb,var(--os-brand-rail)_9%,white)] !px-2 text-[12px] font-medium text-[var(--os-brand-ink)]"
         >
           <Columns3 className="h-3.5 w-3.5" />
           Status
         </button>
         <button
           type="button"
-          className="inline-flex h-6 items-center gap-1.5 rounded-md border border-zinc-200 !px-2 text-[11px] text-zinc-600 hover:bg-zinc-50"
+          className="inline-flex h-6 items-center gap-1.5 rounded-md border border-zinc-200 !px-2 text-[12px] text-zinc-600 hover:bg-zinc-50"
           onClick={onCustomize}
         >
           <Settings className="h-3.5 w-3.5" />
@@ -2696,11 +2696,11 @@ function BoardMode({
               }}
             >
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="inline-flex items-center gap-1.5 rounded-md !px-1.5 py-0.5 text-[10px] font-semibold text-white" style={{ backgroundColor: status.color }}>
+                <span className="inline-flex items-center gap-1.5 rounded-md !px-1.5 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: status.color }}>
                   <Circle className="h-3 w-3 fill-current" />
                   {status.label}
                 </span>
-                <span className="text-[11px] font-medium text-zinc-500">{items.length}</span>
+                <span className="text-[12px] font-medium text-zinc-500">{items.length}</span>
               </div>
               <div className="space-y-1.5">
                 {items.map((task) => (
@@ -2730,7 +2730,7 @@ function BoardMode({
                 ) : null}
                 <button
                   type="button"
-                  className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-600 hover:bg-white/70"
+                  className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-600 hover:bg-white/70"
                   onClick={() => onAddTask(status.key)}
                 >
                   <Plus className="h-3.5 w-3.5" />
@@ -2742,7 +2742,7 @@ function BoardMode({
         })}
         <button
           type="button"
-          className="flex h-7 shrink-0 items-center gap-2 rounded-md !px-2.5 text-[12px] text-zinc-500 hover:bg-zinc-100"
+          className="flex h-7 shrink-0 items-center gap-2 rounded-md !px-2.5 text-[13px] text-zinc-500 hover:bg-zinc-100"
           onClick={onCustomize}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -2781,7 +2781,7 @@ function BoardTaskCard({
       role="button"
       tabIndex={0}
       draggable
-      className="group/card w-full cursor-grab rounded-md border border-zinc-200 bg-white !p-2 text-left text-[12px] shadow-sm transition hover:-translate-y-px hover:border-zinc-300 hover:shadow-md active:cursor-grabbing"
+      className="group/card w-full cursor-grab rounded-md border border-zinc-200 bg-white !p-2 text-left text-[13px] shadow-sm transition hover:-translate-y-px hover:border-zinc-300 hover:shadow-md active:cursor-grabbing"
       onClick={(event) => {
         if (dragStartedRef.current) {
           event.preventDefault();
@@ -2814,7 +2814,7 @@ function BoardTaskCard({
         }`} />
         <div className="min-w-0 flex-1">
           <p className="truncate font-medium text-zinc-900">{task.name}</p>
-          <div className="mt-1 flex items-center gap-2 text-[11px] text-zinc-500">
+          <div className="mt-1 flex items-center gap-2 text-[12px] text-zinc-500">
             {task.assignee ? <span className="truncate">{task.assignee}</span> : null}
             {task.dueDate ? <span>{task.dueDate}</span> : null}
             {task.priority ? <span>{task.priority}</span> : null}
@@ -2943,7 +2943,7 @@ function BoardDraftCard({
   onCancel: () => void;
 }) {
   return (
-    <div className="rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_28%,#e4e4e7)] bg-white !p-2 text-[12px] shadow-sm">
+    <div className="rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_28%,#e4e4e7)] bg-white !p-2 text-[13px] shadow-sm">
       <input
         value={draftTask.name}
         onChange={(event) => onDraftChange({ name: event.target.value })}
@@ -2952,7 +2952,7 @@ function BoardDraftCard({
           if (event.key === "Escape") onCancel();
         }}
         placeholder="Task name"
-        className="h-6 w-full bg-transparent text-[12px] text-zinc-900 outline-none placeholder:text-zinc-400"
+        className="h-6 w-full bg-transparent text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400"
         autoFocus
       />
       <div className="mt-2 flex items-center justify-between">
@@ -2963,14 +2963,14 @@ function BoardDraftCard({
         <div className="flex items-center gap-1">
           <button
             type="button"
-            className="h-6 rounded-md !px-2 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100"
+            className="h-6 rounded-md !px-2 text-[12px] font-medium text-zinc-500 hover:bg-zinc-100"
             onClick={onCancel}
           >
             Cancel
           </button>
           <button
             type="button"
-            className="h-6 rounded-md bg-[var(--os-brand-rail)] !px-2 text-[11px] font-medium text-white disabled:opacity-60"
+            className="h-6 rounded-md bg-[var(--os-brand-rail)] !px-2 text-[12px] font-medium text-white disabled:opacity-60"
             disabled={saving}
             onClick={() => {
               void onSave();
@@ -3000,14 +3000,14 @@ function CalendarMode({
 
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-orange-100 bg-orange-50 !px-2 text-[11px] font-medium text-orange-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-orange-100 bg-orange-50 !px-2 text-[12px] font-medium text-orange-700">
         <activeView.Icon className="h-3.5 w-3.5" />
         {activeView.label}
       </div>
       <div className="grid grid-cols-5 gap-2">
         {groups.map((group) => (
           <section key={group.label} className="min-h-[260px] rounded-lg border border-zinc-100 bg-zinc-50/60 !p-2">
-            <div className="mb-2 flex items-center justify-between text-[11px] font-semibold text-zinc-600">
+            <div className="mb-2 flex items-center justify-between text-[12px] font-semibold text-zinc-600">
               <span>{group.label}</span>
               <span>{group.items.length}</span>
             </div>
@@ -3016,14 +3016,14 @@ function CalendarMode({
                 <button
                   key={task.id}
                   type="button"
-                  className="w-full rounded-md border border-zinc-200 bg-white !p-2 text-left text-[12px] shadow-sm hover:border-zinc-300 hover:shadow-md"
+                  className="w-full rounded-md border border-zinc-200 bg-white !p-2 text-left text-[13px] shadow-sm hover:border-zinc-300 hover:shadow-md"
                   onClick={() => onOpenTask(task)}
                 >
                   <p className="truncate font-medium text-zinc-900">{task.name}</p>
-                  <p className="mt-1 truncate text-[11px] text-zinc-500">{task.assignee || "Unassigned"}</p>
+                  <p className="mt-1 truncate text-[12px] text-zinc-500">{task.assignee || "Unassigned"}</p>
                 </button>
               ))}
-              {group.items.length === 0 ? <p className="py-2 text-[11px] text-zinc-400">No tasks</p> : null}
+              {group.items.length === 0 ? <p className="py-2 text-[12px] text-zinc-400">No tasks</p> : null}
             </div>
           </section>
         ))}
@@ -3045,12 +3045,12 @@ function GanttMode({
 
   return (
     <div className="min-w-[920px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-red-100 bg-red-50 !px-2 text-[11px] font-medium text-red-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-red-100 bg-red-50 !px-2 text-[12px] font-medium text-red-700">
         <activeView.Icon className="h-3.5 w-3.5" />
         {activeView.label}
       </div>
       <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
-        <div className="grid grid-cols-[260px_repeat(6,minmax(100px,1fr))] border-b border-zinc-100 bg-zinc-50 text-[11px] font-medium text-zinc-500">
+        <div className="grid grid-cols-[260px_repeat(6,minmax(100px,1fr))] border-b border-zinc-100 bg-zinc-50 text-[12px] font-medium text-zinc-500">
           <span className="!px-3 py-2">Task</span>
           {["Start", "Week 1", "Week 2", "Week 3", "Week 4", "Due"].map((label) => (
             <span key={label} className="border-l border-zinc-100 !px-3 py-2">{label}</span>
@@ -3064,7 +3064,7 @@ function GanttMode({
             <button
               key={task.id}
               type="button"
-              className="grid min-h-9 w-full grid-cols-[260px_repeat(6,minmax(100px,1fr))] items-center border-b border-zinc-100 text-left text-[12px] hover:bg-zinc-50"
+              className="grid min-h-9 w-full grid-cols-[260px_repeat(6,minmax(100px,1fr))] items-center border-b border-zinc-100 text-left text-[13px] hover:bg-zinc-50"
               onClick={() => onOpenTask(task)}
             >
               <span className="flex min-w-0 items-center gap-2 !px-3">
@@ -3072,7 +3072,7 @@ function GanttMode({
                 <span className="truncate font-medium text-zinc-900">{task.name}</span>
               </span>
               <span
-                className="h-5 rounded-full !px-2 text-[11px] font-medium leading-5 text-white"
+                className="h-5 rounded-full !px-2 text-[12px] font-medium leading-5 text-white"
                 style={{
                   gridColumn: `${barStart + 1} / span ${barSpan}`,
                   backgroundColor: statusMeta.color,
@@ -3084,7 +3084,7 @@ function GanttMode({
           );
         })}
         {lanes.length === 0 ? (
-          <div className="flex min-h-[220px] items-center justify-center text-[12px] text-zinc-400">
+          <div className="flex min-h-[220px] items-center justify-center text-[13px] text-zinc-400">
             Add a task to populate the timeline.
           </div>
         ) : null}
@@ -3098,7 +3098,7 @@ function DocMode({ tasks, activeView }: { tasks: TaskItem[]; activeView: ViewDef
 
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 !px-2 text-[11px] font-medium text-blue-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 !px-2 text-[12px] font-medium text-blue-700">
         <activeView.Icon className="h-3.5 w-3.5" />
         {activeView.label}
       </div>
@@ -3107,18 +3107,18 @@ function DocMode({ tasks, activeView }: { tasks: TaskItem[]; activeView: ViewDef
           value={note}
           onChange={(event) => setNote(event.target.value)}
           placeholder="Add notes, decisions, or context for this list..."
-          className="min-h-[360px] resize-none rounded-xl border border-zinc-200 bg-white !p-4 text-[13px] leading-6 text-zinc-800 outline-none focus:border-[var(--os-brand-rail)]"
+          className="min-h-[360px] resize-none rounded-xl border border-zinc-200 bg-white !p-4 text-[14px] leading-6 text-zinc-800 outline-none focus:border-[var(--os-brand-rail)]"
         />
         <aside className="rounded-xl border border-zinc-200 bg-white !p-3">
-          <p className="mb-2 text-[12px] font-semibold text-zinc-900">Linked tasks</p>
+          <p className="mb-2 text-[13px] font-semibold text-zinc-900">Linked tasks</p>
           <div className="space-y-1">
             {tasks.slice(0, 8).map((task) => (
-              <div key={task.id} className="flex items-center gap-2 rounded-md !px-2 py-1.5 text-[12px] text-zinc-700">
+              <div key={task.id} className="flex items-center gap-2 rounded-md !px-2 py-1.5 text-[13px] text-zinc-700">
                 <CircleDashed className="h-3.5 w-3.5 text-zinc-400" />
                 <span className="truncate">{task.name}</span>
               </div>
             ))}
-            {tasks.length === 0 ? <p className="text-[12px] text-zinc-400">No linked tasks yet.</p> : null}
+            {tasks.length === 0 ? <p className="text-[13px] text-zinc-400">No linked tasks yet.</p> : null}
           </div>
         </aside>
       </div>
@@ -3175,7 +3175,7 @@ function FormMode({
 
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 !px-2 text-[11px] font-medium text-blue-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 !px-2 text-[12px] font-medium text-blue-700">
         <activeView.Icon className="h-3.5 w-3.5" />
         {activeView.label}
       </div>
@@ -3188,16 +3188,16 @@ function FormMode({
       >
         <div className="border-b border-zinc-100 !px-4 py-3">
           <h2 className="text-[14px] font-semibold text-zinc-900">Task intake form</h2>
-          <p className="mt-1 text-[12px] text-zinc-500">Create list tasks without leaving the current view.</p>
+          <p className="mt-1 text-[13px] text-zinc-500">Create list tasks without leaving the current view.</p>
         </div>
-        <div className="grid gap-3 !p-4 text-[12px]">
+        <div className="grid gap-3 !p-4 text-[13px]">
           <label className="grid gap-1.5">
             <span className="font-medium text-zinc-700">Task name</span>
             <input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               placeholder="Enter task name"
-              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
+              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[14px] outline-none focus:border-[var(--os-brand-rail)]"
               autoFocus
             />
           </label>
@@ -3205,7 +3205,7 @@ function FormMode({
             <div className="relative">
               <button
                 type="button"
-                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                 onClick={() => setOpenMenu(openMenu === "assignee" ? null : "assignee")}
               >
                 <span className="inline-flex min-w-0 items-center gap-2">
@@ -3229,7 +3229,7 @@ function FormMode({
             <div className="relative">
               <button
                 type="button"
-                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                 onClick={() => setOpenMenu(openMenu === "date" ? null : "date")}
               >
                 <span className="inline-flex min-w-0 items-center gap-2">
@@ -3252,7 +3252,7 @@ function FormMode({
             <div className="relative">
               <button
                 type="button"
-                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                 onClick={() => setOpenMenu(openMenu === "priority" ? null : "priority")}
               >
                 <span className="inline-flex min-w-0 items-center gap-2">
@@ -3274,7 +3274,7 @@ function FormMode({
             <div className="relative">
               <button
                 type="button"
-                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                className="flex h-9 w-full items-center justify-between rounded-lg border border-zinc-200 !px-3 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                 onClick={() => setOpenMenu(openMenu === "type" ? null : "type")}
               >
                 <span className="inline-flex min-w-0 items-center gap-2">
@@ -3301,14 +3301,14 @@ function FormMode({
               value={tagDraft}
               onChange={(event) => setTagDraft(event.target.value)}
               placeholder="Comma separated tags"
-              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
+              className="h-9 rounded-lg border border-zinc-200 !px-3 text-[14px] outline-none focus:border-[var(--os-brand-rail)]"
             />
           </label>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-zinc-100 !px-4 py-3">
           <button
             type="button"
-            className="h-8 rounded-md !px-3 text-[12px] text-zinc-500 hover:bg-zinc-100"
+            className="h-8 rounded-md !px-3 text-[13px] text-zinc-500 hover:bg-zinc-100"
             onClick={() => {
               setTitle("");
               setAssignee("");
@@ -3324,7 +3324,7 @@ function FormMode({
           <button
             type="submit"
             disabled={!title.trim() || saving}
-            className="h-8 rounded-md bg-[var(--os-brand-rail)] !px-3 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-8 rounded-md bg-[var(--os-brand-rail)] !px-3 text-[13px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Creating…" : "Create task"}
           </button>
@@ -3345,13 +3345,13 @@ function PlaceholderMode({
 }) {
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 !px-2 text-[11px] font-medium text-zinc-700">
+      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 !px-2 text-[12px] font-medium text-zinc-700">
         <activeView.Icon className="h-3.5 w-3.5" style={{ color: activeView.swatch }} />
         {activeView.label}
       </div>
       <div className="rounded-xl border border-zinc-200 bg-white !p-4">
         <h2 className="mb-1.5 text-[14px] font-semibold text-zinc-900">{activeView.label} view</h2>
-        <p className="mb-4 max-w-[440px] text-[12px] leading-5 text-zinc-500">
+        <p className="mb-4 max-w-[440px] text-[13px] leading-5 text-zinc-500">
           This view is active and keeps the same task data. Open a task from the preview while this renderer is expanded.
         </p>
         <div className="grid max-w-[640px] grid-cols-2 gap-2">
@@ -3359,7 +3359,7 @@ function PlaceholderMode({
             <button
               key={task.id}
               type="button"
-              className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 bg-white !px-2 text-left text-[12px] hover:bg-zinc-50"
+              className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 bg-white !px-2 text-left text-[13px] hover:bg-zinc-50"
               onClick={() => onOpenTask(task)}
             >
               <CircleDashed className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
@@ -3421,7 +3421,7 @@ function TaskDetailModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 !px-3 text-[12px] text-zinc-500">
+          <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 !px-3 text-[13px] text-zinc-500">
             <div className="flex min-w-0 items-center gap-1.5">
               <span className="truncate">My Wrk</span>
               <span>/</span>
@@ -3437,7 +3437,7 @@ function TaskDetailModal({
           </header>
 
           <div className="min-h-0 flex-1 overflow-auto !px-10 py-7">
-            <div className="mb-4 inline-flex h-6 items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 !px-2 text-[11px] text-zinc-700">
+            <div className="mb-4 inline-flex h-6 items-center gap-1.5 rounded-md border border-zinc-200 bg-zinc-50 !px-2 text-[12px] text-zinc-700">
               <CircleDashed className="h-3.5 w-3.5" />
               <button
                 type="button"
@@ -3461,17 +3461,17 @@ function TaskDetailModal({
               </span>
             </div>
             <h2 className="mb-4 text-[24px] font-semibold leading-tight text-zinc-950">{task.name}</h2>
-            <div className="mb-5 rounded-lg bg-zinc-50 !px-3 py-2 text-[12px] text-zinc-600">
+            <div className="mb-5 rounded-lg bg-zinc-50 !px-3 py-2 text-[13px] text-zinc-600">
               <Bot className="mr-1.5 inline h-3.5 w-3.5 text-[#0073EA]" />
               Ask Brain to write a description, generate subtasks, or find similar tasks
             </div>
 
-            <div className="grid max-w-[760px] grid-cols-2 gap-x-12 gap-y-3 text-[12px]">
+            <div className="grid max-w-[760px] grid-cols-2 gap-x-12 gap-y-3 text-[13px]">
               <TaskDetailField Icon={CheckCircle2} label="Status">
                 <div className="relative flex items-center gap-1.5">
                   <button
                     type="button"
-                    className="inline-flex h-6 items-center gap-1 rounded-md !px-2 text-[11px] font-semibold text-white"
+                    className="inline-flex h-6 items-center gap-1 rounded-md !px-2 text-[12px] font-semibold text-white"
                     style={{ backgroundColor: statusMeta.color }}
                     onClick={() => setStatusOpen((open) => !open)}
                     aria-haspopup="menu"
@@ -3495,7 +3495,7 @@ function TaskDetailModal({
                           <button
                             key={status.key}
                             type="button"
-                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                             onClick={() => {
                               setStatusOpen(false);
                               void onTaskChange(task.id, { status: status.key });
@@ -3575,7 +3575,7 @@ function TaskDetailModal({
                           <button
                             key={priority || "clear"}
                             type="button"
-                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                            className="flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
                             onClick={() => {
                               setPriorityOpen(false);
                               void onTaskChange(task.id, { priority });
@@ -3600,7 +3600,7 @@ function TaskDetailModal({
                     {task.tags.length > 0 ? (
                       <span className="flex min-w-0 flex-wrap gap-1">
                         {task.tags.slice(0, 3).map((tag) => (
-                          <span key={tag} className="rounded-full bg-blue-50 !px-1.5 py-0.5 text-[11px] text-blue-700">
+                          <span key={tag} className="rounded-full bg-blue-50 !px-1.5 py-0.5 text-[12px] text-blue-700">
                             {tag}
                           </span>
                         ))}
@@ -3639,10 +3639,10 @@ function TaskDetailModal({
                 }
               }}
               placeholder="Add description, or write with AI"
-              className="mb-12 min-h-[72px] w-full max-w-[760px] resize-y rounded-lg border border-transparent bg-white !p-2 text-[13px] leading-5 text-zinc-700 outline-none placeholder:text-zinc-400 hover:border-zinc-100 focus:border-[var(--os-brand-rail)]"
+              className="mb-12 min-h-[72px] w-full max-w-[760px] resize-y rounded-lg border border-transparent bg-white !p-2 text-[14px] leading-5 text-zinc-700 outline-none placeholder:text-zinc-400 hover:border-zinc-100 focus:border-[var(--os-brand-rail)]"
             />
 
-            <div className="grid max-w-[360px] gap-3 text-[12px] text-zinc-700">
+            <div className="grid max-w-[360px] gap-3 text-[13px] text-zinc-700">
               {[
                 { label: "Add fields", Icon: Pencil, panel: "fields" as const },
                 { label: "Add subtask", Icon: GitBranch },
@@ -3789,24 +3789,24 @@ function ActivityPanel({ task }: { task: TaskItem }) {
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
       <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
-        <h3 className="text-[13px] font-semibold text-zinc-900">Activity</h3>
+        <h3 className="text-[14px] font-semibold text-zinc-900">Activity</h3>
         <div className="flex items-center gap-2 text-zinc-500">
           <Search className="h-3.5 w-3.5" />
           <MessageSquare className="h-3.5 w-3.5" />
           <ListFilter className="h-3.5 w-3.5" />
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[11px] text-zinc-500">
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[12px] text-zinc-500">
         <div className="mb-3 flex">
           <span>You created this task</span>
           <span className="ml-auto">{task.dateCreated}</span>
         </div>
-        {loading ? <div className="text-[11px] text-zinc-400">Loading activity…</div> : null}
-        {error ? <div className="mb-2 rounded-md bg-red-50 !px-2 py-1 text-[11px] text-red-600">{error}</div> : null}
+        {loading ? <div className="text-[12px] text-zinc-400">Loading activity…</div> : null}
+        {error ? <div className="mb-2 rounded-md bg-red-50 !px-2 py-1 text-[12px] text-red-600">{error}</div> : null}
         <div className="space-y-2">
           {comments.map((comment) => (
-            <div key={comment.id} className="rounded-lg border border-zinc-200 bg-white !p-2 text-[12px] text-zinc-700 shadow-sm">
-              <div className="mb-1 flex items-center gap-2 text-[10px] font-medium text-zinc-400">
+            <div key={comment.id} className="rounded-lg border border-zinc-200 bg-white !p-2 text-[13px] text-zinc-700 shadow-sm">
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
                 <UserRound className="h-3 w-3" />
                 <span>{commentAuthorName(comment)}</span>
                 {comment.createdAt ? <span className="ml-auto">{formatActivityTime(comment.createdAt)}</span> : null}
@@ -3826,16 +3826,16 @@ function ActivityPanel({ task }: { task: TaskItem }) {
               if (event.key === "Enter") void addComment();
             }}
             placeholder="Write a comment..."
-            className="mb-2 h-8 w-full bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+            className="mb-2 h-8 w-full bg-transparent text-[13px] outline-none placeholder:text-zinc-400"
           />
           <div className="flex items-center gap-1 text-zinc-400">
             <Plus className="h-4 w-4" />
-            <span className="rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-600">Comment</span>
+            <span className="rounded-md bg-zinc-100 !px-2 py-1 text-[12px] text-zinc-600">Comment</span>
             <Bot className="h-4 w-4 text-[#0073EA]" />
             <Paperclip className="h-4 w-4" />
             <button
               type="button"
-              className="ml-auto rounded-md bg-zinc-100 !px-2 py-1 text-[11px] text-zinc-500 hover:bg-zinc-200 disabled:opacity-50"
+              className="ml-auto rounded-md bg-zinc-100 !px-2 py-1 text-[12px] text-zinc-500 hover:bg-zinc-200 disabled:opacity-50"
               disabled={!commentDraft.trim() || saving}
               onClick={() => void addComment()}
             >
@@ -3882,14 +3882,14 @@ function RelatedItemsPanel({
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
       <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
-        <h3 className="text-[13px] font-semibold text-zinc-900">Related items</h3>
+        <h3 className="text-[14px] font-semibold text-zinc-900">Related items</h3>
         <div className="flex items-center gap-2 text-zinc-500">
           <Search className="h-3.5 w-3.5" />
           <Plus className="h-3.5 w-3.5" />
         </div>
       </div>
       <div className="border-b border-zinc-100 !p-2">
-        <div className="grid grid-cols-2 rounded-md bg-zinc-100 !p-0.5 text-[11px] text-zinc-500">
+        <div className="grid grid-cols-2 rounded-md bg-zinc-100 !p-0.5 text-[12px] text-zinc-500">
           <button type="button" className="h-6 rounded bg-white font-medium text-zinc-700 shadow-sm">Relationships</button>
           <button type="button" className="h-6 rounded">References</button>
         </div>
@@ -3901,11 +3901,11 @@ function RelatedItemsPanel({
               <span className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl border border-zinc-200 bg-white text-zinc-400">
                 <GitBranch className="h-4 w-4" />
               </span>
-              <p className="text-[12px] font-semibold text-zinc-700">No related items</p>
-              <p className="mt-1 text-[11px] leading-4 text-zinc-400">Link related Tasks or Docs to organize and quickly access them here.</p>
+              <p className="text-[13px] font-semibold text-zinc-700">No related items</p>
+              <p className="mt-1 text-[12px] leading-4 text-zinc-400">Link related Tasks or Docs to organize and quickly access them here.</p>
               <button
                 type="button"
-                className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[11px] text-zinc-600 shadow-sm hover:bg-zinc-50"
+                className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[12px] text-zinc-600 shadow-sm hover:bg-zinc-50"
                 onClick={() => setAdding(true)}
               >
                 + Relate a Task or Doc
@@ -3916,7 +3916,7 @@ function RelatedItemsPanel({
         {items.length > 0 ? (
           <div className="space-y-1.5">
             {items.map((item) => (
-              <div key={item} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] text-zinc-700">
+              <div key={item} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[13px] text-zinc-700">
                 <GitBranch className="h-3.5 w-3.5 text-zinc-500" />
                 <span className="min-w-0 flex-1 truncate">{item}</span>
                 <button type="button" className="text-zinc-400 hover:text-zinc-700" onClick={() => removeItem(item)}>
@@ -3936,14 +3936,14 @@ function RelatedItemsPanel({
                 if (event.key === "Escape") setAdding(false);
               }}
               placeholder="Search or enter task/doc name"
-              className="h-8 w-full bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+              className="h-8 w-full bg-transparent text-[13px] outline-none placeholder:text-zinc-400"
               autoFocus
             />
             <div className="mt-1 flex justify-end gap-1">
-              <button type="button" className="h-7 rounded-md !px-2 text-[11px] text-zinc-500 hover:bg-zinc-100" onClick={() => setAdding(false)}>
+              <button type="button" className="h-7 rounded-md !px-2 text-[12px] text-zinc-500 hover:bg-zinc-100" onClick={() => setAdding(false)}>
                 Cancel
               </button>
-              <button type="button" className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2 text-[11px] font-medium text-white disabled:opacity-50" disabled={!draft.trim()} onClick={addItem}>
+              <button type="button" className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2 text-[12px] font-medium text-white disabled:opacity-50" disabled={!draft.trim()} onClick={addItem}>
                 Relate
               </button>
             </div>
@@ -3952,7 +3952,7 @@ function RelatedItemsPanel({
         {items.length > 0 && !adding ? (
           <button
             type="button"
-            className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[11px] text-zinc-600 shadow-sm hover:bg-zinc-50"
+            className="mt-3 h-7 rounded-md border border-zinc-200 bg-white !px-2.5 text-[12px] text-zinc-600 shadow-sm hover:bg-zinc-50"
             onClick={() => setAdding(true)}
           >
             + Relate a Task or Doc
@@ -3993,12 +3993,12 @@ function TaskFieldsPanel({
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
       <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
-        <h3 className="text-[13px] font-semibold text-zinc-900">Fields</h3>
+        <h3 className="text-[14px] font-semibold text-zinc-900">Fields</h3>
         <Settings className="h-3.5 w-3.5 text-zinc-500" />
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[12px]">
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[13px]">
         <label className="block">
-          <span className="mb-1.5 block text-[11px] font-medium text-zinc-500">Notes</span>
+          <span className="mb-1.5 block text-[12px] font-medium text-zinc-500">Notes</span>
           <textarea
             value={notesDraft}
             onChange={(event) => setNotesDraft(event.target.value)}
@@ -4007,26 +4007,26 @@ function TaskFieldsPanel({
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter") event.currentTarget.blur();
             }}
             placeholder="Attach notes to this task"
-            className="min-h-[104px] w-full resize-y rounded-lg border border-zinc-200 bg-white !p-2 text-[12px] leading-5 outline-none placeholder:text-zinc-400 focus:border-[var(--os-brand-rail)]"
+            className="min-h-[104px] w-full resize-y rounded-lg border border-zinc-200 bg-white !p-2 text-[13px] leading-5 outline-none placeholder:text-zinc-400 focus:border-[var(--os-brand-rail)]"
           />
         </label>
         <div className="mt-4 border-t border-zinc-100 pt-3">
-          <p className="mb-2 text-[11px] font-medium text-zinc-500">Custom fields</p>
+          <p className="mb-2 text-[12px] font-medium text-zinc-500">Custom fields</p>
           {customEntries.length > 0 ? (
             <div className="space-y-2">
               {customEntries.map(([key, value]) => (
                 <label key={key} className="block">
-                  <span className="mb-1 block truncate text-[11px] font-medium text-zinc-500">{key}</span>
+                  <span className="mb-1 block truncate text-[12px] font-medium text-zinc-500">{key}</span>
                   <input
                     defaultValue={value}
                     onBlur={(event) => updateField(key, event.currentTarget.value.trim())}
-                    className="h-8 w-full rounded-md border border-zinc-200 bg-white !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+                    className="h-8 w-full rounded-md border border-zinc-200 bg-white !px-2 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
                   />
                 </label>
               ))}
             </div>
           ) : (
-            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[11px] leading-4 text-zinc-500">
+            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[12px] leading-4 text-zinc-500">
               No custom fields are attached yet. Use the table column panel to add workspace fields, or save notes here.
             </p>
           )}
@@ -4067,10 +4067,10 @@ function ChecklistPanel({
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
       <div className="flex h-10 items-center justify-between border-b border-zinc-200 !px-3">
-        <h3 className="text-[13px] font-semibold text-zinc-900">Checklist</h3>
-        <span className="text-[11px] text-zinc-500">{completed}/{items.length}</span>
+        <h3 className="text-[14px] font-semibold text-zinc-900">Checklist</h3>
+        <span className="text-[12px] text-zinc-500">{completed}/{items.length}</span>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[12px]">
+      <div className="min-h-0 flex-1 overflow-y-auto !p-3 text-[13px]">
         <div className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2">
           <ClipboardList className="h-3.5 w-3.5 text-zinc-400" />
           <input
@@ -4080,11 +4080,11 @@ function ChecklistPanel({
               if (event.key === "Enter") addItem();
             }}
             placeholder="Add checklist item"
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-zinc-400"
           />
           <button
             type="button"
-            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
+            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[12px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
             disabled={!draft.trim()}
             onClick={addItem}
           >
@@ -4114,7 +4114,7 @@ function ChecklistPanel({
             </div>
           ))}
           {items.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[11px] leading-4 text-zinc-500">
+            <p className="rounded-lg border border-dashed border-zinc-200 bg-white !p-3 text-[12px] leading-4 text-zinc-500">
               Add checklist items to track smaller steps inside this task.
             </p>
           ) : null}
@@ -4156,10 +4156,10 @@ function AddLinksPanel({
   return (
     <aside className="flex w-[360px] shrink-0 flex-col border-l border-zinc-200 bg-zinc-50/40">
       <div className="flex h-10 items-center border-b border-zinc-200 !px-3">
-        <h3 className="text-[13px] font-semibold text-zinc-900">Add a link to this task</h3>
+        <h3 className="text-[14px] font-semibold text-zinc-900">Add a link to this task</h3>
       </div>
-      <div className="!p-3 text-[12px]">
-        <p className="mb-1.5 text-[11px] font-medium text-zinc-500">Add a link</p>
+      <div className="!p-3 text-[13px]">
+        <p className="mb-1.5 text-[12px] font-medium text-zinc-500">Add a link</p>
         <div className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2">
           <Link2 className="h-3.5 w-3.5 text-zinc-400" />
           <input
@@ -4168,12 +4168,12 @@ function AddLinksPanel({
             onKeyDown={(event) => {
               if (event.key === "Enter") addLink();
             }}
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-zinc-400"
+            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-zinc-400"
             placeholder="Paste URL"
           />
           <button
             type="button"
-            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
+            className="rounded bg-zinc-100 !px-1.5 py-0.5 text-[12px] text-zinc-600 hover:bg-zinc-200 disabled:opacity-40"
             disabled={!url.trim()}
             onClick={addLink}
           >
@@ -4183,7 +4183,7 @@ function AddLinksPanel({
         {links.length > 0 ? (
           <div className="mt-3 space-y-1.5">
             {links.map((link) => (
-              <div key={link} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] text-zinc-700">
+              <div key={link} className="flex h-8 items-center gap-2 rounded-md border border-zinc-200 bg-white !px-2 text-[13px] text-zinc-700">
                 <Link2 className="h-3.5 w-3.5 text-zinc-500" />
                 <span className="min-w-0 flex-1 truncate">{link}</span>
                 <button type="button" className="text-zinc-400 hover:text-zinc-700" onClick={() => removeLink(link)}>
@@ -4193,14 +4193,14 @@ function AddLinksPanel({
             ))}
           </div>
         ) : null}
-        <div className="mt-2 flex items-center gap-2 text-[11px] text-zinc-500">
+        <div className="mt-2 flex items-center gap-2 text-[12px] text-zinc-500">
           {["#7C3AED", "#F43F5E", "#0EA5E9", "#18181B", "#22C55E", "#2563EB"].map((color) => (
             <span key={color} className="h-3.5 w-3.5 rounded-full" style={{ backgroundColor: color }} />
           ))}
           <span>and more</span>
           <ChevronRight className="h-3 w-3" />
         </div>
-        <p className="mb-2 mt-5 text-[11px] font-medium text-zinc-500">Or relate items</p>
+        <p className="mb-2 mt-5 text-[12px] font-medium text-zinc-500">Or relate items</p>
         <div className="space-y-1">
           <LinkPanelItem Icon={GitBranch} label="Task or Doc" />
           <LinkPanelItem Icon={Workflow} label="Dependencies" />
@@ -4213,7 +4213,7 @@ function AddLinksPanel({
 
 function LinkPanelItem({ Icon, label }: { Icon: LucideIcon; label: string }) {
   return (
-    <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md !px-1 text-left text-[12px] text-zinc-700 hover:bg-zinc-100">
+    <button type="button" className="flex h-7 w-full items-center gap-2 rounded-md !px-1 text-left text-[13px] text-zinc-700 hover:bg-zinc-100">
       <Icon className="h-3.5 w-3.5 text-zinc-500" />
       {label}
     </button>
@@ -4273,9 +4273,9 @@ function FieldsPanel({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search for new or existing fields"
-          className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+          className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !px-2 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
         />
-        <div className="mt-1.5 flex gap-4 text-[12px]">
+        <div className="mt-1.5 flex gap-4 text-[13px]">
           <button
             type="button"
             className={`border-b-2 pb-1 ${fieldMode === "create" ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500"}`}
@@ -4364,10 +4364,10 @@ function ColumnMenuPopover({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search for new or existing fields"
-            className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+            className="h-8 w-full rounded-md border border-[color-mix(in_srgb,var(--os-brand-rail)_35%,#e4e4e7)] bg-white !px-2 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
             autoFocus
           />
-          <div className="mt-1.5 flex gap-4 text-[12px]">
+          <div className="mt-1.5 flex gap-4 text-[13px]">
             <button
               type="button"
               className={`border-b-2 pb-1 ${fieldMode === "create" ? "border-zinc-900 text-zinc-900" : "border-transparent text-zinc-500"}`}
@@ -4516,7 +4516,7 @@ function GroupMenu({
           <div className="relative flex-1">
             <button
               type="button"
-              className="flex h-8 w-full items-center gap-2 rounded-md border border-zinc-200 !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+              className="flex h-8 w-full items-center gap-2 rounded-md border border-zinc-200 !px-2 text-left text-[14px] text-zinc-800 hover:bg-zinc-50"
               onClick={() => { setFieldOpen((o) => !o); setDirOpen(false); }}
             >
               <CalendarDays className="h-3.5 w-3.5 text-zinc-500" />
@@ -4529,7 +4529,7 @@ function GroupMenu({
                   <button
                     key={option.key}
                     type="button"
-                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] ${
+                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[14px] ${
                       value === option.key ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                     }`}
                     onClick={() => { onChange(option.key); setFieldOpen(false); }}
@@ -4547,7 +4547,7 @@ function GroupMenu({
           <div className="relative w-[120px]">
             <button
               type="button"
-              className="flex h-8 w-full items-center gap-1 rounded-md border border-zinc-200 !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+              className="flex h-8 w-full items-center gap-1 rounded-md border border-zinc-200 !px-2 text-left text-[14px] text-zinc-800 hover:bg-zinc-50"
               onClick={() => { setDirOpen((o) => !o); setFieldOpen(false); }}
             >
               <span className="flex-1 truncate">{direction === "asc" ? "Ascending" : "Descending"}</span>
@@ -4559,7 +4559,7 @@ function GroupMenu({
                   <button
                     key={d}
                     type="button"
-                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[13px] ${
+                    className={`flex h-8 w-full items-center gap-2 !px-2 text-left text-[14px] ${
                       direction === d ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                     }`}
                     onClick={() => { onDirectionChange(d); setDirOpen(false); }}
@@ -4583,7 +4583,7 @@ function GroupMenu({
         </div>
 
         <div className="mt-2 flex items-center justify-between border-t border-zinc-100 pt-2">
-          <span className="text-[13px] text-zinc-700">Also group by List</span>
+          <span className="text-[14px] text-zinc-700">Also group by List</span>
           <Switch checked={alsoGroupByList} onChange={onAlsoGroupByListChange} aria-label="Also group by List" />
         </div>
       </div>
@@ -4610,7 +4610,7 @@ function GroupOptionsMenu({
     <>
       <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
       <div className="absolute left-0 top-7 z-[80] w-[260px] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl">
-        <div className="!px-4 py-3 text-[12px] font-medium text-zinc-500">Group options</div>
+        <div className="!px-4 py-3 text-[13px] font-medium text-zinc-500">Group options</div>
         <div className="!px-2 pb-2">
           <GroupOptionsItem Icon={CheckCircle2} label="Select all" onClick={onSelectAll} />
           <GroupOptionsItem Icon={ChevronRight} label="Collapse group" onClick={onCollapseGroup} rotate />
@@ -4638,7 +4638,7 @@ function GroupOptionsItem({
   return (
     <button
       type="button"
-      className="flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-800 hover:bg-zinc-50"
+      className="flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[14px] text-zinc-800 hover:bg-zinc-50"
       onClick={onClick}
     >
       <Icon className={`h-3.5 w-3.5 text-zinc-500 ${rotate ? "-rotate-90" : ""}`} />
@@ -4720,13 +4720,13 @@ function FilterMenu({
       <div className="fixed inset-0 z-[75]" onClick={onClose} aria-hidden />
       <div className="absolute right-0 top-7 z-[80] w-[480px] rounded-xl border border-zinc-200 bg-white !p-3 shadow-2xl">
         <div className="mb-2 flex items-center justify-between">
-          <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-zinc-800">
+          <span className="inline-flex items-center gap-1 text-[14px] font-semibold text-zinc-800">
             Filters <Info className="h-3.5 w-3.5 text-zinc-400" />
           </span>
           <div className="relative">
             <button
               type="button"
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 !px-2 text-[12px] text-zinc-600 hover:bg-zinc-50"
+              className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 !px-2 text-[13px] text-zinc-600 hover:bg-zinc-50"
               onClick={() => setSavedOpen((o) => !o)}
             >
               Saved filters <ChevronDown className="h-3.5 w-3.5" />
@@ -4734,12 +4734,12 @@ function FilterMenu({
             {savedOpen ? (
               <div className="absolute right-0 top-9 z-[82] w-[260px] rounded-lg border border-zinc-200 bg-white !p-2 shadow-xl">
                 {saved.length === 0 ? (
-                  <p className="!px-1 py-1 text-[12px] text-zinc-400">No saved filters yet.</p>
+                  <p className="!px-1 py-1 text-[13px] text-zinc-400">No saved filters yet.</p>
                 ) : (
                   <ul className="mb-2 space-y-0.5">
                     {saved.map((s) => (
                       <li key={s.name} className="group flex items-center gap-2 rounded-md !px-2 py-1 hover:bg-zinc-50">
-                        <button type="button" className="flex-1 truncate text-left text-[12.5px] text-zinc-700" onClick={() => applySaved(s)}>
+                        <button type="button" className="flex-1 truncate text-left text-[13.5px] text-zinc-700" onClick={() => applySaved(s)}>
                           {s.name}
                         </button>
                         <button type="button" className="text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500" aria-label="Delete saved filter" onClick={() => deleteSaved(s.name)}>
@@ -4755,13 +4755,13 @@ function FilterMenu({
                     onChange={(e) => setSaveName(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") saveCurrent(); }}
                     placeholder="Save current as…"
-                    className="h-7 flex-1 rounded-md border border-zinc-200 !px-2 text-[12px] outline-none"
+                    className="h-7 flex-1 rounded-md border border-zinc-200 !px-2 text-[13px] outline-none"
                   />
                   <button
                     type="button"
                     onClick={saveCurrent}
                     disabled={!saveName.trim() || filters.length === 0}
-                    className="h-7 rounded-md bg-zinc-900 !px-2 text-[12px] font-medium text-white disabled:opacity-40"
+                    className="h-7 rounded-md bg-zinc-900 !px-2 text-[13px] font-medium text-white disabled:opacity-40"
                   >
                     Save
                   </button>
@@ -4772,7 +4772,7 @@ function FilterMenu({
         </div>
 
         {filters.length === 0 ? (
-          <p className="!px-1 py-2 text-[12px] text-zinc-400">No filters yet. Add one to narrow this view.</p>
+          <p className="!px-1 py-2 text-[13px] text-zinc-400">No filters yet. Add one to narrow this view.</p>
         ) : (
           <div className="space-y-2">
             {filters.map((rule, idx) => (
@@ -4790,11 +4790,11 @@ function FilterMenu({
         )}
 
         <div className="mt-2 flex items-center justify-between">
-          <button type="button" className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--os-brand-ink)] hover:opacity-80" onClick={addFilter}>
+          <button type="button" className="inline-flex items-center gap-1 text-[13px] font-medium text-[var(--os-brand-ink)] hover:opacity-80" onClick={addFilter}>
             <Plus className="h-3.5 w-3.5" /> Add filter
           </button>
           {filters.length > 0 ? (
-            <button type="button" className="text-[12px] font-medium text-red-500 hover:text-red-600" onClick={() => onFiltersChange([])}>
+            <button type="button" className="text-[13px] font-medium text-red-500 hover:text-red-600" onClick={() => onFiltersChange([])}>
               Clear all
             </button>
           ) : null}
@@ -4808,7 +4808,7 @@ function FilterMenu({
               <button
                 key={option.key}
                 type="button"
-                className={`inline-flex h-7 items-center gap-1 rounded-md !px-2 text-[12px] ${
+                className={`inline-flex h-7 items-center gap-1 rounded-md !px-2 text-[13px] ${
                   sortKey === option.key ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                 }`}
                 onClick={() => onSortChange(option.key)}
@@ -4843,14 +4843,14 @@ function FilterRuleRow({
   const needsValue = !VALUELESS_OPERATORS.includes(rule.operator);
   return (
     <div className="flex items-center gap-2">
-      <div className="w-16 shrink-0 text-[12px] text-zinc-500">
+      <div className="w-16 shrink-0 text-[13px] text-zinc-500">
         {index === 0 ? (
           <span className="!pl-1">Where</span>
         ) : (
           <select
             value={connector}
             onChange={(e) => onConnectorChange(e.target.value as FilterConnector)}
-            className="h-7 w-full rounded-md border border-zinc-200 bg-white text-[12px] text-zinc-700"
+            className="h-7 w-full rounded-md border border-zinc-200 bg-white text-[13px] text-zinc-700"
           >
             <option value="AND">AND</option>
             <option value="OR">OR</option>
@@ -4864,30 +4864,30 @@ function FilterRuleRow({
           const m = filterFieldMeta(field);
           onChange({ field, operator: m.operators[0], value: "" });
         }}
-        className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px] text-zinc-800"
+        className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[13px] text-zinc-800"
       >
         {FILTER_FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
       </select>
       <select
         value={rule.operator}
         onChange={(e) => onChange({ operator: e.target.value as FilterOperator })}
-        className="h-7 w-24 shrink-0 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px] text-zinc-800"
+        className="h-7 w-24 shrink-0 rounded-md border border-zinc-200 bg-white !px-1.5 text-[13px] text-zinc-800"
       >
         {meta.operators.map((op) => <option key={op} value={op}>{FILTER_OPERATOR_LABELS[op]}</option>)}
       </select>
       {needsValue ? (
         meta.valueKind === "status" ? (
-          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px]">
+          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[13px]">
             <option value="">Select…</option>
             {STATUS_COLUMNS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
         ) : meta.valueKind === "priority" ? (
-          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[12px]">
+          <select value={rule.value} onChange={(e) => onChange({ value: e.target.value })} className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-1.5 text-[13px]">
             <option value="">Select…</option>
             {["Urgent", "High", "Normal", "Low"].map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         ) : (
-          <input value={rule.value} onChange={(e) => onChange({ value: e.target.value })} placeholder="Value" className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-2 text-[12px] outline-none" />
+          <input value={rule.value} onChange={(e) => onChange({ value: e.target.value })} placeholder="Value" className="h-7 flex-1 rounded-md border border-zinc-200 bg-white !px-2 text-[13px] outline-none" />
         )
       ) : (
         <span className="flex-1" />
@@ -4958,7 +4958,7 @@ function TagEditorPopover({
         onKeyDown={(event) => {
           if (event.key === "Enter") onCreate();
         }}
-        className="h-8 w-full border-b border-zinc-100 !px-2 text-[12px] outline-none"
+        className="h-8 w-full border-b border-zinc-100 !px-2 text-[13px] outline-none"
         placeholder="Search or create tag"
         autoFocus
       />
@@ -4969,7 +4969,7 @@ function TagEditorPopover({
               <button
                 key={tag}
                 type="button"
-                className="inline-flex h-6 items-center gap-1 rounded-full bg-blue-50 !px-2 text-[11px] text-blue-700 hover:bg-blue-100"
+                className="inline-flex h-6 items-center gap-1 rounded-full bg-blue-50 !px-2 text-[12px] text-blue-700 hover:bg-blue-100"
                 onClick={() => onRemove(tag)}
               >
                 {tag}
@@ -4980,7 +4980,7 @@ function TagEditorPopover({
         ) : null}
         <button
           type="button"
-          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[12px] text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
+          className="flex h-7 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:text-zinc-400"
           disabled={!query.trim()}
           onClick={onCreate}
         >
@@ -5015,7 +5015,7 @@ function CustomFieldPopover({
         onSave();
       }}
     >
-      <div className="border-b border-zinc-100 !px-2.5 py-2 text-[11px] font-medium text-zinc-500">
+      <div className="border-b border-zinc-100 !px-2.5 py-2 text-[12px] font-medium text-zinc-500">
         {label}
       </div>
       <div className="!p-2">
@@ -5026,20 +5026,20 @@ function CustomFieldPopover({
             if (event.key === "Escape") onClear();
           }}
           placeholder={`Add ${label.toLowerCase()}`}
-          className="h-8 w-full rounded-md border border-zinc-200 !px-2 text-[12px] outline-none focus:border-[var(--os-brand-rail)]"
+          className="h-8 w-full rounded-md border border-zinc-200 !px-2 text-[13px] outline-none focus:border-[var(--os-brand-rail)]"
           autoFocus
         />
         <div className="mt-2 flex items-center justify-end gap-1.5">
           <button
             type="button"
-            className="h-7 rounded-md !px-2 text-[11px] text-zinc-500 hover:bg-zinc-100"
+            className="h-7 rounded-md !px-2 text-[12px] text-zinc-500 hover:bg-zinc-100"
             onClick={onClear}
           >
             Clear
           </button>
           <button
             type="submit"
-            className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2.5 text-[11px] font-medium text-white"
+            className="h-7 rounded-md bg-[var(--os-brand-rail)] !px-2.5 text-[12px] font-medium text-white"
           >
             Save
           </button>
@@ -5052,7 +5052,7 @@ function CustomFieldPopover({
 function PanelHeader({ title, onClose }: { title: string; onClose: () => void }) {
   return (
     <div className="flex h-9 shrink-0 items-center justify-between border-b border-zinc-100 !px-3">
-      <h2 className="text-[13px] font-semibold text-zinc-900">{title}</h2>
+      <h2 className="text-[14px] font-semibold text-zinc-900">{title}</h2>
       <button
         type="button"
         className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 hover:text-zinc-900"
@@ -5078,7 +5078,7 @@ function FieldSection({
 }) {
   return (
     <div className="border-b border-zinc-100 !px-2 py-1.5">
-      <div className="mb-1 flex items-center justify-between text-[10px] font-medium text-zinc-500">
+      <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-zinc-500">
         <span>{title}</span>
         {trailing ? (
           <button
@@ -5099,13 +5099,13 @@ function FieldToggle({ column, checked, onToggle }: { column: ColumnDef; checked
   return (
     <button
       type="button"
-      className="flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+      className="flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
       onClick={onToggle}
       disabled={column.key === "name"}
     >
       <column.Icon className="h-3 w-3 text-zinc-500" />
       <span className="min-w-0 flex-1 truncate">{column.label}</span>
-      {column.key === "taskType" ? <span className="rounded bg-fuchsia-100 !px-1 text-[10px] font-medium text-fuchsia-700">New</span> : null}
+      {column.key === "taskType" ? <span className="rounded bg-fuchsia-100 !px-1 text-[11px] font-medium text-fuchsia-700">New</span> : null}
       <SwitchDisplay checked={checked} disabled={column.key === "name"} />
     </button>
   );
@@ -5121,12 +5121,12 @@ function CreateFieldRow({
   return (
     <button
       type="button"
-      className="group flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+      className="group flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
       onClick={onCreate}
     >
       <field.Icon className="h-3 w-3" style={{ color: field.color }} />
       <span className="min-w-0 flex-1 truncate">{field.label}</span>
-      <span className="hidden text-[11px] text-zinc-500 group-hover:inline">Create</span>
+      <span className="hidden text-[12px] text-zinc-500 group-hover:inline">Create</span>
     </button>
   );
 }
@@ -5145,7 +5145,7 @@ function PanelAction({
   return (
     <button
       type="button"
-      className="flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+      className="flex h-7 w-full items-center gap-2 rounded-md !px-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
       onClick={onClick}
     >
       <Icon className="h-3 w-3 text-zinc-500" />
@@ -5158,7 +5158,7 @@ function PanelAction({
 
 function SettingRow({ label, value }: { label: string; value?: string }) {
   return (
-    <div className="flex h-6 items-center justify-between text-[12px] text-zinc-700">
+    <div className="flex h-6 items-center justify-between text-[13px] text-zinc-700">
       <span>{label}</span>
       {value ? <span className="text-zinc-400">{value}</span> : <ChevronRight className="h-3.5 w-3.5 text-zinc-400" />}
     </div>
@@ -5169,7 +5169,7 @@ function SettingToggle({ label, checked, onToggle }: { label: string; checked: b
   return (
     <button
       type="button"
-      className="flex h-6 w-full items-center justify-between rounded-md text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+      className="flex h-6 w-full items-center justify-between rounded-md text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
       onClick={onToggle}
     >
       <span>{label}</span>
@@ -5211,7 +5211,7 @@ function Checkbox({ checked, label, onChange }: { checked: boolean; label: strin
 }
 
 function PanelLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-1 text-[11px] font-medium text-zinc-500">{children}</div>;
+  return <div className="mb-1 text-[12px] font-medium text-zinc-500">{children}</div>;
 }
 
 // Date-bucket group headers render as colored text (ClickUp style),
@@ -5229,7 +5229,7 @@ function GroupBadge({ label }: { label: string }) {
   if (status) {
     return (
       <span
-        className="inline-flex h-6 items-center rounded-md !px-2 text-[12px] font-semibold text-white"
+        className="inline-flex h-6 items-center rounded-md !px-2 text-[13px] font-semibold text-white"
         style={{ backgroundColor: status.color }}
       >
         {label}
@@ -5238,9 +5238,9 @@ function GroupBadge({ label }: { label: string }) {
   }
   const color = DATE_GROUP_COLORS[label];
   if (color) {
-    return <span className="text-[13px] font-semibold" style={{ color }}>{label}</span>;
+    return <span className="text-[14px] font-semibold" style={{ color }}>{label}</span>;
   }
-  return <span className="text-[13px] font-semibold text-zinc-700">{label}</span>;
+  return <span className="text-[14px] font-semibold text-zinc-700">{label}</span>;
 }
 
 function renderTaskValue(task: TaskItem, column: ColumnDef) {
@@ -5711,7 +5711,7 @@ function MultiSelectActionBar({
 }) {
   return (
     <div className="fixed bottom-8 left-1/2 z-[100] flex h-12 -translate-x-1/2 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 !px-2.5 text-white shadow-2xl">
-      <div className="flex h-8 items-center rounded-md bg-zinc-800 !px-3 text-[13px] font-medium text-white shadow-inner">
+      <div className="flex h-8 items-center rounded-md bg-zinc-800 !px-3 text-[14px] font-medium text-white shadow-inner">
         {count} Task{count === 1 ? "" : "s"} selected
         <button type="button" onClick={onClear} className="ml-2 text-zinc-400 hover:text-white">
           <X className="h-3.5 w-3.5" />
@@ -5735,7 +5735,7 @@ function ActionPill({ Icon, label, onClick }: { Icon: LucideIcon; label: string;
   return (
     <button
       type="button"
-      className="flex h-8 items-center gap-1.5 rounded-md !px-2 text-[12px] font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
+      className="flex h-8 items-center gap-1.5 rounded-md !px-2 text-[13px] font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
       onClick={onClick}
     >
       <Icon className="h-3.5 w-3.5" />

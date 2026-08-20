@@ -148,7 +148,7 @@ function LinkRow({
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
               disabled={busy}
-              className="text-[11px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
+              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
               Link

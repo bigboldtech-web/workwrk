@@ -77,7 +77,7 @@ export function ClosingCTA() {
         {/* Content */}
         <div className="relative px-8 lg:px-16 py-20 lg:py-28 text-center">
           <motion.span
-            className="inline-flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] px-3 h-7 rounded-full bg-white/15 text-white backdrop-blur"
+            className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.22em] px-3 h-7 rounded-full bg-white/15 text-white backdrop-blur"
             initial={{ opacity: 0, y: 14 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, margin: "-80px" }}
@@ -152,7 +152,7 @@ export function ClosingCTA() {
 
           {/* Reassurance row */}
           <motion.div
-            className="mt-10 inline-flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[12px] text-white/80"
+            className="mt-10 inline-flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-[13px] text-white/80"
             initial={{ opacity: 0 }}
             whileInView={{ opacity: 1 }}
             viewport={{ once: true, margin: "-60px" }}

@@ -193,7 +193,7 @@ export default function AdminCompaniesPage() {
                         <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
                           <span className="text-sm font-medium">{c.name}</span>
-                          <p className="text-[10px] text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
+                          <p className="text-[11px] text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
                         </div>
                       </div>
                     </td>
@@ -203,7 +203,7 @@ export default function AdminCompaniesPage() {
                     <td className="p-4 text-center text-sm">{c._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(c.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-[10px] text-muted">
+                      <div className="flex items-center justify-center gap-3 text-[11px] text-muted">
                         <span title="Tasks"><CheckSquare size={10} className="inline mr-0.5" />{c._count.tasks}</span>
                         <span title="KRAs"><Target size={10} className="inline mr-0.5" />{c._count.kras}</span>
                         <span title="SOPs"><BookOpen size={10} className="inline mr-0.5" />{c._count.sops}</span>
@@ -265,27 +265,27 @@ export default function AdminCompaniesPage() {
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Users size={14} className="mx-auto mb-1 text-blue-400" />
                   <p className="text-lg font-bold">{selected._count.users}</p>
-                  <p className="text-[10px] text-muted">Users</p>
+                  <p className="text-[11px] text-muted">Users</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <CheckSquare size={14} className="mx-auto mb-1 text-green-400" />
                   <p className="text-lg font-bold">{selected._count.tasks}</p>
-                  <p className="text-[10px] text-muted">Tasks</p>
+                  <p className="text-[11px] text-muted">Tasks</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Target size={14} className="mx-auto mb-1 text-orange-400" />
                   <p className="text-lg font-bold">{selected._count.kras}</p>
-                  <p className="text-[10px] text-muted">KRAs</p>
+                  <p className="text-[11px] text-muted">KRAs</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <BookOpen size={14} className="mx-auto mb-1 text-[#d4ff2e]" />
                   <p className="text-lg font-bold">{selected._count.sops}</p>
-                  <p className="text-[10px] text-muted">SOPs</p>
+                  <p className="text-[11px] text-muted">SOPs</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Star size={14} className="mx-auto mb-1 text-yellow-400" />
                   <p className="text-lg font-bold">{selected._count.reviewCycles}</p>
-                  <p className="text-[10px] text-muted">Reviews</p>
+                  <p className="text-[11px] text-muted">Reviews</p>
                 </div>
               </div>
 

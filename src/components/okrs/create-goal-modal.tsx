@@ -183,7 +183,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
 
         <div className="space-y-3">
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Goal name
             </label>
             <Input
@@ -192,13 +192,13 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
               placeholder="What do you want to do?"
-              className="h-8 text-[13px]"
+              className="h-8 text-[14px]"
             />
           </div>
 
           {isManagerViewer && (
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 Owner
               </label>
               <GoalOwnerPicker
@@ -208,14 +208,14 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
               />
               {/* Helper, not a link — gray like every other field hint (blue
                   made it read as clickable). */}
-              <p className="mt-1 text-[11px] text-zinc-400">
+              <p className="mt-1 text-[12px] text-zinc-400">
                 Who is responsible for this Goal?
               </p>
             </div>
           )}
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Level
             </label>
             {/* flex-wrap: three labels + translations must never clip out of a
@@ -229,7 +229,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                     type="button"
                     disabled={locked}
                     onClick={() => setSelLevel(o.value)}
-                    className={`h-7 rounded-md border px-2.5 text-[12px] transition-colors ${
+                    className={`h-7 rounded-md border px-2.5 text-[13px] transition-colors ${
                       selLevel === o.value
                         ? "border-[#0073EA] bg-[#0073EA]/10 font-medium text-[#0073EA]"
                         : locked
@@ -245,36 +245,36 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Contributors
             </label>
             <GoalAudiencePicker value={audience} onChange={setAudience} />
-            <p className="mt-1 text-[11px] text-zinc-400">
+            <p className="mt-1 text-[12px] text-zinc-400">
               Who can see and push this Goal — departments and roles resolve to their current members.
             </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 Start date
               </label>
               <Input
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                className="h-8 text-[13px]"
+                className="h-8 text-[14px]"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 End date
               </label>
               <Input
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                className="h-8 text-[13px]"
+                className="h-8 text-[14px]"
               />
             </div>
           </div>
@@ -285,18 +285,18 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
               min-w-0 lets the cadence cell actually shrink inside the grid. */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-2">
             <div>
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 Quarter
               </label>
               <Input
                 value={quarter}
                 onChange={(e) => setQuarter(e.target.value)}
                 placeholder="e.g. Q3 2026"
-                className="h-8 text-[13px]"
+                className="h-8 text-[14px]"
               />
             </div>
             <div className="min-w-0">
-              <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
                 Check-in cadence
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -305,7 +305,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                     key={o.value}
                     type="button"
                     onClick={() => setCadence(o.value)}
-                    className={`h-7 rounded-md border px-2 text-[12px] transition-colors ${
+                    className={`h-7 rounded-md border px-2 text-[13px] transition-colors ${
                       cadence === o.value
                         ? "border-[#0073EA] bg-[#0073EA]/10 font-medium text-[#0073EA]"
                         : "border-zinc-200 text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:text-zinc-300"
@@ -316,7 +316,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
                 ))}
               </div>
               {cadence === "NONE" && (
-                <p className="mt-1 text-[11px] text-zinc-400">
+                <p className="mt-1 text-[12px] text-zinc-400">
                   No check-in reminders for this goal.
                 </p>
               )}
@@ -324,7 +324,7 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
           </div>
 
           <div>
-            <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
               Description
             </label>
             <textarea
@@ -332,11 +332,11 @@ export function CreateGoalModal({ open, level, goal, focusOwner, onClose, onSave
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Why is this Goal set, and how should it be achieved?"
               rows={2}
-              className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+              className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400 focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
             />
           </div>
 
-          {error && <p className="text-[12px] text-[#E2445C]">{error}</p>}
+          {error && <p className="text-[13px] text-[#E2445C]">{error}</p>}
         </div>
 
         <DialogFooter>

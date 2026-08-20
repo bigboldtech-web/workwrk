@@ -99,7 +99,7 @@ export function HeroBoardMock() {
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--brand-red)", opacity: 0.55 }} />
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--brand-yellow)", opacity: 0.65 }} />
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "var(--status-done)", opacity: 0.55 }} />
-          <span className="ml-3 text-[11px] font-mono" style={{ color: "var(--m-text-soft)" }}>
+          <span className="ml-3 text-[12px] font-mono" style={{ color: "var(--m-text-soft)" }}>
             workwrk.com / people / performance
           </span>
         </div>
@@ -115,7 +115,7 @@ export function HeroBoardMock() {
           {HUB_TABS.map((t) => (
             <span
               key={t.name}
-              className="relative px-3 py-2 text-[12px] font-semibold whitespace-nowrap"
+              className="relative px-3 py-2 text-[13px] font-semibold whitespace-nowrap"
               style={{
                 color: t.active ? "var(--m-text)" : "var(--m-text-soft)",
               }}
@@ -152,11 +152,11 @@ export function HeroBoardMock() {
           transition={{ duration: 0.5, delay: 0.45 }}
         >
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: "var(--m-text-soft)" }}>
               People · Performance
             </span>
-            <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>·</span>
-            <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>Q3 cycle</span>
+            <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>·</span>
+            <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>Q3 cycle</span>
           </div>
           <p className="mt-1 font-extrabold text-lg" style={{ color: "var(--m-text)" }}>
             Composite scores
@@ -165,7 +165,7 @@ export function HeroBoardMock() {
 
         {/* Column headers */}
         <motion.div
-          className="mt-3 mx-5 grid grid-cols-[1.5fr_1.1fr_minmax(0,1fr)_88px] gap-2 px-3 py-2 rounded-md text-[10px] font-bold uppercase tracking-[0.14em]"
+          className="mt-3 mx-5 grid grid-cols-[1.5fr_1.1fr_minmax(0,1fr)_88px] gap-2 px-3 py-2 rounded-md text-[11px] font-bold uppercase tracking-[0.14em]"
           style={{
             backgroundColor: "var(--m-surface)",
             color: "var(--m-text-soft)",
@@ -213,11 +213,11 @@ export function HeroBoardMock() {
         >
           <Search size={12} />
         </span>
-        <span className="text-[11px] font-semibold" style={{ color: "var(--m-text)" }}>
+        <span className="text-[12px] font-semibold" style={{ color: "var(--m-text)" }}>
           Cmd-K
         </span>
         <span
-          className="text-[9px] font-bold uppercase tracking-[0.14em] px-1.5 h-4 inline-flex items-center rounded text-white"
+          className="text-[10px] font-bold uppercase tracking-[0.14em] px-1.5 h-4 inline-flex items-center rounded text-white"
           style={{ backgroundColor: "var(--brand-red)" }}
         >
           AI
@@ -242,14 +242,14 @@ export function HeroBoardMock() {
             transition={{ duration: 0.35 }}
           >
             <span
-              className="w-6 h-6 rounded-full flex items-center justify-center text-[12px]"
+              className="w-6 h-6 rounded-full flex items-center justify-center text-[13px]"
               style={{
                 backgroundColor: `color-mix(in srgb, ${TICKER[tickerIdx].tone} 18%, white)`,
               }}
             >
               {TICKER[tickerIdx].icon}
             </span>
-            <span className="text-[11px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
+            <span className="text-[12px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
               {TICKER[tickerIdx].text}
             </span>
           </motion.div>
@@ -265,10 +265,10 @@ export function HeroBoardMock() {
         transition={{ duration: 0.6, delay: 1.6 }}
       >
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
             Team composite
           </span>
-          <span className="text-[10px] font-bold" style={{ color: "var(--status-done)" }}>
+          <span className="text-[11px] font-bold" style={{ color: "var(--status-done)" }}>
             +6%
           </span>
         </div>
@@ -318,7 +318,7 @@ export function HeroBoardMock() {
         >
           <Sparkles size={11} />
         </span>
-        <span className="text-[11px] font-semibold" style={{ color: "var(--m-text)" }}>
+        <span className="text-[12px] font-semibold" style={{ color: "var(--m-text)" }}>
           AI auto-assigned <span style={{ color: "var(--m-text-soft)" }}>3 tasks</span>
         </span>
       </motion.div>
@@ -340,10 +340,10 @@ function GroupBar({
       transition={{ duration: 0.45, delay, ease: [0.22, 1, 0.36, 1] }}
     >
       <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: color }} />
-      <span className="text-[12px] font-bold" style={{ color }}>
+      <span className="text-[13px] font-bold" style={{ color }}>
         {label}
       </span>
-      <span className="text-[10px]" style={{ color: "var(--m-text-soft)" }}>
+      <span className="text-[11px]" style={{ color: "var(--m-text-soft)" }}>
         {count} {count === 1 ? "person" : "people"}
       </span>
     </motion.div>
@@ -370,18 +370,18 @@ function Row({
       {/* Person */}
       <div className="flex items-center gap-2 min-w-0">
         <span
-          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0"
+          className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
           style={{ backgroundColor: hue }}
         >
           {initials}
         </span>
-        <span className="text-[12.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>
+        <span className="text-[13.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>
           {name}
         </span>
       </div>
 
       {/* Role */}
-      <span className="text-[12px] truncate" style={{ color: "var(--m-text-muted)" }}>
+      <span className="text-[13px] truncate" style={{ color: "var(--m-text-muted)" }}>
         {role}
       </span>
 
@@ -399,14 +399,14 @@ function Row({
             transition={{ duration: 0.9, delay: delay + 0.15, ease: [0.22, 1, 0.36, 1] }}
           />
         </div>
-        <span className="text-[11px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
+        <span className="text-[12px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
           {score}
         </span>
       </div>
 
       {/* Focus pill */}
       <span
-        className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+        className="text-[11px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
         style={{ backgroundColor: f.bg }}
       >
         {f.label}

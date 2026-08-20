@@ -303,7 +303,7 @@ export default function WhiteboardCanvasPage() {
         <button
           type="button"
           onClick={copyLink}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 text-[12.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900 shrink-0"
+          className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2.5 text-[13.5px] font-medium text-zinc-700 transition-colors hover:bg-zinc-50 hover:text-zinc-900 shrink-0"
         >
           <Share2 className="h-3.5 w-3.5" /> Share
         </button>

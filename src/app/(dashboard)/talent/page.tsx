@@ -460,7 +460,7 @@ function PlaceModal({
         <div className="px-5 py-4 space-y-4 overflow-y-auto">
           {/* Person */}
           <div className="space-y-1.5">
-            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Person</label>
+            <label className="text-[12px] uppercase tracking-wide text-zinc-400">Person</label>
             <div className="flex items-center gap-2 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8">
               <Search className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
               <input
@@ -468,7 +468,7 @@ function PlaceModal({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Filter people…"
-                className="flex-1 bg-transparent text-[13px] focus:outline-none"
+                className="flex-1 bg-transparent text-[14px] focus:outline-none"
                 style={{ color: "var(--os-ink)" }}
               />
             </div>
@@ -476,7 +476,7 @@ function PlaceModal({
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               size={4}
-              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[13px] p-1 bg-white dark:bg-[#14171D]"
+              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[14px] p-1 bg-white dark:bg-[#14171D]"
               style={{ color: "var(--os-ink)" }}
             >
               {filteredUsers.map((u) => (
@@ -489,9 +489,9 @@ function PlaceModal({
 
           {/* Mini 9-box placement */}
           <div className="space-y-1.5">
-            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Placement · click a box</label>
+            <label className="text-[12px] uppercase tracking-wide text-zinc-400">Placement · click a box</label>
             <div className="flex gap-2">
-              <div className="flex flex-col items-center justify-between py-1 text-[9px] font-semibold text-zinc-400" style={{ writingMode: "vertical-rl" as const }}>
+              <div className="flex flex-col items-center justify-between py-1 text-[10px] font-semibold text-zinc-400" style={{ writingMode: "vertical-rl" as const }}>
                 <span>HIGH</span><span>POTENTIAL</span><span>LOW</span>
               </div>
               <div className="grid grid-cols-3 gap-1.5 flex-1">
@@ -510,41 +510,41 @@ function PlaceModal({
                         boxShadow: selected ? `0 0 0 1px ${BOX_COLORS[key]}` : "none",
                       }}
                     >
-                      <div className="text-[11px] font-semibold leading-tight">{BOX_LABELS[key]}</div>
+                      <div className="text-[12px] font-semibold leading-tight">{BOX_LABELS[key]}</div>
                     </button>
                   );
                 })}
               </div>
             </div>
-            <div className="flex justify-between text-[9px] font-semibold text-zinc-400 pl-6 pr-1">
+            <div className="flex justify-between text-[10px] font-semibold text-zinc-400 pl-6 pr-1">
               <span>LOW</span><span>PERFORMANCE</span><span>HIGH</span>
             </div>
             {boxKey && (
-              <p className="text-[11.5px] text-zinc-500">Selected: <span style={{ color: BOX_COLORS[boxKey], fontWeight: 600 }}>{BOX_LABELS[boxKey]}</span> · {BOX_LONG[boxKey]}</p>
+              <p className="text-[12.5px] text-zinc-500">Selected: <span style={{ color: BOX_COLORS[boxKey], fontWeight: 600 }}>{BOX_LABELS[boxKey]}</span> · {BOX_LONG[boxKey]}</p>
             )}
           </div>
 
           {/* Period */}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <label className="text-[11px] uppercase tracking-wide text-zinc-400">Period</label>
+              <label className="text-[12px] uppercase tracking-wide text-zinc-400">Period</label>
               <input
                 type="text"
                 value={period}
                 onChange={(e) => setPeriod(e.target.value)}
                 placeholder="2026-08"
-                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
+                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[14px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
                 style={{ color: "var(--os-ink)" }}
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-[11px] uppercase tracking-wide text-zinc-400">Action (optional)</label>
+              <label className="text-[12px] uppercase tracking-wide text-zinc-400">Action (optional)</label>
               <input
                 type="text"
                 value={action}
                 onChange={(e) => setAction(e.target.value)}
                 placeholder="e.g. Promote, Develop, Coach"
-                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
+                className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 h-8 text-[14px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA]"
                 style={{ color: "var(--os-ink)" }}
               />
             </div>
@@ -552,29 +552,29 @@ function PlaceModal({
 
           {/* Notes */}
           <div className="space-y-1.5">
-            <label className="text-[11px] uppercase tracking-wide text-zinc-400">Notes (optional)</label>
+            <label className="text-[12px] uppercase tracking-wide text-zinc-400">Notes (optional)</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Calibration rationale, development focus…"
               rows={3}
-              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 py-2 text-[13px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA] resize-none"
+              className="w-full rounded-md border border-zinc-200 dark:border-[#2A2F38] px-2.5 py-2 text-[14px] bg-white dark:bg-[#14171D] focus:outline-none focus:border-[#0073EA] resize-none"
               style={{ color: "var(--os-ink)" }}
             />
           </div>
 
-          {error && <p className="text-[12px] text-[#E2445C]">{error}</p>}
+          {error && <p className="text-[13px] text-[#E2445C]">{error}</p>}
         </div>
 
         <div className="border-t border-zinc-100 dark:border-[#2A2F38] px-5 py-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="px-3 h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[12.5px] font-medium" style={{ color: "var(--os-ink)" }}>
+          <button type="button" onClick={onClose} className="px-3 h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-[13.5px] font-medium" style={{ color: "var(--os-ink)" }}>
             Cancel
           </button>
           <button
             type="button"
             onClick={save}
             disabled={!canSave}
-            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-white text-[12.5px] font-medium"
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-white text-[13.5px] font-medium"
             style={{ background: canSave ? "#0073EA" : "#9dbfe8", cursor: canSave ? "pointer" : "default" }}
           >
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}

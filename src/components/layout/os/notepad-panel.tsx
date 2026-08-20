@@ -213,7 +213,7 @@ export function NotepadPanel() {
             </button>
           ) : null}
           <div className="text-[14px] font-semibold text-zinc-900 flex-1">Notepad</div>
-          {saving ? <span className="text-[11px] text-zinc-600">Saving…</span> : null}
+          {saving ? <span className="text-[12px] text-zinc-600">Saving…</span> : null}
           <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Close">
             <X className="w-4 h-4" />
           </button>
@@ -225,7 +225,7 @@ export function NotepadPanel() {
           ) : seed === "error" ? (
             // No editor on a failed load — typing into an empty canvas here
             // would save over the note's real content.
-            <div className="flex-1 px-4 py-10 text-center text-[12.5px] text-zinc-400 dark:text-zinc-500">
+            <div className="flex-1 px-4 py-10 text-center text-[13.5px] text-zinc-400 dark:text-zinc-500">
               Couldn&apos;t load this note. Go back and try again.
             </div>
           ) : (
@@ -245,7 +245,7 @@ export function NotepadPanel() {
             {notes === null ? (
               <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-zinc-300" /></div>
             ) : notes.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[12.5px] text-zinc-400 dark:text-zinc-500">No notes yet. Create your first sticky note.</div>
+              <div className="px-4 py-10 text-center text-[13.5px] text-zinc-400 dark:text-zinc-500">No notes yet. Create your first sticky note.</div>
             ) : (
               <ul className="py-1">
                 {notes.map((n) => (
@@ -253,8 +253,8 @@ export function NotepadPanel() {
                     <button type="button" onClick={() => openNote(n.id)} className="w-full flex items-start gap-2.5 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-white/5 border-b border-zinc-100 dark:border-[#23272F]">
                       <FileText className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[13px] font-medium text-zinc-800 dark:text-zinc-100">{n.title}</span>
-                        {n.excerpt ? <span className="block truncate text-[11.5px] text-zinc-400 dark:text-zinc-500">{n.excerpt}</span> : null}
+                        <span className="block truncate text-[14px] font-medium text-zinc-800 dark:text-zinc-100">{n.title}</span>
+                        {n.excerpt ? <span className="block truncate text-[12.5px] text-zinc-400 dark:text-zinc-500">{n.excerpt}</span> : null}
                       </span>
                     </button>
                   </li>
@@ -265,7 +265,7 @@ export function NotepadPanel() {
         )}
 
         {!activeId ? (
-          <button type="button" onClick={newNote} disabled={!meId} className="shrink-0 flex items-center gap-2 px-4 h-11 border-t border-zinc-200 dark:border-[#2A2F38] text-[13px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/5 disabled:opacity-40">
+          <button type="button" onClick={newNote} disabled={!meId} className="shrink-0 flex items-center gap-2 px-4 h-11 border-t border-zinc-200 dark:border-[#2A2F38] text-[14px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/5 disabled:opacity-40">
             <Plus className="w-4 h-4" /> New note
           </button>
         ) : null}

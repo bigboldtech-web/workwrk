@@ -68,9 +68,9 @@ function WeightCell({ value, disabled, onSave }: {
           if (e.key === "Escape") { setDraft(String(value)); }
         }}
         aria-label="Weightage %"
-        className="w-12 h-6 px-1 rounded border border-zinc-200 text-[11px] text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+        className="w-12 h-6 px-1 rounded border border-zinc-200 text-[12px] text-right tabular-nums bg-white focus:outline-none focus:border-[#0073EA] disabled:opacity-50 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
-      <span className="text-[11px] text-zinc-400">%</span>
+      <span className="text-[12px] text-zinc-400">%</span>
     </span>
   );
 }
@@ -230,7 +230,7 @@ export function ManageAlignmentDialog({
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500 flex items-center gap-1.5">
                   <Target className="w-3.5 h-3.5" /> KRAs · {kraAssignments.length}
                 </h3>
-                <span className={`text-[11px] ${totalWeight > 100 ? "text-red-500" : "text-zinc-400"}`}>
+                <span className={`text-[12px] ${totalWeight > 100 ? "text-red-500" : "text-zinc-400"}`}>
                   weight {totalWeight}%
                 </span>
               </div>
@@ -241,11 +241,11 @@ export function ManageAlignmentDialog({
                     {/* Which job title this KRA belongs to — an orphan KRA is
                         flagged so the manager spots it before assigning. */}
                     {a.kra?.role ? (
-                      <span className="text-[10px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 truncate max-w-[120px]" title={a.kra.role.title}>{a.kra.role.title}</span>
+                      <span className="text-[11px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 truncate max-w-[120px]" title={a.kra.role.title}>{a.kra.role.title}</span>
                     ) : (
-                      <span className="text-[10px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">No job title</span>
+                      <span className="text-[11px] text-amber-600 px-1.5 py-0.5 rounded bg-amber-50" title="This KRA belongs to no job title yet">No job title</span>
                     )}
-                    {a.kra?.category ? <Badge variant="outline" className="text-[9px]">{a.kra.category}</Badge> : null}
+                    {a.kra?.category ? <Badge variant="outline" className="text-[10px]">{a.kra.category}</Badge> : null}
                     <WeightCell key={`w-${a.id}-${a.weightage}`} value={a.weightage} disabled={busy !== null} onSave={(w) => saveWeight(a.id, w)} />
                     <button type="button" onClick={() => void removeKra(a.id)} disabled={busy !== null}
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove KRA">
@@ -253,11 +253,11 @@ export function ManageAlignmentDialog({
                     </button>
                   </li>
                 ))}
-                {kraAssignments.length === 0 ? <li className="text-[12px] text-zinc-400 px-1">No KRAs assigned.</li> : null}
+                {kraAssignments.length === 0 ? <li className="text-[13px] text-zinc-400 px-1">No KRAs assigned.</li> : null}
               </ul>
               <div className="mt-2 flex items-center gap-2">
                 <select value={newKraId} onChange={(e) => setNewKraId(e.target.value)}
-                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] bg-white">
+                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[13.5px] bg-white">
                   <option value="">Add a KRA…</option>
                   {availableKras.map((k) => (
                     <option key={k.id} value={k.id}>
@@ -267,7 +267,7 @@ export function ManageAlignmentDialog({
                 </select>
                 <Input type="number" min={1} max={100} value={newKraWeight}
                   onChange={(e) => setNewKraWeight(Number(e.target.value))}
-                  className="w-16 h-8 text-[12.5px] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
+                  className="w-16 h-8 text-[13.5px] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" aria-label="Weightage %" />
                 <Button size="sm" onClick={() => void addKra()} disabled={!newKraId || busy !== null}>
                   {busy === "add-kra" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 </Button>
@@ -283,18 +283,18 @@ export function ManageAlignmentDialog({
                 {sopAssignments.map((a) => (
                   <li key={a.id} className="flex items-center gap-2 rounded-md border border-zinc-200 px-2.5 py-1.5">
                     <span className="flex-1 min-w-0 text-sm truncate">{a.sop?.title ?? "SOP"}</span>
-                    {a.mandatory ? <Badge variant="outline" className="text-[9px]">Mandatory</Badge> : null}
+                    {a.mandatory ? <Badge variant="outline" className="text-[10px]">Mandatory</Badge> : null}
                     <button type="button" onClick={() => void removeSop(a.id)} disabled={busy !== null}
                       className="text-zinc-400 hover:text-red-500 disabled:opacity-50" aria-label="Remove SOP">
                       {busy === `del-sop-${a.id}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <X className="w-3.5 h-3.5" />}
                     </button>
                   </li>
                 ))}
-                {sopAssignments.length === 0 ? <li className="text-[12px] text-zinc-400 px-1">No SOPs assigned.</li> : null}
+                {sopAssignments.length === 0 ? <li className="text-[13px] text-zinc-400 px-1">No SOPs assigned.</li> : null}
               </ul>
               <div className="mt-2 flex items-center gap-2">
                 <select value={newSopId} onChange={(e) => setNewSopId(e.target.value)}
-                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[12.5px] bg-white">
+                  className="flex-1 h-8 px-2 rounded-md border border-zinc-200 text-[13.5px] bg-white">
                   <option value="">Assign a SOP…</option>
                   {availableSops.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
                 </select>

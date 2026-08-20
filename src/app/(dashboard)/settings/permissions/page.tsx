@@ -90,14 +90,14 @@ export default function PermissionsPage() {
         <ShieldCheck className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Roles &amp; Permissions</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[13px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
         Control exactly who can do what. Each column is an access level; tick a capability to grant it.
         Super&nbsp;Admin and Company&nbsp;Admin always have full access.
         {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
       </p>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading permissions…
         </div>
       ) : (
@@ -121,10 +121,10 @@ export default function PermissionsPage() {
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-[14px] font-medium text-zinc-900">
                   <ChevronRight className="h-4 w-4 shrink-0 text-zinc-400 transition-transform group-open:rotate-90" />
                   {def.label}
-                  <span className="text-[12px] font-normal text-zinc-400">· {actions.length}</span>
+                  <span className="text-[13px] font-normal text-zinc-400">· {actions.length}</span>
                 </summary>
                 <div className="overflow-x-auto border-t border-zinc-100 px-2 pb-2">
-                  <table className="w-full border-collapse text-[12px]">
+                  <table className="w-full border-collapse text-[13px]">
                     <thead>
                       <tr>
                         <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left font-medium text-zinc-500">Capability</th>
@@ -177,14 +177,14 @@ export default function PermissionsPage() {
             type="button"
             onClick={save}
             disabled={!dirty || saving}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[12px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
           >
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
             {saving ? "Saving…" : "Save changes"}
           </button>
-          {dirty && !saving ? <span className="text-[12px] text-amber-600">Unsaved changes</span> : null}
+          {dirty && !saving ? <span className="text-[13px] text-amber-600">Unsaved changes</span> : null}
           {banner ? (
-            <span className={`inline-flex items-center gap-1 text-[12px] ${banner.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>
+            <span className={`inline-flex items-center gap-1 text-[13px] ${banner.kind === "ok" ? "text-emerald-600" : "text-red-600"}`}>
               {banner.kind === "ok" ? <Check className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
               {banner.text}
             </span>

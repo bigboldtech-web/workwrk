@@ -66,7 +66,7 @@ export function ListCsvExport({ rows, filename }: Props) {
       type="button"
       onClick={onClick}
       disabled={rows.length === 0}
-      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11.5px] border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12.5px] border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
       title={rows.length === 0 ? "No items to export" : `Export ${rows.length} item${rows.length === 1 ? "" : "s"} to CSV`}
     >
       <Download className="w-3 h-3" />

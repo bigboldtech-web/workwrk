@@ -136,13 +136,13 @@ export function ReminderTicker() {
     >
       {fired.length > 1 ? (
         <div className="flex items-center justify-between px-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          <span className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
             {fired.length} reminders
           </span>
           <button
             type="button"
             onClick={dismissAll}
-            className="text-[11.5px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100"
+            className="text-[12.5px] text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100"
           >
             Dismiss all
           </button>
@@ -161,14 +161,14 @@ export function ReminderTicker() {
                 <AlarmClock className="w-4 h-4 text-[#0073EA]" />
               </span>
               <div className="flex-1 min-w-0">
-                <div className="text-[10.5px] font-semibold uppercase tracking-wide text-[#0073EA]">Reminder</div>
-                <div className="text-[13.5px] font-medium text-zinc-900 dark:text-zinc-100 leading-snug break-words">
+                <div className="text-[11.5px] font-semibold uppercase tracking-wide text-[#0073EA]">Reminder</div>
+                <div className="text-[14.5px] font-medium text-zinc-900 dark:text-zinc-100 leading-snug break-words">
                   {r.title}
                 </div>
                 {r.body ? (
-                  <div className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-2">{r.body}</div>
+                  <div className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-2">{r.body}</div>
                 ) : null}
-                <div className="flex items-center gap-1 text-[11px] text-zinc-400 mt-1">
+                <div className="flex items-center gap-1 text-[12px] text-zinc-400 mt-1">
                   {isTask ? <CheckSquare className="w-3 h-3" /> : null}
                   <span>{agoLabel(r.firedAt)}</span>
                 </div>
@@ -191,7 +191,7 @@ export function ReminderTicker() {
                     key={s.label}
                     type="button"
                     onClick={() => void act(r.id, { snoozeMinutes: s.minutes() })}
-                    className="px-2 py-1 rounded-md text-[12px] border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+                    className="px-2 py-1 rounded-md text-[13px] border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                   >
                     {s.label}
                   </button>
@@ -199,7 +199,7 @@ export function ReminderTicker() {
                 <button
                   type="button"
                   onClick={() => setSnoozeOpenId(null)}
-                  className="px-2 py-1 rounded-md text-[12px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"
+                  className="px-2 py-1 rounded-md text-[13px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-white/10"
                 >
                   Cancel
                 </button>
@@ -210,7 +210,7 @@ export function ReminderTicker() {
                   <button
                     type="button"
                     onClick={() => openReminder(r)}
-                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12.5px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]"
+                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[13.5px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]"
                   >
                     <ArrowUpRight className="w-3.5 h-3.5" /> Open
                   </button>
@@ -218,14 +218,14 @@ export function ReminderTicker() {
                 <button
                   type="button"
                   onClick={() => setSnoozeOpenId(r.id)}
-                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[12.5px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
+                  className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[13.5px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
                 >
                   <Clock className="w-3.5 h-3.5" /> Snooze <ChevronDown className="w-3 h-3" />
                 </button>
                 <button
                   type="button"
                   onClick={() => void act(r.id, {})}
-                  className="ml-auto inline-flex items-center h-7 px-2.5 rounded-md text-[12.5px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
+                  className="ml-auto inline-flex items-center h-7 px-2.5 rounded-md text-[13.5px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
                 >
                   Dismiss
                 </button>

@@ -89,10 +89,10 @@ export function ItemSubtasks({
   return (
     <div>
       <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
-        Subtasks {list.length > 0 ? <span className="text-[10.5px] text-zinc-400 normal-case tracking-normal">{doneCount}/{list.length}</span> : null}
+        Subtasks {list.length > 0 ? <span className="text-[11.5px] text-zinc-400 normal-case tracking-normal">{doneCount}/{list.length}</span> : null}
       </h3>
       {rows === null ? (
-        <div className="flex items-center gap-2 text-[12.5px] text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 text-[13.5px] text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
       ) : (
         <div className="rounded-lg border border-zinc-200 divide-y divide-zinc-100">
           {list.map((r) => {
@@ -105,13 +105,13 @@ export function ItemSubtasks({
                 className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-zinc-50"
               >
                 <ChevronRight className="w-3 h-3 text-zinc-300 shrink-0" />
-                <span className={`flex-1 text-[13px] truncate ${isDoneStatus(statuses, r.status) ? "line-through text-zinc-400" : "text-zinc-800"}`}>{r.title}</span>
-                {st ? <span className="text-[10.5px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: `${st.color}22`, color: st.color }}>{st.label}</span> : null}
+                <span className={`flex-1 text-[14px] truncate ${isDoneStatus(statuses, r.status) ? "line-through text-zinc-400" : "text-zinc-800"}`}>{r.title}</span>
+                {st ? <span className="text-[11.5px] px-1.5 py-0.5 rounded font-medium shrink-0" style={{ background: `${st.color}22`, color: st.color }}>{st.label}</span> : null}
                 {r.owner ? <span className="shrink-0"><PersonAvatar person={{ ...r.owner, email: null }} size={18} /></span> : null}
               </button>
             );
           })}
-          {list.length === 0 ? <div className="px-3 py-2 text-[12.5px] text-zinc-400">No subtasks yet.</div> : null}
+          {list.length === 0 ? <div className="px-3 py-2 text-[13.5px] text-zinc-400">No subtasks yet.</div> : null}
           {canEdit ? (
             <div className="flex items-center gap-2 px-3 py-2">
               <Plus className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -121,14 +121,14 @@ export function ItemSubtasks({
                 onChange={(e) => { setDraft(e.target.value); if (error) setError(null); }}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
                 placeholder="Type a subtask and press Enter…"
-                className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-zinc-400"
+                className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400"
               />
               {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" /> : null}
             </div>
           ) : null}
         </div>
       )}
-      {error ? <p className="mt-1.5 text-[11.5px] text-red-500">{error}</p> : null}
+      {error ? <p className="mt-1.5 text-[12.5px] text-red-500">{error}</p> : null}
     </div>
   );
 }

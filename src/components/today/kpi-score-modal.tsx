@@ -103,7 +103,7 @@ export function KpiScoreModal({
               className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
             />
             {prompt.kpi.lowerIsBetter ? (
-              <div className="text-[10px] uppercase tracking-wide text-zinc-500 mt-1">Lower is better</div>
+              <div className="text-[11px] uppercase tracking-wide text-zinc-500 mt-1">Lower is better</div>
             ) : null}
           </div>
           <div>

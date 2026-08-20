@@ -58,14 +58,14 @@ function Hero() {
           <div>
             <Link
               href="/changelog"
-              className="inline-flex items-center gap-2 text-[12px] font-semibold pl-2 pr-3 h-7 rounded-full border bg-white transition-colors"
+              className="inline-flex items-center gap-2 text-[13px] font-semibold pl-2 pr-3 h-7 rounded-full border bg-white transition-colors"
               style={{
                 color: "var(--m-text)",
                 borderColor: "var(--m-border)",
               }}
             >
               <span
-                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.16em] px-2 h-5 rounded-full text-white"
+                className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.16em] px-2 h-5 rounded-full text-white"
                 style={{ backgroundColor: "var(--brand-red)" }}
               >
                 <Sparkles size={9} /> new
@@ -152,7 +152,7 @@ function TrustStrip() {
     >
       <div className="max-w-7xl mx-auto px-6 lg:px-10">
         <p
-          className="text-[11px] font-bold uppercase tracking-[0.22em] text-center"
+          className="text-[12px] font-bold uppercase tracking-[0.22em] text-center"
           style={{ color: "var(--m-text-soft)" }}
         >
           500+ teams across 8 countries run on workwrk

@@ -253,10 +253,10 @@ export function SopCategoryManager() {
                       </button>
                     )}
 
-                    <Badge variant="outline" className="text-[10px] shrink-0">
+                    <Badge variant="outline" className="text-[11px] shrink-0">
                       {cat.subcategories.length} sub
                     </Badge>
-                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                    <Badge variant="secondary" className="text-[11px] shrink-0">
                       {cat.sopCount ?? 0} SOP{cat.sopCount === 1 ? "" : "s"}
                     </Badge>
 
@@ -327,7 +327,7 @@ export function SopCategoryManager() {
                             ) : (
                               <span className="flex-1 text-xs truncate">{sub.name}</span>
                             )}
-                            <Badge variant="secondary" className="text-[10px] shrink-0">
+                            <Badge variant="secondary" className="text-[11px] shrink-0">
                               {sub.sopCount ?? 0} SOP{sub.sopCount === 1 ? "" : "s"}
                             </Badge>
 

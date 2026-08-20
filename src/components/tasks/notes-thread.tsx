@@ -78,14 +78,14 @@ export function NotesThread({ taskId }: { taskId: string }) {
             <div key={c.id} className="flex items-start gap-2">
               <Avatar className="h-7 w-7 shrink-0">
                 {c.author.avatar ? <AvatarImage src={c.author.avatar} alt="" /> : null}
-                <AvatarFallback className="text-[10px]">
+                <AvatarFallback className="text-[11px]">
                   {c.author.firstName[0]}{c.author.lastName[0]}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline gap-2 mb-0.5">
                   <span className="text-xs font-medium">{c.author.firstName} {c.author.lastName}</span>
-                  <span className="text-[10px] text-muted">{timeAgo(c.createdAt)}</span>
+                  <span className="text-[11px] text-muted">{timeAgo(c.createdAt)}</span>
                 </div>
                 <p className="text-xs whitespace-pre-wrap">{c.body}</p>
               </div>

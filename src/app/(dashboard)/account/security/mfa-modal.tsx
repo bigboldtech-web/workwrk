@@ -115,22 +115,22 @@ export function MfaEnrollDialog({
           </DialogTitle>
 
           {phase === "loading" && (
-            <div className="mt-6 flex items-center justify-center gap-2 py-8 text-[13px] text-zinc-500">
+            <div className="mt-6 flex items-center justify-center gap-2 py-8 text-[14px] text-zinc-500">
               <Loader2 className="h-4 w-4 animate-spin" /> Preparing your secret…
             </div>
           )}
 
           {phase === "error" && (
             <div className="mt-4">
-              <div className="flex items-start gap-2 rounded-lg border border-[#E2445C]/30 bg-[#E2445C]/10 px-3.5 py-3 text-[12.5px] leading-relaxed text-[#E2445C]">
+              <div className="flex items-start gap-2 rounded-lg border border-[#E2445C]/30 bg-[#E2445C]/10 px-3.5 py-3 text-[13.5px] leading-relaxed text-[#E2445C]">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{err}</span>
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
                   Close
                 </button>
-                <button type="button" onClick={() => void begin()} className="rounded-lg bg-[#0073EA] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#0060B9]">
+                <button type="button" onClick={() => void begin()} className="rounded-lg bg-[#0073EA] px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#0060B9]">
                   Retry
                 </button>
               </div>
@@ -152,14 +152,14 @@ export function MfaEnrollDialog({
               )}
 
               <div className="mt-3">
-                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Or enter this key manually</div>
-                <code className="block break-all rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[12px] font-mono text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-200">
+                <div className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Or enter this key manually</div>
+                <code className="block break-all rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[13px] font-mono text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-200">
                   {secret}
                 </code>
               </div>
 
               <div className="mt-4">
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Verification code</label>
+                <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Verification code</label>
                 <input
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -172,17 +172,17 @@ export function MfaEnrollDialog({
               </div>
 
               {err && (
-                <div className="mt-3 flex items-start gap-2 text-[12px] text-[#E2445C]">
+                <div className="mt-3 flex items-start gap-2 text-[13px] text-[#E2445C]">
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   <span>{err}</span>
                 </div>
               )}
 
               <div className="mt-5 flex justify-end gap-2">
-                <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
                   Cancel
                 </button>
-                <button type="button" onClick={() => void verify()} disabled={submitting || !CODE_RE.test(code)} className="inline-flex items-center gap-2 rounded-lg bg-[#0073EA] px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-[#0060B9] disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" onClick={() => void verify()} disabled={submitting || !CODE_RE.test(code)} className="inline-flex items-center gap-2 rounded-lg bg-[#0073EA] px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#0060B9] disabled:cursor-not-allowed disabled:opacity-50">
                   {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   Verify & enable
                 </button>
@@ -199,16 +199,16 @@ export function MfaEnrollDialog({
 
               <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800/60">
                 {backupCodes.map((c) => (
-                  <code key={c} className="text-center text-[13px] font-mono tracking-wide text-zinc-700 dark:text-zinc-200">{c}</code>
+                  <code key={c} className="text-center text-[14px] font-mono tracking-wide text-zinc-700 dark:text-zinc-200">{c}</code>
                 ))}
               </div>
 
               <div className="mt-4 flex justify-between gap-2">
-                <button type="button" onClick={copyBackup} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+                <button type="button" onClick={copyBackup} className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3.5 py-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
                   {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy codes"}
                 </button>
-                <button type="button" onClick={finish} className="rounded-lg bg-[#0073EA] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#0060B9]">
+                <button type="button" onClick={finish} className="rounded-lg bg-[#0073EA] px-4 py-2 text-[14px] font-semibold text-white hover:bg-[#0060B9]">
                   Done
                 </button>
               </div>
@@ -286,17 +286,17 @@ export function MfaDisableDialog({
           </div>
 
           {err && (
-            <div className="mt-3 flex items-start gap-2 text-[12px] text-[#E2445C]">
+            <div className="mt-3 flex items-start gap-2 text-[13px] text-[#E2445C]">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>{err}</span>
             </div>
           )}
 
           <div className="mt-5 flex justify-end gap-2">
-            <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
+            <button type="button" onClick={() => onOpenChange(false)} className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800">
               Cancel
             </button>
-            <button type="button" onClick={() => void disable()} disabled={submitting || !code.trim()} className="inline-flex items-center gap-2 rounded-lg bg-[#E2445C] px-3.5 py-2 text-[13px] font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">
+            <button type="button" onClick={() => void disable()} disabled={submitting || !code.trim()} className="inline-flex items-center gap-2 rounded-lg bg-[#E2445C] px-3.5 py-2 text-[14px] font-semibold text-white hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50">
               {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Turn off 2FA
             </button>

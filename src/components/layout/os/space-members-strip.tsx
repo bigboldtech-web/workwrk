@@ -56,7 +56,7 @@ export function SpaceMembersStrip({ spaceId, spaceName, visibility, members, tot
             {shown.map((m) => (
               <span
                 key={m.id}
-                className="h-6 w-6 rounded-full border-2 border-white inline-flex items-center justify-center text-[10px] font-semibold text-white shadow-sm"
+                className="h-6 w-6 rounded-full border-2 border-white inline-flex items-center justify-center text-[11px] font-semibold text-white shadow-sm"
                 style={{ backgroundColor: colorForId(m.id) }}
                 title={`${m.name} · ${m.role.toLowerCase()}`}
               >
@@ -64,24 +64,24 @@ export function SpaceMembersStrip({ spaceId, spaceName, visibility, members, tot
               </span>
             ))}
             {overflow > 0 ? (
-              <span className="h-6 w-6 rounded-full border-2 border-white bg-zinc-100 text-zinc-600 inline-flex items-center justify-center text-[10px] font-semibold shadow-sm">
+              <span className="h-6 w-6 rounded-full border-2 border-white bg-zinc-100 text-zinc-600 inline-flex items-center justify-center text-[11px] font-semibold shadow-sm">
                 +{overflow}
               </span>
             ) : null}
             {shown.length === 0 ? (
-              <span className="h-6 w-6 rounded-full border-2 border-white bg-zinc-100 text-zinc-400 inline-flex items-center justify-center text-[10px] font-semibold shadow-sm">
+              <span className="h-6 w-6 rounded-full border-2 border-white bg-zinc-100 text-zinc-400 inline-flex items-center justify-center text-[11px] font-semibold shadow-sm">
                 ?
               </span>
             ) : null}
           </span>
-          <span className="text-[12px] text-zinc-500 group-hover:text-zinc-900 transition-colors">
+          <span className="text-[13px] text-zinc-500 group-hover:text-zinc-900 transition-colors">
             {totalCount} {totalCount === 1 ? "member" : "members"}
           </span>
         </button>
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="h-7 px-2.5 rounded-md text-[12px] font-medium border border-zinc-200 hover:bg-zinc-50 text-zinc-700"
+          className="h-7 px-2.5 rounded-md text-[13px] font-medium border border-zinc-200 hover:bg-zinc-50 text-zinc-700"
         >
           Manage
         </button>

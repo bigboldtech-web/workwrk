@@ -76,7 +76,7 @@ export function SpaceIconPicker({ iconName, color, fallbackInitial, onChange }: 
                 placeholder="Search…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-surface-2 text-[12.5px] focus:outline-none focus:border-[color:var(--accent)]"
+                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-surface-2 text-[13.5px] focus:outline-none focus:border-[color:var(--accent)]"
                 autoFocus
               />
             </div>

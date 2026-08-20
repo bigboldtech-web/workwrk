@@ -95,9 +95,9 @@ export default function DevelopersPage() {
                 <span className="w-2.5 h-2.5 rounded-full bg-rose-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-                <span className="ml-3 text-[11px] text-slate-400 font-mono">{CODE_EXAMPLES[0].title}</span>
+                <span className="ml-3 text-[12px] text-slate-400 font-mono">{CODE_EXAMPLES[0].title}</span>
               </div>
-              <pre className="p-5 text-[12px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
+              <pre className="p-5 text-[13px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
                 <code>{CODE_EXAMPLES[0].code}</code>
               </pre>
             </div>
@@ -132,10 +132,10 @@ export default function DevelopersPage() {
             {CODE_EXAMPLES.map((ex) => (
               <div key={ex.title} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
                 <div className="px-4 h-9 border-b border-slate-700 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-300 font-semibold">{ex.title}</span>
-                  <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider">{ex.lang}</span>
+                  <span className="text-[12px] text-slate-300 font-semibold">{ex.title}</span>
+                  <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider">{ex.lang}</span>
                 </div>
-                <pre className="p-4 text-[11.5px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
+                <pre className="p-4 text-[12.5px] leading-relaxed text-slate-200 font-mono overflow-x-auto">
                   <code>{ex.code}</code>
                 </pre>
               </div>

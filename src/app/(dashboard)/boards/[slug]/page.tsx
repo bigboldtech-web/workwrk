@@ -142,7 +142,7 @@ export default async function BoardPage(props: {
 
         <Link
           href="/automation/workflows"
-          className="text-[12.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
+          className="text-[13.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
           title="Automations"
         >
           <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -152,11 +152,11 @@ export default async function BoardPage(props: {
           type="button"
           disabled
           title="Ask AI is coming soon"
-          className="text-[12.5px] text-zinc-400 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md cursor-not-allowed"
+          className="text-[13.5px] text-zinc-400 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md cursor-not-allowed"
         >
           <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
           Ask
-          <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
         </button>
         <BoardShareButton
           boardId={board.id}

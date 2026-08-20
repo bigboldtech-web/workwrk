@@ -115,8 +115,8 @@ export default function MySopsPage() {
         description={items === null ? "Loading…" : `${active.length} active · ${overdue.length} overdue · ${done.length} completed · ${overallPct}% steps done`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
-            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
+            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
           </div>
         }
       />
@@ -171,7 +171,7 @@ export default function MySopsPage() {
                   <button
                     type="button"
                     onClick={() => setShowAllDone((v) => !v)}
-                    className="mt-1.5 text-[12px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
+                    className="mt-1.5 text-[13px] text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
                   >
                     {showAllDone ? "Show less" : `View all ${done.length}`}
                   </button>
@@ -228,7 +228,7 @@ function SopRow({ a, onAck, acking }: { a: ApiAssignment; onAck: (assignmentId: 
             type="button"
             disabled={acking}
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAck(a.id); }}
-            className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[11px] text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50"
+            className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-200 px-2 text-[12px] text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50"
             title="Mark this SOP as read"
           >
             {acking ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}

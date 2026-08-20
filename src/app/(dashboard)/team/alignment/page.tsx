@@ -57,10 +57,10 @@ export default async function TeamAlignmentPage() {
           <h1 className="text-base font-semibold text-zinc-900">Alignment board</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">your reports — what they own, how they&rsquo;re tracking</span>
           <div className="flex-1" />
-          <Link href="/team/rollup" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/team/rollup" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <BarChart3 className="w-3.5 h-3.5 text-zinc-400" /> Rollup
           </Link>
-          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/team/reviews" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <ClipboardCheck className="w-3.5 h-3.5 text-zinc-400" /> Reviews
           </Link>
         </div>

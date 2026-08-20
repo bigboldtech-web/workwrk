@@ -66,7 +66,7 @@ export function PdfPages({
     return () => { cancelled = true; };
   }, [url, width]);
 
-  if (err) return <div className="mx-auto max-w-[760px] rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700">{err}</div>;
+  if (err) return <div className="mx-auto max-w-[760px] rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[14px] text-red-700">{err}</div>;
   if (dims.length === 0) return <div className="flex items-center justify-center py-16 text-sm text-zinc-400">Rendering PDF…</div>;
 
   return (

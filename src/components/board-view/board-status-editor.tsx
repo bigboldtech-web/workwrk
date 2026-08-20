@@ -140,7 +140,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
       <aside role="dialog" aria-modal="true" aria-label="Task statuses" className="fixed top-0 right-0 bottom-0 z-50 w-[400px] max-w-full bg-white border-l border-zinc-200 shadow-2xl flex flex-col">
         <div className="px-4 py-3 border-b border-zinc-200 flex items-center gap-2">
           <span className="text-sm font-semibold text-zinc-900">Task statuses</span>
-          <span className="text-[11px] text-zinc-400">{draft.length} of 30</span>
+          <span className="text-[12px] text-zinc-400">{draft.length} of 30</span>
           <button
             type="button"
             onClick={onClose}
@@ -159,7 +159,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
         ) : null}
 
         <div className="flex-1 overflow-y-auto px-4 py-3">
-          <p className="text-[11.5px] text-zinc-500 mb-3">
+          <p className="text-[12.5px] text-zinc-500 mb-3">
             Statuses are per-List. The group (Active / Done / Closed) drives completion
             logic — overdue flags, &ldquo;hide closed&rdquo;, and rollups. Drag to reorder.
           </p>
@@ -203,13 +203,13 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
                   value={s.label}
                   disabled={!canEdit}
                   onChange={(e) => patchRow(idx, { label: e.target.value })}
-                  className="flex-1 min-w-0 h-7 px-1.5 rounded text-[13px] bg-transparent outline-none hover:bg-zinc-50 focus:bg-white focus:ring-1 focus:ring-zinc-300 disabled:opacity-60"
+                  className="flex-1 min-w-0 h-7 px-1.5 rounded text-[14px] bg-transparent outline-none hover:bg-zinc-50 focus:bg-white focus:ring-1 focus:ring-zinc-300 disabled:opacity-60"
                 />
                 <select
                   value={s.group}
                   disabled={!canEdit}
                   onChange={(e) => patchRow(idx, { group: e.target.value as StatusGroup })}
-                  className="h-7 rounded border border-zinc-200 bg-white px-1 text-[11.5px] text-zinc-600 outline-none focus:border-zinc-400 disabled:opacity-60"
+                  className="h-7 rounded border border-zinc-200 bg-white px-1 text-[12.5px] text-zinc-600 outline-none focus:border-zinc-400 disabled:opacity-60"
                   title={GROUP_META[s.group].blurb}
                 >
                   {(Object.keys(GROUP_META) as StatusGroup[]).map((g) => (
@@ -240,12 +240,12 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
                 onChange={(e) => setNewLabel(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") addRow(); }}
                 placeholder="New status name"
-                className="flex-1 min-w-0 h-8 px-2 rounded-lg border border-zinc-200 text-[13px] outline-none focus:border-zinc-400"
+                className="flex-1 min-w-0 h-8 px-2 rounded-lg border border-zinc-200 text-[14px] outline-none focus:border-zinc-400"
               />
               <select
                 value={newGroup}
                 onChange={(e) => setNewGroup(e.target.value as StatusGroup)}
-                className="h-8 rounded-lg border border-zinc-200 bg-white px-1 text-[11.5px] text-zinc-600 outline-none focus:border-zinc-400"
+                className="h-8 rounded-lg border border-zinc-200 bg-white px-1 text-[12.5px] text-zinc-600 outline-none focus:border-zinc-400"
               >
                 {(Object.keys(GROUP_META) as StatusGroup[]).map((g) => (
                   <option key={g} value={g}>{GROUP_META[g].label}</option>
@@ -263,7 +263,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
             </div>
           ) : null}
 
-          <p className="mt-3 text-[11px] text-zinc-400">
+          <p className="mt-3 text-[12px] text-zinc-400">
             Items keeping a deleted status stay visible — they bucket under their raw
             value until re-statused.
           </p>
@@ -275,7 +275,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
               type="button"
               onClick={() => void save(null)}
               disabled={busy}
-              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[12.5px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[13.5px] text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50 disabled:opacity-50"
               title="Use the workspace default statuses"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -286,7 +286,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
               type="button"
               onClick={() => void save(draft)}
               disabled={busy || !dirty || draft.length === 0}
-              className="inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-[13px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-[14px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
               Save

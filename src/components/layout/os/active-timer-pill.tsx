@@ -77,10 +77,10 @@ export function ActiveTimerPill() {
   const Inner = (
     <span className="inline-flex items-center gap-1.5 h-6 px-1.5 rounded-md bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 transition-colors">
       <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-      <span className="font-mono tabular-nums text-[11px] font-semibold">
+      <span className="font-mono tabular-nums text-[12px] font-semibold">
         {elapsed(active.startedAt, now)}
       </span>
-      <span className="text-[11px] truncate max-w-[140px]" title={label}>{label}</span>
+      <span className="text-[12px] truncate max-w-[140px]" title={label}>{label}</span>
       <button
         type="button"
         onClick={stop}

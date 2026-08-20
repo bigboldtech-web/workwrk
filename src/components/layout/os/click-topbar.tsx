@@ -104,10 +104,10 @@ export function ClickTopbar() {
           aria-label="Switch workspace"
           aria-expanded={menuOpen}
         >
-          <span className="w-5 h-5 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[10px] font-bold">
+          <span className="w-5 h-5 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[11px] font-bold">
             {orgInitials(orgName)}
           </span>
-          <span className="text-[13px] font-medium text-zinc-900 leading-none max-w-[160px] truncate">{orgName}</span>
+          <span className="text-[14px] font-medium text-zinc-900 leading-none max-w-[160px] truncate">{orgName}</span>
           <ChevronDown className="w-3 h-3 text-zinc-500" />
         </button>
         <CalendarPeek />
@@ -127,10 +127,10 @@ export function ClickTopbar() {
           aria-label="Search workspace"
         >
           <Search className="w-[13px] h-[13px] text-zinc-400 group-hover:text-zinc-600 transition-colors flex-shrink-0" />
-          <span className="text-[12.5px] flex-1 text-zinc-500 truncate">
+          <span className="text-[13.5px] flex-1 text-zinc-500 truncate">
             Search tasks, docs, people, spaces…
           </span>
-          <span className="text-[10px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 font-mono flex-shrink-0">⌘K</span>
+          <span className="text-[11px] text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 border border-zinc-200 font-mono flex-shrink-0">⌘K</span>
         </button>
         <AskAiButton size="sm" onClick={() => openSidekick()} title="Ask the Brain (⌘J)" />
       </div>
@@ -179,7 +179,7 @@ export function ClickTopbar() {
             ref={profileBtnRef}
             type="button"
             onClick={() => setProfileOpen((v) => !v)}
-            className="w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-semibold"
+            className="w-6 h-6 rounded-full text-white flex items-center justify-center text-[11px] font-semibold"
             style={{ background: "var(--os-brand)" }}
             aria-label="Your profile"
             aria-haspopup="menu"

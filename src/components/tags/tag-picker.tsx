@@ -158,7 +158,7 @@ export function TagPicker({
             variant="default"
             className="text-xs gap-1 pr-1"
           >
-            <span className="text-[10px] uppercase opacity-60">{TYPE_LABELS[a.tag.type] ?? a.tag.type}</span>
+            <span className="text-[11px] uppercase opacity-60">{TYPE_LABELS[a.tag.type] ?? a.tag.type}</span>
             <span>{a.tag.name}</span>
             {canEdit && (
               <button

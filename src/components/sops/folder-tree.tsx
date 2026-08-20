@@ -100,7 +100,7 @@ export function FolderTree({
         onDrop={(e) => handleDrop(e, node.id)}
         onClick={() => onSelect(node.id)}
         className={[
-          "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12.5px] cursor-pointer select-none",
+          "group flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[13.5px] cursor-pointer select-none",
           "transition-colors",
           isSelected ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
           isDropTarget ? "ring-1 ring-[#d4ff2e] ring-inset" : "",
@@ -124,7 +124,7 @@ export function FolderTree({
           style={{ backgroundColor: dot }}
         />
         <span className="truncate flex-1">{node.name}</span>
-        <span className="text-[10px] font-mono tabular-nums text-muted">
+        <span className="text-[11px] font-mono tabular-nums text-muted">
           {node.sopCountDeep}
         </span>
       </div>
@@ -177,13 +177,13 @@ export function FolderTree({
       <div
         onClick={() => onSelect("all")}
         className={[
-          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[12.5px] cursor-pointer select-none",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[13.5px] cursor-pointer select-none",
           selected === "all" ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
         ].join(" ")}
       >
         <Layers size={12} className="text-muted" />
         <span className="flex-1">All SOPs</span>
-        <span className="text-[10px] font-mono tabular-nums text-muted">{totalSops}</span>
+        <span className="text-[11px] font-mono tabular-nums text-muted">{totalSops}</span>
       </div>
 
       {/* Pseudo-node: Unfoldered. Drop target too — drop here to "unfile" an SOP. */}
@@ -193,7 +193,7 @@ export function FolderTree({
         onDragLeave={() => setDropTarget((p) => (p === "__none__" ? null : p))}
         onDrop={(e) => handleDrop(e, null)}
         className={[
-          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[12.5px] cursor-pointer select-none",
+          "flex items-center gap-1.5 rounded-md px-1.5 py-1 pl-[20px] text-[13.5px] cursor-pointer select-none",
           selected === "none" ? "bg-[rgba(212,255,46,0.10)] text-[#d4ff2e]" : "hover:bg-surface-2 text-foreground",
           dropTarget === "__none__" ? "ring-1 ring-[#d4ff2e] ring-inset" : "",
         ].join(" ")}
@@ -201,7 +201,7 @@ export function FolderTree({
         <Inbox size={12} className="text-muted" />
         <span className="flex-1">Unfoldered</span>
         {typeof unfolderedCount === "number" && (
-          <span className="text-[10px] font-mono tabular-nums text-muted">{unfolderedCount}</span>
+          <span className="text-[11px] font-mono tabular-nums text-muted">{unfolderedCount}</span>
         )}
       </div>
 
@@ -209,7 +209,7 @@ export function FolderTree({
 
       {/* Tree */}
       {roots.length === 0 ? (
-        <div className="px-2 py-3 text-[11px] text-muted">
+        <div className="px-2 py-3 text-[12px] text-muted">
           No folders yet.{canManage ? " Right-click to create one." : ""}
         </div>
       ) : (
@@ -220,7 +220,7 @@ export function FolderTree({
         <button
           type="button"
           onClick={() => onCreateChild(null)}
-          className="mt-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+          className="mt-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
         >
           <Plus size={12} /> New folder
         </button>

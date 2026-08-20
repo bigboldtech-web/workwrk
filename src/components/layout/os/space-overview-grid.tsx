@@ -179,7 +179,7 @@ function ManageCardsModal({
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="px-5 pt-3 text-[12px] text-zinc-500">
+        <p className="px-5 pt-3 text-[13px] text-zinc-500">
           Toggle which cards appear on the Overview. Hidden cards keep their saved layout.
         </p>
         <ul className="flex-1 overflow-y-auto p-3 space-y-1">
@@ -195,8 +195,8 @@ function ManageCardsModal({
                     className="mt-1 w-4 h-4 accent-zinc-900 cursor-pointer"
                   />
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[13px] font-medium text-zinc-900">{c.label}</span>
-                    <span className="block text-[12px] text-zinc-500">{c.description}</span>
+                    <span className="block text-[14px] font-medium text-zinc-900">{c.label}</span>
+                    <span className="block text-[13px] text-zinc-500">{c.description}</span>
                   </span>
                   {isHidden ? (
                     <Plus className="w-3.5 h-3.5 text-zinc-400 mt-1" />
@@ -210,7 +210,7 @@ function ManageCardsModal({
           <button
             type="button"
             onClick={onClose}
-            className="text-[12.5px] px-3 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-700"
+            className="text-[13.5px] px-3 py-1.5 rounded-md bg-zinc-900 text-white hover:bg-zinc-700"
           >
             Done
           </button>

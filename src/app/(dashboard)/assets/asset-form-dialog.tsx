@@ -22,7 +22,7 @@ import {
 } from "./types";
 
 const SELECT_CLASS =
-  "flex h-10 w-full rounded-lg border border-border bg-white dark:bg-surface-2 px-3 py-2 text-[13.5px] text-foreground " +
+  "flex h-10 w-full rounded-lg border border-border bg-white dark:bg-surface-2 px-3 py-2 text-[14.5px] text-foreground " +
   "transition-fast hover:border-muted-2/60 focus-visible:outline-none focus-visible:border-[color:var(--accent)] " +
   "focus-visible:ring-[3px] focus-visible:ring-[color:var(--accent)]/15 disabled:cursor-not-allowed disabled:opacity-50";
 
@@ -231,7 +231,7 @@ export function AssetFormDialog({
                   <option key={s} value={s}>{STATUS_LABEL[s]}</option>
                 ))}
               </select>
-              <p className="text-[11.5px] text-muted-2">Assignment is managed from the row actions menu.</p>
+              <p className="text-[12.5px] text-muted-2">Assignment is managed from the row actions menu.</p>
             </div>
           )}
 

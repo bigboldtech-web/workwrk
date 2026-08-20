@@ -41,7 +41,7 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] outline-none transition-all",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[14px] outline-none transition-all",
       "hover:bg-surface-2 focus:bg-surface-2",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       destructive ? "text-red-400 hover:bg-red-500/10 focus:bg-red-500/10" : "text-foreground",
@@ -60,7 +60,7 @@ const ContextMenuSubTrigger = React.forwardRef<
   <ContextMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[13px] text-foreground outline-none transition-all",
+      "flex cursor-pointer select-none items-center gap-2 rounded-lg px-2.5 py-2 text-[14px] text-foreground outline-none transition-all",
       "hover:bg-surface-2 focus:bg-surface-2",
       "data-[state=open]:bg-surface-2",
       inset && "pl-8",
@@ -100,7 +100,7 @@ const ContextMenuRadioItem = React.forwardRef<
   <ContextMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-8 pr-2.5 text-[13px] text-foreground outline-none transition-all",
+      "relative flex cursor-pointer select-none items-center gap-2 rounded-lg py-2 pl-8 pr-2.5 text-[14px] text-foreground outline-none transition-all",
       "hover:bg-surface-2 focus:bg-surface-2",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
@@ -136,7 +136,7 @@ const ContextMenuLabel = React.forwardRef<
   <ContextMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2.5 pt-2 pb-1.5 text-[10.5px] font-medium text-muted-2 tracking-[0.12em] uppercase",
+      "px-2.5 pt-2 pb-1.5 text-[11.5px] font-medium text-muted-2 tracking-[0.12em] uppercase",
       className,
     )}
     style={{ fontFamily: "var(--font-geist-mono), monospace" }}

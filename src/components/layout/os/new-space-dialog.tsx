@@ -226,7 +226,7 @@ function Step1({
 
       <div className="px-6 pb-2 space-y-5">
         <div>
-          <label className="text-[12.5px] font-medium block mb-2">Icon &amp; name</label>
+          <label className="text-[13.5px] font-medium block mb-2">Icon &amp; name</label>
           <div className="flex items-start gap-3">
             <SpaceIconPicker
               iconName={state.iconName}
@@ -243,7 +243,7 @@ function Step1({
                 value={state.name}
                 onChange={(e) => onChange("name", e.target.value)}
                 placeholder="e.g. Marketing, Engineering, HR"
-                className={`w-full h-8 px-3 rounded-md border bg-surface text-[13px] focus:outline-none transition-colors ${
+                className={`w-full h-8 px-3 rounded-md border bg-surface text-[14px] focus:outline-none transition-colors ${
                   showNameError
                     ? "border-red-500/70 focus:border-red-500"
                     : "border-border focus:border-[color:var(--accent)]"
@@ -251,28 +251,28 @@ function Step1({
                 autoFocus
               />
               {showNameError ? (
-                <div className="mt-1 text-[12px] text-red-500">Space name is required</div>
+                <div className="mt-1 text-[13px] text-red-500">Space name is required</div>
               ) : null}
             </div>
           </div>
         </div>
 
         <div>
-          <label className="text-[12.5px] font-medium block mb-2">
+          <label className="text-[13.5px] font-medium block mb-2">
             Description
           </label>
           <textarea
             value={state.description}
             onChange={(e) => onChange("description", e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-md border border-border bg-surface text-[13px] resize-none focus:outline-none focus:border-[color:var(--accent)]"
+            className="w-full px-3 py-2 rounded-md border border-border bg-surface text-[14px] resize-none focus:outline-none focus:border-[color:var(--accent)]"
           />
         </div>
 
         <div className="border-t border-border pt-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-muted" />
-            <span className="text-[12.5px] font-medium">Default permission</span>
+            <span className="text-[13.5px] font-medium">Default permission</span>
             <Info className="h-3.5 w-3.5 text-muted-2" />
           </div>
           <PermissionSelect
@@ -284,8 +284,8 @@ function Step1({
         <div className="border-t border-border pt-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
-              <div className="text-[12.5px] font-medium">Make Private</div>
-              <div className="text-[12px] text-muted">Only you and invited members have access</div>
+              <div className="text-[13.5px] font-medium">Make Private</div>
+              <div className="text-[13px] text-muted">Only you and invited members have access</div>
             </div>
             <Switch
               checked={state.isPrivate}
@@ -296,7 +296,7 @@ function Step1({
         </div>
 
         {error && error !== "Space name is required" ? (
-          <div className="text-[12px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
+          <div className="text-[13px] text-red-500 bg-red-500/10 rounded-md px-3 py-2">{error}</div>
         ) : null}
       </div>
 
@@ -306,14 +306,14 @@ function Step1({
         <button
           type="button"
           onClick={onCancel}
-          className="text-[12.5px] text-muted hover:text-foreground px-3 h-8 rounded-md"
+          className="text-[13.5px] text-muted hover:text-foreground px-3 h-8 rounded-md"
         >
           Cancel
         </button>
         <button
           type="button"
           onClick={onContinue}
-          className="px-4 h-8 rounded-md text-[12.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 transition-colors"
+          className="px-4 h-8 rounded-md text-[13.5px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 transition-colors"
         >
           Continue
         </button>
@@ -333,7 +333,7 @@ function PermissionSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as Permission)}
-      className="h-8 px-2.5 pr-7 rounded-md border border-border bg-surface text-[12.5px] focus:outline-none focus:border-[color:var(--accent)]"
+      className="h-8 px-2.5 pr-7 rounded-md border border-border bg-surface text-[13.5px] focus:outline-none focus:border-[color:var(--accent)]"
     >
       {(Object.keys(PERMISSION_LABELS) as Permission[]).map((k) => (
         <option key={k} value={k}>

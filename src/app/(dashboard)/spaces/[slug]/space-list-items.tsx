@@ -113,11 +113,11 @@ export function SpaceListItemsTable({
               title={it.title}
             >
               <StatusGlyph current={current} statuses={statuses} />
-              <span className={`truncate hover:text-[var(--os-brand)] transition-colors ${depth > 0 ? "text-[12.5px] text-zinc-700" : "text-[13px] font-medium text-zinc-900"}`}>
+              <span className={`truncate hover:text-[var(--os-brand)] transition-colors ${depth > 0 ? "text-[13.5px] text-zinc-700" : "text-[14px] font-medium text-zinc-900"}`}>
                 {it.title}
               </span>
               {kids.length > 0 ? (
-                <span className="inline-flex items-center px-1.5 h-4 rounded-full bg-zinc-100 text-[10px] font-medium text-zinc-500 shrink-0">
+                <span className="inline-flex items-center px-1.5 h-4 rounded-full bg-zinc-100 text-[11px] font-medium text-zinc-500 shrink-0">
                   {kids.length}
                 </span>
               ) : null}
@@ -133,7 +133,7 @@ export function SpaceListItemsTable({
         </td>
         <td className="px-3 py-2">
           <span
-            className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium"
+            className="inline-flex items-center px-1.5 py-0.5 rounded text-[12px] font-medium"
             style={{ backgroundColor: `${statusColor}1a`, color: statusColor }}
           >
             {statusLabel}
@@ -142,12 +142,12 @@ export function SpaceListItemsTable({
         <td className="px-3 py-2 hidden sm:table-cell">
           <Link
             href={`/boards/${it.board.slug}`}
-            className="text-[12px] text-zinc-600 hover:text-zinc-900 truncate inline-block max-w-[200px]"
+            className="text-[13px] text-zinc-600 hover:text-zinc-900 truncate inline-block max-w-[200px]"
           >
             {it.board.name}
           </Link>
         </td>
-        <td className="px-3 py-2 text-right text-[11px] text-zinc-500 tabular-nums">
+        <td className="px-3 py-2 text-right text-[12px] text-zinc-500 tabular-nums">
           {timeAgo(it.updatedAt)}
         </td>
       </tr>,
@@ -162,7 +162,7 @@ export function SpaceListItemsTable({
     <>
       <table className="w-full">
         <thead className="bg-zinc-50 border-b border-zinc-200">
-          <tr className="text-left text-[10.5px] uppercase tracking-wide text-zinc-500">
+          <tr className="text-left text-[11.5px] uppercase tracking-wide text-zinc-500">
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Status</th>
             <th className="px-3 py-2 font-medium hidden sm:table-cell">Board</th>

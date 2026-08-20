@@ -126,11 +126,11 @@ export function BrandingManager() {
           <div className="rounded-lg border border-dashed border-border bg-surface-2 p-6 text-center">
             <Crown size={20} className="mx-auto text-muted mb-2" />
             <p className="text-sm font-medium">Enterprise add-on</p>
-            <p className="text-[12px] text-muted mt-1 max-w-md mx-auto">
+            <p className="text-[13px] text-muted mt-1 max-w-md mx-auto">
               Branding is a custom add-on we enable per Enterprise customer. Reach out to
               your WorkwrK contact and we&rsquo;ll switch it on for {data?.name ?? "your org"}.
             </p>
-            <Badge variant="outline" className="mt-3 text-[10px]">{features?.plan ?? "STARTER"}</Badge>
+            <Badge variant="outline" className="mt-3 text-[11px]">{features?.plan ?? "STARTER"}</Badge>
           </div>
         </CardContent>
       </Card>
@@ -157,7 +157,7 @@ export function BrandingManager() {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={logo} alt="" className="h-full w-full object-contain" />
               ) : (
-                <span className="text-[10px] text-muted">No logo</span>
+                <span className="text-[11px] text-muted">No logo</span>
               )}
             </div>
             <div className="flex items-center gap-2">
@@ -172,7 +172,7 @@ export function BrandingManager() {
               )}
             </div>
           </div>
-          <p className="text-[11px] text-muted">PNG or SVG, ideally under 200 KB. Square aspect ratio looks best.</p>
+          <p className="text-[12px] text-muted">PNG or SVG, ideally under 200 KB. Square aspect ratio looks best.</p>
         </div>
 
         {/* Display name */}
@@ -184,7 +184,7 @@ export function BrandingManager() {
             placeholder={data?.name ?? "Your company name"}
             maxLength={60}
           />
-          <p className="text-[11px] text-muted">Shown next to the logo in the sidebar. Leave blank to use your org name.</p>
+          <p className="text-[12px] text-muted">Shown next to the logo in the sidebar. Leave blank to use your org name.</p>
         </div>
 
         {/* Primary color */}
@@ -203,7 +203,7 @@ export function BrandingManager() {
               style={{ backgroundColor: /^#[0-9a-fA-F]{6}$/.test(primaryColor) ? primaryColor : "transparent" }}
             />
           </div>
-          <p className="text-[11px] text-muted">Hex format. Used for accents — links, primary buttons, progress bars.</p>
+          <p className="text-[12px] text-muted">Hex format. Used for accents — links, primary buttons, progress bars.</p>
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

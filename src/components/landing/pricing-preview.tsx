@@ -95,7 +95,7 @@ export function PricingPreview() {
           transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
         >
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             Pricing
@@ -177,7 +177,7 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
       {/* "Most chosen" pill */}
       {tier.featured && (
         <span
-          className="absolute -top-3 left-7 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full text-white"
+          className="absolute -top-3 left-7 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.18em] px-2.5 h-6 rounded-full text-white"
           style={{ backgroundColor: tier.hue }}
         >
           <Sparkles size={9} /> Most chosen
@@ -213,7 +213,7 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
         </span>
         {tier.priceSuffix && (
           <span
-            className="text-[13px] font-medium"
+            className="text-[14px] font-medium"
             style={{ color: "var(--m-text-soft)" }}
           >
             {tier.priceSuffix}
@@ -222,14 +222,14 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
       </p>
 
       <p
-        className="mt-1.5 text-[12.5px]"
+        className="mt-1.5 text-[13.5px]"
         style={{ color: "var(--m-text-soft)" }}
       >
         {tier.sub}
       </p>
 
       <p
-        className="mt-3 text-[13.5px] leading-relaxed"
+        className="mt-3 text-[14.5px] leading-relaxed"
         style={{ color: "var(--m-text-muted)" }}
       >
         {tier.description}
@@ -252,7 +252,7 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
         {tier.features.map((f, i) => (
           <motion.li
             key={f}
-            className="flex items-start gap-2.5 text-[13.5px]"
+            className="flex items-start gap-2.5 text-[14.5px]"
             style={{ color: "var(--m-text)" }}
             initial={{ opacity: 0, x: -8 }}
             whileInView={{ opacity: 1, x: 0 }}

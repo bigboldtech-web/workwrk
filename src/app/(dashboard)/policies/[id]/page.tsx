@@ -247,27 +247,27 @@ export default function PolicyDetailPage() {
           <div className="flex items-center gap-2">
             {policy?.canEdit && !editing ? (
               <>
-                <button type="button" onClick={openAssign} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={openAssign} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
                   <UserPlus className="h-3.5 w-3.5" /> Assign
                 </button>
-                <button type="button" onClick={openAssignees} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${showAssignees ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
+                <button type="button" onClick={openAssignees} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[14px] hover:bg-zinc-50 ${showAssignees ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
                   <Users className="h-3.5 w-3.5" /> Assignees
                 </button>
-                <button type="button" onClick={openHistory} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] hover:bg-zinc-50 ${showHistory ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
+                <button type="button" onClick={openHistory} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-[14px] hover:bg-zinc-50 ${showHistory ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
                   <History className="h-3.5 w-3.5" /> History
                 </button>
-                <Link href={`/policies/${policy.id}/compliance`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <Link href={`/policies/${policy.id}/compliance`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
                   <ShieldCheck className="h-3.5 w-3.5" /> Audit ledger
                 </Link>
-                <button type="button" onClick={startEdit} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={startEdit} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
                   <Pencil className="h-3.5 w-3.5" /> Edit
                 </button>
               </>
             ) : null}
-            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               <ArrowLeft className="h-3.5 w-3.5" /> All policies
             </Link>
-            <Link href="/policies/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/policies/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               Compliance
             </Link>
           </div>
@@ -288,19 +288,19 @@ export default function PolicyDetailPage() {
               <select
                 value={editStatus}
                 onChange={(e) => setEditStatus(e.target.value as PolStatus)}
-                className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700"
+                className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-700"
               >
                 <option value="DRAFT">Draft</option>
                 <option value="PUBLISHED">Published</option>
                 <option value="ARCHIVED">Archived</option>
               </select>
-              <label className="flex items-center gap-1.5 text-[13px] text-zinc-500" title="Effective date (system field)">
+              <label className="flex items-center gap-1.5 text-[14px] text-zinc-500" title="Effective date (system field)">
                 <CalendarDays className="h-3.5 w-3.5" />
                 <input
                   type="date"
                   value={editEffectiveDate}
                   onChange={(e) => setEditEffectiveDate(e.target.value)}
-                  className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700"
+                  className="h-8 rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-700"
                 />
               </label>
               <input
@@ -310,7 +310,7 @@ export default function PolicyDetailPage() {
                 onChange={(e) => setEditCategory(e.target.value)}
                 placeholder="Category…"
                 title="Category — groups this policy on the Policies page"
-                className="h-8 w-40 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700 outline-none focus:border-zinc-300"
+                className="h-8 w-40 rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-700 outline-none focus:border-zinc-300"
               />
               <datalist id="policy-categories">
                 <option value="HR" />
@@ -322,16 +322,16 @@ export default function PolicyDetailPage() {
                 <option value="Expense" />
               </datalist>
               {editStatus === "PUBLISHED" ? (
-                <label className="flex items-center gap-1.5 text-[13px] text-zinc-600" title="Material change — resets everyone to pending and requires them to re-acknowledge the new version. Leave off for typo/format fixes.">
+                <label className="flex items-center gap-1.5 text-[14px] text-zinc-600" title="Material change — resets everyone to pending and requires them to re-acknowledge the new version. Leave off for typo/format fixes.">
                   <input type="checkbox" checked={editRequireReack} onChange={(e) => setEditRequireReack(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                   Require re-acknowledgement
                 </label>
               ) : null}
               <div className="flex-1" />
-              <button type="button" onClick={() => setEditing(false)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <button type="button" onClick={() => setEditing(false)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
                 <X className="h-3.5 w-3.5" /> Cancel
               </button>
-              <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+              <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
               </button>
             </div>
@@ -362,20 +362,20 @@ export default function PolicyDetailPage() {
               {policy.category ? <span className="font-medium text-zinc-500">{policy.category}</span> : null}
               <span>v{policy.version}</span>
               {policy.effectiveDate ? <span>· Effective {new Date(policy.effectiveDate).toLocaleDateString()}</span> : null}
-              {policy.status !== "PUBLISHED" ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-500">{policy.status}</span> : null}
+              {policy.status !== "PUBLISHED" ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[12px] font-medium text-zinc-500">{policy.status}</span> : null}
             </div>
             <h1 className="text-2xl font-semibold tracking-[-0.01em] text-zinc-900">{policy.title}</h1>
 
             {policy.requiresAck ? (
               <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-4">
                 {policy.needsReack ? (
-                  <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+                  <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[14px] text-amber-800">
                     <AlertTriangle className="h-4 w-4 shrink-0" /> This policy was updated to v{policy.version}. Please re-acknowledge the current version.
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="min-w-[200px] flex-1">
-                    <div className="flex items-center gap-2 text-[13px] font-medium text-zinc-700">
+                    <div className="flex items-center gap-2 text-[14px] font-medium text-zinc-700">
                       <Users className="h-4 w-4 text-zinc-400" /> {policy.totalAcks ?? 0} of {policy.totalUsers ?? 0} acknowledged
                       <span className="text-zinc-400">· {ackRate}% on v{policy.ackVersion ?? policy.version}</span>
                     </div>
@@ -384,16 +384,16 @@ export default function PolicyDetailPage() {
                     </div>
                   </div>
                   {policy.acknowledged ? (
-                    <span className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-50 px-3 text-[13px] font-medium text-emerald-700">
+                    <span className="inline-flex h-9 items-center gap-1.5 rounded-md bg-emerald-50 px-3 text-[14px] font-medium text-emerald-700">
                       <CheckCircle2 className="h-4 w-4" /> You&apos;ve acknowledged v{policy.ackVersion ?? policy.version}
                     </span>
                   ) : (
                     <div className="flex flex-col items-end gap-2">
-                      <label className="flex max-w-sm cursor-pointer items-start gap-2 text-[13px] text-zinc-700">
+                      <label className="flex max-w-sm cursor-pointer items-start gap-2 text-[14px] text-zinc-700">
                         <input type="checkbox" checked={attested} onChange={(e) => setAttested(e.target.checked)} className="mt-0.5 h-4 w-4" style={{ accentColor: "#0073EA" }} />
                         <span>{policy.ackStatement?.trim() || DEFAULT_ATTESTATION}</span>
                       </label>
-                      <button type="button" onClick={acknowledge} disabled={acking || !attested} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+                      <button type="button" onClick={acknowledge} disabled={acking || !attested} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                         {acking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Acknowledge
                       </button>
                     </div>
@@ -404,24 +404,24 @@ export default function PolicyDetailPage() {
 
             {showHistory ? (
               <div className="mt-4 rounded-xl border border-zinc-200 bg-white">
-                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[13px] font-medium text-zinc-700">
+                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[14px] font-medium text-zinc-700">
                   <History className="h-4 w-4 text-zinc-400" /> Version history
                   <span className="text-zinc-400">· current v{policy.version}</span>
                 </div>
                 {versions === null ? (
-                  <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                  <div className="px-4 py-3 text-[14px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
                 ) : versions.length === 0 ? (
-                  <div className="px-4 py-3 text-[13px] text-zinc-400">No prior versions yet — edits to a published policy are versioned automatically.</div>
+                  <div className="px-4 py-3 text-[14px] text-zinc-400">No prior versions yet — edits to a published policy are versioned automatically.</div>
                 ) : (
                   <ul className="divide-y divide-zinc-100">
                     {versions.map((v) => (
                       <li key={v.id} className="flex items-center gap-3 px-4 py-2.5">
-                        <span className="inline-flex h-6 min-w-[2.5rem] items-center justify-center rounded bg-zinc-100 px-1.5 text-[12px] font-semibold text-zinc-600">v{v.version}</span>
+                        <span className="inline-flex h-6 min-w-[2.5rem] items-center justify-center rounded bg-zinc-100 px-1.5 text-[13px] font-semibold text-zinc-600">v{v.version}</span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] text-zinc-800">{v.title}</div>
-                          <div className="text-[11px] text-zinc-400">{new Date(v.createdAt).toLocaleString()}</div>
+                          <div className="truncate text-[14px] text-zinc-800">{v.title}</div>
+                          <div className="text-[12px] text-zinc-400">{new Date(v.createdAt).toLocaleString()}</div>
                         </div>
-                        <button type="button" onClick={() => restore(v.id)} disabled={!!restoring} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2 text-[12px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+                        <button type="button" onClick={() => restore(v.id)} disabled={!!restoring} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
                           {restoring === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
                         </button>
                       </li>
@@ -433,25 +433,25 @@ export default function PolicyDetailPage() {
 
             {showAssignees ? (
               <div className="mt-4 rounded-xl border border-zinc-200 bg-white">
-                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[13px] font-medium text-zinc-700">
+                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5 text-[14px] font-medium text-zinc-700">
                   <Users className="h-4 w-4 text-zinc-400" /> Assignees
                   {assignees ? <span className="text-zinc-400">· {assignees.filter((a) => a.status === "COMPLETED").length}/{assignees.length} acknowledged</span> : null}
                 </div>
                 {assignees === null ? (
-                  <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                  <div className="px-4 py-3 text-[14px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
                 ) : assignees.length === 0 ? (
-                  <div className="px-4 py-3 text-[13px] text-zinc-400">No one assigned yet — use <strong>Assign</strong> to send this to employees.</div>
+                  <div className="px-4 py-3 text-[14px] text-zinc-400">No one assigned yet — use <strong>Assign</strong> to send this to employees.</div>
                 ) : (
                   <ul className="divide-y divide-zinc-100">
                     {assignees.map((a) => (
                       <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] text-zinc-800">{a.name}</div>
-                          {a.email ? <div className="truncate text-[11px] text-zinc-400">{a.email}</div> : null}
+                          <div className="truncate text-[14px] text-zinc-800">{a.name}</div>
+                          {a.email ? <div className="truncate text-[12px] text-zinc-400">{a.email}</div> : null}
                         </div>
                         {a.status === "COMPLETED"
-                          ? <span className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /> Acknowledged</span>
-                          : <span className="text-[12px] text-amber-600">Pending</span>}
+                          ? <span className="inline-flex items-center gap-1 text-[13px] font-medium text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /> Acknowledged</span>
+                          : <span className="text-[13px] text-amber-600">Pending</span>}
                       </li>
                     ))}
                   </ul>
@@ -479,7 +479,7 @@ export default function PolicyDetailPage() {
               <button type="button" onClick={() => setShowAssign(false)} className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"><X className="h-4 w-4" /></button>
             </div>
             <div className="border-b border-zinc-100 px-4 py-2.5">
-              <label className="flex cursor-pointer items-center gap-2 text-[13px] text-zinc-700">
+              <label className="flex cursor-pointer items-center gap-2 text-[14px] text-zinc-700">
                 <input type="checkbox" checked={assignAll} onChange={(e) => setAssignAll(e.target.checked)} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                 Everyone in the org
               </label>
@@ -487,16 +487,16 @@ export default function PolicyDetailPage() {
             {!assignAll ? (
               <>
                 <div className="border-b border-zinc-100 px-4 py-2">
-                  <input type="text" value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder="Search people…" className="h-8 w-full rounded-md border border-zinc-200 px-2.5 text-[13px] outline-none focus:border-zinc-300" />
+                  <input type="text" value={userQuery} onChange={(e) => setUserQuery(e.target.value)} placeholder="Search people…" className="h-8 w-full rounded-md border border-zinc-200 px-2.5 text-[14px] outline-none focus:border-zinc-300" />
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {orgUsers === null ? (
-                    <div className="px-4 py-3 text-[13px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                    <div className="px-4 py-3 text-[14px] text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
                   ) : (() => {
                     const q = userQuery.trim().toLowerCase();
                     const list = orgUsers.filter((u) => !q || `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(q));
                     return list.length === 0 ? (
-                      <div className="px-4 py-3 text-[13px] text-zinc-400">No people match.</div>
+                      <div className="px-4 py-3 text-[14px] text-zinc-400">No people match.</div>
                     ) : (
                       <ul>
                         {list.map((u) => {
@@ -506,8 +506,8 @@ export default function PolicyDetailPage() {
                               <label className="flex cursor-pointer items-center gap-2.5 px-4 py-2 hover:bg-zinc-50">
                                 <input type="checkbox" checked={on} onChange={() => setSelectedIds((prev) => { const n = new Set(prev); if (on) n.delete(u.id); else n.add(u.id); return n; })} className="h-4 w-4" style={{ accentColor: "#0073EA" }} />
                                 <div className="min-w-0">
-                                  <div className="truncate text-[13px] text-zinc-800">{u.firstName} {u.lastName}</div>
-                                  <div className="truncate text-[11px] text-zinc-400">{u.email}</div>
+                                  <div className="truncate text-[14px] text-zinc-800">{u.firstName} {u.lastName}</div>
+                                  <div className="truncate text-[12px] text-zinc-400">{u.email}</div>
                                 </div>
                               </label>
                             </li>
@@ -520,13 +520,13 @@ export default function PolicyDetailPage() {
               </>
             ) : null}
             <div className="flex items-center gap-2 border-t border-zinc-100 px-4 py-2.5">
-              <label htmlFor="assign-due" className="text-[12px] text-zinc-500">Acknowledge by</label>
-              <input id="assign-due" type="date" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} className="h-8 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-700 outline-none focus:border-zinc-300" />
-              {assignDueDate ? <button type="button" onClick={() => setAssignDueDate("")} className="text-[12px] text-zinc-400 hover:text-zinc-700">Clear</button> : <span className="text-[12px] text-zinc-300">optional</span>}
+              <label htmlFor="assign-due" className="text-[13px] text-zinc-500">Acknowledge by</label>
+              <input id="assign-due" type="date" value={assignDueDate} onChange={(e) => setAssignDueDate(e.target.value)} className="h-8 rounded-md border border-zinc-200 px-2 text-[14px] text-zinc-700 outline-none focus:border-zinc-300" />
+              {assignDueDate ? <button type="button" onClick={() => setAssignDueDate("")} className="text-[13px] text-zinc-400 hover:text-zinc-700">Clear</button> : <span className="text-[13px] text-zinc-300">optional</span>}
             </div>
             <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3">
-              <div className="text-[12px] text-zinc-400">{assignAll ? "All active employees" : `${selectedIds.size} selected`}</div>
-              <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+              <div className="text-[13px] text-zinc-400">{assignAll ? "All active employees" : `${selectedIds.size} selected`}</div>
+              <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                 {assignBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Assign
               </button>
             </div>

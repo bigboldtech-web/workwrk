@@ -16,7 +16,7 @@ export function ItemTypePicker({ value, canEdit, onChange }: { value: string | n
   const current = value ? byId.get(value) ?? null : def;
 
   const chip = current ? (
-    <span className="inline-flex items-center gap-1.5 text-[13px] text-zinc-700">
+    <span className="inline-flex items-center gap-1.5 text-[14px] text-zinc-700">
       {createElement(itemTypeIcon(current.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
       {current.singular}
     </span>
@@ -34,7 +34,7 @@ export function ItemTypePicker({ value, canEdit, onChange }: { value: string | n
             <MenuItem
               key={t.id}
               leading={createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-500 shrink-0" })}
-              label={<>{t.singular}{t.isDefault ? <span className="ml-1.5 text-[10px] text-zinc-400">(default)</span> : null}</>}
+              label={<>{t.singular}{t.isDefault ? <span className="ml-1.5 text-[11px] text-zinc-400">(default)</span> : null}</>}
               selected={(value ?? def?.id) === t.id}
               onClick={() => { onChange(t.id); setOpen(false); }}
             />

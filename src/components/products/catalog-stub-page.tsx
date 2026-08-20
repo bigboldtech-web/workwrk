@@ -74,7 +74,7 @@ export function CatalogStubPage({ slug }: Props) {
             <Icon size={24} />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[10px] font-semibold uppercase tracking-wider mb-2">
+            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[11px] font-semibold uppercase tracking-wider mb-2">
               <Sparkles size={10} /> Coming soon
             </div>
             <h1 className="text-2xl font-semibold tracking-tight mb-1">{product.name}</h1>
@@ -88,10 +88,10 @@ export function CatalogStubPage({ slug }: Props) {
 
         {product.seededAgents && product.seededAgents.length > 0 && (
           <div className="mb-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5">Ships with these agents</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5">Ships with these agents</p>
             <div className="flex flex-wrap gap-1.5">
               {product.seededAgents.map((a) => (
-                <span key={a} className="text-[11px] px-2 py-0.5 rounded-full bg-surface-2 text-foreground/80 font-mono">
+                <span key={a} className="text-[12px] px-2 py-0.5 rounded-full bg-surface-2 text-foreground/80 font-mono">
                   {a}
                 </span>
               ))}
@@ -101,10 +101,10 @@ export function CatalogStubPage({ slug }: Props) {
 
         {product.seededTemplates && product.seededTemplates.length > 0 && (
           <div className="mb-5">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5">Starter templates</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-2 mb-1.5">Starter templates</p>
             <div className="flex flex-wrap gap-1.5">
               {product.seededTemplates.map((t) => (
-                <span key={t} className="text-[11px] px-2 py-0.5 rounded-full bg-surface-2 text-foreground/80">
+                <span key={t} className="text-[12px] px-2 py-0.5 rounded-full bg-surface-2 text-foreground/80">
                   {t}
                 </span>
               ))}
@@ -128,7 +128,7 @@ export function CatalogStubPage({ slug }: Props) {
           </Link>
         </div>
 
-        <p className="text-[11px] text-muted-2 mt-4">
+        <p className="text-[12px] text-muted-2 mt-4">
           In the meantime: most teams build a custom version of this in <Link href="/studio" className="underline text-violet-600 hover:text-violet-700">Studio</Link> — same data shape, your own columns, deploys instantly.
         </p>
       </div>

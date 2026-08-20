@@ -121,8 +121,8 @@ export default function NewSopPage() {
         description="Pick how you want to document this process"
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">All SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">All SOPs</Link>
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
               <ClipboardCheck className="h-3.5 w-3.5" /> My SOPs
             </Link>
           </div>
@@ -132,7 +132,7 @@ export default function NewSopPage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="mb-7 text-center">
           <h2 className="text-[18px] font-semibold tracking-[-0.01em] text-zinc-900">How do you want to document this?</h2>
-          <p className="mt-1.5 text-[13px] text-zinc-500">SOPs work four different ways. Pick the one that fits how your team will actually consume it.</p>
+          <p className="mt-1.5 text-[14px] text-zinc-500">SOPs work four different ways. Pick the one that fits how your team will actually consume it.</p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -167,15 +167,15 @@ export default function NewSopPage() {
                   <Icon className={`h-5 w-5 ${t.iconColor}`} />
                 </div>
                 <h3 className="mt-3 text-[15px] font-semibold text-zinc-900">{t.label}</h3>
-                <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-500">{t.tagline}</p>
+                <p className="mt-1 text-[13.5px] leading-relaxed text-zinc-500">{t.tagline}</p>
                 <ul className="mt-3 space-y-1.5">
                   {t.bullets.map((b) => (
-                    <li key={b} className="flex items-center gap-2 text-[12px] text-zinc-600">
+                    <li key={b} className="flex items-center gap-2 text-[13px] text-zinc-600">
                       <span className={`h-1 w-1 shrink-0 rounded-full ${t.dot}`} /> {b}
                     </li>
                   ))}
                 </ul>
-                <span className="mt-auto pt-4 inline-flex items-center gap-1 text-[13px] font-medium text-zinc-900">
+                <span className="mt-auto pt-4 inline-flex items-center gap-1 text-[14px] font-medium text-zinc-900">
                   {busy ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating…</>) : (<>Start <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></>)}
                 </span>
               </button>
@@ -183,7 +183,7 @@ export default function NewSopPage() {
           })}
         </div>
 
-        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-2.5 text-center text-[12.5px] text-zinc-600">
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-lg border border-blue-100 bg-blue-50/50 px-4 py-2.5 text-center text-[13.5px] text-zinc-600">
           <Sparkles className="h-4 w-4 shrink-0 text-[#0073EA]" />
           Need inspiration? Sidekick can draft a first version for any of these — open it after creating.
         </div>

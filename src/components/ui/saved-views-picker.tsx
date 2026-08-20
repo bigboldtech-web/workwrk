@@ -81,7 +81,7 @@ export function SavedViewsPicker<T>({
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[12px] font-medium border border-border bg-surface hover:bg-surface-2 text-muted hover:text-foreground transition-colors"
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-[13px] font-medium border border-border bg-surface hover:bg-surface-2 text-muted hover:text-foreground transition-colors"
           >
             <Bookmark size={12} />
             <span className="truncate max-w-[140px]">
@@ -94,7 +94,7 @@ export function SavedViewsPicker<T>({
           <DropdownMenuLabel>Saved views</DropdownMenuLabel>
           <DropdownMenuSeparator />
           {views.length === 0 && (
-            <div className="px-2 py-2 text-[11.5px] text-muted-2">
+            <div className="px-2 py-2 text-[12.5px] text-muted-2">
               No saved views yet.
             </div>
           )}
@@ -115,7 +115,7 @@ export function SavedViewsPicker<T>({
                   ) : (
                     <span className="w-[11px]" aria-hidden />
                   )}
-                  <span className="truncate text-[12px]">{v.name}</span>
+                  <span className="truncate text-[13px]">{v.name}</span>
                 </span>
                 <button
                   type="button"
@@ -141,7 +141,7 @@ export function SavedViewsPicker<T>({
             className="cursor-pointer"
           >
             <Plus size={12} className="mr-2" />
-            <span className="text-[12px]">Save current as…</span>
+            <span className="text-[13px]">Save current as…</span>
           </DropdownMenuItem>
           {current && (
             <DropdownMenuItem
@@ -150,7 +150,7 @@ export function SavedViewsPicker<T>({
                 handleClear();
               }}
             >
-              <span className="text-[12px] text-muted">Clear current view</span>
+              <span className="text-[13px] text-muted">Clear current view</span>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -171,7 +171,7 @@ export function SavedViewsPicker<T>({
             }}
             className="space-y-2"
           >
-            <Label htmlFor="saved-view-name" className="text-[11.5px]">
+            <Label htmlFor="saved-view-name" className="text-[12.5px]">
               View name
             </Label>
             <Input

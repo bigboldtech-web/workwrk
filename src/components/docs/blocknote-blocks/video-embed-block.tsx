@@ -149,7 +149,7 @@ function VideoInput({ editable, onSubmit }: { editable: boolean; onSubmit: (url:
         type="button"
         onClick={submit}
         disabled={!url.trim()}
-        className="text-[12.5px] font-medium text-[var(--os-brand)] disabled:opacity-40"
+        className="text-[13.5px] font-medium text-[var(--os-brand)] disabled:opacity-40"
       >
         Embed
       </button>

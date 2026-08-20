@@ -489,9 +489,9 @@ export function OsCommandPalette() {
           <CheckSquare className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
           <span className="flex items-center gap-2 mt-0.5">
-            <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+            <span className="flex items-center gap-1 text-[12px] text-zinc-500 dark:text-zinc-400">
               <span className="w-2 h-2 rounded-full" style={{ background: tone.dot }} />
               <span>{it.due || tone.label}</span>
             </span>
@@ -513,9 +513,9 @@ export function OsCommandPalette() {
           <Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
           {it.editedAt ? (
-            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">
+            <span className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">
               {it.editor ? `${it.editor} · ` : ""}{it.editedAt}
             </span>
           ) : null}
@@ -531,15 +531,15 @@ export function OsCommandPalette() {
     const isActive = idx === active;
     return (
       <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-full text-white flex-shrink-0 text-[12px] font-semibold" style={{ background: it.color }}>
+        <span className="flex items-center justify-center w-7 h-7 rounded-full text-white flex-shrink-0 text-[13px] font-semibold" style={{ background: it.color }}>
           {it.initials}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">
             {it.label}
-            {it.isAgent ? <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-medium">AGENT</span> : null}
+            {it.isAgent ? <span className="ml-1.5 text-[11px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-medium">AGENT</span> : null}
           </span>
-          {it.role ? <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">{it.role}</span> : null}
+          {it.role ? <span className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">{it.role}</span> : null}
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -556,8 +556,8 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label} space</span>
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.members} members</span>
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label} space</span>
+          <span className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.members} members</span>
         </span>
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -574,11 +574,11 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          {it.hint ? <span className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.hint}</span> : null}
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          {it.hint ? <span className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.hint}</span> : null}
         </span>
         {it.shortcut && !isActive ? (
-          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
+          <span className="text-[11.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
         ) : null}
         <TrailingChips isActive={isActive} isCommand={true} />
       </Row>
@@ -595,10 +595,10 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          <span className="block text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
         </span>
         {it.shortcut && !isActive ? (
-          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
+          <span className="text-[11.5px] text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
         ) : null}
         <TrailingChips isActive={isActive} isCommand={false} />
       </Row>
@@ -615,12 +615,12 @@ export function OsCommandPalette() {
           <it.Icon className="w-3.5 h-3.5" />
         </span>
         <span className="flex-1 min-w-0 flex items-center gap-2">
-          <span className="text-[13.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
+          <span className="text-[14.5px] text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
           {it.alias ? (
-            <span className="text-[11px] text-zinc-400 dark:text-zinc-400">·</span>
+            <span className="text-[12px] text-zinc-400 dark:text-zinc-400">·</span>
           ) : null}
           {it.alias ? (
-            <span className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">{it.alias}</span>
+            <span className="text-[12px] text-zinc-500 dark:text-zinc-400 font-mono">{it.alias}</span>
           ) : null}
         </span>
         <TrailingChips isActive={isActive} isCommand={true} />
@@ -668,7 +668,7 @@ export function OsCommandPalette() {
 	            className="flex-1 bg-transparent text-[14px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
           />
           <AskAiButton onClick={() => { openSidekick(query.trim() || undefined); closePalette(); }} title="Ask the Brain" />
-          <span className="text-[10.5px] text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-[#2A2F38] font-mono">ESC</span>
+          <span className="text-[11.5px] text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-[#2A2F38] font-mono">ESC</span>
         </div>
 
         {/* Source tabs. Connectable-but-not-yet-connected sources render
@@ -688,7 +688,7 @@ export function OsCommandPalette() {
                   }
                   setSourceKey(s.key);
                 }}
-	                className={`relative flex items-center gap-1.5 h-7 text-[12px] font-medium flex-shrink-0 transition-colors ${
+	                className={`relative flex items-center gap-1.5 h-7 text-[13px] font-medium flex-shrink-0 transition-colors ${
                   isUnconnected
                     ? "text-zinc-500 dark:text-zinc-400 hover:text-zinc-400 dark:hover:text-zinc-300"
                     : sourceKey === s.key
@@ -741,7 +741,7 @@ export function OsCommandPalette() {
                 key={f.key}
                 type="button"
                 onClick={() => toggleType(f.key)}
-	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border transition-colors ${
+	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[12.5px] font-medium border transition-colors ${
                   on
                     ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)] dark:border-transparent dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] dark:text-zinc-100"
                     : "border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
@@ -758,7 +758,7 @@ export function OsCommandPalette() {
               key={f.key}
               type="button"
               onClick={() => toggleType(f.key)}
-	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[11.5px] font-medium border border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
+	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[12.5px] font-medium border border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
               aria-pressed
             >
               <f.Icon className="w-3.5 h-3.5" />
@@ -787,7 +787,7 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => toggleType(f.key)}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[13px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <f.Icon className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
                       <span className="flex-1">{f.label}</span>
@@ -806,7 +806,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setFilterOpen((v) => !v); setSortOpen(false); setMoreOpen(false); }}
-	              className={`flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium transition-colors ${
+	              className={`flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[12.5px] font-medium transition-colors ${
                 filterKey !== "any"
                   ? "text-[var(--os-brand-deep)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
                   : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
@@ -829,7 +829,7 @@ export function OsCommandPalette() {
                       key={f.key}
                       type="button"
                       onClick={() => { setFilterKey(f.key); setFilterOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[13px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <span className="flex-1">{f.label}</span>
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
@@ -845,7 +845,7 @@ export function OsCommandPalette() {
             <button
               type="button"
               onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setMoreOpen(false); }}
-	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10 transition-colors"
+	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[12.5px] font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10 transition-colors"
               aria-expanded={sortOpen}
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
@@ -863,7 +863,7 @@ export function OsCommandPalette() {
                       key={s.key}
                       type="button"
                       onClick={() => { setSortKey(s.key); setSortOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[12px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-[13px] text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
                     >
                       <span className="flex-1">{s.label}</span>
                       {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
@@ -880,10 +880,10 @@ export function OsCommandPalette() {
           {flatItems.length === 0 ? (
             <div className="px-4 py-14 text-center">
               <Search className="w-7 h-7 mx-auto text-zinc-300 dark:text-zinc-400 mb-3" />
-              <div className="text-[13px] text-zinc-700 dark:text-zinc-200 font-medium">
+              <div className="text-[14px] text-zinc-700 dark:text-zinc-200 font-medium">
                 {query ? `No matches for "${query}"` : "Nothing matches the active filters"}
               </div>
-              <div className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-1">
+              <div className="text-[13px] text-zinc-500 dark:text-zinc-400 mt-1">
                 {query ? "Try a different query, or clear the type filters." : "Clear a filter to see results."}
               </div>
             </div>
@@ -895,7 +895,7 @@ export function OsCommandPalette() {
         </div>
 
         {/* Footer */}
-	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 dark:border-[#2A2F38] text-[11px] text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-white/5">
+	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 dark:border-[#2A2F38] text-[12px] text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-white/5">
           <div className="flex items-center gap-1.5">
             <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10">
               <ChevronLeft className="w-3 h-3" />
@@ -906,11 +906,11 @@ export function OsCommandPalette() {
           </div>
           <span className="flex items-center gap-1.5">
             <span>Press</span>
-            <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">/</span>
+            <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[11px]">/</span>
             <span>for commands ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">Tab</span>
+            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[11px]">Tab</span>
             <span>for actions ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[10px]">Esc</span>
+            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-[11px]">Esc</span>
             <span>to close</span>
           </span>
           <span className="flex-1" />

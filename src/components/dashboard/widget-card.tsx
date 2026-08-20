@@ -25,7 +25,7 @@ export function WidgetCard({
     <div className="group relative flex h-full flex-col rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="flex shrink-0 items-center gap-1.5 px-3 pt-2.5 pb-1">
         <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-zinc-300 opacity-0 transition-opacity group-hover:opacity-100" />
-        <span className="truncate text-[13px] font-semibold text-zinc-900">{title}</span>
+        <span className="truncate text-[14px] font-semibold text-zinc-900">{title}</span>
         <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
           {onRefresh ? (
             <button

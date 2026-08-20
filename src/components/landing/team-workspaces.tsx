@@ -288,7 +288,7 @@ export function TeamWorkspaces() {
         {/* Header */}
         <div className="max-w-3xl">
           <p
-            className="text-[11px] font-bold uppercase tracking-[0.22em]"
+            className="text-[12px] font-bold uppercase tracking-[0.22em]"
             style={{ color: "var(--brand-red)" }}
           >
             Built for every team
@@ -323,7 +323,7 @@ export function TeamWorkspaces() {
               <button
                 key={team.id}
                 onClick={() => handleTab(team.id)}
-                className="relative inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-[13px] font-semibold transition-colors"
+                className="relative inline-flex items-center gap-2 px-4 py-2.5 rounded-full text-[14px] font-semibold transition-colors"
                 style={{
                   color: isActive ? team.hue : "var(--m-text-muted)",
                 }}
@@ -409,7 +409,7 @@ function FloatingLiveChip({ team }: { team: TeamData }) {
       transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
     >
       <span
-        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[13px] relative"
+        className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[14px] relative"
         style={{ backgroundColor: team.hue }}
       >
         {team.liveChip.icon}
@@ -422,10 +422,10 @@ function FloatingLiveChip({ team }: { team: TeamData }) {
         />
       </span>
       <div>
-        <p className="text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--m-text-soft)" }}>
           Right now
         </p>
-        <p className="text-[12px] font-semibold leading-tight" style={{ color: "var(--m-text)" }}>
+        <p className="text-[13px] font-semibold leading-tight" style={{ color: "var(--m-text)" }}>
           {team.liveChip.text}
         </p>
       </div>
@@ -471,7 +471,7 @@ function WSHeader({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
     <div className="flex items-start justify-between gap-4 flex-wrap">
       <div>
         <p
-          className="text-[10px] font-bold uppercase tracking-[0.22em]"
+          className="text-[11px] font-bold uppercase tracking-[0.22em]"
           style={{ color: "var(--m-text-soft)" }}
         >
           {team.eyebrow}
@@ -526,14 +526,14 @@ function KPITile({ kpi, hue, delay }: { kpi: KPI; hue: string; delay: number }) 
     >
       <div className="flex items-baseline justify-between gap-2">
         <p
-          className="text-[9.5px] font-bold uppercase tracking-[0.14em]"
+          className="text-[10px] font-bold uppercase tracking-[0.14em]"
           style={{ color: "var(--m-text-soft)" }}
         >
           {kpi.label}
         </p>
         {kpi.trend && (
           <span
-            className="text-[9.5px] font-bold tabular-nums"
+            className="text-[10px] font-bold tabular-nums"
             style={{
               color: kpi.trend.startsWith("-") && !kpi.label.toLowerCase().includes("cycle") && !kpi.label.toLowerCase().includes("payback") && !kpi.label.toLowerCase().includes("hire") && !kpi.label.toLowerCase().includes("incidents") && !kpi.label.toLowerCase().includes("burn") && !kpi.label.toLowerCase().includes("approvals")
                 ? "var(--status-stuck)"
@@ -639,7 +639,7 @@ function ActivityRow({
         {avatars.slice(0, 5).map((a, i) => (
           <span
             key={i}
-            className="w-7 h-7 rounded-full text-white text-[10px] font-bold flex items-center justify-center ring-2 ring-white"
+            className="w-7 h-7 rounded-full text-white text-[11px] font-bold flex items-center justify-center ring-2 ring-white"
             style={{ backgroundColor: a.hue, zIndex: avatars.length - i }}
           >
             {a.initials}
@@ -647,7 +647,7 @@ function ActivityRow({
         ))}
         {avatars.length > 5 && (
           <span
-            className="w-7 h-7 rounded-full text-[10px] font-bold flex items-center justify-center ring-2 ring-white"
+            className="w-7 h-7 rounded-full text-[11px] font-bold flex items-center justify-center ring-2 ring-white"
             style={{
               backgroundColor: "var(--m-border)",
               color: "var(--m-text-muted)",
@@ -670,10 +670,10 @@ function ActivityRow({
             transition={{ duration: 0.35 }}
           >
             <span className="text-[14px]">{item.icon}</span>
-            <span className="text-[12.5px] truncate" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13.5px] truncate" style={{ color: "var(--m-text)" }}>
               {item.text}
             </span>
-            <span className="ml-auto text-[10px]" style={{ color: "var(--m-text-soft)" }}>
+            <span className="ml-auto text-[11px]" style={{ color: "var(--m-text-soft)" }}>
               {item.time}
             </span>
           </motion.div>
@@ -688,7 +688,7 @@ function ActivityRow({
           animate={{ opacity: [1, 0.3, 1] }}
           transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
         />
-        <span className="text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: hue }}>
+        <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: hue }}>
           Live
         </span>
       </span>
@@ -703,7 +703,7 @@ function RightRail({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
     <>
       <div>
         <p
-          className="text-[9.5px] font-bold uppercase tracking-[0.18em]"
+          className="text-[10px] font-bold uppercase tracking-[0.18em]"
           style={{ color: "var(--m-text-soft)" }}
         >
           This week
@@ -719,7 +719,7 @@ function RightRail({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
             className="font-extrabold tabular-nums"
           />
         </p>
-        <p className="mt-1 text-[11px]" style={{ color: "var(--m-text-muted)" }}>
+        <p className="mt-1 text-[12px]" style={{ color: "var(--m-text-muted)" }}>
           {team.id === "sales" ? "deals advanced"
             : team.id === "ops" ? "SOP runs completed"
             : team.id === "hr" ? "reviews signed off"
@@ -744,7 +744,7 @@ function RightRail({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
 
       <div className="mt-6">
         <p
-          className="text-[9.5px] font-bold uppercase tracking-[0.18em] mb-2"
+          className="text-[10px] font-bold uppercase tracking-[0.18em] mb-2"
           style={{ color: "var(--m-text-soft)" }}
         >
           Quick actions
@@ -759,7 +759,7 @@ function RightRail({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
           ).map((action) => (
             <button
               key={action}
-              className="w-full text-left text-[11.5px] font-semibold px-3 py-2 rounded-md bg-white transition-colors hover:border-[color:var(--m-border-dark)]"
+              className="w-full text-left text-[12.5px] font-semibold px-3 py-2 rounded-md bg-white transition-colors hover:border-[color:var(--m-border-dark)]"
               style={{
                 color: "var(--m-text)",
                 border: "1px solid var(--m-border)",
@@ -773,7 +773,7 @@ function RightRail({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
 
       <div className="mt-auto pt-4">
         <button
-          className="w-full inline-flex items-center justify-between text-[12px] font-semibold px-3 py-2.5 rounded-md text-white"
+          className="w-full inline-flex items-center justify-between text-[13px] font-semibold px-3 py-2.5 rounded-md text-white"
           style={{ backgroundColor: team.hue }}
         >
           Open {team.name} hub <ArrowRight size={12} />
@@ -863,10 +863,10 @@ function SalesBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bo
             transition={{ duration: 0.4, delay: 0.05 + i * 0.05 }}
           >
             <div className="flex items-center justify-between">
-              <span className="text-[9.5px] font-bold uppercase tracking-[0.14em]" style={{ color: s.hue }}>
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: s.hue }}>
                 {s.stage}
               </span>
-              <span className="text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>{s.count}</span>
+              <span className="text-[11px] font-mono" style={{ color: "var(--m-text-soft)" }}>{s.count}</span>
             </div>
             <p className="mt-1.5 text-[16px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>{s.value}</p>
             <div className="mt-2 h-1 rounded-full overflow-hidden" style={{ backgroundColor: "var(--m-surface)" }}>
@@ -885,7 +885,7 @@ function SalesBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bo
       {/* Closing this week */}
       <div className="mt-4 rounded-xl overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
         <p
-          className="px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em]"
+          className="px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
           style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}
         >
           Closing this week
@@ -899,20 +899,20 @@ function SalesBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bo
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.35, delay: 0.4 + i * 0.05 }}
           >
-            <span className="text-[12px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
               {d.name}
             </span>
             <span
-              className="w-6 h-6 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+              className="w-6 h-6 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
               style={{ backgroundColor: hue }}
             >
               {d.owner}
             </span>
-            <span className="text-[12px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
               {d.amount}
             </span>
             <span
-              className="text-[9px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+              className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
               style={{ backgroundColor: "#f59e0b" }}
             >
               {d.stage}
@@ -941,7 +941,7 @@ function OpsBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; body
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
       <div
-        className="grid grid-cols-[1.4fr_100px_64px_88px_64px] gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em]"
+        className="grid grid-cols-[1.4fr_100px_64px_88px_64px] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
         style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}
       >
         <span>SOP run</span>
@@ -961,18 +961,18 @@ function OpsBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; body
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.4, delay: 0.05 + i * 0.06 }}
           >
-            <span className="text-[12.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13.5px] font-medium truncate" style={{ color: "var(--m-text)" }}>
               {t.label}
             </span>
-            <span className="text-[11px] font-mono" style={{ color: "var(--m-text-soft)" }}>{t.sop}</span>
+            <span className="text-[12px] font-mono" style={{ color: "var(--m-text-soft)" }}>{t.sop}</span>
             <span
-              className="w-6 h-6 rounded-full text-[9px] font-bold text-white flex items-center justify-center"
+              className="w-6 h-6 rounded-full text-[10px] font-bold text-white flex items-center justify-center"
               style={{ backgroundColor: t.ownerHue }}
             >
               {t.owner}
             </span>
             <span
-              className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+              className="text-[11px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
               style={{ backgroundColor: s.bg }}
             >
               {s.label}
@@ -1005,8 +1005,8 @@ function HRBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bodyK
         transition={{ duration: 0.4 }}
       >
         <div className="flex items-baseline justify-between">
-          <span className="text-[11px] font-semibold" style={{ color: "var(--m-text)" }}>Review cycle</span>
-          <span className="text-[11px] font-bold tabular-nums" style={{ color: hue }}>72%</span>
+          <span className="text-[12px] font-semibold" style={{ color: "var(--m-text)" }}>Review cycle</span>
+          <span className="text-[12px] font-bold tabular-nums" style={{ color: hue }}>72%</span>
         </div>
         <div className="mt-2 h-2 rounded-full overflow-hidden" style={{ backgroundColor: "var(--m-surface)" }}>
           <motion.div
@@ -1035,9 +1035,9 @@ function HRBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bodyK
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.3 + i * 0.06 }}
               >
-                <p className="text-[8.5px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>{s.label}</p>
-                <p className="mt-0.5 text-[11.5px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
-                  {s.done}<span className="text-[8.5px] font-normal" style={{ color: "var(--m-text-soft)" }}>/{s.total}</span>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>{s.label}</p>
+                <p className="mt-0.5 text-[12.5px] font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
+                  {s.done}<span className="text-[10px] font-normal" style={{ color: "var(--m-text-soft)" }}>/{s.total}</span>
                 </p>
                 <div className="mt-1 h-0.5 rounded-full overflow-hidden" style={{ backgroundColor: "var(--m-surface)" }}>
                   <motion.div className="h-full rounded-full" style={{ backgroundColor: s.hue }}
@@ -1058,7 +1058,7 @@ function HRBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bodyK
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4, delay: 0.1 }}
       >
-        <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--m-text-soft)" }}>
           Open seats · 7
         </p>
         <div className="mt-3 space-y-2">
@@ -1077,8 +1077,8 @@ function HRBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bodyK
               transition={{ delay: 0.2 + i * 0.07 }}
             >
               <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: hue }} />
-              <span className="text-[11.5px] font-medium flex-1 truncate" style={{ color: "var(--m-text)" }}>{s.title}</span>
-              <span className="text-[10px] font-bold" style={{ color: hue }}>{s.candidates}</span>
+              <span className="text-[12.5px] font-medium flex-1 truncate" style={{ color: "var(--m-text)" }}>{s.title}</span>
+              <span className="text-[11px] font-bold" style={{ color: hue }}>{s.candidates}</span>
             </motion.div>
           ))}
         </div>
@@ -1099,7 +1099,7 @@ function FinanceBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; 
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
       <div
-        className="grid grid-cols-[1.2fr_1fr_1fr_minmax(0,1.4fr)] gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em]"
+        className="grid grid-cols-[1.2fr_1fr_1fr_minmax(0,1.4fr)] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
         style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}
       >
         <span>Department</span>
@@ -1116,10 +1116,10 @@ function FinanceBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; 
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.35, delay: 0.05 + i * 0.06 }}
         >
-          <span className="text-[12.5px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{b.dept}</span>
-          <span className="text-[11.5px] tabular-nums text-right" style={{ color: "var(--m-text-muted)" }}>{b.budget}</span>
+          <span className="text-[13.5px] font-semibold truncate" style={{ color: "var(--m-text)" }}>{b.dept}</span>
+          <span className="text-[12.5px] tabular-nums text-right" style={{ color: "var(--m-text-muted)" }}>{b.budget}</span>
           <span
-            className="text-[12px] font-bold tabular-nums text-right"
+            className="text-[13px] font-bold tabular-nums text-right"
             style={{ color: b.over ? "var(--status-stuck)" : "var(--m-text)" }}
           >
             {b.actual}
@@ -1135,7 +1135,7 @@ function FinanceBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; 
               />
             </div>
             <span
-              className="text-[10.5px] font-bold tabular-nums w-9 text-right"
+              className="text-[11.5px] font-bold tabular-nums w-9 text-right"
               style={{ color: b.over ? "var(--status-stuck)" : hue }}
             >
               {b.pct}%
@@ -1186,11 +1186,11 @@ function EngBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; body
           <div className="flex items-center justify-between px-1 mb-2">
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: col.color }} />
-              <span className="text-[9.5px] font-bold uppercase tracking-[0.14em]" style={{ color: col.color }}>
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: col.color }}>
                 {col.title}
               </span>
             </div>
-            <span className="text-[9px] font-mono" style={{ color: "var(--m-text-soft)" }}>{col.count}</span>
+            <span className="text-[10px] font-mono" style={{ color: "var(--m-text-soft)" }}>{col.count}</span>
           </div>
           <div className="space-y-1.5">
             {col.cards.map((card, i) => {
@@ -1205,20 +1205,20 @@ function EngBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; body
                   transition={{ delay: 0.2 + ci * 0.06 + i * 0.04 }}
                 >
                   <p
-                    className={`text-[11px] font-medium leading-snug ${card.done ? "line-through opacity-60" : ""}`}
+                    className={`text-[12px] font-medium leading-snug ${card.done ? "line-through opacity-60" : ""}`}
                     style={{ color: "var(--m-text)" }}
                   >
                     {card.label}
                   </p>
                   <div className="mt-2 flex items-center justify-between">
                     <span
-                      className="text-[8.5px] font-bold px-1.5 h-4 inline-flex items-center rounded-sm"
+                      className="text-[10px] font-bold px-1.5 h-4 inline-flex items-center rounded-sm"
                       style={{ backgroundColor: t.bg, color: t.color }}
                     >
                       {t.label}
                     </span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-bold" style={{ color: "var(--m-text-muted)" }}>
+                      <span className="text-[11px] font-bold" style={{ color: "var(--m-text-muted)" }}>
                         {card.pts}pt
                       </span>
                       {card.owner && (
@@ -1261,7 +1261,7 @@ function MarketingBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string
   return (
     <div className="rounded-xl overflow-hidden" style={{ border: "1px solid var(--m-border)" }}>
       <div
-        className="grid grid-cols-[1.6fr_1fr_1fr_80px_80px] gap-2 px-4 py-2 text-[10px] font-bold uppercase tracking-[0.14em]"
+        className="grid grid-cols-[1.6fr_1fr_1fr_80px_80px] gap-2 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em]"
         style={{ backgroundColor: "var(--m-surface)", color: "var(--m-text-soft)" }}
       >
         <span>Campaign</span>
@@ -1281,20 +1281,20 @@ function MarketingBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.4, delay: 0.05 + i * 0.06 }}
           >
-            <span className="text-[12.5px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13.5px] font-semibold truncate" style={{ color: "var(--m-text)" }}>
               {c.name}
             </span>
-            <span className="text-[11px] truncate" style={{ color: "var(--m-text-muted)" }}>
+            <span className="text-[12px] truncate" style={{ color: "var(--m-text-muted)" }}>
               {c.channel}
             </span>
-            <span className="text-[12px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
+            <span className="text-[13px] font-bold tabular-nums text-right" style={{ color: "var(--m-text)" }}>
               {c.pipeline}
             </span>
-            <span className="text-[11.5px] font-bold tabular-nums text-center" style={{ color: c.hue }}>
+            <span className="text-[12.5px] font-bold tabular-nums text-center" style={{ color: c.hue }}>
               {c.mql || "—"}
             </span>
             <span
-              className="text-[9px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
+              className="text-[10px] font-bold text-white text-center px-2 h-6 inline-flex items-center justify-center rounded-md"
               style={{ backgroundColor: s.bg }}
             >
               {s.label}

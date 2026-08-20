@@ -88,13 +88,13 @@ export function BoardDashboardView({ initialItems, statuses }: BoardDashboardVie
         <BreakdownCard title="By status" segs={statusSegs} total={stats.total} />
         <BreakdownCard title="By priority" segs={prioritySegs} total={prioritySegs.reduce((a, s) => a + s.count, 0)} emptyHint="No priorities set yet." />
         <div className="rounded-lg border border-zinc-200 bg-white p-4">
-          <div className="text-[12.5px] font-semibold text-zinc-900 mb-3">By person</div>
+          <div className="text-[13.5px] font-semibold text-zinc-900 mb-3">By person</div>
           {owners.length === 0 ? (
-            <p className="text-[12px] text-zinc-400">No assigned items yet.</p>
+            <p className="text-[13px] text-zinc-400">No assigned items yet.</p>
           ) : (
             <ul className="space-y-2">
               {owners.slice(0, 8).map(({ owner, open, done }) => (
-                <li key={owner.id} className="flex items-center gap-2 text-[12.5px]">
+                <li key={owner.id} className="flex items-center gap-2 text-[13.5px]">
                   <PersonAvatar person={{ ...owner, email: null }} size={20} />
                   <span className="flex-1 min-w-0 truncate text-zinc-700">
                     {`${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim()}
@@ -104,7 +104,7 @@ export function BoardDashboardView({ initialItems, statuses }: BoardDashboardVie
                 </li>
               ))}
               {owners.length > 8 ? (
-                <li className="text-[11px] text-zinc-400">+{owners.length - 8} more</li>
+                <li className="text-[12px] text-zinc-400">+{owners.length - 8} more</li>
               ) : null}
             </ul>
           )}
@@ -118,7 +118,7 @@ function StatCard({ label, value, Icon, tint }: { label: string; value: number; 
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-3" style={{ borderLeft: `3px solid ${tint}` }}>
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-zinc-500">{label}</span>
+        <span className="text-[12px] text-zinc-500">{label}</span>
         <Icon className="w-3.5 h-3.5" style={{ color: tint }} />
       </div>
       <div className="mt-1 text-[22px] font-semibold tabular-nums text-zinc-900 leading-none">{value}</div>
@@ -131,9 +131,9 @@ function StatCard({ label, value, Icon, tint }: { label: string; value: number; 
 function BreakdownCard({ title, segs, total, emptyHint }: { title: string; segs: Seg[]; total: number; emptyHint?: string }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4">
-      <div className="text-[12.5px] font-semibold text-zinc-900 mb-3">{title}</div>
+      <div className="text-[13.5px] font-semibold text-zinc-900 mb-3">{title}</div>
       {segs.length === 0 || total === 0 ? (
-        <p className="text-[12px] text-zinc-400">{emptyHint ?? "Nothing here yet."}</p>
+        <p className="text-[13px] text-zinc-400">{emptyHint ?? "Nothing here yet."}</p>
       ) : (
         <StatusDistribution segs={segs} total={total} />
       )}

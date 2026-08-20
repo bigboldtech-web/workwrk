@@ -152,23 +152,23 @@ export default function AgreementEditorPage() {
         actions={
           <div className="flex items-center gap-2">
             {ag && ag.sourceType !== "pdf" ? (
-              <button type="button" onClick={() => setEditText((v) => !v)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <button type="button" onClick={() => setEditText((v) => !v)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50">
                 {editText ? <><Check className="h-3.5 w-3.5" /> Done editing</> : <><Pencil className="h-3.5 w-3.5" /> Edit text</>}
               </button>
             ) : null}
             {ag?.isTemplate ? (
-              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
+              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9]"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
             ) : (
               <>
-                <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
-                <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
-                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+                <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
+                <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
+                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
                   {sendBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send to signers
                 </button>
               </>
             )}
-            <button type="button" onClick={archive} title="Move to Trash" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 hover:text-red-600"><Archive className="h-3.5 w-3.5" /></button>
-            <Link href={ag?.isTemplate ? "/agreements?view=templates" : "/agreements"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
+            <button type="button" onClick={archive} title="Move to Trash" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50 hover:text-red-600"><Archive className="h-3.5 w-3.5" /></button>
+            <Link href={ag?.isTemplate ? "/agreements?view=templates" : "/agreements"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
           </div>
         }
       />
@@ -187,10 +187,10 @@ export default function AgreementEditorPage() {
               placeholder="Contract title…"
               className="min-w-0 flex-1 border-0 border-b border-zinc-200 px-0 py-1 text-2xl font-semibold tracking-[-0.01em] text-zinc-900 outline-none focus:border-zinc-300"
             />
-            <label className="flex items-center gap-1.5 text-[12px] text-zinc-500">
+            <label className="flex items-center gap-1.5 text-[13px] text-zinc-500">
               Folder
               <input list="agreement-categories" value={ag.category ?? ""} onChange={(e) => setCategory(e.target.value)} placeholder="Uncategorized"
-                className="h-8 w-44 rounded-md border border-zinc-200 bg-white px-2 text-[13px] text-zinc-700 outline-none focus:border-zinc-300" />
+                className="h-8 w-44 rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-700 outline-none focus:border-zinc-300" />
             </label>
             <datalist id="agreement-categories">{CATEGORY_OPTIONS.map((c) => <option key={c} value={c} />)}</datalist>
           </div>
@@ -232,15 +232,15 @@ export default function AgreementEditorPage() {
               <h2 className="text-base font-semibold text-zinc-900">Signing links</h2>
               <button type="button" onClick={() => setSendLinks(null)} className="rounded p-1 text-zinc-400 hover:bg-zinc-100"><X className="h-4 w-4" /></button>
             </div>
-            <p className="mb-3 text-[13px] text-zinc-500">Share each party&apos;s private link to collect their signature. (Parties with an email were also notified.)</p>
+            <p className="mb-3 text-[14px] text-zinc-500">Share each party&apos;s private link to collect their signature. (Parties with an email were also notified.)</p>
             <ul className="space-y-2">
               {sendLinks.map((l) => (
                 <li key={l.partyId} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-zinc-800">{l.name}</div>
-                    <div className="truncate text-[11px] text-zinc-400">{l.link}</div>
+                    <div className="truncate text-[14px] font-medium text-zinc-800">{l.name}</div>
+                    <div className="truncate text-[12px] text-zinc-400">{l.link}</div>
                   </div>
-                  <button type="button" onClick={() => copyText(l.link)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#0073EA] px-2.5 text-[12px] font-medium text-white hover:bg-[#0060B9]"><Copy className="h-3 w-3" /> Copy</button>
+                  <button type="button" onClick={() => copyText(l.link)} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#0073EA] px-2.5 text-[13px] font-medium text-white hover:bg-[#0060B9]"><Copy className="h-3 w-3" /> Copy</button>
                 </li>
               ))}
             </ul>

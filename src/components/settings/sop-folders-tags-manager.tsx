@@ -224,7 +224,7 @@ export function SopFoldersTagsManager() {
     return (
       <div key={node.id}>
         <div
-          className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[12.5px] hover:bg-surface-2 transition-colors"
+          className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[13.5px] hover:bg-surface-2 transition-colors"
           style={{ paddingLeft: depth * 18 + 8 }}
         >
           <span
@@ -232,7 +232,7 @@ export function SopFoldersTagsManager() {
             style={{ backgroundColor: node.color || "#0073EA" }}
           />
           <span className="truncate font-medium">{node.name}</span>
-          <Badge variant="outline" className="text-[10px] h-5 shrink-0" title={depth === 0 ? "SOPs in this category, subcategories included" : "SOPs in this subcategory"}>
+          <Badge variant="outline" className="text-[11px] h-5 shrink-0" title={depth === 0 ? "SOPs in this category, subcategories included" : "SOPs in this subcategory"}>
             {node.sopCountDeep} SOP{node.sopCountDeep === 1 ? "" : "s"}
           </Badge>
           <span className="flex-1" />
@@ -325,7 +325,7 @@ export function SopFoldersTagsManager() {
               {roots.map((r) => renderNode(r, 0))}
             </div>
           )}
-          <p className="text-[11px] text-muted mt-3 leading-relaxed flex items-start gap-1.5">
+          <p className="text-[12px] text-muted mt-3 leading-relaxed flex items-start gap-1.5">
             <UsersIcon size={12} className="mt-0.5 shrink-0" />
             <span>
               Access cascades: anyone granted a category also sees its
@@ -373,7 +373,7 @@ export function SopFoldersTagsManager() {
                 <div key={t.name} className="flex items-center gap-2 rounded-lg border border-border bg-surface-2 p-2 text-xs">
                   <TagIcon size={12} className="text-muted shrink-0" />
                   <span className="flex-1 truncate font-medium">#{t.name}</span>
-                  <Badge variant="outline" className="text-[10px] h-5">{t.count}</Badge>
+                  <Badge variant="outline" className="text-[11px] h-5">{t.count}</Badge>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleRenameTag(t)} aria-label={`Rename tag ${t.name}`}>
                     <Pencil size={12} />
                   </Button>
@@ -389,7 +389,7 @@ export function SopFoldersTagsManager() {
                 </div>
               ))}
               {filteredTags.length === 0 && (
-                <div className="col-span-full text-[11px] text-muted text-center py-3">
+                <div className="col-span-full text-[12px] text-muted text-center py-3">
                   No tags match &quot;{tagFilter}&quot;.
                 </div>
               )}

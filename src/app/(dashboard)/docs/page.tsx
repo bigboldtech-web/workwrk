@@ -250,7 +250,7 @@ export default function DocsPage() {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-200 text-[12.5px] font-medium text-zinc-700 hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-200 text-[13.5px] font-medium text-zinc-700 hover:bg-zinc-50"
             onClick={() => toast("Import is coming soon")}
           >
             <ImportIcon className="w-3.5 h-3.5" /> Import
@@ -261,7 +261,7 @@ export default function DocsPage() {
                 type="button"
                 onClick={() => void createDoc()}
                 disabled={creating}
-                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-60"
               >
                 {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} New Doc
               </button>
@@ -278,13 +278,13 @@ export default function DocsPage() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setNewMenu(false)} />
                 <div className="absolute right-0 top-9 z-50 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
-                  <button type="button" onClick={() => void createDoc()} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <button type="button" onClick={() => void createDoc()} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50">
                     <FileText className="w-4 h-4 text-zinc-400" /> Blank doc
                   </button>
                   <div className="h-px bg-zinc-100 my-1" />
-                  <div className="px-3 pt-0.5 pb-1 text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">From template</div>
+                  <div className="px-3 pt-0.5 pb-1 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">From template</div>
                   {TEMPLATES.map((t) => (
-                    <button key={t.key} type="button" onClick={() => void createDoc(t)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50">
+                    <button key={t.key} type="button" onClick={() => void createDoc(t)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50">
                       <t.Icon className="w-4 h-4" style={{ color: t.tint }} /> {t.title}
                     </button>
                   ))}
@@ -310,7 +310,7 @@ export default function DocsPage() {
 
       {/* Templates */}
       <div className="px-5 pt-3 pb-3">
-        <div className="text-[12px] text-zinc-500 mb-1.5">Templates</div>
+        <div className="text-[13px] text-zinc-500 mb-1.5">Templates</div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {TEMPLATES.map((t) => (
             <button
@@ -326,11 +326,11 @@ export default function DocsPage() {
                 <t.Icon className="w-5 h-5" />
               </span>
               <span className="min-w-0">
-                <span className="flex items-center gap-1 text-[13.5px] font-semibold text-zinc-900">
+                <span className="flex items-center gap-1 text-[14.5px] font-semibold text-zinc-900">
                   {t.title}
                   {t.verified ? <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-500 text-white text-[8px]">✓</span> : null}
                 </span>
-                <span className="block text-[12px] text-zinc-500 truncate">{t.hint}</span>
+                <span className="block text-[13px] text-zinc-500 truncate">{t.hint}</span>
               </span>
             </button>
           ))}
@@ -344,24 +344,24 @@ export default function DocsPage() {
           <button
             type="button"
             onClick={() => { setFilterOpen((s) => !s); setSortOpen(false); }}
-            className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] ${locFilter.size > 0 ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]" : "text-zinc-600 hover:bg-zinc-100"}`}
+            className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[13.5px] ${locFilter.size > 0 ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]" : "text-zinc-600 hover:bg-zinc-100"}`}
           >
             <ListFilter className="w-3.5 h-3.5" /> Filters
-            {locFilter.size > 0 ? <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--os-brand)] text-white text-[10px] font-semibold">{locFilter.size}</span> : null}
+            {locFilter.size > 0 ? <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--os-brand)] text-white text-[11px] font-semibold">{locFilter.size}</span> : null}
           </button>
           {filterOpen ? (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
               <div className="absolute left-0 top-8 z-50 w-[240px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
                 <div className="px-3 pt-1 pb-1.5 flex items-center justify-between">
-                  <span className="text-[10.5px] font-semibold uppercase tracking-wide text-zinc-400">Location</span>
+                  <span className="text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">Location</span>
                   {locFilter.size > 0 ? (
-                    <button type="button" onClick={() => setLocFilter(new Set())} className="text-[11px] text-[var(--os-brand)] hover:underline">Clear</button>
+                    <button type="button" onClick={() => setLocFilter(new Set())} className="text-[12px] text-[var(--os-brand)] hover:underline">Clear</button>
                   ) : null}
                 </div>
                 <div className="max-h-[280px] overflow-y-auto">
                   {locations.list.length === 0 && !locations.hasNone ? (
-                    <div className="px-3 py-2 text-[12px] text-zinc-400">No locations</div>
+                    <div className="px-3 py-2 text-[13px] text-zinc-400">No locations</div>
                   ) : null}
                   {locations.list.map((l) => {
                     const on = locFilter.has(l.name);
@@ -370,7 +370,7 @@ export default function DocsPage() {
                         key={l.name}
                         type="button"
                         onClick={() => setLocFilter((prev) => { const n = new Set(prev); if (n.has(l.name)) n.delete(l.name); else n.add(l.name); return n; })}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50"
                       >
                         <EntityTile size="xs" icon={l.icon} color={l.color} name={l.name} fallback={locationFallback(l.type)} />
                         <span className="flex-1 truncate">{l.name}</span>
@@ -382,9 +382,9 @@ export default function DocsPage() {
                     <button
                       type="button"
                       onClick={() => setLocFilter((prev) => { const n = new Set(prev); if (n.has(NO_LOC)) n.delete(NO_LOC); else n.add(NO_LOC); return n; })}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-500 hover:bg-zinc-50"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-500 hover:bg-zinc-50"
                     >
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-zinc-100 text-zinc-400 text-[10px] shrink-0">–</span>
+                      <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-zinc-100 text-zinc-400 text-[11px] shrink-0">–</span>
                       <span className="flex-1 truncate">No location</span>
                       {locFilter.has(NO_LOC) ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
                     </button>
@@ -400,7 +400,7 @@ export default function DocsPage() {
           <button
             type="button"
             onClick={() => { setSortOpen((s) => !s); setFilterOpen(false); }}
-            className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:bg-zinc-100"
+            className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[13.5px] text-zinc-600 hover:bg-zinc-100"
           >
             <ArrowUpDown className="w-3.5 h-3.5" /> Sort
           </button>
@@ -415,7 +415,7 @@ export default function DocsPage() {
                       key={o.col}
                       type="button"
                       onClick={() => { toggleSort(o.col); }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[13px] text-zinc-700 hover:bg-zinc-50"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50"
                     >
                       <span className="flex-1">{o.label}</span>
                       {active ? (sort.dir === "asc" ? <ChevronUp className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : <ChevronDown className="w-3.5 h-3.5 text-[var(--os-brand)]" />) : null}
@@ -433,7 +433,7 @@ export default function DocsPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search docs…"
-            className="w-[200px] text-[12.5px] bg-transparent outline-none placeholder:text-zinc-400"
+            className="w-[200px] text-[13.5px] bg-transparent outline-none placeholder:text-zinc-400"
           />
         </div>
       </div>
@@ -441,7 +441,7 @@ export default function DocsPage() {
       {/* Table */}
       <div className="flex-1 overflow-y-auto">
         {/* Column header — Name / Location / Date updated are click-to-sort */}
-        <div className={`${COLS} sticky top-0 z-10 bg-white border-b border-zinc-100 px-5 h-9 text-[11.5px] font-medium text-zinc-400`}>
+        <div className={`${COLS} sticky top-0 z-10 bg-white border-b border-zinc-100 px-5 h-9 text-[12.5px] font-medium text-zinc-400`}>
           <SortHeader label="Name" col="title" sort={sort} onSort={toggleSort} />
           <SortHeader label="Location" col="location" sort={sort} onSort={toggleSort} />
           <SortHeader label="Date updated" col="updated" sort={sort} onSort={toggleSort} />
@@ -451,13 +451,13 @@ export default function DocsPage() {
         </div>
 
         {loadError ? (
-          <div className="px-5 py-10 text-center text-[13px] text-zinc-500">Couldn&apos;t load docs — {loadError}</div>
+          <div className="px-5 py-10 text-center text-[14px] text-zinc-500">Couldn&apos;t load docs — {loadError}</div>
         ) : rows === null ? (
-          <div className="px-5 py-10 text-center text-[13px] text-zinc-400">Loading docs…</div>
+          <div className="px-5 py-10 text-center text-[14px] text-zinc-400">Loading docs…</div>
         ) : displayed.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <FileText className="w-8 h-8 mx-auto text-zinc-300" />
-            <p className="mt-2 text-[13px] text-zinc-500">
+            <p className="mt-2 text-[14px] text-zinc-500">
               {search.trim() || locFilter.size > 0
                 ? "Nothing matches these filters."
                 : view === "recent" ? "No recently viewed docs. Docs you open show up here."
@@ -467,7 +467,7 @@ export default function DocsPage() {
                 : `No docs in ${VIEW_LABEL[view]} yet.`}
             </p>
             {!search.trim() && locFilter.size === 0 && (view === "all" || view === "my") ? (
-              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[12.5px] font-medium hover:bg-zinc-800">
+              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800">
                 <Plus className="w-3.5 h-3.5" /> New Doc
               </button>
             ) : null}
@@ -481,7 +481,7 @@ export default function DocsPage() {
             return (
               <div
                 key={d.id}
-                className={`${COLS} group px-5 h-11 border-b border-zinc-100 hover:bg-zinc-50/70 cursor-pointer text-[13px]`}
+                className={`${COLS} group px-5 h-11 border-b border-zinc-100 hover:bg-zinc-50/70 cursor-pointer text-[14px]`}
                 onClick={() => router.push(`/docs/${d.id}`)}
                 onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: fav })}
               >
@@ -492,7 +492,7 @@ export default function DocsPage() {
                   </span>
                   <span className="truncate text-zinc-800">{d.title || "Untitled"}</span>
                   {count > 0 ? (
-                    <span className="inline-flex items-center gap-0.5 text-[11px] text-zinc-400 shrink-0">
+                    <span className="inline-flex items-center gap-0.5 text-[12px] text-zinc-400 shrink-0">
                       <FileText className="w-3 h-3" />{count}
                     </span>
                   ) : null}
@@ -525,7 +525,7 @@ export default function DocsPage() {
                   {loc ? (
                     loc.href ? (
                       <span
-                        className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-700 hover:text-zinc-900 hover:underline"
+                        className="inline-flex items-center gap-1.5 max-w-full text-[13.5px] text-zinc-700 hover:text-zinc-900 hover:underline"
                         onClick={(e) => { e.stopPropagation(); router.push(loc.href!); }}
                         title={loc.name}
                       >
@@ -533,7 +533,7 @@ export default function DocsPage() {
                         <span className="truncate">{loc.name}</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 max-w-full text-[12.5px] text-zinc-700" title={loc.name}>
+                      <span className="inline-flex items-center gap-1.5 max-w-full text-[13.5px] text-zinc-700" title={loc.name}>
                         <EntityTile size="xs" icon={loc.icon} color={loc.color} name={loc.name} fallback={locationFallback(loc.type)} />
                         <span className="truncate">{loc.name}</span>
                       </span>
@@ -542,12 +542,12 @@ export default function DocsPage() {
                 </div>
 
                 {/* Date updated */}
-                <div className="text-zinc-600 text-[12.5px]">{smartDate(d.updatedAt)}</div>
+                <div className="text-zinc-600 text-[13.5px]">{smartDate(d.updatedAt)}</div>
 
                 {/* Date viewed — this viewer's last open (recent-docs marker) */}
                 <div>
                   {viewedAt ? (
-                    <span className="text-zinc-600 text-[12.5px]">{smartDate(viewedAt)}</span>
+                    <span className="text-zinc-600 text-[13.5px]">{smartDate(viewedAt)}</span>
                   ) : (
                     <span className="text-zinc-300">–</span>
                   )}
@@ -563,7 +563,7 @@ export default function DocsPage() {
                         </span>
                       ))}
                       {d.contributors.length > 4 ? (
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full ring-2 ring-white dark:ring-zinc-900 bg-zinc-100 text-zinc-500 text-[10px] font-medium">
+                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full ring-2 ring-white dark:ring-zinc-900 bg-zinc-100 text-zinc-500 text-[11px] font-medium">
                           +{d.contributors.length - 4}
                         </span>
                       ) : null}

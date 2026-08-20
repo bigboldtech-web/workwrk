@@ -162,7 +162,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or enter email…"
-              className="flex-1 text-[13px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-[14px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
           <div className="max-h-[260px] overflow-y-auto py-1.5">
@@ -177,9 +177,9 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               </>
             ) : null}
             {people === null || loading ? (
-              <div className="px-3 py-4 text-[12px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-[13px] text-zinc-400">Loading…</div>
             ) : people.length === 0 ? (
-              <div className="px-3 py-4 text-[12px] text-zinc-400">No people found</div>
+              <div className="px-3 py-4 text-[13px] text-zinc-400">No people found</div>
             ) : (
               people.map((p) => {
                 const isMe = p.id === meId;

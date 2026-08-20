@@ -38,7 +38,7 @@ export function EverythingView({
         <Link
           href={`/boards/${board.slug}`}
           onClick={(e) => e.stopPropagation()}
-          className="inline-flex items-center gap-1 shrink-0 max-w-[160px] h-[18px] px-1.5 rounded bg-zinc-100 text-[10.5px] text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 transition-colors"
+          className="inline-flex items-center gap-1 shrink-0 max-w-[160px] h-[18px] px-1.5 rounded bg-zinc-100 text-[11.5px] text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700 transition-colors"
           title={`Open List: ${board.name}`}
         >
           <List className="w-3 h-3 shrink-0" />

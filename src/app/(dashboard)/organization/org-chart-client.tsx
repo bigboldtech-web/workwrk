@@ -226,10 +226,10 @@ export default function OrganizationPage() {
             {orgWide ? `${orgName} — full reporting hierarchy` : "Your reporting tree — you and the people below you"}
           </span>
           <div className="flex-1" />
-          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/people" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Users className="w-3.5 h-3.5 text-zinc-400" /> Directory
           </Link>
-          <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <SettingsIcon className="w-3.5 h-3.5 text-zinc-400" /> Org settings
           </Link>
         </div>
@@ -251,7 +251,7 @@ export default function OrganizationPage() {
           <TeamCard
             title="Reporting hierarchy"
             subtitle={`${stats.topLayer} at the top · ${stats.people} total`}
-            action={<Link href="/people" className="inline-flex items-center gap-1 text-[12px] text-[var(--os-brand)] hover:underline">All people <ArrowRight className="w-3 h-3" /></Link>}
+            action={<Link href="/people" className="inline-flex items-center gap-1 text-[13px] text-[var(--os-brand)] hover:underline">All people <ArrowRight className="w-3 h-3" /></Link>}
           >
             <div className="space-y-0.5">
               {tree.slice(0, 8).map((node) => (
@@ -259,15 +259,15 @@ export default function OrganizationPage() {
               ))}
               {tree.length > 8 ? (
                 <div className="pt-1.5">
-                  <Link href="/people" className="text-[12px] text-zinc-500 hover:text-zinc-800">+ {tree.length - 8} more top-level → see all people</Link>
+                  <Link href="/people" className="text-[13px] text-zinc-500 hover:text-zinc-800">+ {tree.length - 8} more top-level → see all people</Link>
                 </div>
               ) : null}
             </div>
             {unlinked.length > 0 ? (
               <div className="mt-3 pt-3 border-t border-zinc-100">
                 <div className="flex items-center gap-2 mb-1 px-1">
-                  <h3 className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold">Not linked to a manager</h3>
-                  <span className="text-[11px] text-zinc-400">reporting loop or broken chain — fix in <Link href="/settings/members" className="text-[var(--os-brand)] hover:underline">Members</Link></span>
+                  <h3 className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold">Not linked to a manager</h3>
+                  <span className="text-[12px] text-zinc-400">reporting loop or broken chain — fix in <Link href="/settings/members" className="text-[var(--os-brand)] hover:underline">Members</Link></span>
                 </div>
                 <div className="space-y-0.5">
                   {unlinked.map((node) => (
@@ -313,13 +313,13 @@ function TreeNodeView({
         <Link href={`/people/${id}`} className="flex items-center gap-2.5 flex-1 min-w-0 py-1.5">
           <TeamAvatar name={name} avatar={node.user.avatar} size={30} />
           <div className="min-w-0">
-            <div className="text-[13px] font-medium text-zinc-900 truncate">{name}</div>
-            <div className="text-[11px] text-zinc-500 truncate">
+            <div className="text-[14px] font-medium text-zinc-900 truncate">{name}</div>
+            <div className="text-[12px] text-zinc-500 truncate">
               {node.user.role?.title ?? "—"}{node.user.department?.name ? ` · ${node.user.department.name}` : ""}
             </div>
           </div>
         </Link>
-        {hasReports ? <span className="text-[11px] text-zinc-400 shrink-0 tabular-nums">{node.reports.length}</span> : null}
+        {hasReports ? <span className="text-[12px] text-zinc-400 shrink-0 tabular-nums">{node.reports.length}</span> : null}
       </div>
       {hasReports && !isCollapsed ? (
         <div>

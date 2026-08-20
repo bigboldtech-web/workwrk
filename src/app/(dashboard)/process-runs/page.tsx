@@ -127,9 +127,9 @@ export default function ProcessRunsPage() {
         description={rows === null ? "Loading…" : `${stats.total} run${stats.total === 1 ? "" : "s"} · ${stats.counts.ACTIVE} active · ${stats.counts.OVERDUE} overdue · ${stats.avgProgress}% avg`}
         actions={
           <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><BookCopy className="h-3.5 w-3.5" /> SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> My SOPs</Link>
-            <button type="button" onClick={() => toast("Start a run from any checklist SOP")} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[13px] font-medium text-white hover:bg-[#0060B9]">
+            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><BookCopy className="h-3.5 w-3.5" /> SOPs</Link>
+            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> My SOPs</Link>
+            <button type="button" onClick={() => toast("Start a run from any checklist SOP")} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9]">
               Start run
             </button>
           </div>

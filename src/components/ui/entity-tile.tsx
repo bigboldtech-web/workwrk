@@ -41,9 +41,9 @@ const tileVariants = cva(
   {
     variants: {
       size: {
-        xs: "h-4 w-4 rounded-[4px] text-[9px]",
-        sm: "h-[18px] w-[18px] rounded-[5px] text-[10px]",
-        md: "h-5 w-5 rounded-[6px] text-[11px]",
+        xs: "h-4 w-4 rounded-[4px] text-[10px]",
+        sm: "h-[18px] w-[18px] rounded-[5px] text-[11px]",
+        md: "h-5 w-5 rounded-[6px] text-[12px]",
         lg: "h-9 w-9 rounded-[9px] text-[15px]",
       },
     },

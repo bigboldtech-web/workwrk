@@ -161,7 +161,7 @@ export default async function RolePage(props: {
           <EntityTile size="lg" color="#0073EA" name={role.title} />
           <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate" title={role.title}>{role.title}</span>
-            <span className="text-[11px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>
+            <span className="text-[12px] font-medium text-zinc-500 px-1.5 py-0.5 rounded bg-zinc-100 uppercase tracking-wide">{role.level}</span>
             <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />
           </h1>
         </div>

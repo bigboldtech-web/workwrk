@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
  * don't shift color overnight.
  */
 const badgeVariants = cva(
-  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold transition-fast focus:outline-none tracking-[0.04em] leading-none",
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11.5px] font-semibold transition-fast focus:outline-none tracking-[0.04em] leading-none",
   {
     variants: {
       variant: {

@@ -284,7 +284,7 @@ function AnnCard({ a, onAck, canManage, onViewAcks }: { a: ApiAnn; onAck: () => 
           <button
             type="button"
             onClick={onViewAcks}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[var(--os-line)] text-[12px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-[var(--os-line)] text-[13px] text-[var(--os-ink-2)] hover:bg-[var(--os-surface-1)]"
           >
             <Users2 className="w-3.5 h-3.5" /> Ack status
           </button>

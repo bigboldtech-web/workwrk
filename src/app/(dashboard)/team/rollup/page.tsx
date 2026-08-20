@@ -59,7 +59,7 @@ export default async function TeamRollupPage() {
           <h1 className="text-base font-semibold text-zinc-900">Rollup</h1>
           <span className="text-xs text-zinc-400 hidden sm:inline">two levels below you — every sub-team&rsquo;s health</span>
           <div className="flex-1" />
-          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[13px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
+          <Link href="/team/alignment" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50">
             <Target className="w-3.5 h-3.5 text-zinc-400" /> Alignment
           </Link>
         </div>
@@ -139,7 +139,7 @@ function SubTeamCard({ t }: { t: SubTeam }) {
         </div>
         <OwnReviewBadge own={t.manager.ownReview} />
         {t.manager.via === "dotted" ? (
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">
+          <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">
             <GitBranchPlus className="w-3 h-3" /> Dotted
           </span>
         ) : null}
@@ -173,7 +173,7 @@ function SubMetric({
     undefined;
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+      <div className="flex items-center gap-1.5 text-[12px] text-zinc-500">
         <Icon className="w-3 h-3" />
         {label}
       </div>
@@ -185,14 +185,14 @@ function SubMetric({
 function OwnReviewBadge({ own }: { own: SubTeam["manager"]["ownReview"] }) {
   if (!own.status) return null;
   if (own.status === "DRAFT") {
-    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Own: Draft</span>;
+    return <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Own: Draft</span>;
   }
   if (own.status === "SUBMITTED") {
-    return <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700">Own: Submitted</span>;
+    return <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700">Own: Submitted</span>;
   }
   const approved = own.managerStatus === "APPROVED";
   return (
-    <span className={`text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+    <span className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
       approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
     }`}>
       {approved ? "Own: Approved" : "Own: Changes"}
@@ -209,10 +209,10 @@ function DirectIcRow({ ic }: { ic: DirectIcSummary }) {
       </span>
       <div className="flex-1 min-w-0">
         <div className="text-sm truncate">{ic.firstName} {ic.lastName}</div>
-        <div className="text-[11px] text-zinc-500 truncate">{ic.email}</div>
+        <div className="text-[12px] text-zinc-500 truncate">{ic.email}</div>
       </div>
       {ic.via === "dotted" ? (
-        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Dotted</span>
+        <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Dotted</span>
       ) : null}
       <ReviewChip review={ic.weeklyReview} />
       <span className={`text-xs ${toneClass(tone(ic.kpiCompliancePct))}`}>KPI {ic.kpiCompliancePct == null ? "—" : `${ic.kpiCompliancePct}%`}</span>
@@ -226,16 +226,16 @@ function DirectIcRow({ ic }: { ic: DirectIcSummary }) {
 
 function ReviewChip({ review }: { review: DirectIcSummary["weeklyReview"] }) {
   if (!review.status) {
-    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-700"><AlertCircle className="w-3 h-3" />No review</span>;
+    return <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-700"><AlertCircle className="w-3 h-3" />No review</span>;
   }
   if (review.status === "DRAFT") {
-    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Draft</span>;
+    return <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-600">Draft</span>;
   }
   if (review.status === "SUBMITTED") {
-    return <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700"><Clock className="w-3 h-3" />Submitted</span>;
+    return <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-700"><Clock className="w-3 h-3" />Submitted</span>;
   }
   const approved = review.managerStatus === "APPROVED";
-  return <span className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+  return <span className={`inline-flex items-center gap-1 text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
     approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
   }`}>{approved ? "Approved" : "Changes"}</span>;
 }

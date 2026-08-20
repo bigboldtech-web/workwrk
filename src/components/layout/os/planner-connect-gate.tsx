@@ -15,8 +15,8 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
         <CalendarClock className="w-4 h-4 text-[#0073EA]" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100">Connect your calendar</div>
-        <p className="text-[12px] text-zinc-500 dark:text-zinc-400 leading-snug">
+        <div className="text-[14px] font-medium text-zinc-900 dark:text-zinc-100">Connect your calendar</div>
+        <p className="text-[13px] text-zinc-500 dark:text-zinc-400 leading-snug">
           Your tasks and work already show here. Connect Google Calendar to layer in your meetings.
         </p>
       </div>
@@ -25,7 +25,7 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <a
         href="/api/integrations/google-calendar/connect"
-        className="shrink-0 h-8 px-3 rounded-lg bg-[#0073EA] text-white text-[12.5px] font-medium inline-flex items-center gap-1.5 hover:bg-[#0060B9]"
+        className="shrink-0 h-8 px-3 rounded-lg bg-[#0073EA] text-white text-[13.5px] font-medium inline-flex items-center gap-1.5 hover:bg-[#0060B9]"
       >
         <GoogleMark /> Connect Google Calendar
       </a>
@@ -33,10 +33,10 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
         type="button"
         disabled
         title="Microsoft Outlook is coming soon"
-        className="shrink-0 h-8 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] text-[12.5px] font-medium text-zinc-400 dark:text-zinc-500 inline-flex items-center gap-1.5 cursor-not-allowed"
+        className="shrink-0 h-8 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] text-[13.5px] font-medium text-zinc-400 dark:text-zinc-500 inline-flex items-center gap-1.5 cursor-not-allowed"
       >
         <OutlookMark /> Outlook
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 dark:bg-white/10 rounded px-1 py-0.5">Soon</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 dark:bg-white/10 rounded px-1 py-0.5">Soon</span>
       </button>
       <button
         type="button"

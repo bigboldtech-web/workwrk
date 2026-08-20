@@ -60,17 +60,17 @@ export default function HierarchyPage() {
         <Network className="h-5 w-5 text-zinc-700" />
         <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Hierarchy</h1>
       </header>
-      <p className="mb-4 text-[13px] text-zinc-500">
+      <p className="mb-4 text-[14px] text-zinc-500">
         Your org’s reporting lines. Change who reports to whom in{" "}
         <Link href="/settings/members" className="text-zinc-700 underline underline-offset-2 hover:text-zinc-900">Members</Link>.
       </p>
 
       {users === null ? (
-        <div className="flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading hierarchy…
         </div>
       ) : roots.length === 0 ? (
-        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-6 text-center text-[13px] text-zinc-400">
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-6 text-center text-[14px] text-zinc-400">
           No people yet.
         </div>
       ) : (
@@ -113,16 +113,16 @@ function Node({ user, childrenOf, depth }: { user: U; childrenOf: Map<string, U[
           // eslint-disable-next-line @next/next/no-img-element
           <img src={user.avatar} alt="" className="h-6 w-6 rounded-full object-cover" />
         ) : (
-          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-[10px] font-semibold text-zinc-600">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-[11px] font-semibold text-zinc-600">
             {(user.firstName?.[0] ?? "?").toUpperCase()}
           </span>
         )}
-        <span className="truncate text-[13px] font-medium text-zinc-900">{nameOf(user)}</span>
-        <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[10.5px] font-medium text-zinc-500">
+        <span className="truncate text-[14px] font-medium text-zinc-900">{nameOf(user)}</span>
+        <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-[11.5px] font-medium text-zinc-500">
           {LABEL[user.accessLevel] ?? user.accessLevel}
         </span>
         {kids.length > 0 ? (
-          <span className="shrink-0 text-[11px] text-zinc-400">{kids.length} report{kids.length > 1 ? "s" : ""}</span>
+          <span className="shrink-0 text-[12px] text-zinc-400">{kids.length} report{kids.length > 1 ? "s" : ""}</span>
         ) : null}
       </div>
       {open && kids.map((k) => <Node key={k.id} user={k} childrenOf={childrenOf} depth={depth + 1} />)}
