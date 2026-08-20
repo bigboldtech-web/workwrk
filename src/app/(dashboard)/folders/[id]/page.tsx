@@ -194,8 +194,8 @@ export default async function FolderPage(props: {
 
       <FolderViewTabs view={view} folderId={folder.id} />
 
-      <FileDropZone spaceFolderId={folder.id} disabled={!canEdit} label={`"${folder.name}"`} className="flex-1 min-h-0 flex flex-col">
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
+        <FileDropZone spaceFolderId={folder.id} disabled={!canEdit} label={`"${folder.name}"`} />
         {view === "list" ? (
           boards.length === 0 ? (
             <p className="text-sm text-zinc-500 py-8 text-center">No lists in this folder yet.</p>
@@ -300,8 +300,7 @@ export default async function FolderPage(props: {
           </div>
         )}
       </div>
-    </FileDropZone>
-      </div>
+    </div>
   );
 }
 
