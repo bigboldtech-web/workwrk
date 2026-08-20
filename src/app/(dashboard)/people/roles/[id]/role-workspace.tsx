@@ -446,6 +446,14 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
     if (!name) return;
     if (await call("/api/ownership-areas", "POST", { name, ownerRoleId: roleId })) setNewArea("");
   };
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const [deleteArea, setDeleteArea] = useState<{ id: string; name: string } | null>(null);
+  const saveRename = async (areaId: string) => {
+    const name = renameVal.trim();
+    if (!name) { setRenamingId(null); return; }
+    if (await call(`/api/ownership-areas/${areaId}`, "PATCH", { name })) setRenamingId(null);
+  };
   const raiseRequest = (b: Boundary) => {
     toast(`Logged: request to ${b.area.ownerRole?.title ?? "owner"} for “${b.area.name}”`);
     // Phase 2 routes this to a tracked work item; Phase 1 confirms the owner.
@@ -458,8 +466,46 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
         {/* Owns */}
         <BoundaryColumn tone="#16a34a" icon={ShieldCheck} label="Owns">
           {bundle.ownedAreas.length === 0 ? <Empty>Nothing owned yet</Empty> : bundle.ownedAreas.map((a) => (
-            <li key={a.id} className="flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-emerald-50/60 text-[12.5px] text-zinc-800">
-              <span className="flex-1 truncate" title={a.name}>{a.name}</span>
+            <li key={a.id} className="group/oa flex items-center gap-1.5 px-2 py-1.5 rounded-md bg-emerald-50/60 text-[12.5px] text-zinc-800">
+              {renamingId === a.id ? (
+                <input
+                  autoFocus
+                  value={renameVal}
+                  onChange={(e) => setRenameVal(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); void saveRename(a.id); }
+                    if (e.key === "Escape") setRenamingId(null);
+                  }}
+                  onBlur={() => void saveRename(a.id)}
+                  className="flex-1 min-w-0 text-[12.5px] bg-white rounded border border-emerald-200 px-1.5 py-0.5 outline-none focus:border-[var(--os-brand)]"
+                />
+              ) : (
+                <span className="flex-1 truncate" title={a.name}>{a.name}</span>
+              )}
+              {canEdit && renamingId !== a.id ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { setRenamingId(a.id); setRenameVal(a.name); }}
+                    title="Rename area"
+                    aria-label={`Rename ${a.name}`}
+                    className="opacity-0 group-hover/oa:opacity-100 text-zinc-400 hover:text-zinc-700"
+                  >
+                    <Pencil className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setDeleteArea({ id: a.id, name: a.name })}
+                    title="Delete area"
+                    aria-label={`Delete ${a.name}`}
+                    className="opacity-0 group-hover/oa:opacity-100 text-zinc-400 hover:text-red-500"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </>
+              ) : null}
             </li>
           ))}
           {canEdit ? (
@@ -489,6 +535,21 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
       {addOpen ? (
         <AddBoundary areas={assignable} relation={addOpen} busy={busy} onClose={() => setAddOpen(null)}
           onPick={async (areaId) => { if (await call("/api/role-boundaries", "POST", { roleId, areaId, relation: addOpen })) setAddOpen(null); }} />
+      ) : null}
+
+      {deleteArea ? (
+        <ConfirmDialog
+          open
+          onClose={() => setDeleteArea(null)}
+          onConfirm={async () => {
+            if (await call(`/api/ownership-areas/${deleteArea.id}`, "DELETE")) setDeleteArea(null);
+          }}
+          loading={busy}
+          title={`Delete area "${deleteArea.name}"?`}
+          description="The area disappears everywhere — including other roles' Can-request and Cannot-touch lists. No SOPs, KRAs or people are affected."
+          confirmLabel="Delete area"
+          destructive
+        />
       ) : null}
     </Card>
   );
