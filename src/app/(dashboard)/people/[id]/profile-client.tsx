@@ -475,7 +475,7 @@ function GoalsSection({ mode, alignment, loading }: { mode: Mode; alignment: Ali
                         ) : null}
                         <div className="flex-1" />
                         <span className="text-[12px] text-zinc-400 tabular-nums">
-                          {kr.currentValue}{kr.unit ? ` ${kr.unit}` : ""} / {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
+                          {kr.currentValue} → {kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
                         </span>
                         <span className="text-[13px] font-medium tabular-nums text-zinc-800 w-9 text-right">
                           {kr.progress}%
@@ -562,22 +562,35 @@ function AssetsTab({ userId }: { userId: string }) {
 function ScoreBreakdown({ breakdown }: { breakdown: Record<string, unknown> | null }) {
   if (!breakdown) return null;
 
+  // Keys mirror performanceScoreService's stored breakdown; weights live under
+  // DIFFERENT keys (kpi/manager/peer/self) — mapping them 1:1 used to render
+  // every weight as 0% and dropped the Goal/Task rows entirely.
   const components = [
-    { label: "KPI Achievement", key: "kpiScore", icon: Target },
-    { label: "Manager Rating", key: "managerRating", icon: Star },
-    { label: "Peer Rating", key: "peerRating", icon: Users },
-    { label: "Self Assessment", key: "selfRating", icon: Smile },
-    { label: "SOP Compliance", key: "sopCompliance", icon: CheckSquare },
-    { label: "Task Completion", key: "taskCompletion", icon: TrendingUp },
-  ];
+    { label: "KPI Achievement", key: "kpiScore", weightKey: "kpi", icon: Target },
+    { label: "Manager Rating", key: "managerRating", weightKey: "manager", icon: Star },
+    { label: "Peer Rating", key: "peerRating", weightKey: "peer", icon: Users },
+    { label: "Self Assessment", key: "selfRating", weightKey: "self", icon: Smile },
+    { label: "SOP Compliance", key: "sopCompliance", weightKey: "sopCompliance", icon: CheckSquare },
+    { label: "Goal Progress", key: "okrScore", fixedWeight: 10, icon: Trophy },
+    { label: "Task Delivery", key: "taskScore", fixedWeight: 5, icon: TrendingUp },
+  ] as const;
 
   const weights = (breakdown.weights as Record<string, number>) || {};
+  const hasAny = components.some(({ key }) => breakdown[key] != null);
+  if (!hasAny) {
+    return (
+      <p className="text-xs text-zinc-400 leading-relaxed">
+        No components measured yet. KPI readings, review ratings, SOP acknowledgements,
+        goal check-ins and task delivery feed this score as they accumulate.
+      </p>
+    );
+  }
 
   return (
     <div className="space-y-2">
-      {components.map(({ label, key, icon: Icon }) => {
+      {components.map(({ label, key, icon: Icon, ...w }) => {
         const value = breakdown[key] as number | null;
-        const weight = weights[key] ?? 0;
+        const weight = "fixedWeight" in w && w.fixedWeight != null ? w.fixedWeight : (weights[(w as { weightKey?: string }).weightKey ?? ""] ?? 0);
         if (value == null) return null;
         return (
           <div key={key} className="flex items-center gap-3">
@@ -615,14 +628,15 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
   const maxScore = Math.max(...history.map((h) => h.score), 100);
 
   return (
-    <div className="flex items-end gap-3 h-32">
+    <>
+    <div className="flex items-end justify-center gap-4 h-32">
       {history.map((h) => {
         const height = maxScore > 0 ? (h.score / maxScore) * 100 : 0;
         const label = h.period.length === 7
-          ? new Date(h.period + "-01").toLocaleString("default", { month: "short", year: "2-digit" })
+          ? new Date(h.period + "-01").toLocaleString("default", { month: "short", year: "2-digit" }).replace(" ", " \u2019")
           : h.period;
         return (
-          <div key={h.period} className="flex-1 flex flex-col items-center gap-1">
+          <div key={h.period} className="flex w-full max-w-[72px] flex-col items-center gap-1">
             <span className={`text-[11px] font-mono font-bold ${getScoreColor(h.score)}`}>
               {h.score}
             </span>
@@ -637,6 +651,12 @@ function ScoreTrendChart({ history }: { history: Array<{ period: string; score: 
         );
       })}
     </div>
+    {history.length === 1 ? (
+      <p className="mt-2 text-center text-[11px] text-zinc-400">
+        First scored month — the trend line builds as monthly scores accumulate.
+      </p>
+    ) : null}
+    </>
   );
 }
 
