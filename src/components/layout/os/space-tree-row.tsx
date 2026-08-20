@@ -29,6 +29,7 @@ import { TableMoreTrigger } from "./table-more-menu";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuList, MenuItem, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 import { useOsToast } from "./toast";
+import { uploadDroppedFiles, dragHasFiles } from "@/lib/upload-dropped-files";
 import { useOsShell } from "./shell-context";
 import { SidebarQuickStar } from "./sidebar-quick-star";
 
@@ -225,6 +226,7 @@ export function SpaceTreeRow({
   onReorderSpace,
   reorderable = false,
 }: Props) {
+  const { toast } = useOsToast();
   const router = useRouter();
   const [expanded, setExpanded] = useState(() => spaceExpandStore.get(space.id) ?? false);
   const [data, setData] = useState<ChildrenPayload | null>(() => spaceChildrenStore.get(space.id) ?? null);
@@ -307,6 +309,8 @@ export function SpaceTreeRow({
           startSpaceDrag(e, space.id);
         }}
         onDragOver={(e) => {
+          // OS files dropped on a Space row attach at the Space root.
+          if (dragHasFiles(e)) { e.preventDefault(); e.stopPropagation(); setRootDragOver(true); return; }
           if (isSpaceDrag(e)) {
             // Reorder: pick before/after based on cursor vs row midpoint.
             e.preventDefault();
@@ -318,6 +322,13 @@ export function SpaceTreeRow({
         }}
         onDragLeave={() => { setRootDragOver(false); setSpaceDropEdge(null); }}
         onDrop={async (e) => {
+          if (dragHasFiles(e)) {
+            e.preventDefault(); e.stopPropagation();
+            setRootDragOver(false); setSpaceDropEdge(null);
+            const r = await uploadDroppedFiles(e.dataTransfer.files, { spaceId: space.id });
+            toast(r.ok === r.total ? `${r.ok} file${r.ok === 1 ? "" : "s"} added to ${space.name}` : `${r.ok}/${r.total} files added to ${space.name}`);
+            return;
+          }
           if (isSpaceDrag(e)) {
             e.preventDefault();
             const draggedId = readSpaceDrag(e);
@@ -447,6 +458,7 @@ function FolderTreeRow({
   spaceName: string;
   onChanged: () => void;
 }) {
+  const { toast } = useOsToast();
   const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? false);
   const pathname = usePathname();
   const isActive = pathname === `/folders/${folder.id}`;
@@ -468,6 +480,8 @@ function FolderTreeRow({
         draggable
         onDragStart={(e) => { e.stopPropagation(); startTreeDrag(e, { kind: "folder", id: folder.id }); }}
         onDragOver={(e) => {
+          // OS files dropped on a folder row land INSIDE the folder.
+          if (dragHasFiles(e)) { e.preventDefault(); e.stopPropagation(); setDropZone("inside"); return; }
           if (!isTreeDrag(e)) return;
           e.preventDefault(); e.stopPropagation();
           // Folder-over-folder gets three zones: top edge = drop ABOVE,
@@ -484,6 +498,13 @@ function FolderTreeRow({
         }}
         onDragLeave={() => setDropZone(null)}
         onDrop={async (e) => {
+          if (dragHasFiles(e)) {
+            e.preventDefault(); e.stopPropagation();
+            setDropZone(null);
+            const r = await uploadDroppedFiles(e.dataTransfer.files, { spaceFolderId: folder.id });
+            toast(r.ok === r.total ? `${r.ok} file${r.ok === 1 ? "" : "s"} added to ${folder.name}` : `${r.ok}/${r.total} files added to ${folder.name}`);
+            return;
+          }
           if (!isTreeDrag(e)) return;
           e.preventDefault(); e.stopPropagation();
           const zone = dropZone;

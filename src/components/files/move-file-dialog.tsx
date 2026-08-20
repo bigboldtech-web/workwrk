@@ -24,7 +24,7 @@ export function MoveFileDialog({ fileId, fileName, onClose }: { fileId: string; 
   useEffect(() => {
     fetch("/api/spaces")
       .then((r) => (r.ok ? r.json() : []))
-      .then((d) => setSpaces((Array.isArray(d) ? d : d.data ?? []).map((s: SpaceRow) => ({ id: s.id, name: s.name }))))
+      .then((d) => setSpaces((Array.isArray(d) ? d : d.spaces ?? d.data ?? []).map((s: SpaceRow) => ({ id: s.id, name: s.name }))))
       .catch(() => setSpaces([]));
   }, []);
 
