@@ -58,8 +58,10 @@ export async function POST(req: NextRequest) {
         mimeType: file.type || null,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "S3 upload failed";
-      return NextResponse.json({ error: message }, { status: 500 });
+      // Invalid/revoked object-storage credentials must not make uploads
+      // impossible: on a single-node deploy the local-disk path below is a
+      // fully working store. Log loudly (ops fixes the keys), fall through.
+      console.error("[upload] S3 write failed — falling back to local storage:", err instanceof Error ? err.message : err);
     }
   }
 
