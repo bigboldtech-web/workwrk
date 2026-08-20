@@ -15911,6 +15911,8 @@ table.os-tbl {
 .ftile__body { padding: 10px 12px; flex: 1; }
 .ftile__name { font-size: 13.5px; font-weight: 600; color: var(--os-ink); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ftile__meta { font-size: 12px; color: var(--os-ink-3); font-variant-numeric: tabular-nums; }
+.ftile__spacechip { color: var(--os-ink-3); text-decoration: none; }
+.ftile__spacechip:hover { color: var(--os-brand); text-decoration: underline; }
 .ftile__actions { display: flex; gap: 2px; padding: 6px 8px; border-top: 1px solid var(--os-line); background: var(--os-surface-1); }
 .ftile__act { padding: 5px; border-radius: 4px; color: var(--os-ink-3); }
 .ftile__act:hover { background: var(--os-surface-2); color: var(--os-ink); }

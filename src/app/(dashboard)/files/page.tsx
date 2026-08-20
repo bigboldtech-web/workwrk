@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   HardDrive, Folder, FolderPlus, Upload, Search, Star, Trash2,
   ExternalLink, Image as ImageIcon, FileText, File as FileIcon,
@@ -36,6 +37,7 @@ type ApiFile = {
   starred: boolean; description?: string | null;
   summary?: string | null; summarizedAt?: string | null;
   createdAt: string; updatedAt: string;
+  spaceFolder?: { id: string; name: string } | null;
 };
 
 function fmtSize(n: number): string {
@@ -402,6 +404,11 @@ export default function FilesPage() {
                       <div className="ftile__meta">
                         <span>{fmtSize(f.size)}</span>
                         <span>· {new Date(f.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                        {f.spaceFolder ? (
+                          <Link href={`/folders/${f.spaceFolder.id}`} className="ftile__spacechip" title={`In folder ${f.spaceFolder.name}`}>
+                            · 📁 {f.spaceFolder.name}
+                          </Link>
+                        ) : null}
                       </div>
                       {f.summary && (
                         <details className="ftile__summary">

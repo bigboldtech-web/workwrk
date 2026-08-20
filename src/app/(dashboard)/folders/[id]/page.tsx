@@ -7,6 +7,7 @@
 // nested child folders) are aggregated for the List view and progress bars.
 
 import { notFound, redirect } from "next/navigation";
+import { FolderFilesCard } from "@/components/spaces/folder-files-card";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -291,6 +292,9 @@ export default async function FolderPage(props: {
                 </ul>
               )}
             </Card>
+
+            {/* Files uploaded into this folder — also visible in Library → Files */}
+            <FolderFilesCard folderId={folder.id} canEdit={canEdit} />
           </div>
         )}
       </div>

@@ -207,6 +207,11 @@ model FileEntry {
   // right context. Org-wide uploads (Library tab without a Space chip
   // selected) leave this null.
   spaceId        String?
+  // Space-hierarchy anchor: a file uploaded INSIDE a Space folder. spaceId is
+  // derived from the folder on write so Library space filters + visibility
+  // gating keep working with zero extra plumbing.
+  spaceFolderId  String?
+  spaceFolder    Folder?      @relation("FolderFiles", fields: [spaceFolderId], references: [id], onDelete: SetNull)
   uploadedById   String
   // Light, optional metadata — text caption, color tag for sorting.
   description    String?
@@ -222,6 +227,7 @@ model FileEntry {
   @@index([organizationId, folderId])
   @@index([uploadedById])
   @@index([organizationId, spaceId])
+  @@index([organizationId, spaceFolderId])
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -4512,6 +4518,7 @@ model Folder {
   @@index([organizationId, archivedAt])
   @@index([spaceId, parentFolderId, position])
   @@index([parentFolderId])
+  files          FileEntry[]  @relation("FolderFiles")
 }
 
 // SpaceMember — per-Space ACL. Org admins implicitly access every

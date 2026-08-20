@@ -61,9 +61,12 @@ export async function GET(req: NextRequest) {
   const search = sp.get("q")?.trim().toLowerCase() ?? "";
   const spaceIdFilter = sp.get("spaceId"); // "" or null = all; specific id = scoped
 
+  const spaceFolderIdFilter = sp.get("spaceFolderId");
+
   const where: Record<string, unknown> = { organizationId: orgId };
   if (search) where.name = { contains: search, mode: "insensitive" };
   else if (starred) where.starred = true;
+  else if (spaceFolderIdFilter) where.spaceFolderId = spaceFolderIdFilter;
   else where.folderId = folderId;
   if (spaceIdFilter) where.spaceId = spaceIdFilter;
 
@@ -84,7 +87,18 @@ export async function GET(req: NextRequest) {
     : new Set<string>();
   const gated = files.filter((f) => !f.spaceId || visible.has(f.spaceId));
 
-  return jsonSuccess(gated);
+  // Attach the Space-folder name so the Library drive can show where a
+  // space-anchored file lives (chip linking back to the folder).
+  const sfIds = [...new Set(gated.map((f) => f.spaceFolderId).filter((x): x is string => !!x))];
+  const sfNames = sfIds.length
+    ? new Map((await prisma.folder.findMany({ where: { id: { in: sfIds } }, select: { id: true, name: true } })).map((f) => [f.id, f.name]))
+    : new Map<string, string>();
+  const enriched = gated.map((f) => ({
+    ...f,
+    spaceFolder: f.spaceFolderId && sfNames.has(f.spaceFolderId) ? { id: f.spaceFolderId, name: sfNames.get(f.spaceFolderId)! } : null,
+  }));
+
+  return jsonSuccess(enriched);
 }
 
 export async function POST(req: NextRequest) {
@@ -99,7 +113,8 @@ export async function POST(req: NextRequest) {
   const size = Number(body.size) || 0;
   const url = typeof body.url === "string" ? body.url : "";
   const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
-  const spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
+  let spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
+  const spaceFolderId = typeof body.spaceFolderId === "string" && body.spaceFolderId ? body.spaceFolderId : null;
   const description = typeof body.description === "string" ? body.description.slice(0, 500) : null;
 
   if (!name || !url) return jsonError("name + url required");
@@ -118,8 +133,19 @@ export async function POST(req: NextRequest) {
     if (!space) return jsonError("space not found", 404);
   }
 
+  // Space-folder anchor: validate in-org and DERIVE spaceId from the folder,
+  // so Library space filters + Space visibility gating apply automatically.
+  if (spaceFolderId) {
+    const sf = await prisma.folder.findFirst({
+      where: { id: spaceFolderId, space: { organizationId: orgId } },
+      select: { id: true, spaceId: true },
+    });
+    if (!sf) return jsonError("space folder not found", 404);
+    spaceId = sf.spaceId ?? spaceId;
+  }
+
   const entry = await prisma.fileEntry.create({
-    data: { organizationId: orgId, name, mimeType, size, url, folderId, spaceId, uploadedById: userId, description },
+    data: { organizationId: orgId, name, mimeType, size, url, folderId, spaceId, spaceFolderId, uploadedById: userId, description },
   });
 
   return jsonSuccess(entry, 201);
