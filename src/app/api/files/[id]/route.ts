@@ -44,6 +44,34 @@ export async function PATCH(
     }
   }
   if (typeof body.starred === "boolean") data.starred = body.starred;
+
+  // Space anchors — move the file anywhere: into a Space folder (spaceId is
+  // derived from the folder), to a Space root (folder cleared), or out of
+  // Spaces entirely (both cleared).
+  if (body.spaceFolderId !== undefined) {
+    if (body.spaceFolderId === null || body.spaceFolderId === "") {
+      data.spaceFolderId = null;
+    } else {
+      const sf = await prisma.folder.findFirst({
+        where: { id: body.spaceFolderId, space: { organizationId: orgId } },
+        select: { id: true, spaceId: true },
+      });
+      if (!sf) return jsonError("space folder not found", 404);
+      data.spaceFolderId = sf.id;
+      data.spaceId = sf.spaceId;
+    }
+  }
+  if (body.spaceId !== undefined && data.spaceId === undefined) {
+    if (body.spaceId === null || body.spaceId === "") {
+      data.spaceId = null;
+      if (data.spaceFolderId === undefined) data.spaceFolderId = null;
+    } else {
+      const space = await prisma.space.findFirst({ where: { id: body.spaceId, organizationId: orgId }, select: { id: true } });
+      if (!space) return jsonError("space not found", 404);
+      data.spaceId = space.id;
+      if (data.spaceFolderId === undefined) data.spaceFolderId = null;
+    }
+  }
   if (typeof body.description === "string" || body.description === null) data.description = body.description?.slice?.(0, 500) ?? null;
 
   const updated = await prisma.fileEntry.update({ where: { id }, data });

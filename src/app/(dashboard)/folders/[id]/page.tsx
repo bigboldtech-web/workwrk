@@ -8,6 +8,7 @@
 
 import { notFound, redirect } from "next/navigation";
 import { FolderFilesCard } from "@/components/spaces/folder-files-card";
+import { FileDropZone } from "@/components/files/file-drop-zone";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -193,6 +194,7 @@ export default async function FolderPage(props: {
 
       <FolderViewTabs view={view} folderId={folder.id} />
 
+      <FileDropZone spaceFolderId={folder.id} disabled={!canEdit} label={`"${folder.name}"`} className="flex-1 min-h-0 flex flex-col">
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
         {view === "list" ? (
           boards.length === 0 ? (
@@ -298,7 +300,8 @@ export default async function FolderPage(props: {
           </div>
         )}
       </div>
-    </div>
+    </FileDropZone>
+      </div>
   );
 }
 

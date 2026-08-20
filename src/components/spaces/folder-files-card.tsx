@@ -5,8 +5,9 @@
 // the drive's Space filter and visibility gating apply automatically).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileText, Image as ImageIcon, FileArchive, Film, Music, Upload, Loader2, Trash2, ExternalLink } from "lucide-react";
+import { FileText, Image as ImageIcon, FileArchive, Film, Music, Upload, Loader2, Trash2, ExternalLink, MoveRight } from "lucide-react";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { MoveFileDialog } from "@/components/files/move-file-dialog";
 import { useOsToast } from "@/components/layout/os/toast";
 
 interface FileRow {
@@ -37,6 +38,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
   const confirm = useConfirm();
   const [files, setFiles] = useState<FileRow[] | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [movingFile, setMovingFile] = useState<FileRow | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -48,6 +50,11 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
     } catch { /* card stays in loading state; nothing destructive */ }
   }, [folderId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const onChanged = () => void load();
+    window.addEventListener("workwrk:files-changed", onChanged);
+    return () => window.removeEventListener("workwrk:files-changed", onChanged);
+  }, [load]);
 
   async function uploadFiles(list: FileList | null) {
     if (!list || list.length === 0) return;
@@ -110,7 +117,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
         <div className="flex items-center gap-2 py-4 text-[13px] text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : files.length === 0 ? (
         <p className="py-3 text-[13px] text-zinc-400">
-          No files yet.{canEdit ? " Upload the first — it also appears in Library → Files." : ""}
+          No files yet.{canEdit ? " Drag files anywhere on this page to upload — they also appear in Library → Files." : ""}
         </p>
       ) : (
         <ul className="divide-y divide-zinc-100">
@@ -133,15 +140,23 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
                 {canEdit ? (
-                  <button type="button" onClick={() => void remove(f)} aria-label={`Delete ${f.name}`} className="rounded-md p-1.5 text-zinc-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <>
+                    <button type="button" onClick={() => setMovingFile(f)} aria-label={`Move ${f.name}`} title="Move to another folder, space or the library" className="rounded-md p-1.5 text-zinc-300 opacity-0 hover:bg-zinc-100 hover:text-zinc-700 group-hover:opacity-100">
+                      <MoveRight className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" onClick={() => void remove(f)} aria-label={`Delete ${f.name}`} className="rounded-md p-1.5 text-zinc-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </>
                 ) : null}
               </li>
             );
           })}
         </ul>
       )}
+      {movingFile ? (
+        <MoveFileDialog fileId={movingFile.id} fileName={movingFile.name} onClose={() => setMovingFile(null)} />
+      ) : null}
     </section>
   );
 }

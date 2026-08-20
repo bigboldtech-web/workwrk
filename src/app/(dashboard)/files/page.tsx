@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MoveFileDialog } from "@/components/files/move-file-dialog";
 import Link from "next/link";
 import {
   HardDrive, Folder, FolderPlus, Upload, Search, Star, Trash2,
@@ -108,6 +109,11 @@ export default function FilesPage() {
     }
   }, [view]);
 
+  useEffect(() => {
+    const onChanged = () => { void loadFolders(); void loadFiles(); };
+    window.addEventListener("workwrk:files-changed", onChanged);
+    return () => window.removeEventListener("workwrk:files-changed", onChanged);
+  }, [loadFolders, loadFiles]);
   useEffect(() => { void loadFolders(); }, [loadFolders]);
   useEffect(() => { void loadFiles(); }, [loadFiles]);
   const v = rowVersion("files");
@@ -194,6 +200,7 @@ export default function FilesPage() {
   }
 
   const [summarizing, setSummarizing] = useState<Set<string>>(new Set());
+  const [movingSpaceFile, setMovingSpaceFile] = useState<{ id: string; name: string } | null>(null);
   async function summarize(id: string) {
     setSummarizing((prev) => { const next = new Set(prev); next.add(id); return next; });
     try {
@@ -428,6 +435,7 @@ export default function FilesPage() {
                       )}
                       <a href={f.url} target="_blank" rel="noopener" className="ftile__act" title="Open"><ExternalLink /></a>
                       <button type="button" className="ftile__act" title="Rename" onClick={() => rename(f)}>✎</button>
+                      <button type="button" className="ftile__act" title="Move to a Space folder, Space, or Library" onClick={() => setMovingSpaceFile({ id: f.id, name: f.name })}>⇢</button>
                       <button type="button" className="ftile__act ftile__act--danger" title="Delete" onClick={() => remove(f.id)}>
                         <Trash2 />
                       </button>
@@ -440,6 +448,9 @@ export default function FilesPage() {
           )}
         </section>
       </div>
+      {movingSpaceFile ? (
+        <MoveFileDialog fileId={movingSpaceFile.id} fileName={movingSpaceFile.name} onClose={() => setMovingSpaceFile(null)} />
+      ) : null}
     </div>
   );
 }
