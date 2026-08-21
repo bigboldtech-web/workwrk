@@ -454,9 +454,28 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
     if (!name) { setRenamingId(null); return; }
     if (await call(`/api/ownership-areas/${areaId}`, "PATCH", { name })) setRenamingId(null);
   };
-  const raiseRequest = (b: Boundary) => {
-    toast(`Logged: request to ${b.area.ownerRole?.title ?? "owner"} for “${b.area.name}”`);
-    // Phase 2 routes this to a tracked work item; Phase 1 confirms the owner.
+  const [requestFor, setRequestFor] = useState<Boundary | null>(null);
+  const [requestNote, setRequestNote] = useState("");
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const raiseRequest = (b: Boundary) => { setRequestNote(""); setRequestFor(b); };
+  const sendRequest = async () => {
+    if (!requestFor || !requestNote.trim() || sendingRequest) return;
+    setSendingRequest(true);
+    try {
+      const res = await fetch("/api/role-boundaries/request", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ areaId: requestFor.area.id, note: requestNote.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d?.error ?? "Couldn't send the request"); return; }
+      toast(
+        d.notified > 0
+          ? `Request sent to ${d.notified} ${d.ownerTitle}${d.notified === 1 ? "" : " holders"}`
+          : `Request logged — nobody currently holds ${d.ownerTitle}`,
+      );
+      setRequestFor(null);
+    } finally { setSendingRequest(false); }
   };
 
   return (
@@ -519,14 +538,14 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
 
         {/* Can request */}
         <BoundaryColumn tone="#0073EA" icon={HandHelping} label="Can request" onAdd={canEdit && assignable.length ? () => setAddOpen("CAN_REQUEST") : undefined}>
-          {canRequest.length === 0 ? <Empty>None</Empty> : canRequest.map((b) => (
+          {canRequest.length === 0 ? <Empty>None yet — link areas other roles own, so this role can raise requests to them.</Empty> : canRequest.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} onRequest={() => raiseRequest(b)} />
           ))}
         </BoundaryColumn>
 
         {/* Cannot touch */}
         <BoundaryColumn tone="#dc2626" icon={Ban} label="Cannot touch" onAdd={canEdit && assignable.length ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
-          {cannotTouch.length === 0 ? <Empty>None</Empty> : cannotTouch.map((b) => (
+          {cannotTouch.length === 0 ? <Empty>None yet — mark areas explicitly off-limits for this role.</Empty> : cannotTouch.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} />
           ))}
         </BoundaryColumn>
@@ -535,6 +554,35 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
       {addOpen ? (
         <AddBoundary areas={assignable} relation={addOpen} busy={busy} onClose={() => setAddOpen(null)}
           onPick={async (areaId) => { if (await call("/api/role-boundaries", "POST", { roleId, areaId, relation: addOpen })) setAddOpen(null); }} />
+      ) : null}
+
+      {requestFor ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setRequestFor(null)}>
+          <div className="absolute inset-0 bg-black/30" />
+          <div className="relative w-full max-w-sm bg-white rounded-xl border border-zinc-200 shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-zinc-900">Request: {requestFor.area.name}</h3>
+              <button type="button" onClick={() => setRequestFor(null)} className="text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
+            </div>
+            <p className="text-[12px] text-zinc-500 mb-3">
+              Goes to everyone currently holding <span className="font-medium text-zinc-700">{requestFor.area.ownerRole?.title ?? "the owner role"}</span> — they decide and act; this role never edits the area directly.
+            </p>
+            <textarea
+              value={requestNote}
+              onChange={(e) => setRequestNote(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="What do you need changed or decided?"
+              className="w-full text-[13px] rounded-md border border-zinc-200 px-2.5 py-1.5 resize-y focus:outline-none focus:border-[var(--os-brand)]"
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" onClick={() => setRequestFor(null)} className="h-8 px-3 rounded-md text-[13px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+              <button type="button" disabled={sendingRequest || !requestNote.trim()} onClick={() => void sendRequest()} className="h-8 px-3.5 rounded-md text-[13px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50 inline-flex items-center gap-1.5">
+                {sendingRequest ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Send request
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {deleteArea ? (
@@ -581,16 +629,36 @@ function BoundaryRow({ b, canEdit, busy, onRemove, onRequest }: { b: Boundary; c
 }
 
 function AddBoundary({ areas, relation, busy, onClose, onPick }: { areas: Area[]; relation: string; busy: boolean; onClose: () => void; onPick: (areaId: string) => void }) {
+  const [q, setQ] = useState("");
+  const filtered = areas.filter((a) => !q.trim() || a.name.toLowerCase().includes(q.trim().toLowerCase()) || (a.ownerRole?.title ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/30" />
       <div className="relative w-full max-w-sm bg-white rounded-xl border border-zinc-200 shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-1">
           <h3 className="text-sm font-semibold text-zinc-900">{relation === "CAN_REQUEST" ? "Can request" : "Cannot touch"} — pick an area</h3>
           <button type="button" onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><X className="w-4 h-4" /></button>
         </div>
+        <p className="text-[12px] text-zinc-500 mb-2">
+          {relation === "CAN_REQUEST"
+            ? "This role will be able to raise requests to the area's owner — never edit it directly."
+            : "This role is explicitly barred from the area — even requests are off the table."}
+        </p>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search areas or owners…"
+          className="mb-2 w-full h-8 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
+        />
+        {areas.length === 0 ? (
+          <p className="px-1 py-4 text-[12.5px] text-zinc-400">
+            No areas owned by other roles yet. Areas are defined on the owning role&apos;s page — open that role and add them under <span className="font-medium text-zinc-600">Owns</span>.
+          </p>
+        ) : filtered.length === 0 ? (
+          <p className="px-1 py-4 text-[12.5px] text-zinc-400">Nothing matches.</p>
+        ) : null}
         <ul className="max-h-[280px] overflow-y-auto -mx-1">
-          {areas.map((a) => (
+          {filtered.map((a) => (
             <li key={a.id}>
               <button type="button" disabled={busy} onClick={() => onPick(a.id)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[14px] hover:bg-zinc-50">
                 <span className="flex-1 min-w-0"><span className="block truncate">{a.name}</span>{a.ownerRole ? <span className="block text-[11.5px] text-zinc-400">owner · {a.ownerRole.title}</span> : null}</span>
