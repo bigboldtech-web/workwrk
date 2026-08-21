@@ -33,7 +33,10 @@ export async function GET() {
           name: true,
           lastMessageAt: true,
           createdById: true,
-          members: { select: MEMBER_SELECT },
+          // Cap the roster: DM/group titles need a handful of people, and
+          // #general would otherwise ship the whole org in every 20s poll.
+          members: { select: MEMBER_SELECT, take: 8 },
+          _count: { select: { members: true } },
           messages: {
             where: { deletedAt: null },
             orderBy: { createdAt: "desc" },
@@ -63,13 +66,94 @@ export async function GET() {
       ...m.conversation,
       lastMessage: m.conversation.messages[0] ?? null,
       messages: undefined,
+      memberCount: m.conversation._count.members,
+      _count: undefined,
       myLastReadAt: m.lastReadAt,
       myNotifyLevel: m.notifyLevel,
       unreadCount: unread.get(m.conversation.id) ?? 0,
     }))
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 
-  return jsonSuccess({ conversations });
+  // Channel directory — org channels are open: everyone can see and join
+  // them. Failures here must never break the conversation list.
+  let channels: { id: string; name: string | null; memberCount: number; isMember: boolean }[] = [];
+  try {
+    channels = await channelDirectory(orgId, userId);
+  } catch (e) {
+    console.error("channel directory failed", e);
+  }
+
+  return jsonSuccess({ conversations, channels });
+}
+
+/** Org-open channel list. Also lazily seeds #general (whole org joined)
+ *  and auto-joins people who joined the org after the seed. */
+async function channelDirectory(orgId: string, userId: string) {
+  let rows = await prisma.conversation.findMany({
+    where: { organizationId: orgId, type: "CHANNEL" },
+    select: {
+      id: true,
+      name: true,
+      _count: { select: { members: true } },
+      members: { where: { userId }, select: { id: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const general = rows.find((r) => (r.name ?? "").toLowerCase() === "general");
+  if (!general) {
+    // First run for this org: create #general with every active person in
+    // it. Advisory lock + re-check so two simultaneous first loads can't
+    // seed duplicate channels.
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"seed-general:" + orgId}))`;
+      const exists = await tx.conversation.findFirst({
+        where: { organizationId: orgId, type: "CHANNEL", name: { equals: "general", mode: "insensitive" } },
+        select: { id: true },
+      });
+      if (exists) return;
+      const people = await tx.user.findMany({
+        where: { organizationId: orgId, deletedAt: null },
+        select: { id: true },
+      });
+      await tx.conversation.create({
+        data: {
+          organizationId: orgId,
+          type: "CHANNEL",
+          name: "general",
+          createdById: userId,
+          // Channels stay quiet in the bell (Slack parity — mentions come
+          // in Phase 5). Unread badges still work.
+          members: { create: people.map((u) => ({ userId: u.id, notifyLevel: "mentions" })) },
+        },
+      });
+    });
+    rows = await prisma.conversation.findMany({
+      where: { organizationId: orgId, type: "CHANNEL" },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { members: true } },
+        members: { where: { userId }, select: { id: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  } else if (general.members.length === 0) {
+    // Joined the org after the seed — everyone belongs in #general.
+    await prisma.conversationMember.createMany({
+      data: [{ conversationId: general.id, userId, notifyLevel: "mentions" }],
+      skipDuplicates: true,
+    });
+    general.members = [{ id: "joined" }];
+    general._count.members += 1;
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    memberCount: r._count.members,
+    isMember: r.members.length > 0,
+  }));
 }
 
 export async function POST(req: NextRequest) {
@@ -79,7 +163,29 @@ export async function POST(req: NextRequest) {
   const orgId = getOrgId(session);
 
   const body = await req.json().catch(() => null);
-  const type = body?.type === "GROUP" ? "GROUP" : "DM";
+  const type = body?.type === "GROUP" ? "GROUP" : body?.type === "CHANNEL" ? "CHANNEL" : "DM";
+
+  if (type === "CHANNEL") {
+    const name = typeof body?.name === "string" ? body.name.trim().replace(/^#/, "").slice(0, 60) : "";
+    if (!name) return jsonError("Channels need a name", 400);
+    const clash = await prisma.conversation.findFirst({
+      where: { organizationId: orgId, type: "CHANNEL", name: { equals: name, mode: "insensitive" } },
+      select: { id: true },
+    });
+    if (clash) return jsonSuccess({ id: clash.id, existed: true });
+    const channel = await prisma.conversation.create({
+      data: {
+        organizationId: orgId,
+        type: "CHANNEL",
+        name,
+        createdById: userId,
+        members: { create: [{ userId, notifyLevel: "mentions" }] },
+      },
+      select: { id: true },
+    });
+    return jsonSuccess({ id: channel.id, existed: false }, 201);
+  }
+
   const rawIds: unknown = body?.memberIds;
   const memberIds = Array.isArray(rawIds)
     ? [...new Set(rawIds.filter((x): x is string => typeof x === "string" && x.length > 0 && x !== userId))]

@@ -16,13 +16,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  Bell, BellOff, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
-  RefreshCw, Send, Users, Video,
+  Bell, BellOff, Hash, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
+  RefreshCw, Send, UserPlus, Users, Video,
 } from "lucide-react";
 import { MeetingCall } from "@/components/meetings/meeting-call";
 import { TeamAvatar } from "@/components/team/ui";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { AddPeopleDialog } from "@/components/chat/add-people-dialog";
 import { conversationTitle, type ChatUserLite } from "@/components/chat/conversation-utils";
 
 const POLL_MS = 4_000;
@@ -68,6 +69,7 @@ export default function ConversationPage() {
   const [callAudioOnly, setCallAudioOnly] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
+  const [addPeopleOpen, setAddPeopleOpen] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -83,7 +85,21 @@ export default function ConversationPage() {
     fetch(`/api/conversations/${id}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((d) => { if (active) setMeta(d); })
-      .catch(() => { if (active) setMetaError(true); });
+      .catch(async (e) => {
+        // Deep link into a channel I haven't joined? Channels are org-open,
+        // so try a self-join once (only succeeds for channels) and reload.
+        // Only on a definite 404 — a transient 500 must not reload-loop —
+        // and never when the user just LEFT this channel (back button
+        // would silently rejoin them otherwise).
+        const justLeft = sessionStorage.getItem(`workwrk:chat-left:${id}`) === "1";
+        if (e instanceof Error && e.message === "404" && !justLeft) {
+          try {
+            const j = await fetch(`/api/conversations/${id}/join`, { method: "POST" });
+            if (j.ok && active) { window.location.reload(); return; }
+          } catch { /* fall through to the honest error state */ }
+        }
+        if (active) setMetaError(true);
+      });
     return () => { active = false; };
   }, [id]);
 
@@ -257,7 +273,7 @@ export default function ConversationPage() {
 
   const rename = async () => {
     setMenuOpen(false);
-    const name = window.prompt("Group name", meta?.name ?? "");
+    const name = window.prompt(meta?.type === "CHANNEL" ? "Channel name" : "Group name", meta?.name ?? "");
     if (name === null) return;
     const res = await fetch(`/api/conversations/${id}`, {
       method: "PATCH",
@@ -274,6 +290,9 @@ export default function ConversationPage() {
     const res = await fetch(`/api/conversations/${id}`, { method: "DELETE" }).catch(() => null);
     setConfirmLeave(false);
     if (res?.ok) {
+      // Marker keeps the deep-link auto-join from silently undoing this
+      // if the user presses Back into the channel they just left.
+      try { sessionStorage.setItem(`workwrk:chat-left:${id}`, "1"); } catch { /* private mode */ }
       window.dispatchEvent(new Event("workwrk:chat-changed"));
       router.push("/chat");
     } else toast("Couldn't leave the conversation");
@@ -288,7 +307,9 @@ export default function ConversationPage() {
     );
   }
 
-  const title = meta ? conversationTitle(meta, meId) : "…";
+  const title = meta
+    ? meta.type === "CHANNEL" ? `#${meta.name ?? "channel"}` : conversationTitle(meta, meId)
+    : "…";
   const others = meta?.members.filter((m) => m.userId !== meId) ?? [];
 
   return (
@@ -296,10 +317,16 @@ export default function ConversationPage() {
       {/* Header */}
       <header className="flex items-center gap-3 px-4 h-14 border-b border-zinc-100 shrink-0">
         <div className="flex items-center -space-x-2 shrink-0">
-          {others.slice(0, 3).map((m) => (
-            <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={28} />
-          ))}
-          {others.length === 0 && <span className="w-7 h-7 rounded-full bg-zinc-100 inline-flex items-center justify-center"><Users className="w-4 h-4 text-zinc-400" /></span>}
+          {meta?.type === "CHANNEL" ? (
+            <span className="w-7 h-7 rounded-md bg-zinc-100 inline-flex items-center justify-center"><Hash className="w-4 h-4 text-zinc-500" /></span>
+          ) : (
+            <>
+              {others.slice(0, 3).map((m) => (
+                <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={28} />
+              ))}
+              {others.length === 0 && <span className="w-7 h-7 rounded-full bg-zinc-100 inline-flex items-center justify-center"><Users className="w-4 h-4 text-zinc-400" /></span>}
+            </>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[15px] font-semibold text-zinc-900">{title}</h1>
@@ -341,13 +368,18 @@ export default function ConversationPage() {
                   {myNotify === "mute" ? <Bell className="w-4 h-4 text-zinc-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
-                {meta?.type === "GROUP" && (
+                {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
+                  <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                    <UserPlus className="w-4 h-4 text-zinc-400" /> Add people
+                  </button>
+                )}
+                {(meta?.type === "GROUP" || (meta?.type === "CHANNEL" && (meta.name ?? "").toLowerCase() !== "general")) && (
                   <>
                     <button type="button" onClick={() => void rename()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                      <Pencil className="w-4 h-4 text-zinc-400" /> Rename group
+                      <Pencil className="w-4 h-4 text-zinc-400" /> {meta.type === "CHANNEL" ? "Rename channel" : "Rename group"}
                     </button>
                     <button type="button" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-red-600 hover:bg-red-50">
-                      <LogOut className="w-4 h-4" /> Leave group
+                      <LogOut className="w-4 h-4" /> {meta.type === "CHANNEL" ? "Leave channel" : "Leave group"}
                     </button>
                   </>
                 )}
@@ -384,7 +416,9 @@ export default function ConversationPage() {
         ) : messages.length === 0 ? (
           <div className="py-14 text-center">
             <p className="text-[15px] font-medium text-zinc-700">Say hello 👋</p>
-            <p className="text-[13px] text-zinc-400 mt-1">This is the start of your conversation with {title}.</p>
+            <p className="text-[13px] text-zinc-400 mt-1">
+              {meta?.type === "CHANNEL" ? `This is the very beginning of ${title}.` : `This is the start of your conversation with ${title}.`}
+            </p>
           </div>
         ) : (
           <MessageFeed messages={messages} meId={meId} onRetry={retry} onJoinCall={() => startCall(false)} />
@@ -417,14 +451,31 @@ export default function ConversationPage() {
         </div>
       </div>
 
+      {addPeopleOpen && meta && (
+        <AddPeopleDialog
+          conversationId={id}
+          existingMemberIds={meta.members.map((m) => m.userId)}
+          onClose={() => setAddPeopleOpen(false)}
+          onAdded={(count) => {
+            setAddPeopleOpen(false);
+            toast(count === 1 ? "1 person added" : `${count} people added`);
+            window.dispatchEvent(new Event("workwrk:chat-changed"));
+            fetch(`/api/conversations/${id}`, { cache: "no-store" })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((d) => { if (d) setMeta(d); })
+              .catch(() => { /* header refresh is cosmetic */ });
+          }}
+        />
+      )}
+
       {confirmLeave && (
         <ConfirmDialog
           open
           onClose={() => setConfirmLeave(false)}
           onConfirm={() => void leave()}
-          title="Leave this group?"
+          title={meta?.type === "CHANNEL" ? "Leave this channel?" : "Leave this group?"}
           description="You'll stop receiving messages. The conversation and its history stay for everyone else."
-          confirmLabel="Leave group"
+          confirmLabel={meta?.type === "CHANNEL" ? "Leave channel" : "Leave group"}
           destructive
         />
       )}

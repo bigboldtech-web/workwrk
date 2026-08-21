@@ -69,10 +69,30 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   // Renames apply to named conversations only — DMs derive their name.
   if (typeof body?.name === "string") {
-    const conversation = await prisma.conversation.findUnique({ where: { id }, select: { type: true } });
+    const conversation = await prisma.conversation.findUnique({
+      where: { id },
+      select: { type: true, name: true, organizationId: true },
+    });
     if (conversation?.type === "DM") return jsonError("Direct messages can't be renamed", 400);
-    const name = body.name.trim().slice(0, 80);
+    const name = body.name.trim().replace(/^#/, "").slice(0, 80);
     if (!name) return jsonError("Name can't be empty", 400);
+    if (conversation?.type === "CHANNEL") {
+      // #general is the org's seeded home channel — its name is its
+      // identity (the seeder keys on it), so it can never change.
+      if ((conversation.name ?? "").toLowerCase() === "general") {
+        return jsonError("#general is the company channel — it can't be renamed", 400);
+      }
+      const clash = await prisma.conversation.findFirst({
+        where: {
+          organizationId: conversation.organizationId,
+          type: "CHANNEL",
+          name: { equals: name, mode: "insensitive" },
+          id: { not: id },
+        },
+        select: { id: true },
+      });
+      if (clash) return jsonError("A channel with that name already exists", 400);
+    }
     await prisma.conversation.update({ where: { id }, data: { name } });
   }
 
@@ -88,8 +108,14 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const membership = await requireMembership(id, userId, getOrgId(session));
   if (!membership) return jsonError("Conversation not found", 404);
 
-  const conversation = await prisma.conversation.findUnique({ where: { id }, select: { type: true } });
+  const conversation = await prisma.conversation.findUnique({ where: { id }, select: { type: true, name: true } });
   if (conversation?.type === "DM") return jsonError("Direct messages can't be left — mute them instead", 400);
+  if (conversation?.type === "CHANNEL" && (conversation.name ?? "").toLowerCase() === "general") {
+    // Everyone belongs in the company channel (Slack model) — and the
+    // directory would auto-rejoin within one poll anyway, which would
+    // silently wipe read state. Honest refusal beats a fake leave.
+    return jsonError("Everyone's in #general — mute it instead of leaving", 400);
+  }
 
   // Leaving = removing my membership. Messages stay (data integrity).
   // The epoch bump rotates the derived call room so the departing

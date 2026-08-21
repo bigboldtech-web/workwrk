@@ -10,25 +10,32 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { MessageCircle, Plus, Search, Users, X } from "lucide-react";
+import { Hash, MessageCircle, Plus, Search, Users, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
+import { useOsToast } from "./toast";
 import {
   conversationTitle, conversationAvatarUser, type ConversationListRow,
 } from "@/components/chat/conversation-utils";
 
 const LIST_POLL_MS = 20_000;
 
+type ChannelRow = { id: string; name: string | null; memberCount: number; isMember: boolean };
+
 export function ChatSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
   const { query } = useSidebarSearch();
   const { data: session } = useSession();
+  const { toast } = useOsToast();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
   const [rows, setRows] = useState<ConversationListRow[] | null>(null);
+  const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  const [channelModalOpen, setChannelModalOpen] = useState(false);
+  const [joining, setJoining] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -36,6 +43,7 @@ export function ChatSidebar() {
       if (!r.ok) return;
       const d = await r.json();
       setRows((d.conversations ?? []) as ConversationListRow[]);
+      setChannels((d.channels ?? []) as ChannelRow[]);
     } catch { /* keep the last good list — a blip must not blank the sidebar */ }
   }, []);
 
@@ -58,19 +66,56 @@ export function ChatSidebar() {
     };
   }, [load]);
 
-  // Sidebar-header "+" fires this (apps-catalog createActions).
+  // Sidebar-header "+" fires these (apps-catalog createActions).
   useEffect(() => {
     const onNew = () => setModalOpen(true);
+    const onNewChannel = () => setChannelModalOpen(true);
     window.addEventListener("workwrk:os:new:chat-new", onNew);
-    return () => window.removeEventListener("workwrk:os:new:chat-new", onNew);
+    window.addEventListener("workwrk:os:new:chat-new-channel", onNewChannel);
+    return () => {
+      window.removeEventListener("workwrk:os:new:chat-new", onNew);
+      window.removeEventListener("workwrk:os:new:chat-new-channel", onNewChannel);
+    };
   }, []);
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => {
     if (!rows) return null;
-    if (!q) return rows;
-    return rows.filter((r) => conversationTitle(r, meId).toLowerCase().includes(q));
+    const direct = rows.filter((r) => r.type !== "CHANNEL");
+    if (!q) return direct;
+    return direct.filter((r) => conversationTitle(r, meId).toLowerCase().includes(q));
   }, [rows, q, meId]);
+
+  // Unread badges for channels come from the conversation list (member rows).
+  const channelUnread = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of rows ?? []) if (r.type === "CHANNEL") map.set(r.id, r.unreadCount);
+    return map;
+  }, [rows]);
+
+  const visibleChannels = useMemo(
+    () => (q ? channels.filter((c) => (c.name ?? "").toLowerCase().includes(q)) : channels),
+    [channels, q],
+  );
+
+  const openChannel = async (c: ChannelRow) => {
+    // An explicit open is consent — clear any "just left" marker so the
+    // page's auto-join guard doesn't block this deliberate rejoin.
+    try { sessionStorage.removeItem(`workwrk:chat-left:${c.id}`); } catch { /* private mode */ }
+    if (c.isMember) { router.push(`/chat/${c.id}`); return; }
+    setJoining(c.id);
+    try {
+      const r = await fetch(`/api/conversations/${c.id}/join`, { method: "POST" });
+      if (r.ok) {
+        window.dispatchEvent(new Event("workwrk:chat-changed"));
+        router.push(`/chat/${c.id}`);
+      } else {
+        toast("Couldn't join the channel — try again");
+      }
+    } catch {
+      toast("Couldn't join the channel — check your connection");
+    } finally { setJoining(null); }
+  };
 
   return (
     <div className="flex flex-col">
@@ -82,6 +127,50 @@ export function ChatSidebar() {
         <Plus className="w-4 h-4 text-zinc-500" />
         New chat
       </button>
+
+      {filtered !== null && (visibleChannels.length > 0 || q === "") && (
+        <>
+          <div className="flex items-center justify-between px-2 pt-1 pb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Channels</span>
+            <button type="button" onClick={() => setChannelModalOpen(true)} aria-label="New channel" className="text-zinc-400 hover:text-zinc-700">
+              <Plus className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <ul className="flex flex-col gap-0.5 mb-2">
+            {visibleChannels.map((c) => {
+              const active = pathname === `/chat/${c.id}`;
+              const unread = channelUnread.get(c.id) ?? 0;
+              return (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onClick={() => void openChannel(c)}
+                    disabled={joining === c.id}
+                    className={`w-full flex items-center gap-2 h-8 px-2 rounded-md text-left ${
+                      active ? "bg-zinc-100" : "hover:bg-zinc-50"
+                    } ${c.isMember ? "" : "opacity-70"}`}
+                  >
+                    <Hash className="w-4 h-4 text-zinc-400 shrink-0" />
+                    <span className={`flex-1 truncate text-[14px] ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                      {c.name}
+                    </span>
+                    {unread > 0 ? (
+                      <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                        {unread > 99 ? "99+" : unread}
+                      </span>
+                    ) : !c.isMember ? (
+                      <span className="shrink-0 text-[11px] text-zinc-400">{joining === c.id ? "Joining…" : "Join"}</span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <div className="px-2 pt-1 pb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Direct messages</span>
+          </div>
+        </>
+      )}
 
       {filtered === null ? (
         <div className="px-2 py-4 text-[13px] text-zinc-400">Loading conversations…</div>
@@ -134,6 +223,17 @@ export function ChatSidebar() {
             );
           })}
         </ul>
+      )}
+
+      {channelModalOpen && (
+        <NewChannelDialog
+          onClose={() => setChannelModalOpen(false)}
+          onCreated={(id) => {
+            setChannelModalOpen(false);
+            window.dispatchEvent(new Event("workwrk:chat-changed"));
+            router.push(`/chat/${id}`);
+          }}
+        />
       )}
 
       {modalOpen && (
@@ -295,6 +395,83 @@ function NewChatModal({ meId, onClose, onCreated }: {
             className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {creating ? "Starting…" : picked.length > 1 ? "Start group chat" : "Start chat"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ── New channel — org-open, name required ─────────────────────── */
+
+function NewChannelDialog({ onClose, onCreated }: {
+  onClose: () => void;
+  onCreated: (conversationId: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const create = async () => {
+    const trimmed = name.trim().replace(/^#/, "");
+    if (!trimmed || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "CHANNEL", name: trimmed }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok || !d?.id) {
+        setError(d?.error || "Couldn't create the channel. Try again.");
+        setCreating(false);
+        return;
+      }
+      onCreated(d.id);
+    } catch {
+      setError("Couldn't create the channel. Check your connection and try again.");
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>New channel</DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] text-zinc-500 mb-2">
+          Channels are open to everyone in the company — anyone can find and join them.
+        </p>
+        <div className="flex items-center gap-2 h-9 px-2.5 rounded-md border border-zinc-200 bg-white">
+          <Hash className="w-4 h-4 text-zinc-400 shrink-0" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+            placeholder="e.g. sales, product, random"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400"
+          />
+        </div>
+        {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
+        <div className="mt-3 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void create()}
+            disabled={!name.trim() || creating}
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {creating ? "Creating…" : "Create channel"}
           </button>
         </div>
       </DialogContent>
