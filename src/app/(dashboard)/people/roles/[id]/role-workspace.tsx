@@ -509,7 +509,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
                     onClick={() => { setRenamingId(a.id); setRenameVal(a.name); }}
                     title="Rename area"
                     aria-label={`Rename ${a.name}`}
-                    className="opacity-0 group-hover/oa:opacity-100 text-zinc-400 hover:text-zinc-700"
+                    className="text-zinc-300 hover:text-zinc-700"
                   >
                     <Pencil className="w-3 h-3" />
                   </button>
@@ -519,7 +519,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
                     onClick={() => setDeleteArea({ id: a.id, name: a.name })}
                     title="Delete area"
                     aria-label={`Delete ${a.name}`}
-                    className="opacity-0 group-hover/oa:opacity-100 text-zinc-400 hover:text-red-500"
+                    className="text-zinc-300 hover:text-red-500"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -537,14 +537,14 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
         </BoundaryColumn>
 
         {/* Can request */}
-        <BoundaryColumn tone="#0073EA" icon={HandHelping} label="Can request" onAdd={canEdit && assignable.length ? () => setAddOpen("CAN_REQUEST") : undefined}>
+        <BoundaryColumn tone="#0073EA" icon={HandHelping} label="Can request" onAdd={canEdit ? () => setAddOpen("CAN_REQUEST") : undefined}>
           {canRequest.length === 0 ? <Empty>None yet — link areas other roles own, so this role can raise requests to them.</Empty> : canRequest.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} onRequest={() => raiseRequest(b)} />
           ))}
         </BoundaryColumn>
 
         {/* Cannot touch */}
-        <BoundaryColumn tone="#dc2626" icon={Ban} label="Cannot touch" onAdd={canEdit && assignable.length ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
+        <BoundaryColumn tone="#dc2626" icon={Ban} label="Cannot touch" onAdd={canEdit ? () => setAddOpen("CANNOT_TOUCH") : undefined}>
           {cannotTouch.length === 0 ? <Empty>None yet — mark areas explicitly off-limits for this role.</Empty> : cannotTouch.map((b) => (
             <BoundaryRow key={b.id} b={b} canEdit={canEdit} busy={busy} onRemove={() => call(`/api/role-boundaries/${b.id}`, "DELETE")} />
           ))}
@@ -552,7 +552,7 @@ function BoundaryCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boolea
       </div>
 
       {addOpen ? (
-        <AddBoundary areas={assignable} relation={addOpen} busy={busy} onClose={() => setAddOpen(null)}
+        <AddBoundary areas={assignable} roles={bundle.allRoles.filter((r) => r.id !== roleId)} relation={addOpen} busy={busy} onClose={() => setAddOpen(null)}
           onPick={async (areaId) => { if (await call("/api/role-boundaries", "POST", { roleId, areaId, relation: addOpen })) setAddOpen(null); }} />
       ) : null}
 
@@ -623,13 +623,34 @@ function BoundaryRow({ b, canEdit, busy, onRemove, onRequest }: { b: Boundary; c
         {b.area.ownerRole ? <span className="block text-[11.5px] text-zinc-400 truncate">owner · {b.area.ownerRole.title}</span> : <span className="block text-[11.5px] text-amber-500">no owner set</span>}
       </span>
       {onRequest ? <button type="button" onClick={onRequest} title="Raise a request to the owner" className="opacity-0 group-hover/br:opacity-100 text-[12px] text-[var(--os-brand)] hover:underline">Request</button> : null}
-      {canEdit ? <button type="button" disabled={busy} onClick={onRemove} className="opacity-0 group-hover/br:opacity-100 text-zinc-400 hover:text-red-500"><X className="w-3.5 h-3.5" /></button> : null}
+      {canEdit ? <button type="button" disabled={busy} onClick={onRemove} className="text-zinc-300 hover:text-red-500" title="Remove from this list" aria-label="Remove"><X className="w-3.5 h-3.5" /></button> : null}
     </li>
   );
 }
 
-function AddBoundary({ areas, relation, busy, onClose, onPick }: { areas: Area[]; relation: string; busy: boolean; onClose: () => void; onPick: (areaId: string) => void }) {
+function AddBoundary({ areas, roles, relation, busy, onClose, onPick }: { areas: Area[]; roles: { id: string; title: string }[]; relation: string; busy: boolean; onClose: () => void; onPick: (areaId: string) => void }) {
   const [q, setQ] = useState("");
+  const { toast } = useOsToast();
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newOwner, setNewOwner] = useState("");
+  const [savingNew, setSavingNew] = useState(false);
+  const createArea = async () => {
+    const name = newName.trim();
+    if (!name || !newOwner || savingNew) return;
+    setSavingNew(true);
+    try {
+      const res = await fetch("/api/ownership-areas", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, ownerRoleId: newOwner }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(d?.error ?? "Couldn't create the area"); return; }
+      const created = d?.data ?? d;
+      if (created?.id) onPick(created.id);
+    } finally { setSavingNew(false); }
+  };
   const filtered = areas.filter((a) => !q.trim() || a.name.toLowerCase().includes(q.trim().toLowerCase()) || (a.ownerRole?.title ?? "").toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -657,7 +678,7 @@ function AddBoundary({ areas, relation, busy, onClose, onPick }: { areas: Area[]
         ) : filtered.length === 0 ? (
           <p className="px-1 py-4 text-[12.5px] text-zinc-400">Nothing matches.</p>
         ) : null}
-        <ul className="max-h-[280px] overflow-y-auto -mx-1">
+        <ul className="max-h-[240px] overflow-y-auto -mx-1">
           {filtered.map((a) => (
             <li key={a.id}>
               <button type="button" disabled={busy} onClick={() => onPick(a.id)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-left text-[14px] hover:bg-zinc-50">
@@ -666,6 +687,37 @@ function AddBoundary({ areas, relation, busy, onClose, onPick }: { areas: Area[]
             </li>
           ))}
         </ul>
+        <div className="mt-2 border-t border-zinc-100 pt-2">
+          {creating ? (
+            <div className="space-y-1.5">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                autoFocus
+                placeholder="New area name (e.g. Quote pricing rules)"
+                className="w-full h-8 px-2.5 rounded-md border border-zinc-200 text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
+              />
+              <select
+                value={newOwner}
+                onChange={(e) => setNewOwner(e.target.value)}
+                className="w-full h-8 px-2 rounded-md border border-zinc-200 text-[13px] text-zinc-700 focus:outline-none focus:border-[var(--os-brand)]"
+              >
+                <option value="">Owner role…</option>
+                {roles.map((r) => <option key={r.id} value={r.id}>{r.title}</option>)}
+              </select>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setCreating(false)} className="h-7 px-2.5 rounded-md text-[12px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+                <button type="button" disabled={savingNew || !newName.trim() || !newOwner} onClick={() => void createArea()} className="h-7 px-3 rounded-md text-[12px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50">
+                  {savingNew ? "Creating…" : "Create and add"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" onClick={() => setCreating(true)} className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-md text-left text-[13px] text-[var(--os-brand)] hover:bg-zinc-50">
+              <Plus className="w-3.5 h-3.5" /> New area…
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
