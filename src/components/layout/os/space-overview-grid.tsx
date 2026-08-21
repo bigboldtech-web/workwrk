@@ -24,7 +24,6 @@ const DEFAULT_LAYOUTS: LayoutShape = {
     { i: "lists",     x: 0, y: 8,  w: 12, h: 4 },
     { i: "resources", x: 0, y: 12, w: 6, h: 4 },
     { i: "workload",  x: 6, y: 12, w: 6, h: 4 },
-    { i: "files",     x: 0, y: 99, w: 12, h: 4 },
   ],
   md: [
     { i: "recent",    x: 0, y: 0,  w: 4, h: 5 },
@@ -34,7 +33,6 @@ const DEFAULT_LAYOUTS: LayoutShape = {
     { i: "lists",     x: 0, y: 8,  w: 12, h: 4 },
     { i: "resources", x: 0, y: 12, w: 6, h: 4 },
     { i: "workload",  x: 6, y: 12, w: 6, h: 4 },
-    { i: "files",     x: 0, y: 99, w: 12, h: 4 },
   ],
   sm: [
     { i: "recent",    x: 0, y: 0,  w: 12, h: 4 },
@@ -44,7 +42,6 @@ const DEFAULT_LAYOUTS: LayoutShape = {
     { i: "lists",     x: 0, y: 15, w: 12, h: 4 },
     { i: "resources", x: 0, y: 19, w: 12, h: 4 },
     { i: "workload",  x: 0, y: 23, w: 12, h: 4 },
-    { i: "files",     x: 0, y: 99, w: 12, h: 4 },
   ],
 };
 
@@ -52,10 +49,9 @@ export const OVERVIEW_CARD_CATALOG: Array<{ key: string; label: string; descript
   { key: "recent",    label: "Recent",    description: "Items you opened recently in this Space" },
   { key: "docs",      label: "Docs",      description: "Docs anchored to this Space" },
   { key: "bookmarks", label: "Bookmarks", description: "Pinned URLs for fast access" },
-  { key: "files",     label: "Files",     description: "Files at this Space's root — drag and drop to add" },
   { key: "folders",   label: "Folders",   description: "Folders inside this Space" },
   { key: "lists",     label: "Lists",     description: "Lists across folders and root" },
-  { key: "resources", label: "Resources", description: "Files dropped on this Space" },
+  { key: "resources", label: "Resources", description: "Files on this Space — drag and drop to add; also in Library → Files" },
   { key: "workload",  label: "Workload",  description: "Pie of items by status" },
 ];
 

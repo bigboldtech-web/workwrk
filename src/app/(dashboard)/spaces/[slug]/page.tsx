@@ -714,11 +714,6 @@ export default async function SpacePage(props: {
                     )}
                   </OverviewCard>
                 ),
-                files: (
-                  <OverviewCard title="Files">
-                    <SpaceFilesCard spaceId={space.id} spaceName={space.name} canEdit={spaceCanEdit} />
-                  </OverviewCard>
-                ),
                 bookmarks: (
                   <OverviewCard title="Bookmarks">
                     <div className="flex flex-col items-center justify-center py-6 text-center">
@@ -824,11 +819,7 @@ export default async function SpacePage(props: {
                 ),
                 resources: (
                   <OverviewCard title="Resources">
-                    <div className="flex flex-col items-center justify-center py-10 text-center border border-dashed border-zinc-200 rounded-md">
-                      <span className="text-[12.5px] text-zinc-500">
-                        Drop files here or <span className="text-zinc-700 underline">attach</span>
-                      </span>
-                    </div>
+                    <SpaceFilesCard spaceId={space.id} spaceName={space.name} canEdit={spaceCanEdit} />
                   </OverviewCard>
                 ),
                 workload: (
