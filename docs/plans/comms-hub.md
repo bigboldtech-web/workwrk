@@ -1,6 +1,6 @@
 # Comms Hub — Slack × Zoom × Meet, inside WorkwrK
 
-**Date:** 2026-08-21 · **Status:** Phases 0–3 LIVE (46e7324, d2402a0), Phases 4–6 planned
+**Date:** 2026-08-21 · **Status:** Phases 0–4 LIVE (46e7324, d2402a0, f026745), Phases 5–6 planned
 **Mandate (user):** "Slack, Zoom and Google Meet infused. Chat with team members, video call them, have a group of people in a meeting, audio calls. Plan it so seamless and so light that it doesn't put load on the WorkwrK system. Get it live slowly, slowly, and test it out."
 
 ---
@@ -132,10 +132,15 @@ Posting a **call card** system message ("📞 Call started — Join") is how
 others join: Slack-huddle model, zero signaling infra. Guest links work here
 too (same HMAC scheme) → external people joinable from any chat.
 
-### Phase 4 — Channels
-Org channels (#general seeded) + Space-linked channels; join/leave/invite,
-admin = Space managers. Same tables (`type: CHANNEL`), same UI, so this is
-mostly permissioning + a create-channel dialog.
+### Phase 4 — Channels ✅ LIVE (f026745)
+Org-open channels + #general seeded with everyone (advisory-locked lazy
+seed; late org joiners auto-join). Join-on-click from the sidebar's
+Channels section, New-channel dialog, Add-people on groups/channels.
+#general is immutable + unleavable server-side (the review fleet showed a
+mutable name lets any member force reseed loops / silent rejoins). Channel
+bells are mention-only by default — mentions arrive in Phase 5; badges
+count everything. Space-linked channels deferred to a later pass
+(`spaceId` column is ready).
 
 ### Phase 5 — Comfort layer
 Reactions + attachments (reuse `/api/upload`; files dropped in chat also land
