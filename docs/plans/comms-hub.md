@@ -1,6 +1,6 @@
 # Comms Hub — Slack × Zoom × Meet, inside WorkwrK
 
-**Date:** 2026-08-21 · **Status:** Phase 0 LIVE, Phases 1–6 planned
+**Date:** 2026-08-21 · **Status:** Phases 0–3 LIVE (46e7324, d2402a0), Phases 4–6 planned
 **Mandate (user):** "Slack, Zoom and Google Meet infused. Chat with team members, video call them, have a group of people in a meeting, audio calls. Plan it so seamless and so light that it doesn't put load on the WorkwrK system. Get it live slowly, slowly, and test it out."
 
 ---
@@ -112,7 +112,7 @@ public `/meet/[code]` door. **Test now:** run a real meeting, invite an
 external guest + a notetaker (Fireflies/Otter by guest link), paste transcript
 back into meeting notes. Verdict feeds the §3 gate.
 
-### Phase 1 — Chat core (DMs + group DMs)
+### Phase 1 — Chat core (DMs + group DMs) ✅ LIVE (d2402a0, with 2 and 3)
 The migration above; APIs (`/api/conversations` list+create, `[id]/messages`
 cursor fetch + post, `[id]/read`); `/chat` two-pane Slack layout: left =
 conversations + people search, right = thread + composer. Optimistic send
@@ -120,12 +120,12 @@ with retry + visible failure (data-integrity rule). Adaptive polling: 4s
 active pane, 20s list, paused when tab hidden. **Soft launch: URL only — no
 sidebar entry yet.** Test with the team; watch pm2/pg load before widening.
 
-### Phase 2 — Woven into the OS
+### Phase 2 — Woven into the OS ✅ LIVE (d2402a0)
 Sidebar "Chat" entry + topbar unread badge (one cheap count query on the
 existing 60s notification poll — no new timer); "Message" button on people
 profiles and member pickers; DM/mention notifications into inbox buckets.
 
-### Phase 3 — Calls from chat (the Zoom fusion)
+### Phase 3 — Calls from chat (the Zoom fusion) ✅ LIVE (d2402a0)
 Video + audio buttons in any conversation header → `MeetingCall` with room
 `chat:{conversationId}` (audio = `startWithVideoMuted/AudioOnly` config).
 Posting a **call card** system message ("📞 Call started — Join") is how
@@ -159,6 +159,21 @@ pointless over polling. Gate: actual query volume from Phases 1–5, not vibes.
   applied via the deploy-migrations path.
 - Kill switch: chat surfaces render an honest "Chat is resting" state on API
   failure — never take the shell down with it.
+
+## 6b. Ship notes (2026-08-21)
+
+- Phases 1–3 shipped together in d2402a0 (user directive: "get it ready for
+  the team"). Deviations from plan: Chat went straight into the rail
+  (skipped the URL-only soft launch); notifications ride the existing bell
+  with one-unread-per-conversation dedup instead of a topbar badge.
+- `Conversation.callEpoch` added (not in original model): bumped when a
+  member leaves so the derived call room rotates and ex-members' captured
+  room names die — authz review finding.
+- Poll cursor is `gte` + client id-dedup so same-millisecond messages
+  can't be skipped.
+- Deploy-pipeline observation: back-to-back pushes create a window where
+  pm2 serves a half-rebuilt .next (500s for ~5 min, self-heals). Worth an
+  out-of-place build + symlink swap eventually.
 
 ## 7. Open decisions for the user
 
