@@ -36,7 +36,7 @@ export function MoveFileDialog({ fileId, fileName, onClose }: { fileId: string; 
       try {
         const r = await fetch(`/api/folders?spaceId=${encodeURIComponent(spaceId)}`);
         const d = r.ok ? await r.json() : [];
-        setFolders((prev) => ({ ...prev, [spaceId]: Array.isArray(d) ? d : d.data ?? [] }));
+        setFolders((prev) => ({ ...prev, [spaceId]: Array.isArray(d) ? d : d.folders ?? d.data ?? [] }));
       } finally { setLoadingFolders(null); }
     }
   }
