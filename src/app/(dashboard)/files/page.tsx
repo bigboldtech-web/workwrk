@@ -39,6 +39,7 @@ type ApiFile = {
   summary?: string | null; summarizedAt?: string | null;
   createdAt: string; updatedAt: string;
   spaceFolder?: { id: string; name: string } | null;
+  space?: { id: string; name: string; slug: string } | null;
 };
 
 function fmtSize(n: number): string {
@@ -414,6 +415,10 @@ export default function FilesPage() {
                         {f.spaceFolder ? (
                           <Link href={`/folders/${f.spaceFolder.id}`} className="ftile__spacechip" title={`In folder ${f.spaceFolder.name}`}>
                             · 📁 {f.spaceFolder.name}
+                          </Link>
+                        ) : f.space ? (
+                          <Link href={`/spaces/${f.space.slug}`} className="ftile__spacechip" title={`In space ${f.space.name}`}>
+                            · 🗂 {f.space.name}
                           </Link>
                         ) : null}
                       </div>

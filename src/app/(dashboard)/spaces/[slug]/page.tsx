@@ -7,6 +7,7 @@
 // (client island) on the right side.
 
 import { notFound, redirect } from "next/navigation";
+import { SpaceFilesCard } from "@/components/spaces/space-files-card";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -711,6 +712,11 @@ export default async function SpacePage(props: {
                         ))}
                       </ul>
                     )}
+                  </OverviewCard>
+                ),
+                files: (
+                  <OverviewCard title="Files">
+                    <SpaceFilesCard spaceId={space.id} spaceName={space.name} canEdit={spaceCanEdit} />
                   </OverviewCard>
                 ),
                 bookmarks: (

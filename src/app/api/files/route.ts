@@ -62,11 +62,13 @@ export async function GET(req: NextRequest) {
   const spaceIdFilter = sp.get("spaceId"); // "" or null = all; specific id = scoped
 
   const spaceFolderIdFilter = sp.get("spaceFolderId");
+  const spaceRoot = sp.get("spaceRoot") === "1"; // files at a Space's root (no folder)
 
   const where: Record<string, unknown> = { organizationId: orgId };
   if (search) where.name = { contains: search, mode: "insensitive" };
   else if (starred) where.starred = true;
   else if (spaceFolderIdFilter) where.spaceFolderId = spaceFolderIdFilter;
+  else if (spaceRoot && spaceIdFilter) where.spaceFolderId = null;
   else where.folderId = folderId;
   if (spaceIdFilter) where.spaceId = spaceIdFilter;
 
@@ -93,9 +95,15 @@ export async function GET(req: NextRequest) {
   const sfNames = sfIds.length
     ? new Map((await prisma.folder.findMany({ where: { id: { in: sfIds } }, select: { id: true, name: true } })).map((f) => [f.id, f.name]))
     : new Map<string, string>();
+  // Space chip for space-root files (no folder): name + slug for the link.
+  const spIds = [...new Set(gated.filter((f) => f.spaceId && !f.spaceFolderId).map((f) => f.spaceId as string))];
+  const spInfo = spIds.length
+    ? new Map((await prisma.space.findMany({ where: { id: { in: spIds } }, select: { id: true, name: true, slug: true } })).map((x) => [x.id, x]))
+    : new Map<string, { id: string; name: string; slug: string }>();
   const enriched = gated.map((f) => ({
     ...f,
     spaceFolder: f.spaceFolderId && sfNames.has(f.spaceFolderId) ? { id: f.spaceFolderId, name: sfNames.get(f.spaceFolderId)! } : null,
+    space: f.spaceId && !f.spaceFolderId && spInfo.has(f.spaceId) ? spInfo.get(f.spaceId)! : null,
   }));
 
   return jsonSuccess(enriched);
