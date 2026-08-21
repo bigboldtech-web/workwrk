@@ -7,6 +7,7 @@
 // past ~30 lines of UI should move to apps/<key>-sidebar.tsx.
 
 import Link from "next/link";
+import { ChatSidebar } from "./chat-sidebar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
@@ -24,6 +25,7 @@ import {
   Library as LibraryIcon, Folder, Trash2,
   LayoutDashboard, Target, GaugeCircle,
   type LucideIcon,
+  MessageCircle,
 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
@@ -1161,6 +1163,9 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
+  { key: "chat", label: "Chat", Icon: MessageCircle, defaultHref: "/chat",
+    matchPaths: ["/chat"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+    createActions: [{ label: "New chat", icon: MessageCircle, event: "chat-new" }] },
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
     matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,

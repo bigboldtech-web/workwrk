@@ -37,3 +37,11 @@ export function verifyMeetingGuestCode(code: string): string | null {
 export function meetingJitsiUrl(meetingId: string): string {
   return `https://meet.jit.si/${meetingRoomName(meetingId)}`;
 }
+
+/** Jitsi room for a chat conversation's calls (huddles). Same derivation
+ *  scheme as meetings, distinct namespace so the two never collide. The
+ *  epoch (bumped when a member leaves) rotates the room so ex-members'
+ *  captured room names stop working. */
+export function chatRoomName(conversationId: string, epoch = 0): string {
+  return `WorkwrK-hud-${conversationId.slice(-6)}-${hmac(`chat:${conversationId}:${epoch}`).slice(0, 10)}`;
+}

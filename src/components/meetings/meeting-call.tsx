@@ -34,10 +34,12 @@ function loadJitsiScript(): Promise<void> {
   return scriptPromise;
 }
 
-export function MeetingCall({ room, subject, displayName, onLeave }: {
+export function MeetingCall({ room, subject, displayName, audioOnly, onLeave }: {
   room: string;
   subject?: string;
   displayName?: string | null;
+  /** Start with camera off — audio-call mode. The user can still turn video on in-call. */
+  audioOnly?: boolean;
   onLeave?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -60,6 +62,7 @@ export function MeetingCall({ room, subject, displayName, onLeave }: {
             prejoinConfig: { enabled: true },
             subject: subject ?? "WorkwrK meeting",
             disableDeepLinking: true,
+            ...(audioOnly ? { startWithVideoMuted: true } : {}),
           },
           interfaceConfigOverwrite: {
             SHOW_JITSI_WATERMARK: false,

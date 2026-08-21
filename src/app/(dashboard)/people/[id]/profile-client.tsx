@@ -34,6 +34,7 @@ import {
   ArrowDownRight, ArrowUpRight, MoveRight, ChevronRight, Settings2,
   ClipboardCheck, Trophy, Gauge, Clock,
   MoreHorizontal, UserMinus, RotateCcw,
+  MessageCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -231,6 +232,32 @@ interface AssetRow {
 }
 
 /* ═══════════════════ Alignment section (KRAs + KPI gauges) ═══════ */
+
+/** Start (or reopen) a DM with this person and jump into it. */
+function MessagePersonButton({ userId }: { userId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "DM", memberIds: [userId] }),
+      });
+      const d = await res.json().catch(() => null);
+      if (res.ok && d?.id) router.push(`/chat/${d.id}`);
+      else setBusy(false);
+    } catch { setBusy(false); }
+  };
+  return (
+    <button type="button" onClick={() => void go()} disabled={busy} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0 disabled:opacity-50">
+      <MessageCircle size={13} /> {busy ? "Opening…" : "Message"}
+    </button>
+  );
+}
+
 
 function AlignmentSection({
   id, mode, alignment, loading, onChanged,
@@ -932,7 +959,10 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
           <div className="flex items-start gap-4">
             <TeamAvatar name={fullName} avatar={user.avatar} size={64} />
             <div className="flex-1 min-w-0">
-              <h1 className="text-lg font-semibold text-zinc-900 truncate">{fullName}</h1>
+              <div className="flex items-start gap-2">
+                <h1 className="text-lg font-semibold text-zinc-900 truncate flex-1">{fullName}</h1>
+                {!user.deletedAt && <MessagePersonButton userId={user.id} />}
+              </div>
               <p className="text-[14px] text-zinc-600 mt-0.5">{user.role?.title || "No job title"}</p>
               <div className="flex items-center gap-3 flex-wrap mt-2.5 text-[13px] text-zinc-500">
                 {user.email ? <a href={`mailto:${user.email}`} className="inline-flex items-center gap-1 hover:text-zinc-800"><Mail size={12} /> {user.email}</a> : null}
@@ -986,6 +1016,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
               <div className="flex-1" />
               {mode === "manage" ? (
                 <>
+                  {!user.deletedAt && !my && <MessagePersonButton userId={user.id} />}
                   <button type="button" onClick={openEditDialog} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md text-[14px] text-zinc-700 border border-zinc-200 hover:bg-zinc-50 shrink-0">
                     <Edit3 size={13} /> Edit profile
                   </button>

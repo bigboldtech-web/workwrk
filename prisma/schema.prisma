@@ -166,6 +166,8 @@ model Organization {
   automationRuns         AutomationRun[]
   automationUsage        AutomationUsage[]
   integrationConnections IntegrationConnection[]
+  // 🆕 Comms Hub — team chat
+  conversations          Conversation[]
 
   @@index([slug])
 }
@@ -537,6 +539,10 @@ model User {
   roleInstances          RoleInstance[]   @relation("UserRoleInstances")
   // 🆕 Goals rebuild — goals this person is directly assigned to
   goalAssignments        GoalAssignee[]
+  // 🆕 Comms Hub — team chat
+  conversationsCreated    Conversation[]        @relation("ConversationCreatedBy")
+  conversationMemberships ConversationMember[]  @relation("ConversationMemberUser")
+  conversationMessages    ConversationMessage[] @relation("ConversationMessageAuthor")
 
   @@unique([email, organizationId])
   @@index([organizationId])
@@ -5504,6 +5510,78 @@ enum ChatRole {
   ASSISTANT
   SYSTEM
   TOOL
+}
+
+// ==========================================
+// 🆕 Comms Hub — team chat (docs/plans/comms-hub.md)
+// Human-to-human conversations: DMs, group chats, channels. Distinct
+// from ChatSession/ChatMessage above, which belong to the AI
+// assistant. Messages soft-delete only. Call rooms are HMAC-derived
+// from the conversation id (lib/meeting-room.ts) — never stored.
+// ==========================================
+
+enum ConversationType {
+  DM
+  GROUP
+  CHANNEL
+}
+
+model Conversation {
+  id             String           @id @default(cuid())
+  organizationId String
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  type           ConversationType
+  /// GROUP/CHANNEL display name. DMs derive their name from members.
+  name           String?
+  /// Phase 4 — channel linked to a Space. Nullable now, no FK churn later.
+  spaceId        String?
+  createdById    String
+  createdBy      User             @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt      DateTime         @default(now())
+  /// Denormalized for sidebar ordering — bumped on every message.
+  lastMessageAt  DateTime         @default(now())
+  /// Rotates the derived call room. Bumped when a member leaves so
+  /// ex-members' captured room names stop working.
+  callEpoch      Int              @default(0)
+  members        ConversationMember[]
+  messages       ConversationMessage[]
+
+  @@index([organizationId, lastMessageAt])
+}
+
+model ConversationMember {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation("ConversationMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// Unread = messages with createdAt > lastReadAt.
+  lastReadAt     DateTime     @default(now())
+  /// "all" | "mentions" | "mute"
+  notifyLevel    String       @default("all")
+  joinedAt       DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model ConversationMessage {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       String
+  author         User         @relation("ConversationMessageAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  body           String
+  createdAt      DateTime     @default(now())
+  editedAt       DateTime?
+  /// Soft delete — body is blanked, row stays for thread continuity.
+  deletedAt      DateTime?
+  /// Phase 5 threads. Nullable now, no migration churn later.
+  parentId       String?
+  /// Reactions, attachments, call cards ({ kind: "call" }).
+  metadata       Json?
+
+  @@index([conversationId, createdAt])
 }
 
 // ==========================================

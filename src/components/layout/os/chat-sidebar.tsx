@@ -1,0 +1,303 @@
+"use client";
+
+// ChatSidebar — the Comms Hub's middle column (docs/plans/comms-hub.md).
+// Slack-style conversation list: DMs and group chats ordered by latest
+// activity, unread badges, and a New-chat flow. Light by design: one
+// list fetch on mount, refreshed every 20s while the tab is visible,
+// plus focus/visibility refetch and the "workwrk:chat-changed" event.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { MessageCircle, Plus, Search, Users, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { TeamAvatar } from "@/components/team/ui";
+import { useSidebarSearch } from "./sidebar-search-context";
+import {
+  conversationTitle, conversationAvatarUser, type ConversationListRow,
+} from "@/components/chat/conversation-utils";
+
+const LIST_POLL_MS = 20_000;
+
+export function ChatSidebar() {
+  const router = useRouter();
+  const pathname = usePathname() || "";
+  const { query } = useSidebarSearch();
+  const { data: session } = useSession();
+  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+
+  const [rows, setRows] = useState<ConversationListRow[] | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await fetch("/api/conversations", { cache: "no-store" });
+      if (!r.ok) return;
+      const d = await r.json();
+      setRows((d.conversations ?? []) as ConversationListRow[]);
+    } catch { /* keep the last good list — a blip must not blank the sidebar */ }
+  }, []);
+
+  useEffect(() => {
+    const run = async () => { await load(); };
+    void run();
+  }, [load]);
+
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) void load(); }, LIST_POLL_MS);
+    const onWake = () => { if (!document.hidden) void load(); };
+    window.addEventListener("focus", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("workwrk:chat-changed", onWake);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("focus", onWake);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("workwrk:chat-changed", onWake);
+    };
+  }, [load]);
+
+  // Sidebar-header "+" fires this (apps-catalog createActions).
+  useEffect(() => {
+    const onNew = () => setModalOpen(true);
+    window.addEventListener("workwrk:os:new:chat-new", onNew);
+    return () => window.removeEventListener("workwrk:os:new:chat-new", onNew);
+  }, []);
+
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!rows) return null;
+    if (!q) return rows;
+    return rows.filter((r) => conversationTitle(r, meId).toLowerCase().includes(q));
+  }, [rows, q, meId]);
+
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => setModalOpen(true)}
+        className="flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200 mb-2"
+      >
+        <Plus className="w-4 h-4 text-zinc-500" />
+        New chat
+      </button>
+
+      {filtered === null ? (
+        <div className="px-2 py-4 text-[13px] text-zinc-400">Loading conversations…</div>
+      ) : filtered.length === 0 ? (
+        <div className="px-2 py-6 text-center">
+          <MessageCircle className="w-5 h-5 text-zinc-300 mx-auto mb-2" />
+          <p className="text-[13px] text-zinc-500">
+            {q ? "No conversations match" : "No conversations yet. Start one with New chat."}
+          </p>
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-0.5">
+          {filtered.map((row) => {
+            const active = pathname === `/chat/${row.id}`;
+            const title = conversationTitle(row, meId);
+            const avatarUser = conversationAvatarUser(row, meId);
+            const preview = row.lastMessage
+              ? `${row.lastMessage.authorId === meId ? "You: " : ""}${(row.lastMessage.metadata as { kind?: string } | null)?.kind === "call" ? "📞 Call" : row.lastMessage.body}`
+              : "No messages yet";
+            return (
+              <li key={row.id}>
+                <Link
+                  href={`/chat/${row.id}`}
+                  className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md ${
+                    active ? "bg-zinc-100" : "hover:bg-zinc-50"
+                  }`}
+                >
+                  {row.type === "DM" && avatarUser ? (
+                    <TeamAvatar name={`${avatarUser.firstName} ${avatarUser.lastName}`} avatar={avatarUser.avatar} size={30} />
+                  ) : (
+                    <span className="w-[30px] h-[30px] rounded-full bg-zinc-100 text-zinc-500 inline-flex items-center justify-center shrink-0">
+                      <Users className="w-4 h-4" />
+                    </span>
+                  )}
+                  <span className="flex-1 min-w-0">
+                    <span className={`block truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                      {title}
+                    </span>
+                    <span className={`block truncate text-[12px] ${row.unreadCount > 0 ? "text-zinc-600" : "text-zinc-400"}`}>
+                      {preview}
+                    </span>
+                  </span>
+                  {row.unreadCount > 0 && (
+                    <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                      {row.unreadCount > 99 ? "99+" : row.unreadCount}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {modalOpen && (
+        <NewChatModal
+          meId={meId}
+          onClose={() => setModalOpen(false)}
+          onCreated={(id) => {
+            setModalOpen(false);
+            window.dispatchEvent(new Event("workwrk:chat-changed"));
+            router.push(`/chat/${id}`);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ── New chat — pick one person (DM) or several (group) ────────── */
+
+type PersonRow = { id: string; firstName: string; lastName: string; avatar?: string | null; role?: { title: string } | null };
+
+function NewChatModal({ meId, onClose, onCreated }: {
+  meId: string | null;
+  onClose: () => void;
+  onCreated: (conversationId: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [people, setPeople] = useState<PersonRow[]>([]);
+  const [picked, setPicked] = useState<PersonRow[]>([]);
+  const [groupName, setGroupName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    let active = true;
+    const t = setTimeout(() => {
+      const params = new URLSearchParams({ scope: "all", limit: "20" });
+      if (search.trim()) params.set("search", search.trim());
+      fetch(`/api/users?${params}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : { data: [] }))
+        .then((d) => { if (active) setPeople(Array.isArray(d?.data) ? d.data : []); })
+        .catch(() => { if (active) setPeople([]); });
+    }, 200);
+    return () => { active = false; clearTimeout(t); };
+  }, [search]);
+
+  const pickedIds = useMemo(() => new Set(picked.map((p) => p.id)), [picked]);
+  const candidates = people.filter((p) => p.id !== meId && !pickedIds.has(p.id));
+
+  const toggle = (p: PersonRow) => {
+    setError(null);
+    setPicked((prev) => (prev.some((x) => x.id === p.id) ? prev.filter((x) => x.id !== p.id) : [...prev, p]));
+  };
+
+  const create = async () => {
+    if (picked.length === 0 || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/conversations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          picked.length === 1
+            ? { type: "DM", memberIds: [picked[0].id] }
+            : { type: "GROUP", memberIds: picked.map((p) => p.id), name: groupName.trim() || undefined },
+        ),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok || !d?.id) {
+        setError(d?.error || "Couldn't start the chat. Try again.");
+        setCreating(false);
+        return;
+      }
+      onCreated(d.id);
+    } catch {
+      setError("Couldn't start the chat. Check your connection and try again.");
+      setCreating(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>New chat</DialogTitle>
+        </DialogHeader>
+
+        {picked.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {picked.map((p) => (
+              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-[13px] text-zinc-700">
+                <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={18} />
+                {p.firstName} {p.lastName}
+                <button type="button" onClick={() => toggle(p)} className="text-zinc-400 hover:text-zinc-700" aria-label={`Remove ${p.firstName}`}>
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 h-9 px-2.5 rounded-md border border-zinc-200 bg-white">
+          <Search className="w-4 h-4 text-zinc-400 shrink-0" />
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search people…"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400"
+          />
+        </div>
+
+        <ul className="mt-2 max-h-56 overflow-y-auto flex flex-col gap-0.5">
+          {candidates.length === 0 ? (
+            <li className="px-2 py-4 text-center text-[13px] text-zinc-400">No people found</li>
+          ) : candidates.map((p) => (
+            <li key={p.id}>
+              <button
+                type="button"
+                onClick={() => toggle(p)}
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left"
+              >
+                <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={28} />
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-[14px] text-zinc-800">{p.firstName} {p.lastName}</span>
+                  {p.role?.title && <span className="block truncate text-[12px] text-zinc-400">{p.role.title}</span>}
+                </span>
+                <Plus className="w-4 h-4 text-zinc-300" />
+              </button>
+            </li>
+          ))}
+        </ul>
+
+        {picked.length > 1 && (
+          <input
+            type="text"
+            value={groupName}
+            onChange={(e) => setGroupName(e.target.value)}
+            placeholder="Group name (optional)"
+            className="mt-2 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-zinc-300"
+          />
+        )}
+
+        {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
+
+        <div className="mt-3 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void create()}
+            disabled={picked.length === 0 || creating}
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {creating ? "Starting…" : picked.length > 1 ? "Start group chat" : "Start chat"}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
