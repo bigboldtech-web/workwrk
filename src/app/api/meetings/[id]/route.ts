@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { meetingRoomName, meetingGuestCode, meetingJitsiUrl } from "@/lib/meeting-room";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess, isManager } from "@/lib/api-helpers";
 import { logItemActivity } from "@/lib/activity/log";
@@ -33,7 +34,17 @@ export async function GET(
 
   if (!meeting) return jsonError("Meeting not found", 404);
 
-  return jsonSuccess(meeting);
+  // Call-layer fields, derived (never stored): the in-app room, the public
+  // guest URL (external people + AI notetaker bots) and the raw Jitsi URL.
+  const base = process.env.NEXTAUTH_URL || "https://workwrk.com";
+  return jsonSuccess({
+    ...meeting,
+    call: {
+      room: meetingRoomName(meeting.id),
+      guestUrl: `${base}/meet/${meetingGuestCode(meeting.id)}`,
+      jitsiUrl: meetingJitsiUrl(meeting.id),
+    },
+  });
 }
 
 // PUT: Edit meeting

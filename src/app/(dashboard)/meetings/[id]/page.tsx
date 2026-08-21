@@ -13,12 +13,14 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { MeetingCall } from "@/components/meetings/meeting-call";
 import { useParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import {
   ArrowLeft, Edit3, Save, Trash2, FileText, Users, CheckSquare,
   MessageSquare, Plus, Calendar as CalendarIcon, Clock, X,
   CheckCircle, Square, ExternalLink, Mic, Sparkles, ClipboardPaste,
-  Loader2, AlertTriangle, ChevronRight,
+  Loader2, AlertTriangle, ChevronRight, Video, Link2,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { C } from "@/components/layout/os/catalog";
@@ -53,6 +55,7 @@ interface Meeting {
   meetingUrl?: string | null;
   attendees: { id: string; userId: string; attended: boolean; user: { id: string; firstName: string; lastName: string; avatar: string | null; email: string } }[];
   actionItems: ActionItem[];
+  call?: { room: string; guestUrl: string; jitsiUrl: string };
 }
 
 interface UserLite { id: string; firstName: string; lastName: string }
@@ -325,7 +328,11 @@ export default function MeetingDetailPage() {
   const router = useRouter();
   const { toast } = useOsToast();
 
+  const { data: session } = useSession();
+  const sessionName = session?.user?.name ?? null;
   const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [callOpen, setCallOpen] = useState(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1");
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [prevIncomplete, setPrevIncomplete] = useState<ActionItem[]>([]);
@@ -551,11 +558,38 @@ export default function MeetingDetailPage() {
           />
         </div>
         <div className="mtgr__head-actions">
+          <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={() => setCallOpen((v) => !v)}>
+            <Video /> {callOpen ? "Hide call" : "Join call"}
+          </button>
+          {meeting.call?.guestUrl ? (
+            <button
+              type="button"
+              className="mtgr-btn mtgr-btn--ghost"
+              title="Anyone with this link joins the call — external guests and AI notetaker bots included. No account needed."
+              onClick={() => {
+                void navigator.clipboard.writeText(meeting.call!.guestUrl);
+                toast("Guest link copied — share with external people or your AI notetaker");
+              }}
+            >
+              <Link2 /> Guest link
+            </button>
+          ) : null}
           <button type="button" className="mtgr-btn mtgr-btn--ghost mtgr-btn--danger" onClick={() => setConfirmingDelete(true)}>
             <Trash2 /> Delete
           </button>
         </div>
       </header>
+
+      {callOpen && meeting.call?.room ? (
+        <div className="px-5 pt-4" style={{ height: "68vh" }}>
+          <MeetingCall
+            room={meeting.call.room}
+            subject={meeting.title}
+            displayName={sessionName}
+            onLeave={() => setCallOpen(false)}
+          />
+        </div>
+      ) : null}
 
       {/* Follow-up alert */}
       {prevIncomplete.length > 0 && (
