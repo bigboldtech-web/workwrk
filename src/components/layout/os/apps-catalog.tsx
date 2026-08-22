@@ -1306,8 +1306,11 @@ export const APPS: AppEntry[] = [
     ]) },
 
   // ── Workspace ───────────────────────────────────────────────
+  // alwaysPinned: the escape hatch. If an admin could hide or floor
+  // Settings, a bad config could lock the org out of the page that fixes
+  // configs. Everyone gets the door; the Admin sections gate inside it.
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
-    matchPaths: ["/settings", "/account"], category: "Workspace",
+    matchPaths: ["/settings", "/account"], category: "Workspace", alwaysPinned: true,
     Sidebar: linksSidebar([
       { href: "/settings",         label: "Workspace settings", Icon: SettingsIcon },
       { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },

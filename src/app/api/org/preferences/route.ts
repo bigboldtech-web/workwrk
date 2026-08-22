@@ -38,6 +38,16 @@ const patchSchema = z.object({
     order: z.array(z.string()).optional(),
     iconsOnly: z.boolean().optional(),
     sectionsOrder: z.array(z.string()).optional(),
+    // 2026-08-22 ACCESS system — the org rail config (src/lib/rail-apps.ts):
+    // which apps every user's rail shows, in what order, with what tier
+    // floors. Writes are strict (reads stay tolerant via parseOrgAppsConfig).
+    // setOrgPreference shallow-merges sidebarDefault keys, so patching
+    // { apps } preserves sibling keys and replaces the apps object whole.
+    apps: z.object({
+      order: z.array(z.string()).optional(),
+      hidden: z.array(z.string()).optional(),
+      minAccess: z.record(z.string(), z.enum(["manager", "hr-admin", "org-admin"])).optional(),
+    }).optional(),
   }).optional(),
   homeDefault: z.object({
     cards: z.array(z.string()).optional(),

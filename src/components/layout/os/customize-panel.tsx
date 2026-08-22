@@ -1,10 +1,17 @@
 "use client";
 
 // CustomizePanel — the ClickUp-style "personalize your interface" modal.
-// Four tabs (Navigation / Home / Sections / Themes) that read and write
+// Four tabs (Appearance / Home / Sections / Themes) that read and write
 // the user's UserPreference row via /api/preferences. Org-level locked
 // keys (OrgPreference.lockedKeys) disable their controls so the user
 // can't override what admin has frozen.
+//
+// 2026-08-22: the app-pinning section is GONE — rail membership/order is
+// now the org ACCESS system (OrgPreference.sidebarDefault.apps, edited in
+// the Settings admin door), not a personal choice. This panel keeps its
+// personal-appearance jobs (rail labels, Home cards, sections, themes),
+// and the sidebar's "Customize Sidebar" footer button stays as the
+// discoverable entry point to it.
 //
 // Design rules from the 2026-06-02 screenshots:
 //   - Whitespace > color. One accent (mint). No hue-keyed chrome.
@@ -17,7 +24,6 @@ import {
   Inbox, MessageSquare, CheckSquare, Send, Globe, ListTodo,
   Layers, Star,
 } from "lucide-react";
-import { CATALOG_APPS, isAlwaysPinned } from "./apps-catalog";
 import { useOsShell } from "./shell-context";
 import {
   Dialog,
@@ -563,26 +569,24 @@ export function CustomizePanel({
           </button>
         </div>
 
-        <Tabs defaultValue="navigation" className="w-full">
+        <Tabs defaultValue="appearance" className="w-full">
           {/* Pill-style segmented tabs (matches ClickUp ref) */}
           <div className="px-4 pb-2">
             <TabsList className="w-full bg-zinc-100 dark:bg-white/5 p-0.5 rounded-lg h-7">
-              <TabsTrigger value="navigation" className="flex-1 rounded-md text-[12.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Navigation</TabsTrigger>
+              <TabsTrigger value="appearance" className="flex-1 rounded-md text-[12.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Appearance</TabsTrigger>
               <TabsTrigger value="home" className="flex-1 rounded-md text-[12.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Home</TabsTrigger>
               <TabsTrigger value="sections" className="flex-1 rounded-md text-[12.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Sections</TabsTrigger>
               <TabsTrigger value="themes" className="flex-1 rounded-md text-[12.5px] font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Themes</TabsTrigger>
             </TabsList>
           </div>
 
-          {/* Navigation tab is fully driven by shell-context (localStorage),
-              so it works even when /api/preferences is unavailable. By
-              default it shows just the Core apps (the dense ClickUp
-              layout); the "Show more apps" toggle reveals the full
-              catalog if the user wants to pin one of the extras. */}
-          <TabsContent value="navigation" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
-            <NavigationList />
-            <div className="border-t border-zinc-200 dark:border-[#2A2F38] my-3 mx-2" />
-            <div className="px-2">
+          {/* Appearance tab — rail label density only. The app pin list
+              that used to live here is gone: which apps show in the rail
+              (and their order) is the org ACCESS config now, managed by
+              admins in Settings, so there is nothing app-related for an
+              individual to toggle. */}
+          <TabsContent value="appearance" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
+            <div className="px-2 pt-1">
               <h3 className="text-[13px] font-medium text-zinc-600 dark:text-zinc-300 mb-2">Appearance</h3>
               <AppearanceToggle
                 iconsOnly={railIconsOnly}
@@ -754,51 +758,12 @@ export function CustomizePanel({
   );
 }
 
-/* Navigation tab list — Core apps by default, full catalog behind an
- * expander. Keeps the dialog visually tight (ClickUp matches this) but
- * still lets users reach the full 38-app catalog without leaving the
- * customize panel. */
-function NavigationList() {
-  const { pinnedAppKeys, togglePinned } = useOsShell();
-  const [showAll, setShowAll] = useState(false);
-  const coreApps = CATALOG_APPS.filter((a) => a.category === "Core");
-  const extras = CATALOG_APPS.filter((a) => a.category !== "Core");
-  const apps = showAll ? CATALOG_APPS : coreApps;
-  return (
-    <div className="flex flex-col">
-      {apps.map((app) => {
-        const checked = pinnedAppKeys.includes(app.key);
-        const always = isAlwaysPinned(app.key);
-        return (
-          <CheckRow
-            key={app.key}
-            Icon={app.Icon}
-            label={app.label.replace(/\.\.$/, "")}
-            checked={checked || always}
-            disabled={always}
-            onChange={() => { if (!always) togglePinned(app.key); }}
-          />
-        );
-      })}
-      {extras.length > 0 ? (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          className="mt-1 px-2 py-1.5 text-[13px] font-medium text-left text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
-        >
-          {showAll ? "Show fewer" : `Show ${extras.length} more apps`}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 function PrefsUnavailable() {
   return (
     <div className="px-3 py-6 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-      Couldn&apos;t load your saved preferences from the server. The Navigation
-      tab still works — your pin changes save locally. Try reloading the
-      page if this persists.
+      Couldn&apos;t load your saved preferences from the server. The Appearance
+      tab still works — that choice applies locally right away. Try
+      reloading the page if this persists.
     </div>
   );
 }

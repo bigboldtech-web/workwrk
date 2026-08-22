@@ -1,21 +1,26 @@
 "use client";
 
-// ClickAppRail — left icon column. Each icon is a pinned app the user
-// has chosen to surface. Beyond the basic click/hover model:
-//   - drag any icon to reorder the pin set
-//   - right-click an icon for Open / Unpin
-//   - Cmd+1..9 jumps to the Nth pinned app (handled in shell-context)
-//   - active app shows a violet pill plus a curved "tab notch" that
-//     visually merges with the secondary sidebar
-//   - "More" tile at the bottom opens AppsMorePopover
+// ClickAppRail — left icon column, driven by the org ACCESS system
+// (2026-08-22, replaces personal pins). Every icon is an app the viewer
+// has access to, in the Super Admin's order — shell-context's railApps
+// resolves that from OrgPreference.sidebarDefault.apps via
+// src/lib/rail-apps. Consequences here:
+//   - no drag-reorder, no pin/unpin context menu, no ghost icons:
+//     everything accessible is always present, so there is nothing to
+//     pin and nothing "unpinned" to surface
+//   - a route whose app the org hid (or the viewer can't access) simply
+//     highlights nothing — the icon isn't ghosted back in
+//   - the <nav> scrolls (overflow-y-auto): with access-wide visibility
+//     the rail can carry 15-20+ icons on short viewports
+// Unchanged: Cmd+1..9 jumps to the Nth rail app (shell-context), hover
+// previews the app's sidebar, active app shows the white pill, and the
+// "More" tile opens AppsMorePopover as a launcher over the same set.
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { UserPlus, ArrowUpCircle, LayoutGrid, ExternalLink, PinOff } from "lucide-react";
-import { useSession } from "next-auth/react";
-import { MenuItem, MenuList } from "@/components/ui/menu";
-import { APPS, canAccessApp, findAppForPath, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { UserPlus, ArrowUpCircle, LayoutGrid } from "lucide-react";
+import { type AppEntry } from "./apps-catalog";
 import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
 import { InviteModal } from "./invite-modal";
 import { useOsShell } from "./shell-context";
@@ -26,14 +31,10 @@ const HOVER_CLOSE_MS = 120;
 // One rail-label treatment so every cell is the same height and full
 // words never clip. Centered under the icon, up to 2 lines, then
 // ellipsis — no more hard-coded "Dashboa.." / "Timeshe..".
-function RailLabel({ children, italic }: { children: React.ReactNode; italic?: boolean }) {
+function RailLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="flex h-[20px] w-full items-center justify-center px-px">
-      <span
-        className={`line-clamp-2 break-words text-center text-[10px] leading-[1.1] ${
-          italic ? "italic" : ""
-        }`}
-      >
+      <span className="line-clamp-2 break-words text-center text-[10px] leading-[1.1]">
         {children}
       </span>
     </span>
@@ -41,65 +42,28 @@ function RailLabel({ children, italic }: { children: React.ReactNode; italic?: b
 }
 
 export function ClickAppRail() {
-  const pathname = usePathname() || "";
   const router = useRouter();
   const {
     activeAppKey, setActiveApp, sidebarCollapsed,
-    pinnedAppKeys, openAppsGrid, appsGridOpen,
-    togglePinned, movePinned, pushRecentApp, iconsOnly,
+    railApps, openAppsGrid, appsGridOpen,
+    pushRecentApp, iconsOnly,
     setPreviewApp, keepPreview, clearPreviewSoon,
   } = useOsShell();
   const [hoverKey, setHoverKey] = useState<string | null>(null);
-  const [dragKey, setDragKey] = useState<string | null>(null);
-  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
-  const [ctxMenu, setCtxMenu] = useState<{ key: string; x: number; y: number } | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
-
-  const pinnedApps = useMemo<AppEntry[]>(() => {
-    const byKey = new Map(APPS.map((a) => [a.key, a] as const));
-    return pinnedAppKeys
-      .map((k) => byKey.get(k))
-      .filter((a): a is AppEntry =>
-        Boolean(a) &&
-        canAccessApp(a!, accessLevel),
-      );
-  }, [pinnedAppKeys, accessLevel]);
-
-  const routeApp = findAppForPath(pathname);
-  const highlightedKey = activeAppKey ?? routeApp?.key ?? "home";
-
-  // Ghost icon: the user is on a route that maps to an app they
-  // haven't pinned. Surface it temporarily so the rail still reflects
-  // where they are, with a "Pin to keep" affordance. Never ghost an app
-  // the user's access tier can't open (an employee on /people/me matches
-  // the manager-gated Teams app; the page is theirs, the app is not).
-  const ghostApp =
-    routeApp && canAccessApp(routeApp, accessLevel) && !pinnedAppKeys.includes(routeApp.key)
-      ? routeApp
-      : null;
+  // activeAppKey can lag reality (localStorage carries it across sessions,
+  // and an admin may hide the app mid-session). When it names an app that
+  // isn't in railApps, no icon matches and nothing highlights — which is
+  // exactly the wanted behavior for hidden apps' routes.
+  const highlightedKey = activeAppKey || "home";
 
   useEffect(() => () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     if (closeTimer.current) clearTimeout(closeTimer.current);
   }, []);
-
-  // Close context menu on outside click / Escape.
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const onDown = () => setCtxMenu(null);
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setCtxMenu(null); };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [ctxMenu]);
 
   const scheduleOpen = (key: string) => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
@@ -118,40 +82,6 @@ export function ClickAppRail() {
     setActiveApp(app.key);
     pushRecentApp(app.key);
     if (app.defaultHref) router.push(app.defaultHref);
-  };
-
-  const onContextMenu = (e: React.MouseEvent, key: string) => {
-    e.preventDefault();
-    setCtxMenu({ key, x: e.clientX, y: e.clientY });
-  };
-
-  // ─── Drag-and-drop reorder ──────────────────────────────────
-  const onDragStart = (e: React.DragEvent, key: string) => {
-    setDragKey(key);
-    e.dataTransfer.effectAllowed = "move";
-    try { e.dataTransfer.setData("text/plain", key); } catch {}
-  };
-  const onDragOverItem = (e: React.DragEvent, key: string) => {
-    if (!dragKey || dragKey === key) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    setDragOverKey(key);
-  };
-  const onDropItem = (e: React.DragEvent, key: string) => {
-    e.preventDefault();
-    if (!dragKey || dragKey === key) {
-      setDragKey(null);
-      setDragOverKey(null);
-      return;
-    }
-    const targetIdx = pinnedAppKeys.indexOf(key);
-    if (targetIdx !== -1) movePinned(dragKey, targetIdx);
-    setDragKey(null);
-    setDragOverKey(null);
-  };
-  const onDragEndItem = () => {
-    setDragKey(null);
-    setDragOverKey(null);
   };
 
   // ClickUp-style theming: the rail uses a *dark, muted* version of the
@@ -179,11 +109,13 @@ export function ClickAppRail() {
       className="w-[60px] flex-shrink-0 h-full flex flex-col relative transition-colors rounded-xl overflow-hidden"
       onMouseLeave={scheduleClose}
     >
+      {/* overflow-y-auto is load-bearing: the ACCESS rail shows every
+          accessible app (15-20+ icons for admins), so the column must
+          scroll on short viewports instead of clipping the tail. */}
       <nav className="flex-1 pt-3 pb-2 overflow-y-auto overflow-x-visible os-no-scrollbar">
-        {pinnedApps.map((app, idx) => {
+        {railApps.map((app, idx) => {
           const active = highlightedKey === app.key && !sidebarCollapsed;
           const isHovered = hoverKey === app.key;
-          const isDragOver = dragOverKey === app.key && dragKey && dragKey !== app.key;
           const shortcut = idx < 9 ? `⌘${idx + 1}` : undefined;
           return (
             <div
@@ -191,23 +123,14 @@ export function ClickAppRail() {
               className="relative mb-1.5"
               onMouseEnter={() => scheduleOpen(app.key)}
               onMouseLeave={scheduleClose}
-              draggable
-              onDragStart={(e) => onDragStart(e, app.key)}
-              onDragOver={(e) => onDragOverItem(e, app.key)}
-              onDrop={(e) => onDropItem(e, app.key)}
-              onDragEnd={onDragEndItem}
             >
-              {isDragOver ? (
-                <div aria-hidden className="absolute -top-1 left-1 right-1 h-0.5 rounded bg-white" />
-              ) : null}
               <button
                 type="button"
                 onClick={() => handleClick(app)}
-                onContextMenu={(e) => onContextMenu(e, app.key)}
                 title={`${app.label.replace(/\.\.$/, "")}${shortcut ? `  ${shortcut}` : ""}`}
                 className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none transition-colors ${
                   active ? "text-white" : `${railTextColor} hover:text-white`
-                } ${dragKey === app.key ? "opacity-40" : ""}`}
+                }`}
                 aria-current={active ? "page" : undefined}
               >
                 <span
@@ -227,35 +150,11 @@ export function ClickAppRail() {
           );
         })}
 
-        {ghostApp ? (
-          <div
-            className="relative mb-1.5 mt-2 pt-2 border-t border-dashed border-white/25"
-            onMouseEnter={() => scheduleOpen(ghostApp.key)}
-            onMouseLeave={scheduleClose}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setActiveApp(ghostApp.key);
-                pushRecentApp(ghostApp.key);
-              }}
-              onContextMenu={(e) => onContextMenu(e, ghostApp.key)}
-              title={`${ghostApp.label.replace(/\.\.$/, "")} (not pinned — right-click to pin)`}
-              className="group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none text-white/70 hover:text-white"
-            >
-              <span className="flex items-center justify-center w-[28px] h-[28px] rounded-lg border border-dashed border-white/40 group-hover:bg-white/10">
-                {hasAppGlyph(ghostApp.key) ? <AppGlyph appKey={ghostApp.key} size={20} /> : <ghostApp.Icon className="w-[16px] h-[16px]" />}
-              </span>
-              {iconsOnly ? null : <RailLabel italic>{ghostApp.label}</RailLabel>}
-            </button>
-          </div>
-        ) : null}
-
         <div className="relative mt-1">
           <button
             type="button"
             onClick={openAppsGrid}
-            title="Add apps, customize navigation"
+            title="Browse and launch apps"
             className={`group w-full flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 focus:outline-none focus-visible:outline-none transition-colors ${
               appsGridOpen ? "text-white" : `${railTextColor} hover:text-white`
             }`}
@@ -298,59 +197,6 @@ export function ClickAppRail() {
           {iconsOnly ? null : <RailLabel>Upgrade</RailLabel>}
         </Link>
       </div>
-
-      {ctxMenu ? (
-        <RailContextMenu
-          appKey={ctxMenu.key}
-          x={ctxMenu.x}
-          y={ctxMenu.y}
-          onClose={() => setCtxMenu(null)}
-          onOpen={() => {
-            const app = APPS.find((a) => a.key === ctxMenu.key);
-            if (app) handleClick(app);
-            setCtxMenu(null);
-          }}
-          onUnpin={() => {
-            togglePinned(ctxMenu.key);
-            setCtxMenu(null);
-          }}
-        />
-      ) : null}
     </aside>
-  );
-}
-
-function RailContextMenu({
-  appKey, x, y, onClose, onOpen, onUnpin,
-}: {
-  appKey: string;
-  x: number;
-  y: number;
-  onClose: () => void;
-  onOpen: () => void;
-  onUnpin: () => void;
-}) {
-  const app = APPS.find((a) => a.key === appKey);
-  if (!app) return null;
-  return (
-    <MenuList
-      className="fixed z-50 w-[200px]"
-      style={{ left: x, top: y }}
-      onMouseDown={(e) => e.stopPropagation()}
-      onContextMenu={(e) => { e.preventDefault(); onClose(); }}
-    >
-      <MenuItem
-        icon={ExternalLink}
-        label={`Open ${app.label.replace(/\.\.$/, "")}`}
-        onClick={onOpen}
-      />
-      {!isAlwaysPinned(app.key) ? (
-        <MenuItem
-          icon={PinOff}
-          label="Unpin from sidebar"
-          onClick={onUnpin}
-        />
-      ) : null}
-    </MenuList>
   );
 }

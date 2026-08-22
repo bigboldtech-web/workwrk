@@ -18,7 +18,7 @@ import {
   ArrowLeft, X, ChevronRight, LayoutGrid, Building2, Tag, Shapes, Users,
   Globe, CreditCard, Boxes, Key, Calendar, FileCheck, Plug, Download,
   BarChart3, Shield, ShieldCheck, Network, User, Bell, Palette,
-  Landmark, CircleUser, Blocks, Database, Lock, type LucideIcon,
+  Landmark, CircleUser, Blocks, Database, Lock, AppWindow, type LucideIcon,
 } from "lucide-react";
 
 // The org-config door is gated to the same two tiers as the server guards
@@ -64,6 +64,9 @@ const DOORS: NavDoor[] = [
           { label: "Identity & profile", icon: Building2, href: "/settings/identity" },
           { label: "Locale & finance", icon: Globe, href: "/settings/locale" },
           { label: "Enabled modules", icon: Boxes, href: "/settings/modules" },
+          // ACCESS-based rail (2026-08-22): which apps show in every
+          // member's left rail, in what order, with what tier floors.
+          { label: "Apps", icon: AppWindow, href: "/settings/apps" },
           { label: "Tags & labels", icon: Tag, href: "/settings/tags" },
           { label: "Task types", icon: Shapes, href: "/settings/task-types" },
         ],

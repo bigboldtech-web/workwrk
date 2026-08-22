@@ -9,6 +9,10 @@
 //      the org's value (admin can freeze keys against user override).
 
 import { prisma } from "@/lib/prisma";
+// Type-only on purpose: rail-apps.ts imports the client apps-catalog at
+// runtime, and this module is server code — a value import would drag the
+// whole client component graph into every API route bundle.
+import type { OrgAppsConfig } from "@/lib/rail-apps";
 
 // ── Shapes ─────────────────────────────────────────────────────────
 
@@ -18,6 +22,12 @@ export interface SidebarPref {
   order: string[];            // user's chosen order for navigable items
   iconsOnly: boolean;         // collapsed (icons only) vs labeled
   sectionsOrder: string[];    // order of sidebar sections ("favorites", "spaces", ...)
+  // 2026-08-22 ACCESS system — the org rail config (which apps the rail
+  // shows, in what order, with what tier floors). Meaningful on the ORG
+  // row (OrgPreference.sidebarDefault) ONLY; a copy on a user row is
+  // ignored — getEffectivePreferences stamps the org value over it.
+  // Stored raw: consumers run rail-apps' tolerant parseOrgAppsConfig.
+  apps?: OrgAppsConfig;
 }
 
 export interface HomePref {
@@ -182,6 +192,21 @@ export async function getEffectivePreferences(userId: string, organizationId: st
     density: raw.userDensity ?? raw.orgDensity ?? DEFAULT_DENSITY,
     lockedKeys: raw.lockedKeys,
   };
+
+  // sidebar.apps (the ACCESS-system rail config) is ORG-LEVEL ONLY: the
+  // Super Admin decides which apps every rail shows. Re-stamp it from the
+  // org row so a user-row copy (the spread above would have let one
+  // through) can never override it. The lockedKeys machinery is NOT used
+  // for this in v1 — locking exists to freeze keys users could otherwise
+  // set, and users have no write path to sidebar.apps at all (the
+  // /api/preferences PATCH schema strips it).
+  if (raw.orgSidebar?.apps !== undefined) {
+    merged.sidebar.apps = raw.orgSidebar.apps;
+  } else {
+    delete merged.sidebar.apps;
+  }
+  // NOTE: sidebar.pinned is legacy (personal pinning is removed) but stays
+  // emitted so stale clients keep working mid-deploy.
 
   // Re-stamp locked keys with org defaults so user can't override.
   // Dot path examples: "sidebar.iconsOnly", "theme.accent", "density".

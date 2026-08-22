@@ -25,17 +25,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Settings, Pin, Clock as ClockIcon } from "lucide-react";
+import { Search, Settings, Clock as ClockIcon } from "lucide-react";
 import { useOsShell } from "./shell-context";
-import { APPS, CATALOG_APPS, CATEGORY_ORDER, canAccessApp, isAlwaysPinned, type AppEntry } from "./apps-catalog";
+import { APPS, CATEGORY_ORDER, type AppEntry } from "./apps-catalog";
 import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
-import { useSession } from "next-auth/react";
 
 export function AppsMorePopover() {
   const router = useRouter();
   const {
     appsGridOpen, closeAppsGrid,
-    pinnedAppKeys, togglePinned,
+    railApps,
     setActiveApp, openCustomize, pushRecentApp,
     recentAppKeys,
   } = useOsShell();
@@ -58,12 +57,12 @@ export function AppsMorePopover() {
     };
   }, [appsGridOpen, closeAppsGrid]);
 
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
-
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const accessible = CATALOG_APPS.filter((a) => canAccessApp(a, accessLevel));
+    // railApps is the org-governed set: access-filtered, org-hidden removed,
+    // admin-ordered. The launcher must agree with the rail — an app the
+    // admin switched off should not resurface here.
+    const accessible = railApps;
     const filtered = q
       ? accessible.filter((a) => a.label.toLowerCase().includes(q) || a.key.includes(q))
       : accessible;
@@ -81,7 +80,7 @@ export function AppsMorePopover() {
           .filter((c) => !CATEGORY_ORDER.includes(c))
           .map((c) => ({ category: c, apps: byCat.get(c)! })),
       );
-  }, [query, accessLevel]);
+  }, [query, railApps]);
 
   const recentApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));
@@ -109,75 +108,36 @@ export function AppsMorePopover() {
   };
 
   function AppCard({ app }: { app: AppEntry }) {
-    const pinned = pinnedAppKeys.includes(app.key);
-    const always = isAlwaysPinned(app.key);
     return (
-      <div className="relative group">
-        <button
-          type="button"
-          onClick={() => launch(app)}
-          className={`w-full h-[72px] flex flex-col items-center justify-center gap-1 px-1.5 rounded-lg border transition-colors ${
-            pinned
-              ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]"
-              : "border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300"
-          }`}
-          title={app.label.replace(/\.\.$/, "")}
-        >
-          {hasAppGlyph(app.key) ? <AppGlyph appKey={app.key} size={22} /> : <app.Icon className="w-[18px] h-[18px] text-zinc-700" />}
-          <span className="text-[12px] text-zinc-700 truncate max-w-full leading-tight">
-            {app.label.replace(/\.\.$/, "")}
-          </span>
-        </button>
-        {/* Pin chip at top-right. Click to toggle (always-pinned apps
-            show a static filled pin in the brand color). */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (!always) togglePinned(app.key);
-          }}
-          disabled={always}
-          aria-pressed={pinned}
-          aria-label={pinned ? `Unpin ${app.label}` : `Pin ${app.label}`}
-          title={always ? "Always pinned" : pinned ? "Unpin" : "Pin"}
-          className={`absolute top-1 right-1 w-[18px] h-[18px] rounded flex items-center justify-center transition-opacity ${
-            pinned || always
-              ? "opacity-100"
-              : "opacity-0 group-hover:opacity-100 focus:opacity-100"
-          }`}
-          style={pinned || always ? {
-            background: "color-mix(in srgb, var(--os-brand) 16%, transparent)",
-            color: "var(--os-brand-deep)",
-          } : {
-            background: "rgba(244,244,245,1)",
-            color: "rgb(82, 82, 91)",
-          }}
-        >
-          <Pin
-            className="w-3 h-3"
-            fill={pinned || always ? "currentColor" : "none"}
-            strokeWidth={2}
-          />
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => launch(app)}
+        className="w-full h-[72px] flex flex-col items-center justify-center gap-1 px-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300 transition-colors"
+        title={app.label.replace(/\.\.$/, "")}
+      >
+        {hasAppGlyph(app.key) ? <AppGlyph appKey={app.key} size={22} /> : <app.Icon className="w-[18px] h-[18px] text-zinc-700" />}
+        <span className="text-[12px] text-zinc-700 truncate max-w-full leading-tight">
+          {app.label.replace(/\.\.$/, "")}
+        </span>
+      </button>
     );
   }
 
   return (
     // Anchored beside the rail (rail is 52px + 6px shell gap), aligned
-    // vertically with the More button which sits near the bottom of
-    // the rail nav. Sliding out to the right keeps the rail's icons in
-    // view while the user picks what to pin.
+    // vertically with the More button which sits near the bottom of the
+    // rail nav. Sliding out to the right keeps the rail's icons in view.
     <div
       ref={panelRef}
       className="absolute left-[60px] bottom-2 z-50 w-[380px] max-h-[560px] bg-white rounded-xl shadow-xl border border-zinc-200 flex flex-col"
       role="dialog"
-      aria-label="Add apps to sidebar"
+      aria-label="All apps"
     >
       <div className="px-4 pt-3 pb-2">
-        <h2 className="text-[14px] font-semibold text-zinc-900">Pin apps to sidebar</h2>
+        <h2 className="text-[14px] font-semibold text-zinc-900">Apps</h2>
         <p className="text-[12px] text-zinc-500 mt-0.5">
-          Tap the pin on any card to add it to your left rail.
+          Everything you have access to. Admins manage visibility and order in
+          Settings &rsaquo; Apps.
         </p>
       </div>
 

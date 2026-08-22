@@ -1,28 +1,9 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ALWAYS_PINNED_KEYS, APPS, DEFAULT_PINNED_KEYS, isAlwaysPinned } from "./apps-catalog";
-
-/** Always-pinned keys come first, then the user's chosen order minus dupes. */
-function ensureAlwaysPinned(keys: string[]): string[] {
-  const appKeys = new Set(APPS.map((app) => app.key));
-  const validInput = keys.filter((key) => appKeys.has(key));
-  const hasUnknownKeys = validInput.length !== keys.length;
-  const onlyAlwaysPinned =
-    validInput.length > 0 && validInput.every((key) => ALWAYS_PINNED_KEYS.includes(key));
-  const shouldRecoverDefaultPins = hasUnknownKeys && (validInput.length === 0 || onlyAlwaysPinned);
-  const source = shouldRecoverDefaultPins ? DEFAULT_PINNED_KEYS : validInput;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const k of ALWAYS_PINNED_KEYS) { out.push(k); seen.add(k); }
-  for (const k of source) {
-    if (!seen.has(k)) {
-      out.push(k);
-      seen.add(k);
-    }
-  }
-  return out;
-}
+import { useSession } from "next-auth/react";
+import { type AppEntry } from "./apps-catalog";
+import { parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 
 export type Lens = "me" | "we";
 
@@ -152,14 +133,14 @@ type ShellState = {
   openAppsGrid: () => void;
   closeAppsGrid: () => void;
 
-  /** Rail pin set — which app keys render in the left rail (persisted). */
-  pinnedAppKeys: string[];
-  togglePinned: (key: string) => void;
-  setPinnedAppKeys: (keys: string[]) => void;
-  isPinned: (key: string) => boolean;
-  /** Move a pinned app to a new index (used for drag-to-reorder). */
-  movePinned: (fromKey: string, toIndex: number) => void;
-
+  /**
+   * Apps the left rail renders — the org ACCESS config (order / hidden /
+   * minAccess from OrgPreference.sidebarDefault.apps) applied over the
+   * catalog and the viewer's access tier (2026-08-22, replaces personal
+   * pins): every user sees every app they have access to, in the admin's
+   * order. alwaysPinned apps (Home) always survive, so this is never empty.
+   */
+  railApps: AppEntry[];
   /** Recently launched apps (most-recent-first, capped at 6). */
   recentAppKeys: string[];
   pushRecentApp: (key: string) => void;
@@ -209,7 +190,6 @@ const Ctx = createContext<ShellState | null>(null);
 const LENS_KEY = "workwrk:os:lens";
 const ACTIVE_APP_KEY = "workwrk:os:active-app";
 const SIDEBAR_COLLAPSED_KEY = "workwrk:os:sidebar-collapsed";
-const PINNED_APPS_KEY = "workwrk:os:pinned-apps";
 const RECENT_APPS_KEY = "workwrk:os:recent-apps";
 const ICONS_ONLY_KEY = "workwrk:os:icons-only";
 // v2: the quick-tools bar replaced the old nav-link tool set, so reset cached
@@ -220,6 +200,11 @@ const MUTED_NOTIFS_KEY = "workwrk:os:muted-notifs";
 const MAX_RECENTS = 6;
 
 export function OsShellProvider({ children }: { children: React.ReactNode }) {
+  // Access tier drives rail visibility (canAccessApp + org minAccess).
+  // SessionProvider wraps the whole app (src/components/layout/providers.tsx),
+  // so useSession is safe here.
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
   const [sidekickInitialPrompt, setSidekickInitialPrompt] = useState<string | null>(null);
@@ -240,7 +225,10 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState<boolean>(false);
   const [appsGridOpen, setAppsGridOpen] = useState(false);
-  const [pinnedAppKeys, setPinnedAppKeysState] = useState<string[]>(DEFAULT_PINNED_KEYS);
+  // Org rail config (ACCESS system). {} until /api/preferences answers —
+  // the rail then shows the plain access-filtered catalog in catalog order,
+  // which is also the correct steady state for orgs that never customized.
+  const [railConfig, setRailConfig] = useState<OrgAppsConfig>({});
   const [recentAppKeys, setRecentAppKeysState] = useState<string[]>([]);
   const [iconsOnly, setIconsOnlyState] = useState<boolean>(false);
   const [profileToolPins, setProfileToolPinsState] = useState<string[]>(DEFAULT_PROFILE_TOOL_PINS);
@@ -257,13 +245,6 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
         if (app) setActiveAppKeyState(app);
         const collapsed = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
         if (collapsed === "1") setSidebarCollapsedState(true);
-        const pins = window.localStorage.getItem(PINNED_APPS_KEY);
-        if (pins) {
-          const parsed = JSON.parse(pins);
-          if (Array.isArray(parsed) && parsed.every((k) => typeof k === "string")) {
-            setPinnedAppKeysState(ensureAlwaysPinned(parsed));
-          }
-        }
         const recents = window.localStorage.getItem(RECENT_APPS_KEY);
         if (recents) {
           const parsed = JSON.parse(recents);
@@ -311,11 +292,12 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
           setIconsOnlyState(sidebar.iconsOnly);
           try { window.localStorage.setItem(ICONS_ONLY_KEY, sidebar.iconsOnly ? "1" : "0"); } catch {}
         }
-        if (Array.isArray(sidebar.pinned) && sidebar.pinned.length > 0) {
-          const next = ensureAlwaysPinned(sidebar.pinned.filter((k: unknown): k is string => typeof k === "string"));
-          setPinnedAppKeysState(next);
-          try { window.localStorage.setItem(PINNED_APPS_KEY, JSON.stringify(next)); } catch {}
-        }
+        // Org ACCESS config for the rail. parseOrgAppsConfig is tolerant
+        // of stale payloads that don't carry sidebar.apps yet (absent →
+        // {} → access-filtered catalog default). The workwrk:prefs-changed
+        // listener below refetches, so an admin save in the Settings door
+        // updates this tab's rail immediately (other tabs and users pick it up on their next load — window CustomEvents are same-tab only) without a reload.
+        setRailConfig(parseOrgAppsConfig(sidebar.apps));
       } catch {}
     };
     void loadServerPrefs();
@@ -333,34 +315,6 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     try { window.localStorage.setItem(ICONS_ONLY_KEY, v ? "1" : "0"); } catch {}
   }, []);
 
-  // Fire-and-forget server save. Declared before movePinned/togglePinned/
-  // setPinnedAppKeys so those useCallback closures can reference it.
-  const savePinsToServer = useCallback((keys: string[]) => {
-    try {
-      void fetch("/api/preferences", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sidebar: { pinned: keys } }),
-      });
-    } catch {}
-  }, []);
-
-  const movePinned = useCallback((fromKey: string, toIndex: number) => {
-    if (isAlwaysPinned(fromKey)) return; // alwaysPinned apps stay anchored
-    setPinnedAppKeysState((prev) => {
-      const idx = prev.indexOf(fromKey);
-      if (idx === -1) return prev;
-      const next = [...prev];
-      next.splice(idx, 1);
-      const clamped = Math.max(0, Math.min(toIndex, next.length));
-      next.splice(clamped, 0, fromKey);
-      const final = ensureAlwaysPinned(next);
-      try { window.localStorage.setItem(PINNED_APPS_KEY, JSON.stringify(final)); } catch {}
-      savePinsToServer(final);
-      return final;
-    });
-  }, [savePinsToServer]);
-
   const pushRecentApp = useCallback((key: string) => {
     setRecentAppKeysState((prev) => {
       const next = [key, ...prev.filter((k) => k !== key)].slice(0, MAX_RECENTS);
@@ -368,24 +322,6 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
-
-  const setPinnedAppKeys = useCallback((keys: string[]) => {
-    const final = ensureAlwaysPinned(keys);
-    setPinnedAppKeysState(final);
-    try { window.localStorage.setItem(PINNED_APPS_KEY, JSON.stringify(final)); } catch {}
-    savePinsToServer(final);
-  }, [savePinsToServer]);
-
-  const togglePinned = useCallback((key: string) => {
-    if (isAlwaysPinned(key)) return; // alwaysPinned apps can't be unpinned
-    setPinnedAppKeysState((prev) => {
-      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
-      const final = ensureAlwaysPinned(next);
-      try { window.localStorage.setItem(PINNED_APPS_KEY, JSON.stringify(final)); } catch {}
-      savePinsToServer(final);
-      return final;
-    });
-  }, [savePinsToServer]);
 
   const setLens = useCallback((l: Lens) => {
     setLensState(l);
@@ -485,8 +421,15 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     setRowVersions((v) => ({ ...v, [moduleId]: (v[moduleId] ?? 0) + 1 }));
   }, []);
   const rowVersion = useCallback((moduleId: string) => rowVersions[moduleId] ?? 0, [rowVersions]);
-  const isPinned = useCallback((key: string) => pinnedAppKeys.includes(key), [pinnedAppKeys]);
-
+  // ── ACCESS-system rail (replaces personal pins, 2026-08-22) ────────
+  // visibleRailApps = catalog − org hidden, filtered by canAccessApp
+  // (baseline, never weakened) and the org minAccess floor, ordered by
+  // the admin's order then catalog order. Home (alwaysPinned) always
+  // survives, so the rail is never empty for any access level.
+  const railApps = useMemo<AppEntry[]>(
+    () => visibleRailApps({ config: railConfig, accessLevel }),
+    [railConfig, accessLevel],
+  );
   const setProfileToolPins = useCallback((keys: string[]) => {
     setProfileToolPinsState(keys);
     try { window.localStorage.setItem(PROFILE_TOOL_PINS_KEY, JSON.stringify(keys)); } catch {}
@@ -536,9 +479,9 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
           return next;
         });
       } else if (meta && /^[1-9]$/.test(e.key)) {
-        // Cmd+1..9 → jump to the Nth pinned app.
+        // Cmd+1..9 → jump to the Nth rail app (org order).
         const idx = parseInt(e.key, 10) - 1;
-        const key = pinnedAppKeys[idx];
+        const key = railApps[idx]?.key;
         if (key) {
           e.preventDefault();
           setActiveAppKeyState(key);
@@ -555,7 +498,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pinnedAppKeys]);
+  }, [railApps]);
 
   const value = useMemo<ShellState>(
     () => ({
@@ -574,14 +517,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon,
       sidebarCollapsed, toggleSidebar, setSidebarCollapsed,
       appsGridOpen, openAppsGrid, closeAppsGrid,
-      pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned,
+      railApps,
       recentAppKeys, pushRecentApp,
       iconsOnly, setIconsOnly,
       profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned,
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, pinnedAppKeys, togglePinned, setPinnedAppKeys, isPinned, movePinned, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, railApps, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
