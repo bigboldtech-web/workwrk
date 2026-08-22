@@ -34051,3 +34051,20 @@ table.os-tbl {
   .workwrk-os .shx__sheet { padding: 0 !important; }
   .workwrk-os .shx__grid, .workwrk-os .shx__grid > div { height: auto !important; overflow: visible !important; }
 }
+
+/* Corner add-rows plus (Sheets' "add more rows at bottom" reduced to one
+ * compact square): floats bottom-left over the grid, just above the tab
+ * bar. Additive block: shx__sheet gains position:relative here rather
+ * than editing its base rule above. Hidden in print with the rest of the
+ * chrome via shx__np on the button itself. */
+.shx__sheet { position: relative; }
+.shx__addrows {
+  position: absolute; left: 18px; bottom: 10px; z-index: 12;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: 1px solid var(--os-line); border-radius: 6px;
+  background: var(--os-surface); color: var(--os-ink-2); cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.shx__addrows:hover:not(:disabled) { background: var(--os-bg-2); color: var(--os-ink); }
+.shx__addrows:disabled { opacity: .5; cursor: default; }
+.shx__addrows svg { width: 14px; height: 14px; }

@@ -11,12 +11,14 @@
  * dead buttons (per-cell bold/italic/color does not exist yet, so those
  * controls are deliberately absent).
  *
- * Columns are anonymous letters (A, B, C…) with an optional small label;
- * "+" appends a generic text column instantly; format/highlight live in
- * the per-column "…" menu, whose "123" section shares its kind mapping
- * with the toolbar via lib/sheet-format-actions. The sheet kernel
- * (SheetGrid) renders the grid; this page owns data semantics, the
- * formula engine host, undo and CSV import/export.
+ * Columns are anonymous letters (A, B, C…) — nothing else in the header,
+ * like Excel. "+" appends a generic text column instantly; number format
+ * lives ONLY in the toolbar's 123/$/%/decimals cluster (Sheets' surface),
+ * and column operations (sort, delete, formula, relation) live in the
+ * header's right-click menu. Rows carry a Sheets-style numbered gutter:
+ * click selects the row, drag reorders it. The sheet kernel (SheetGrid)
+ * renders the grid; this page owns data semantics, the formula engine
+ * host, undo and CSV import/export.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -24,8 +26,9 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, Star, Link2, Check, MoreHorizontal,
+  Globe, Lock, Sigma, Star, Link2, Check,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown,
+  ArrowDownAZ, ArrowUpZA, X,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -42,7 +45,6 @@ import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
-import { ColumnFormatMenu } from "@/components/tables/column-format-menu";
 import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
 import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
@@ -390,8 +392,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [allTables, setAllTables] = useState<{ id: string; name: string }[]>([]);
   // Column currently being configured in the relation modal (link/lookup/rollup).
   const [configColId, setConfigColId] = useState<string | null>(null);
-  // Column whose format/rules popover is open (number/currency/percent/date).
-  const [formatMenuColId, setFormatMenuColId] = useState<string | null>(null);
   // Toolbar filter toggle: the search/filter row hides behind the funnel
   // icon (Sheets keeps its toolbar dense; the row appears on demand).
   const [filterOpen, setFilterOpen] = useState(false);
@@ -437,8 +437,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Column drag-reorder + resize.
   const [dragColId, setDragColId] = useState<string | null>(null);
   const resizeRef = useRef<{ colId: string; startX: number; startW: number } | null>(null);
-  // Row right-click menu — the same action set as the row's hover icons
-  // (open / delete), opened at the cursor via the shared MorePortal.
+  // Row right-click menu — open / delete (single or the whole selected
+  // span), opened at the cursor via the shared MorePortal.
   const [rowMenu, setRowMenu] = useState<{ rowId: string; x: number; y: number } | null>(null);
   const rowMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
   const rowMenuPanelRef = useRef<HTMLDivElement | null>(null);
@@ -456,6 +456,27 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       window.removeEventListener("keydown", onKey);
     };
   }, [rowMenu]);
+  // Header right-click menu — the Sheets model: column operations (sort /
+  // delete / formula / relation) live here now that the hover icon cluster
+  // and the per-column "…" popover are gone. Same MorePortal point-mode
+  // pattern as the row menu above.
+  const [headerMenu, setHeaderMenu] = useState<{ colId: string; x: number; y: number } | null>(null);
+  const headerMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
+  const headerMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!headerMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (headerMenuPanelRef.current?.contains(e.target as Node)) return;
+      setHeaderMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setHeaderMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [headerMenu]);
 
   useEffect(() => { void params.then((p) => setTableId(p.id)); }, [params]);
 
@@ -1040,32 +1061,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     pushUndo({ label, undo: () => apply(before), redo: () => apply(after) });
   }
 
-  /** Column format / highlight rules (Phase 4). Display-only settings, but
-   *  they persist through the SAME columns path as everything else and are
-   *  therefore undoable like everything else. */
-  function setColumnFormat(colId: string, format: ColumnFormat | undefined) {
-    if (!table) return;
-    const col = table.columns.find((c) => c.id === colId);
-    if (!col) return;
-    const before = col.format;
-    const cols = table.columns.map((c) => (c.id === colId ? { ...c, format } : c));
-    setTable({ ...table, columns: cols });
-    void persistColumns(cols).then((ok) => {
-      if (ok) pushColumnPatch(`format "${col.label}"`, colId, { format: before }, { format });
-    });
-  }
-
-  function setColumnRules(colId: string, rules: ConditionalRule[] | undefined) {
-    if (!table) return;
-    const col = table.columns.find((c) => c.id === colId);
-    if (!col) return;
-    const before = col.rules;
-    const cols = table.columns.map((c) => (c.id === colId ? { ...c, rules } : c));
-    setTable({ ...table, columns: cols });
-    void persistColumns(cols).then((ok) => {
-      if (ok) pushColumnPatch(`highlight rules on "${col.label}"`, colId, { rules: before }, { rules });
-    });
-  }
+  /* setColumnFormat / setColumnRules died with the per-column "…" popover
+   * (Sheets parity): the toolbar's 123/$/%/decimals cluster is the only
+   * number-format editor now, and highlight RULES lost their editor while
+   * existing rules keep painting (cellBg below reads col.rules unchanged). */
 
   /** Apply per-column before/after patches as ONE optimistic columns write
    *  and ONE undo command — the multi-column sibling of pushColumnPatch, for
@@ -1196,7 +1195,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }
 
   /** The blank-sheet seed for a table that has zero columns (legacy, or a
-   *  creation whose seeding failed): the SAME 26-column (A..Z) × 100-row
+   *  creation whose seeding failed): the SAME 26-column (A..Z) × 1000-row
    *  shape lib/sheet-new seeds at creation time, so every sheet opens as
    *  the sea of empty cells the user asked for. Not undoable on purpose —
    *  it IS the blank sheet. */
@@ -1206,7 +1205,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols: Column[] = Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: newId(), type: "short_text", label: "" }));
     // Eager tableRef bump, same as addColumn: the guard above must see the
     // new columns immediately, or a double-click faster than the sync
-    // effect fires the 100-row seed twice (200 blank rows).
+    // effect fires the 1000-row seed twice (2000 blank rows).
     if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
     // 26 fresh columns on an empty table: swap (trivially cheap here).
@@ -1257,6 +1256,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (ok) pushColumnPatch(`edit formula of "${col.label}"`, colId, { formula: prev }, { formula: next });
   }
 
+  /* NO UI reaches renameColumn since the header label input died (headers
+   * are pure letters now), but the rename machinery stays: undo replays
+   * still route through performRenameStrict, [Header] refs in stored
+   * formulas keep resolving against labels, and a future rename surface
+   * plugs straight back in. */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept deliberately, see the note above
   function renameColumn(colId: string, label: string) {
     if (!table) return;
     // The header input is controlled and mutates column state per keystroke,
@@ -1442,39 +1447,74 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     document.addEventListener("mouseup", onUp);
   }
 
-  /** One creation path for every row insert on this page, so each created
-   *  row is undoable the same way. */
-  async function createRow(values: Record<string, unknown>): Promise<ApiRow | null> {
-    if (!tableId) return null;
+  /* The old one-at-a-time createRow/addRow pair died with the "New row"
+   * footer button: rows now arrive in blocks (the corner "+" below, the
+   * silent edge growth, paste overflow), all through insertRowsBatchStrict. */
+
+  /** The corner "+" (bottom-left, above the tab bar): 500 blank rows as
+   *  ONE undoable command — the manual sibling of the silent edge growth
+   *  below, for when that growth is gated off (sorted/filtered) or the
+   *  user simply wants runway now. */
+  const [addingRows, setAddingRows] = useState(false);
+  async function addRowsBlock() {
+    if (!tableId || addingRows) return;
+    setAddingRows(true);
     try {
-      const res = await fetch(`/api/tables/${tableId}/rows`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values }),
-      });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
-      const d = await res.json();
-      const row: ApiRow = d.data ?? d;
-      // Host + mirror through the one absorption path (position-true
-      // index; an end-append yields no rewrites).
-      absorbCreatedRows([{ ...row, values: row.values ?? {} }]);
-      // Undo deletes the created row; redo re-inserts its values. The server
-      // returns a NEW id on redo, so the command re-captures it — otherwise
-      // a second undo would aim at an id that no longer exists.
-      let curId = row.id;
-      const snapValues = { ...(row.values ?? {}) };
+      const created = await insertRowsBatchStrict(Array.from({ length: 500 }, () => ({ values: {} })));
+      // The server hands re-added rows NEW ids on redo, so the command
+      // re-captures them — a second undo must aim at rows that exist.
+      let ids = created.map((r) => r.id);
+      let redoCreated: string[] = [];
       pushUndo({
-        label: "add row",
-        undo: () => deleteRowsBatchStrict([curId]),
+        label: "add 500 rows",
+        undo: async () => {
+          await deleteRowsBatchStrict(ids);
+        },
         redo: async () => {
-          const created = await insertRowsBatchStrict([{ values: snapValues }]);
-          if (created[0]) curId = created[0].id;
+          if (redoCreated.length > 0) {
+            // A previous redo attempt died mid-chunk: clear its partial
+            // append first, or rows would duplicate (the bulk-undo shape).
+            await deleteRowsBatchStrict(redoCreated);
+            redoCreated = [];
+          }
+          const again = await insertRowsBatchStrict(
+            Array.from({ length: 500 }, () => ({ values: {} })),
+            (chunkIds) => redoCreated.push(...chunkIds),
+          );
+          ids = again.map((r) => r.id);
         },
       });
-      return row;
-    } catch { toast("Couldn't add row"); return null; }
+    } catch { toast("Couldn't add rows"); }
+    finally { setAddingRows(false); }
   }
 
-  async function addRow() { await createRow({}); }
+  /** Silent growth at the bottom edge: the kernel signals (throttled) when
+   *  ArrowDown / Enter-commit walks off the last row, and 100 blank rows
+   *  appear — Sheets' "keep typing, the sheet keeps up". Deliberately
+   *  NON-undoable (blank appends destroy nothing; Ctrl+Z should keep
+   *  undoing the user's EDITS, not un-grow the sheet under them) and
+   *  gated: never while a sort/filter/search reorders display (the new
+   *  rows would teleport), never mid-stream, never past 50k rows, and one
+   *  append in flight at a time. */
+  const growRowsBusyRef = useRef(false);
+  function growRows() {
+    if (growRowsBusyRef.current) return;
+    if (sortState || filterCol || search.trim() || streamProgress) return;
+    if ((rowsRef.current?.length ?? 0) >= 50_000) return;
+    growRowsBusyRef.current = true;
+    void (async () => {
+      try {
+        // Strict insert path, but NO pushUndo — that is the whole
+        // difference from addRowsBlock. Absorbed via the standard
+        // insert-absorb path (end-appends yield no rewrites).
+        await insertRowsBatchStrict(Array.from({ length: 100 }, () => ({ values: {} })));
+      } catch {
+        // Silent: growth is a convenience; the next edge hit retries.
+      } finally {
+        growRowsBusyRef.current = false;
+      }
+    })();
+  }
 
   /** Phase 5c: a guarded PATCH bounced (409) — another client changed the
    *  cell(s) this edit vouched for. Fold ONLY the conflicted columns (where
@@ -1832,6 +1872,127 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         void persistColumns(cols);
       }
     } catch { toast("Couldn't delete row"); void load(); }
+  }
+
+  /** Move a row to a new index — the gutter drag AND both undo bodies run
+   *  through this one path, so a move and its inverse rewrite formulas
+   *  identically. STRICT: throws on persist failure (undo needs truth).
+   *
+   *  Ordering is the deleteColumn discipline: (1) drive the host FIRST so
+   *  ref rewrites are computed against the pre-move layout ("=A5" must
+   *  keep meaning the row that moved, refs in between must shift by one —
+   *  losing one silently is the catastrophic bug); (2) renumber + reorder
+   *  the local mirror to match storage order; (3) persist positions;
+   *  (4) persist the host's rewrites (cells via the strict batch value
+   *  path, column formulas via saveColumnsStrict).
+   *
+   *  Position renumbering is a ROTATION of the positions the span already
+   *  held: post-move row i of the span takes the i-th pre-move position.
+   *  The moved row therefore lands on the target row's old position and
+   *  every in-between row shifts one slot toward the vacated one — no new
+   *  numbers are minted, so uniqueness and any historical gaps (deleted
+   *  rows) survive, and position order keeps matching display order.
+   *
+   *  Indices here are STORAGE indices (rowsRef order). The gesture may
+   *  only translate a display index into one while display order == storage
+   *  order — that is why the page withholds onRowMove under sort/filter/
+   *  search/stream — but an undo replay is safe even if the user has since
+   *  sorted: it re-runs in storage terms and the display just re-sorts. */
+  async function performRowMoveStrict(rowId: string, toIndex: number) {
+    if (!tableId) throw new Error("no table");
+    const cur = rowsRef.current;
+    if (!cur) throw new Error("rows gone");
+    const from = cur.findIndex((r) => r.id === rowId);
+    if (from < 0) return; // row deleted since — no-op, never corrupt
+    const to = Math.max(0, Math.min(cur.length - 1, toIndex));
+    if (from === to) return;
+
+    // (1) Host first. A thrown rewrite must never block the move; the
+    // rebuild below recovers coherence from the reordered mirror.
+    let res: StructureResult | null = null;
+    try { res = engineHostRef.current?.rowMoved(rowId, to) ?? null; } catch { res = null; }
+
+    // (2) Reorder the mirror + rotate positions across the span.
+    const next = [...cur];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    const lo = Math.min(from, to);
+    const hi = Math.max(from, to);
+    const spanPositions = cur.slice(lo, hi + 1).map((r) => r.position);
+    const posUpdates: { id: string; values: Record<string, unknown>; position: number }[] = [];
+    for (let i = lo; i <= hi; i++) {
+      const p = spanPositions[i - lo];
+      if (next[i].position !== p) {
+        next[i] = { ...next[i], position: p };
+        // values: {} — the batch route treats a keyless entry as
+        // position-only and writes nothing else for it.
+        posUpdates.push({ id: next[i].id, values: {}, position: p });
+      }
+    }
+    commitRows(next);
+    if (res) bumpEngine();
+    else rebuildEngine(tableRef.current?.columns ?? [], next);
+
+    // (3) Positions AND cell rewrites merge into the SAME batch entries —
+    // the route writes values+position per row in one transaction, so a
+    // network drop can no longer land the new order while the old formula
+    // text survives (the silent-repoint catastrophe an unpersisted rewrite
+    // causes). Chunks only split past MAX_OPS, shrinking the torn window
+    // to >500-op spans; one queued job keeps other writes from
+    // interleaving between the slices of one logical move. A refused chunk
+    // throws: the caller toasts and reloads, the reload reconciles.
+    const mergedOps = new Map<string, { id: string; values: Record<string, unknown>; position?: number }>();
+    for (const u of posUpdates) mergedOps.set(u.id, { id: u.id, values: {}, position: u.position });
+    if (res && res.rewritten.cells.length > 0) {
+      for (const u of rewritesToUpdates(res.rewritten.cells)) {
+        const e = mergedOps.get(u.id);
+        if (e) e.values = { ...e.values, ...u.values };
+        else mergedOps.set(u.id, { id: u.id, values: u.values });
+      }
+    }
+    const moveOps = [...mergedOps.values()];
+    await writeQueueRef.current.run(async () => {
+      for (let i = 0; i < moveOps.length; i += BATCH_MAX_OPS) {
+        const r = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: moveOps.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!r.ok) throw new Error(`batch move HTTP ${r.status}`);
+      }
+    });
+
+    // (4) Column-formula rewrites live on the TABLE record, not the data
+    // rows, so they cannot join the batch transaction above — that narrow
+    // window (row-anchored ranges inside COLUMN formulas only) remains,
+    // and a failed save still throws into the caller's toast+reload.
+    if (res && res.rewritten.columns.length > 0) {
+      const curT = tableRef.current;
+      if (curT) {
+        await saveColumnsStrict(applyColumnRewrites(curT.columns, res.rewritten.columns), { hostAlreadyCurrent: true });
+      }
+    }
+  }
+
+  /** The gutter-drag entry point. Undo moves the row back through the SAME
+   *  strict path — the live host then rewrites every ref back, and those
+   *  reverted rewrites persist exactly like the forward ones did (the
+   *  deleteColumn revert discipline, achieved by inversion rather than
+   *  snapshots, because a move — unlike a delete — loses nothing). */
+  function moveRowByDrag(rowId: string, toDisplayIndex: number) {
+    const cur = rowsRef.current ?? [];
+    const from = cur.findIndex((r) => r.id === rowId);
+    const to = Math.max(0, Math.min(cur.length - 1, toDisplayIndex));
+    if (from < 0 || from === to) return;
+    void (async () => {
+      try {
+        await performRowMoveStrict(rowId, to);
+        pushUndo({
+          label: "move row",
+          undo: () => performRowMoveStrict(rowId, from),
+          redo: () => performRowMoveStrict(rowId, to),
+        });
+      } catch { toast("Couldn't move row — reloading"); void load(); }
+    })();
   }
 
   async function importCsv(file: File) {
@@ -2521,11 +2682,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (notes.length > 0) toast(`Pasted ${written} cell${written === 1 ? "" : "s"} · ${notes.join(" · ")}`);
   };
 
-  /** Excel-style header (Excel-ify decision 2): the column LETTER is the
-   *  primary text and the drag-reorder handle; the optional label renders
-   *  as a small second line whose input doubles as the rename affordance.
-   *  Being an <input>, it keeps the kernel's EDITABLE_SEL protection —
-   *  keystrokes in it never reach the grid's shortcuts. */
+  /** Sheets-pure header: the column LETTER, centered, and nothing else —
+   *  no label line, no hover icon cluster ("We are building it like
+   *  Excel"). The letter doubles as the drag-to-reorder handle; the right
+   *  edge stays the resize grip. Every column OPERATION the old hover
+   *  icons carried (edit formula, configure relation, delete, plus sort)
+   *  moved to the header's right-click menu (onHeaderContextMenu). The
+   *  format/highlight-rules popover that used to open here is gone
+   *  entirely — the toolbar's 123/$/%/decimals cluster is the one
+   *  number-format surface, and existing highlight rules KEEP PAINTING
+   *  through cellBg; only their editor died. */
   const kernelHeader = (colId: string) => {
     const c = table.columns.find((x) => x.id === colId);
     if (!c) return null;
@@ -2538,62 +2704,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
       >
         <span
-          title={`Column ${columnLetter(colIndex)} · drag to reorder`}
+          title={`Column ${columnLetter(colIndex)} · drag to reorder · right-click for options`}
           draggable
           onDragStart={() => setDragColId(c.id)}
           onDragEnd={() => setDragColId(null)}
-          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "14px", color: "#3f3f46" }}
+          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "18px", color: "#3f3f46" }}
         >{columnLetter(colIndex)}</span>
-        <input
-          type="text"
-          value={c.label}
-          aria-label={`Label for column ${columnLetter(colIndex)}`}
-          onChange={(e) => setTable({ ...table, columns: table.columns.map((x) => x.id === c.id ? { ...x, label: e.target.value } : x) })}
-          // Empty is a legal label — columns are anonymous like Excel's.
-          onBlur={(e) => renameColumn(c.id, e.target.value.trim())}
-          style={{ flex: "none", width: "100%", height: 13, padding: 0, textAlign: "center", fontSize: 10.5, lineHeight: "13px", fontWeight: 400, color: "#71717a" }}
-        />
-        <span
-          // Visible on header hover only (the kernel's columnheader is the
-          // group/head Tailwind group); the light backdrop keeps the icons
-          // legible over the centered label text they overlap.
-          className="opacity-0 group-hover/head:opacity-100"
-          style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", display: "inline-flex", alignItems: "center", background: "rgba(250,250,250,0.92)", borderRadius: 4 }}
-        >
-          {c.type === "formula" ? (
-            <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
-          ) : null}
-          {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
-            <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
-          ) : null}
-          <button
-            type="button"
-            className="dtbl__col-del"
-            style={{ opacity: 1 }}
-            // Stop the mousedown reaching the menu's outside-click closer,
-            // or "toggle closed" would close-then-reopen in one click.
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={() => setFormatMenuColId((cur) => (cur === c.id ? null : c.id))}
-            title="Column type, format & highlight rules"
-          ><MoreHorizontal /></button>
-          <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
-        </span>
-        {formatMenuColId === c.id ? (
-          // Absolute inside this position:relative header cell — the sticky
-          // header is a transformed/sticky container, so fixed would drift.
-          <ColumnFormatMenu
-            colType={c.type}
-            format={c.format}
-            rules={c.rules}
-            // ONE call per 123 choice: type + starter format land in a
-            // single write, so a single undo restores both (the menu's
-            // deprecated onTypeChange fallback is not used here).
-            onNumberFormat={(kind) => applyNumberFormat([c.id], kind)}
-            onFormatChange={(f) => setColumnFormat(c.id, f)}
-            onRulesChange={(r) => setColumnRules(c.id, r)}
-            onClose={() => setFormatMenuColId(null)}
-          />
-        ) : null}
         <span
           onMouseDown={(e) => startResize(e, c.id)}
           title="Drag to resize"
@@ -2948,11 +3064,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             onUndo={() => void runUndo()}
             onRedo={() => void runRedo()}
             cellStyle={cellBg}
-            onDeleteRows={(ids) => void bulkDeleteRows(ids)}
-            onOpenRow={(id) => setActiveRowId(id)}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
-            sort={sortState}
-            onSortChange={(sn) => persistSort(sn)}
+            onHeaderContextMenu={(colId, x, y) => setHeaderMenu({ colId, x, y })}
+            // Row moving exists ONLY while display order IS storage order:
+            // under a sort/filter/search the gutter's display index names a
+            // different storage slot, and mid-stream the tail hasn't even
+            // arrived. Omitting the prop keeps the gutter click-select only.
+            onRowMove={!sortState && !filterCol && !search.trim() && !streamProgress
+              ? moveRowByDrag
+              : undefined}
+            onGrowRows={growRows}
             onSelectionChange={(sel) => setGridSelection(sel)}
             renderHeader={kernelHeader}
             headerTrailing={
@@ -2965,10 +3086,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 <Plus style={{ width: 15, height: 15 }} />
               </button>
             }
-            footer={<button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>}
             readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup").map((c) => c.id))}
           />
           </div>
+          {/* The corner "+": the one manual add-rows affordance left after
+              the "New row" footer button died. Compact square, Sheets'
+              bottom-left placement, one undoable 500-row block per press. */}
+          <button
+            type="button"
+            className="shx__addrows shx__np"
+            onClick={() => void addRowsBlock()}
+            disabled={addingRows}
+            title="Add 500 rows"
+            aria-label="Add 500 rows"
+          >
+            {addingRows ? <Loader2 className="frmb__spin" /> : <Plus />}
+          </button>
         </div>
       )}
 
@@ -2995,20 +3128,96 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           point={{ x: rowMenu.x, y: rowMenu.y }}
         >
           <MenuList className="min-w-[180px]">
+            {/* The drawer's gutter chevron died with the checkbox gutter —
+                this menu entry is the drawer's remaining door. */}
             <MenuItem
               icon={ChevronRight}
               label="Open row"
               onClick={() => { setActiveRowId(rowMenu.rowId); setRowMenu(null); }}
             />
-            <MenuItem
-              icon={Trash2}
-              label="Delete row"
-              destructive
-              onClick={() => { setRowMenu(null); void deleteRow(rowMenu.rowId); }}
-            />
+            {gridSelection && gridSelection.rowIds.length > 1 && gridSelection.rowIds.includes(rowMenu.rowId) ? (
+              // Right-click INSIDE a multi-row selection acts on the whole
+              // span (Sheets), through the same confirmed+undoable bulk
+              // path the old checkbox pill used.
+              <MenuItem
+                icon={Trash2}
+                label={`Delete ${gridSelection.rowIds.length} rows`}
+                destructive
+                onClick={() => { setRowMenu(null); void bulkDeleteRows(gridSelection.rowIds); }}
+              />
+            ) : (
+              <MenuItem
+                icon={Trash2}
+                label="Delete row"
+                destructive
+                onClick={() => { setRowMenu(null); void deleteRow(rowMenu.rowId); }}
+              />
+            )}
           </MenuList>
         </MorePortal>
       ) : null}
+
+      {headerMenu ? (() => {
+        // Resolve the column at render: a delete can outlive the menu by a
+        // frame, and a dead colId must render nothing rather than a menu
+        // whose every action would no-op or throw.
+        const hc = table.columns.find((c) => c.id === headerMenu.colId);
+        if (!hc) return null;
+        const letter = columnLetter(table.columns.findIndex((c) => c.id === headerMenu.colId));
+        return (
+          <MorePortal
+            anchorRef={headerMenuAnchorRef}
+            panelRef={headerMenuPanelRef}
+            width={200}
+            open
+            placement="below"
+            point={{ x: headerMenu.x, y: headerMenu.y }}
+          >
+            <MenuList className="min-w-[200px]">
+              {/* Sorting drives the SAME persisted sortState the kernel's
+                  old header arrow cycled — persistSort writes it into the
+                  first saved view exactly as before. */}
+              <MenuItem
+                icon={ArrowDownAZ}
+                label={`Sort sheet A → Z by ${letter}`}
+                onClick={() => { setHeaderMenu(null); persistSort({ colId: hc.id, dir: "asc" }); }}
+              />
+              <MenuItem
+                icon={ArrowUpZA}
+                label={`Sort sheet Z → A by ${letter}`}
+                onClick={() => { setHeaderMenu(null); persistSort({ colId: hc.id, dir: "desc" }); }}
+              />
+              {sortState ? (
+                <MenuItem
+                  icon={X}
+                  label="Clear sort"
+                  onClick={() => { setHeaderMenu(null); persistSort(null); }}
+                />
+              ) : null}
+              {hc.type === "formula" ? (
+                <MenuItem
+                  icon={Sigma}
+                  label="Edit formula"
+                  onClick={() => { setHeaderMenu(null); void editFormula(hc.id); }}
+                />
+              ) : null}
+              {hc.type === "link" || hc.type === "lookup" || hc.type === "rollup" ? (
+                <MenuItem
+                  icon={Link2}
+                  label="Configure relation"
+                  onClick={() => { setHeaderMenu(null); setConfigColId(hc.id); }}
+                />
+              ) : null}
+              <MenuItem
+                icon={Trash2}
+                label={`Delete column ${letter}`}
+                destructive
+                onClick={() => { setHeaderMenu(null); void deleteColumn(hc.id); }}
+              />
+            </MenuList>
+          </MorePortal>
+        );
+      })() : null}
 
       {activeRow && (
         <RowDetailModal

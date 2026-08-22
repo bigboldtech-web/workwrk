@@ -4,7 +4,11 @@
  *
  * What it owns: virtualized rows, the selection model (active cell +
  * anchor + rectangular range), full keyboard navigation, frozen first
- * column, row multi-select + bulk delete, sortable headers.
+ * column, and the Sheets-style row-number gutter: clicking a number
+ * selects its row as a normal full-width range, dragging it reorders the
+ * row (onRowMove). Sort UI and column operations live on the page —
+ * headers here are pure content plus a right-click hook
+ * (onHeaderContextMenu), exactly like Sheets.
  *
  * What it does NOT own: cell semantics. Display and editing are render
  * props — the page supplies them from its existing type-specific cells,
@@ -35,25 +39,33 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronRight, Trash2 } from "lucide-react";
 import { fillSeries, parseClipboard, toHTMLTable, toTSV, type Matrix } from "@/lib/sheet-clipboard";
 
 export const SHEET_ROW_H = 33;
 const OVERSCAN = 8;
-const HANDLE_W = 76; // checkbox + expand, frozen
+const GUTTER_W = 48; // row-number gutter, frozen (Sheets-sized: fits 4 digits)
 const COL_W = 180;   // default column width
 
-/* Every caret in the grid — the page's column-rename input in the sticky
- * header, a mounted cell editor — sits INSIDE the grid div, so its
- * keystrokes bubble to the grid's handler. Grid shortcuts must never fire
- * while the user is typing into a field: Backspace would wipe the selected
- * cells instead of deleting a character. */
+/* A pointer that travels further than this from its gutter pointerdown is a
+ * row DRAG, not a click. Small enough that a deliberate drag converts almost
+ * immediately, large enough that a twitchy click never moves a row. */
+const ROW_DRAG_THRESHOLD_PX = 4;
+
+/* Every caret in the grid — a mounted cell editor, anything the page renders
+ * into a header — sits INSIDE the grid div, so its keystrokes bubble to the
+ * grid's handler. Grid shortcuts must never fire while the user is typing
+ * into a field: Backspace would wipe the selected cells instead of deleting
+ * a character. */
 const EDITABLE_SEL = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
 /* Keys that activate the grid when nothing is selected yet. Tab is
  * deliberately excluded: it stays the keyboard user's way OUT of the grid. */
 const SEED_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "PageDown", "PageUp", "Home", "End"]);
 
+/** The page's sort state. The kernel renders NO sort UI (Sheets headers are
+ *  pure letters; sorting lives in the page's header context menu) — the type
+ *  stays exported from here so the page and any future surfaces share one
+ *  shape. */
 export type SheetSort = { colId: string; dir: "asc" | "desc" } | null;
 
 /** A selection rectangle in CURRENT display coordinates. Only ever lives
@@ -121,9 +133,20 @@ export type SheetGridProps = {
    *  overflows the bottom of the table, chunking to the batch cap, and
    *  optimistic update + rollback. Grid awaits it and does nothing else. */
   applyMatrix: (topLeft: { rowId: string; c: number }, matrix: string[][]) => Promise<void>;
-  onDeleteRows: (rowIds: string[]) => void;
-  onOpenRow: (rowId: string) => void;
   onRowContextMenu?: (rowId: string, x: number, y: number) => void;
+  /** Right-click on a column header (Sheets' column-ops surface — the page
+   *  hangs sort/rename/formula/delete off it). Default menu suppressed. */
+  onHeaderContextMenu?: (colId: string, x: number, y: number) => void;
+  /** Reorder a row by dragging its gutter number. Called ONCE per drop with
+   *  the DISPLAY index the row should land at. Omit it and the gutter is
+   *  click-select only — the page withholds it while sorted/filtered/
+   *  streaming/read-only, where a display index is not a storage index. */
+  onRowMove?: (rowId: string, toDisplayIndex: number) => void;
+  /** The user walked off the bottom edge (ArrowDown / Enter-commit-move on
+   *  the last row). Growth is page-owned (it appends real rows); the kernel
+   *  only signals intent, throttled to once per second so a held key at the
+   *  floor doesn't spam appends. */
+  onGrowRows?: () => void;
   /** Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z / Ctrl+Y (Tables Phase 4). The grid only
    *  forwards the keystroke — the page owns the command stack. */
   onUndo?: () => void;
@@ -138,10 +161,8 @@ export type SheetGridProps = {
    *  animation frame and deduped by content, so wiring it costs the page
    *  nothing until the selection actually changes. */
   onSelectionChange?: (sel: { rowIds: string[]; c1: number; c2: number } | null) => void;
-  sort: SheetSort;
-  onSortChange: (sort: SheetSort) => void;
-  /** Header extras (type icon, rename input, config buttons) — the page's
-   *  existing header cell, rendered inside the kernel's th. */
+  /** The page's header cell content, rendered inside the kernel's
+   *  columnheader (post-Sheets-parity: the bare A/B/C letter). */
   renderHeader: (colId: string) => React.ReactNode;
   headerTrailing?: React.ReactNode; // the add-column menu
   footer?: React.ReactNode;         // the add-row button
@@ -152,10 +173,10 @@ export type SheetGridProps = {
 type Cell = { rowId: string; c: number };
 
 export function SheetGrid({
-  columns, rowIds, renderDisplay, renderEditor, onClearCells, onDeleteRows,
-  onOpenRow, onRowContextMenu, sort, onSortChange, renderHeader, headerTrailing,
-  footer, readOnlyCols, getRangeValues, applyMatrix, onUndo, onRedo, cellStyle,
-  onSelectionChange,
+  columns, rowIds, renderDisplay, renderEditor, onClearCells,
+  onRowContextMenu, onHeaderContextMenu, onRowMove, onGrowRows, renderHeader,
+  headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
+  onRedo, cellStyle, onSelectionChange,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -163,10 +184,18 @@ export function SheetGrid({
   const [active, setActive] = useState<Cell | null>(null);
   const [anchor, setAnchor] = useState<Cell | null>(null);
   const [editing, setEditing] = useState<{ rowId: string; c: number; seed: string | null } | null>(null);
-  const [checked, setChecked] = useState<Set<string>>(new Set());
   /* Fill-handle drag. Kept in state, not a ref: the preview rectangle is
    * rendered from it, and reading a ref during render is forbidden. */
   const [fillDrag, setFillDrag] = useState<{ base: Rect; to: number } | null>(null);
+  /* Gutter row drag. Same state-for-render rule as fillDrag; the ref beside
+   * it is the commit-once source of truth (pointerup and lostpointercapture
+   * can both fire for one drop, and a row must never move twice). `gap` is
+   * the candidate insertion gap, 0..rowCount inclusive. */
+  const [rowDrag, setRowDrag] = useState<{ rowId: string; from: number; gap: number } | null>(null);
+  const rowDragRef = useRef<{ rowId: string; from: number; gap: number } | null>(null);
+  /* Armed on gutter pointerdown; becomes a real drag only after the pointer
+   * crosses ROW_DRAG_THRESHOLD_PX, so a plain click stays a click. */
+  const pendingRowDragRef = useRef<{ pointerId: number; rowId: string; startY: number } | null>(null);
   const [applying, setApplying] = useState(false);
   const applyingRef = useRef(false);
 
@@ -200,7 +229,7 @@ export function SheetGrid({
   // Columns aren't virtualized, but horizontal scrolling still needs their
   // real left edges: offs[c] = left of column c, offs[c + 1] = its right.
   const colOffsets = useMemo(() => {
-    const offs = [HANDLE_W];
+    const offs = [GUTTER_W];
     for (const col of columns) offs.push(offs[offs.length - 1] + (col.width ?? COL_W));
     return offs;
   }, [columns]);
@@ -276,9 +305,9 @@ export function SheetGrid({
     const left = colOffsets[c];
     const right = colOffsets[c + 1];
     if (left == null || right == null) return;
-    // The handle column is sticky-left, so it covers the first HANDLE_W px
+    // The number gutter is sticky-left, so it covers the first GUTTER_W px
     // of the viewport — a cell isn't really visible until it clears that.
-    if (left - HANDLE_W < el.scrollLeft) el.scrollLeft = Math.max(0, left - HANDLE_W);
+    if (left - GUTTER_W < el.scrollLeft) el.scrollLeft = Math.max(0, left - GUTTER_W);
     else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
   }, [colOffsets]);
 
@@ -294,18 +323,39 @@ export function SheetGrid({
     scrollCellIntoView(0, 0);
   }, [rowCount, colCount, rowIds, scrollCellIntoView]);
 
+  /* ── growth signal (onGrowRows) ─────────────────────────────── */
+  // Ref-read so move() — a dependency of the whole keyboard path — doesn't
+  // churn when the page passes a fresh arrow function every render.
+  const onGrowRowsRef = useRef(onGrowRows);
+  useEffect(() => { onGrowRowsRef.current = onGrowRows; });
+  const lastGrowRef = useRef(0);
+  const requestGrowRows = useCallback(() => {
+    const fn = onGrowRowsRef.current;
+    if (!fn) return;
+    const now = Date.now();
+    if (now - lastGrowRef.current < 1000) return; // a held ArrowDown repeats far faster than appends land
+    lastGrowRef.current = now;
+    fn();
+  }, []);
+
   const move = useCallback((dr: number, dc: number, extend: boolean) => {
     if (rowCount === 0 || colCount === 0) return;
     const cur = activeRef.current;
     const curR = cur ? rowIndex.get(cur.rowId) : undefined;
     if (!cur || curR == null) { seedActive(); return; }
+    // A single-step move off the bottom edge (ArrowDown or Enter-commit-move
+    // on the last row) asks the page to grow the sheet — Sheets' "the grid
+    // never ends" feel. The move itself still clamps: appended rows arrive
+    // asynchronously, and PageDown deliberately doesn't trigger growth (a
+    // page-jump from mid-table is navigation, not an append request).
+    if (dr === 1 && curR === rowCount - 1) requestGrowRows();
     const r = Math.max(0, Math.min(rowCount - 1, curR + dr));
     const c = Math.max(0, Math.min(colCount - 1, cur.c + dc));
     if (extend) setAnchor((a) => a ?? cur);
     else setAnchor(null);
     setActive({ rowId: rowIds[r], c });
     scrollCellIntoView(r, c);
-  }, [rowCount, colCount, rowIds, rowIndex, seedActive, scrollCellIntoView]);
+  }, [rowCount, colCount, rowIds, rowIndex, seedActive, scrollCellIntoView, requestGrowRows]);
 
   // commitEdit must stay ref-free: it is passed into renderEditor during
   // render, so the compiler requires it not to read refs. The refocus
@@ -600,7 +650,8 @@ export function SheetGrid({
     if (ok) selectRect({ r1: Math.min(base.r1, to), r2: Math.max(base.r2, to), c1: base.c1, c2: base.c2 });
   }, [readRect, colCount, rowIds, runApply, selectRect]);
 
-  const releaseFillPointer = (e: React.PointerEvent) => {
+  /** Shared by the fill handle and the gutter row drag. */
+  const releasePointer = (e: React.PointerEvent) => {
     const el = e.currentTarget as HTMLElement;
     try {
       if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
@@ -619,6 +670,66 @@ export function SheetGrid({
     setFillDrag(null);
     if (commit) void commitFill(drag.base, drag.to);
   };
+
+  /* ── gutter row drag (Sheets row reorder) ───────────────────── */
+
+  /** Which INSERTION GAP a pointer is nearest — 0..rowCount inclusive, where
+   *  gap g is the boundary above display row g. Same zoom-normalized math as
+   *  rowFromClientY, but rounded instead of floored: the top half of a row
+   *  snaps to the gap above it, the bottom half to the gap below, which is
+   *  how the Sheets drop line behaves. */
+  const gapFromClientY = useCallback((clientY: number) => {
+    const el = scrollRef.current;
+    if (!el || rowCount === 0) return null;
+    const rect = el.getBoundingClientRect();
+    const cssZoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom
+      ?? (el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1);
+    const y = (clientY - rect.top) / (cssZoom || 1) - el.clientTop + el.scrollTop - SHEET_ROW_H;
+    return Math.max(0, Math.min(rowCount, Math.round(y / SHEET_ROW_H)));
+  }, [rowCount]);
+
+  /** End of a row drag. Same dual-exit story as endFillDrag (pointerup and
+   *  lostpointercapture race), but a move is NOT idempotent the way the
+   *  single-flight fill is — so the REF is the commit token: whoever nulls
+   *  it performs the move, everyone after sees null and does nothing. */
+  const endRowDrag = (commit: boolean) => {
+    pendingRowDragRef.current = null;
+    const drag = rowDragRef.current;
+    if (!drag) return;
+    rowDragRef.current = null;
+    setRowDrag(null);
+    if (!commit || !onRowMove) return;
+    // Gap → the display index the row lands at: the row vacates its old slot
+    // first, so gaps below it collapse by one (splice-out/splice-in math,
+    // mirroring the host's rowMoved contract).
+    const target = drag.gap > drag.from ? drag.gap - 1 : drag.gap;
+    // Dropped back where it started (gap == from or from + 1): not a move.
+    if (target === drag.from) return;
+    onRowMove(drag.rowId, target);
+  };
+
+  // Escape abandons a row drag without moving anything. Window-level and
+  // capture-phase: mid-drag the pointer capture sits on the gutter cell and
+  // focus can be anywhere, so the grid's own keydown may never hear the key.
+  useEffect(() => {
+    if (!rowDrag) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // the grid's Escape would also collapse the selection
+      pendingRowDragRef.current = null;
+      rowDragRef.current = null;
+      setRowDrag(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [rowDrag]);
+
+  // The dragged row itself can vanish (concurrent delete, or a filter
+  // change from another surface): the drag has nothing left to move, and
+  // the ref must not linger to hijack a later gesture.
+  useEffect(() => {
+    if (rowDrag && !rowIndex.has(rowDrag.rowId)) endRowDrag(false);
+  });
 
   // A row can vanish under an open editor (deleted, or filtered out by a
   // value the editor itself just changed). Close without committing —
@@ -773,26 +884,19 @@ export function SheetGrid({
     }
   };
 
-  /* ── row checkboxes ─────────────────────────────────────────── */
-  // Stale checks (rows deleted/filtered away) are pruned by DERIVING the
-  // live set at render — no state write needed, dead ids are just inert.
-  const liveChecked = useMemo(() => {
-    const live = new Set(rowIds);
-    return new Set([...checked].filter((id) => live.has(id)));
-  }, [checked, rowIds]);
-  const allChecked = rowCount > 0 && liveChecked.size === rowCount;
-  const toggleAll = () => setChecked(allChecked ? new Set() : new Set(rowIds));
-  const toggleRow = (rowId: string) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
-      return next;
-    });
-
-  const cycleSort = (colId: string) => {
-    if (sort?.colId !== colId) onSortChange({ colId, dir: "asc" });
-    else if (sort.dir === "asc") onSortChange({ colId, dir: "desc" });
-    else onSortChange(null);
+  /* ── gutter selection (Sheets row select) ───────────────────── */
+  // A gutter click is nothing special to the selection model: it just sets
+  // an ordinary full-width rectangle (anchor at column 0, active at the last
+  // column), so stats, clipboard, Delete-to-clear and the context menu all
+  // behave exactly as if the user had dragged across the row.
+  const selectRow = (rowId: string, extend: boolean) => {
+    const lastC = colCount - 1;
+    if (lastC < 0) return;
+    // Extending re-anchors at column 0 of the anchor ROW: a cell-range
+    // anchor mid-row must widen to the full row, like Sheets.
+    const anchorRowId = extend ? (anchor?.rowId ?? active?.rowId ?? rowId) : rowId;
+    setAnchor({ rowId: anchorRowId, c: 0 });
+    setActive({ rowId, c: lastC });
   };
 
   const gridWidth = colOffsets[colOffsets.length - 1] + 44;
@@ -823,7 +927,7 @@ export function SheetGrid({
   const fillPreview = fillDrag ? (() => {
     const r1 = Math.min(fillDrag.base.r1, fillDrag.to);
     const r2 = Math.max(fillDrag.base.r2, fillDrag.to);
-    const left = colOffsets[fillDrag.base.c1] ?? HANDLE_W;
+    const left = colOffsets[fillDrag.base.c1] ?? GUTTER_W;
     const right = colOffsets[Math.min(fillDrag.base.c2, colCount - 1) + 1] ?? left;
     return { top: r1 * SHEET_ROW_H, height: (r2 - r1 + 1) * SHEET_ROW_H, left, width: Math.max(0, right - left) };
   })() : null;
@@ -831,22 +935,6 @@ export function SheetGrid({
   /* ── render ─────────────────────────────────────────────────── */
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {liveChecked.size > 0 && (
-        <div className="absolute left-1/2 -translate-x-1/2 bottom-16 z-30 flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 h-11 shadow-lg">
-          <span className="text-[13px] text-zinc-700 font-medium">{liveChecked.size} selected</span>
-          <button
-            type="button"
-            onClick={() => { onDeleteRows([...liveChecked]); setChecked(new Set()); }}
-            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[13px] text-red-600 hover:bg-red-50"
-          >
-            <Trash2 className="w-3.5 h-3.5" /> Delete
-          </button>
-          <button type="button" onClick={() => setChecked(new Set())} className="text-[13px] text-zinc-400 hover:text-zinc-700">
-            Clear
-          </button>
-        </div>
-      )}
-
       <div
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200 bg-white outline-none"
@@ -862,32 +950,30 @@ export function SheetGrid({
           onCut={(e) => onClipboardCopy(e, true)}
           onPaste={onClipboardPaste}
           className="relative outline-none"
-          style={{ width: gridWidth, minWidth: "100%" }}
+          // The grabbing cursor covers the whole grid mid-drag: the pointer
+          // is captured by the gutter cell, but visually it roams the grid.
+          style={{ width: gridWidth, minWidth: "100%", cursor: rowDrag ? "grabbing" : undefined }}
         >
           {/* Header */}
           <div className="sticky top-0 z-20 flex border-b border-zinc-200 bg-zinc-50/95 backdrop-blur" style={{ height: SHEET_ROW_H }}>
-            <div className="sticky left-0 z-10 flex items-center gap-1 border-r border-zinc-200 bg-zinc-50 px-2" style={{ width: HANDLE_W, minWidth: HANDLE_W }}>
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} aria-label="Select all rows" className="accent-[#0073EA]" />
-            </div>
-            {columns.map((col, ci) => (
+            {/* Corner above the gutter: empty, like Sheets. */}
+            <div className="sticky left-0 z-10 border-r border-zinc-200 bg-zinc-50" style={{ width: GUTTER_W, minWidth: GUTTER_W }} />
+            {columns.map((col) => (
               <div
                 key={col.id}
                 role="columnheader"
-                className="group/head flex items-center border-r border-zinc-100 px-1"
+                className="flex items-center border-r border-zinc-100 px-1"
                 style={{ width: col.width ?? COL_W, minWidth: col.width ?? COL_W }}
+                onContextMenu={(e) => {
+                  // Right-click inside a page-rendered field keeps the
+                  // browser's own menu (same guard as the row menu).
+                  if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
+                  if (!onHeaderContextMenu) return;
+                  e.preventDefault();
+                  onHeaderContextMenu(col.id, e.clientX, e.clientY);
+                }}
               >
                 <div className="min-w-0 flex-1">{renderHeader(col.id)}</div>
-                <button
-                  type="button"
-                  onClick={() => cycleSort(col.id)}
-                  title={sort?.colId === col.id ? (sort.dir === "asc" ? "Sorted A→Z — click for Z→A" : "Sorted Z→A — click to unsort") : "Sort"}
-                  className={`shrink-0 inline-flex h-5 w-5 items-center justify-center rounded ${
-                    sort?.colId === col.id ? "text-[#0073EA]" : "text-transparent group-hover/head:text-zinc-300 hover:!text-zinc-600"
-                  }`}
-                >
-                  {sort?.colId === col.id && sort.dir === "desc" ? <ArrowDown className="w-3.5 h-3.5" /> : <ArrowUp className="w-3.5 h-3.5" />}
-                </button>
-                <span data-colindex={ci} className="hidden" />
               </div>
             ))}
             <div className="flex items-center px-1" style={{ width: 44 }}>{headerTrailing}</div>
@@ -903,7 +989,7 @@ export function SheetGrid({
                   key={rowId}
                   role="row"
                   aria-rowindex={r + 1}
-                  className={`absolute left-0 right-0 flex border-b border-zinc-50 ${liveChecked.has(rowId) ? "bg-[#0073EA]/4" : ""}`}
+                  className="absolute left-0 right-0 flex border-b border-zinc-50"
                   style={{ top: r * SHEET_ROW_H, height: SHEET_ROW_H }}
                   onContextMenu={(e) => {
                     if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
@@ -912,22 +998,66 @@ export function SheetGrid({
                     onRowContextMenu(rowId, e.clientX, e.clientY);
                   }}
                 >
-                  <div className="sticky left-0 z-10 flex items-center gap-0.5 border-r border-zinc-200 bg-white px-2" style={{ width: HANDLE_W, minWidth: HANDLE_W }}>
-                    <input
-                      type="checkbox"
-                      checked={liveChecked.has(rowId)}
-                      onChange={() => toggleRow(rowId)}
-                      aria-label="Select row"
-                      className="accent-[#0073EA]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => onOpenRow(rowId)}
-                      title="Open row"
-                      className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-300 hover:bg-zinc-100 hover:text-zinc-600"
-                    >
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Row-number gutter cell: click selects the row, shift+
+                    * click extends the row span, drag (past the threshold)
+                    * reorders. Right-click bubbles to the row's context
+                    * menu above, like the rest of the row. */}
+                  <div
+                    className={`sticky left-0 z-10 flex items-center justify-end border-r border-zinc-200 pr-2 text-[11px] tabular-nums select-none ${
+                      range && r >= range.r1 && r <= range.r2 ? "bg-zinc-100 text-zinc-600" : "bg-white text-zinc-400"
+                    }`}
+                    style={{ width: GUTTER_W, minWidth: GUTTER_W, touchAction: "none" }}
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return; // right-click stays the context menu
+                      // Same as a cell mousedown: stealing focus from an open
+                      // editor blurs it, and blur is how editors commit.
+                      gridRef.current?.focus();
+                      e.preventDefault();
+                      // A scroll can unmount the captured gutter cell, and
+                      // Chrome then fires lostpointercapture at the document
+                      // where React's delegated handler never hears it — the
+                      // ref survives. On touch there are no hover moves to
+                      // self-heal, so THIS gesture would drive the previous
+                      // drag: abandon any stale drag before arming a new one.
+                      if (rowDragRef.current) endRowDrag(false);
+                      selectRow(rowId, e.shiftKey);
+                      // Shift extends a selection; it never starts a move.
+                      if (!onRowMove || e.shiftKey) return;
+                      pendingRowDragRef.current = { pointerId: e.pointerId, rowId, startY: e.clientY };
+                      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                    }}
+                    onPointerMove={(e) => {
+                      // Button already up means we missed the pointerup (a
+                      // failed capture and a release outside this cell).
+                      // Abandon rather than commit: a move the user never
+                      // saw land must not happen on a later hover.
+                      if (e.buttons === 0) { endRowDrag(false); return; }
+                      const pending = pendingRowDragRef.current;
+                      if (pending && pending.pointerId === e.pointerId && !rowDragRef.current) {
+                        if (Math.abs(e.clientY - pending.startY) <= ROW_DRAG_THRESHOLD_PX) return;
+                        const from = rowIndex.get(pending.rowId);
+                        // The row vanished mid-gesture (concurrent delete):
+                        // there is nothing left to move.
+                        if (from == null) { pendingRowDragRef.current = null; return; }
+                        const drag = { rowId: pending.rowId, from, gap: gapFromClientY(e.clientY) ?? from };
+                        rowDragRef.current = drag;
+                        setRowDrag(drag);
+                        return;
+                      }
+                      const drag = rowDragRef.current;
+                      if (!drag) return;
+                      const gap = gapFromClientY(e.clientY);
+                      if (gap != null && gap !== drag.gap) {
+                        const next = { ...drag, gap };
+                        rowDragRef.current = next;
+                        setRowDrag(next);
+                      }
+                    }}
+                    onPointerUp={(e) => { releasePointer(e); endRowDrag(true); }}
+                    onPointerCancel={(e) => { releasePointer(e); endRowDrag(false); }}
+                    onLostPointerCapture={() => endRowDrag(true)}
+                  >
+                    {r + 1}
                   </div>
                   {columns.map((col, c) => {
                     const isActive = active?.rowId === rowId && active.c === c;
@@ -978,6 +1108,17 @@ export function SheetGrid({
               ))
             )}
 
+            {/* Row-drag drop indicator: a 2px line centred on the candidate
+              * gap. z-30 so it rides above the sticky gutter cells (z-10)
+              * — the line must be visible across the numbers it is
+              * dropping between. */}
+            {rowDrag && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute left-0 right-0 z-30 bg-[#0073EA]"
+                style={{ top: rowDrag.gap * SHEET_ROW_H - 1, height: 2 }}
+              />
+            )}
             {fillPreview && (
               <div
                 aria-hidden
@@ -992,7 +1133,7 @@ export function SheetGrid({
                 className="absolute z-10 flex items-center justify-center"
                 style={{
                   top: (fillAnchor.r + 1) * SHEET_ROW_H - 7,
-                  left: (colOffsets[fillAnchor.c + 1] ?? HANDLE_W) - 7,
+                  left: (colOffsets[fillAnchor.c + 1] ?? GUTTER_W) - 7,
                   width: 14,
                   height: 14,
                   cursor: "crosshair",
@@ -1013,8 +1154,8 @@ export function SheetGrid({
                   const r = rowFromClientY(e.clientY);
                   if (r != null && r !== fillDrag.to) setFillDrag({ base: fillDrag.base, to: r });
                 }}
-                onPointerUp={(e) => { releaseFillPointer(e); endFillDrag(true); }}
-                onPointerCancel={(e) => { releaseFillPointer(e); endFillDrag(false); }}
+                onPointerUp={(e) => { releasePointer(e); endFillDrag(true); }}
+                onPointerCancel={(e) => { releasePointer(e); endFillDrag(false); }}
                 onLostPointerCapture={() => endFillDrag(true)}
               >
                 <div className="h-[7px] w-[7px] rounded-[1px] border border-white bg-[#0073EA]" />

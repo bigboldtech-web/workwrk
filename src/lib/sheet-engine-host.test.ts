@@ -222,6 +222,108 @@ describe("structure ops rewrite stored sources", () => {
   });
 });
 
+describe("rowMoved: the gutter drag never repoints a formula", () => {
+  // Four rows, values 10/20/30/40 in column a. Formulas are planted per test.
+  const make = (extra: Record<string, Record<string, unknown>> = {}) =>
+    createTableEngine({
+      columns: [col("a", "number"), col("b", "number")],
+      rows: [
+        row("r1", { a: 10, ...extra.r1 }),
+        row("r2", { a: 20, ...extra.r2 }),
+        row("r3", { a: 30, ...extra.r3 }),
+        row("r4", { a: 40, ...extra.r4 }),
+      ],
+    });
+
+  it("a ref TO the moved row follows it (move up)", () => {
+    // b1 watches r3 by address; r3 also watches its own row's a.
+    const engine = make({ r1: { b: { "=": "A3" } }, r3: { b: { "=": "A3*2" } } });
+    expect(engine.value("b", "r1")).toBe(30);
+    expect(engine.value("b", "r3")).toBe(60);
+
+    const res = engine.rowMoved("r3", 0); // order: r3, r1, r2, r4
+    // r3 is now row 1, so both refs rewrite to A1 — the watcher keeps
+    // watching r3, and r3's own formula keeps reading its own row.
+    expect(res.rewritten.cells).toEqual(
+      expect.arrayContaining([
+        { colId: "b", rowId: "r1", stored: { "=": "A1" } },
+        { colId: "b", rowId: "r3", stored: { "=": "A1*2" } },
+      ]),
+    );
+    expect(res.rewritten.cells).toHaveLength(2);
+    // Same data through new addresses: nothing recomputed to a new value.
+    expect(res.affected).toEqual([]);
+    expect(engine.value("b", "r1")).toBe(30);
+    expect(engine.value("b", "r3")).toBe(60);
+  });
+
+  it("rows between from and to shift by one (move up)", () => {
+    const engine = make({ r1: { b: { "=": "A2" } } }); // watches r2 (row 2)
+    expect(engine.value("b", "r1")).toBe(20);
+
+    engine.rowMoved("r4", 0); // order: r4, r1, r2, r3 — r2 slid down to row 3
+    expect(engine.cellSource("b", "r1")).toBe("=A3");
+    expect(engine.value("b", "r1")).toBe(20);
+  });
+
+  it("rows between from and to shift by one (move down)", () => {
+    const engine = make({ r4: { b: { "=": "A1+A2" } } }); // r1 (row 1) + r2 (row 2)
+    expect(engine.value("b", "r4")).toBe(30);
+
+    engine.rowMoved("r1", 2); // order: r2, r3, r1, r4
+    // r1 landed at row 3; r2 slid up to row 1.
+    expect(engine.cellSource("b", "r4")).toBe("=A3+A1");
+    expect(engine.value("b", "r4")).toBe(30);
+  });
+
+  it("a same-slot move is a recognised no-op", () => {
+    const engine = make({ r1: { b: { "=": "A2" } } });
+    const res = engine.rowMoved("r2", 1);
+    expect(res.rewritten.cells).toEqual([]);
+    expect(res.rewritten.columns).toEqual([]);
+    expect(res.affected).toEqual([]);
+    expect(engine.cellSource("b", "r1")).toBe("=A2");
+    expect(engine.value("b", "r1")).toBe(20);
+  });
+
+  it("column formulas and whole-column aggregates ride through unchanged", () => {
+    const engine = createTableEngine({
+      columns: [
+        col("a", "number"),
+        col("dbl", "formula", "Double", "A*2"), // per-row: current row's a
+        col("sum", "formula", "Sum", "SUM(A)"), // order-independent aggregate
+      ],
+      rows: [row("r1", { a: 1 }), row("r2", { a: 2 }), row("r3", { a: 4 })],
+    });
+    expect(engine.value("dbl", "r1")).toBe(2);
+    expect(engine.value("sum", "r1")).toBe(7);
+
+    const res = engine.rowMoved("r1", 2); // order: r2, r3, r1
+    // Bare column refs have no row coordinate, so nothing rewrites…
+    expect(res.rewritten.columns).toEqual([]);
+    expect(res.rewritten.cells).toEqual([]);
+    // …and every value survives keyed by rowId: same numbers, new order.
+    expect(res.affected).toEqual([]);
+    expect(engine.value("a", "r1")).toBe(1);
+    expect(engine.value("dbl", "r1")).toBe(2);
+    expect(engine.value("dbl", "r3")).toBe(8);
+    for (const rid of ["r1", "r2", "r3"]) expect(engine.value("sum", rid)).toBe(7);
+  });
+
+  it("clamps an out-of-range target instead of throwing", () => {
+    const engine = make({ r1: { b: { "=": "A1" } } });
+    engine.rowMoved("r1", 99); // clamps to the last slot: r2, r3, r4, r1
+    expect(engine.cellSource("b", "r1")).toBe("=A4");
+    expect(engine.value("b", "r1")).toBe(10);
+  });
+
+  it("an unknown rowId throws with the table untouched", () => {
+    const engine = make({ r1: { b: { "=": "A2" } } });
+    expect(() => engine.rowMoved("ghost", 0)).toThrow(/unknown row/);
+    expect(engine.cellSource("b", "r1")).toBe("=A2");
+  });
+});
+
 describe("clock snapshot", () => {
   it("one recalc pass sees exactly one TODAY()", () => {
     // Every clock() call advances a day: per-call evaluation would give the

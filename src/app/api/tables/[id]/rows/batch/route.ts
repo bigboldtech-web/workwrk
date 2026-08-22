@@ -2,9 +2,17 @@
 // Tables Phase 1 (docs/plans/tables.md): the sheet kernel's clears,
 // bulk deletes, pastes and fills all land here instead of a request
 // per cell. Body:
-//   { updates?: [{ id, values, expect? }],  // shallow-merge per row
+//   { updates?: [{ id, values, expect?, position? }],  // shallow-merge per row
 //     inserts?: [{ values? }],              // appended in order after max position
 //     deletes?: [id, ...] }
+//
+// An update entry's optional `position` renumbers the row in the same
+// transaction (the sheet's drag-to-move-row renumbers a whole span at
+// once). Position writes are UNCONDITIONAL — expect guards values only —
+// and a position-only entry ({ values: {} }) writes position and nothing
+// else. Uniqueness across the payload is the client's job: positions are
+// not unique-constrained in the schema, and the move gesture assigns a
+// permutation of positions the rows already held.
 // Caps keep a runaway client from hurting the server. All-or-nothing
 // transaction so a partial paste can't half-apply.
 //
@@ -81,7 +89,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const body = await req.json().catch(() => null);
-  const updates: { id: string; values: Record<string, unknown>; expect?: Record<string, unknown> }[] =
+  const updates: { id: string; values: Record<string, unknown>; expect?: Record<string, unknown>; position?: number }[] =
     Array.isArray(body?.updates)
       ? (body.updates as unknown[])
           .filter((u): u is { id: string; values: Record<string, unknown> } => {
@@ -94,11 +102,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             // every entry did before the guard existed — matching the
             // single-row PATCH's treatment of its expect field.
             const rawExpect = (u as { expect?: unknown }).expect;
+            // Optional explicit position: the sheet's row-move renumbers a
+            // span of rows in the same transaction as its value writes.
+            // Integer-gated because DataTableRow.position is an Int — a
+            // float would throw inside the transaction, after other rows
+            // already took writes. Malformed position drops like malformed
+            // expect does: the entry still applies its values.
+            const rawPosition = (u as { position?: unknown }).position;
             return {
               id: u.id,
               values: u.values,
               ...(typeof rawExpect === "object" && rawExpect !== null && !Array.isArray(rawExpect)
                 ? { expect: rawExpect as Record<string, unknown> }
+                : {}),
+              ...(typeof rawPosition === "number" && Number.isInteger(rawPosition)
+                ? { position: rawPosition }
                 : {}),
             };
           })
@@ -176,6 +194,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // value would be a byte-identical echo, and writing it would still
     // bump updatedAt and take a pointless row lock).
     const applied = new Set<string>();
+    // Explicit position per row (row-move renumbering). Kept apart from
+    // `applied` so a position-only entry never writes `values` back: the
+    // merged map holds a snapshot read at transaction start, and echoing
+    // it would clobber any write that landed between our SELECT and this
+    // UPDATE on a row whose values this payload never touched.
+    const positionByRow = new Map<string, number>();
     const conflictsByRow = new Map<string, Set<string>>();
     let missingIds: string[] = [];
     if (updates.length > 0) {
@@ -205,6 +229,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       for (const u of updates) {
         const base = merged.get(u.id);
         if (!base) continue; // concurrently deleted — reported via missingIds
+        // Position rides OUTSIDE the expect gate, on purpose: a row move
+        // renumbers rows the user never edited, and a stale cell guard on
+        // one of them must not leave the table half-reordered. Later
+        // entries for the same row win, like value keys do.
+        if (u.position !== undefined) positionByRow.set(u.id, u.position);
         if (u.expect) {
           const cols = expectConflicts(dbValues.get(u.id)!, u.expect);
           if (cols.length > 0) {
@@ -217,14 +246,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           }
         }
         merged.set(u.id, { ...base, ...u.values });
-        applied.add(u.id);
+        // A keyless entry (position-only move payload) marks nothing
+        // applied: writing its merged value would be the snapshot echo the
+        // positionByRow comment above exists to prevent.
+        if (Object.keys(u.values).length > 0) applied.add(u.id);
       }
       // Issue in id order so concurrent batches take row locks in the
-      // same sequence and can't deadlock each other.
-      for (const rowId of [...applied].sort()) {
+      // same sequence and can't deadlock each other. Rows that carry only
+      // a position write (values: {}) still take exactly one UPDATE; a
+      // values write and a position write to the same row share one.
+      for (const rowId of [...new Set([...applied, ...positionByRow.keys()])].sort()) {
         await tx.dataTableRow.update({
           where: { id: rowId },
-          data: { values: merged.get(rowId) as Prisma.InputJsonValue },
+          data: {
+            ...(applied.has(rowId) ? { values: merged.get(rowId) as Prisma.InputJsonValue } : {}),
+            ...(positionByRow.has(rowId) ? { position: positionByRow.get(rowId)! } : {}),
+          },
         });
       }
     }
