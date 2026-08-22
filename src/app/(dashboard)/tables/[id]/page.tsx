@@ -44,6 +44,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { ColumnFormatMenu } from "@/components/tables/column-format-menu";
 import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
+import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
@@ -72,7 +73,7 @@ type Column = {
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
 type ViewType = "grid" | "kanban" | "calendar" | "gallery";
-type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" } } };
+type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string } } };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
@@ -375,6 +376,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const viewsRef = useRef<SavedView[]>([]);
   const [filterCol, setFilterCol] = useState<string>("");
   const [filterValue, setFilterValue] = useState<string>("");
+  /* Live selection from the kernel: ORDERED display rowIds plus the
+   * inclusive column-index span (contract shape), null when selection
+   * clears. Feeds the Sheets-style stats cluster in the bottom tab bar. */
+  const [gridSelection, setGridSelection] = useState<{ rowIds: string[]; c1: number; c2: number } | null>(null);
+  // Row ids are per-table: a payload from the previous sheet's kernel must
+  // never feed stats over the next sheet's rows.
+  useEffect(() => { setGridSelection(null); }, [tableId]);
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
   // Relational: rows of every table this one links to (for pickers + lookup/rollup).
   const [linkedTables, setLinkedTables] = useState<Record<string, LinkedTable>>({});
@@ -552,6 +560,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
       viewsRef.current = savedViews;
       setSortState(savedViews[0]?.config?.sort ?? null);
+      // Filter restores from the same first-view config sort does, but only
+      // while its column still exists: applying a filter over a deleted
+      // column would silently blank the whole sheet.
+      const savedFilter = savedViews[0]?.config?.filter;
+      // Restore only what the filter UI can SHOW: the column must still be a
+      // select/multi_select and the saved value still among its options —
+      // otherwise the filter would hide rows while both dropdowns render as
+      // "No filter"/"Any value", an invisible filter with no way to clear it.
+      const fcol = savedFilter ? t.columns.find((c) => c.id === savedFilter.colId) : undefined;
+      const liveFilter = savedFilter && fcol
+        && (fcol.type === "select" || fcol.type === "multi_select")
+        && (!savedFilter.value || (fcol.options ?? []).includes(savedFilter.value))
+        ? savedFilter : null;
+      setFilterCol(liveFilter?.colId ?? "");
+      setFilterValue(liveFilter?.value ?? "");
       savedColumnsRef.current = t.columns;
     } catch (e) {
       // A stale stream that failed (or was deliberately aborted by the
@@ -1069,6 +1092,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setSortState(sn);
     const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
     const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, sort: sn ?? undefined } } : v));
+    viewsRef.current = next;
+    void patchTable({ views: next });
+  };
+
+  /** Filters ride the same first-view config JSON sort does, written just
+   *  as eagerly (persistSort above is the template). Only a FULLY set
+   *  filter persists: the apply path needs both colId and value, so a
+   *  half-picked filter (column chosen, no value yet) is a no-op that is
+   *  not worth resurrecting on reload. `undefined` drops the key in the
+   *  PATCH body's JSON, which is how clearing reaches the server. */
+  const persistFilter = (colId: string, value: string) => {
+    setFilterCol(colId);
+    setFilterValue(value);
+    const filter = colId && value ? { colId, value } : undefined;
+    const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
+    const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, filter } } : v));
     viewsRef.current = next;
     void patchTable({ views: next });
   };
@@ -1859,6 +1898,55 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return sortState.dir === "asc" ? out : -out;
     });
   }, [filteredRows, sortState, table?.columns, engineHost, relationalValue, engineVersion]);
+
+  /* ── Selection stats (Sheets' bottom-right readout) ──────────────
+   * Values for the selected rectangle: literals from row.values, computed
+   * cells (formula/lookup/rollup columns, or a raw {"=": src} cell)
+   * through the engine host. Aggregation itself is lib/sheet-stats. */
+  const statsText = useMemo(() => {
+    void engineVersion; // computed values change when the host mutates in place
+    // Mid-stream the host holds a partial (or previous) row set. A sum
+    // over that set is a lie, so the readout gates out entirely.
+    if (streamProgress) return null;
+    if (!gridSelection || !table) return null;
+    // Clamp the span: a payload can outlive a column delete by a frame.
+    const cols = table.columns.slice(
+      Math.max(0, Math.min(gridSelection.c1, gridSelection.c2)),
+      Math.max(gridSelection.c1, gridSelection.c2) + 1,
+    );
+    const cellCount = gridSelection.rowIds.length * cols.length;
+    if (cellCount < 2) return null; // single cell or empty: Sheets shows nothing
+    // Work cap: past 100k cells the value walk (every computed cell is an
+    // engine read) can stall the frame the selection settles on. The cell
+    // count needs only arithmetic, so show it and skip the reads.
+    if (cellCount > 100_000) return `Cells: ${cellCount.toLocaleString()}`;
+    const values: unknown[] = [];
+    for (const rowId of gridSelection.rowIds) {
+      const r = rowById.get(rowId);
+      if (!r) continue; // stale id (row deleted after the payload fired): empty
+      for (const c of cols) {
+        values.push(
+          // Lookup/rollup are computed display-time from linked tables — the
+          // engine host has no relational awareness, so reading it here would
+          // yield null for cells the grid shows as numbers.
+          c.type === "lookup" || c.type === "rollup"
+            ? relationalValue(c, r)
+            : c.type === "formula" || isFormulaCell(r.values[c.id])
+              // Errors flatten to code strings; the lib keeps them out of numerics.
+              ? engineHost.value(c.id, r.id)
+              : r.values[c.id],
+        );
+      }
+    }
+    const s = selectionStats(values);
+    if (!s) return null; // fewer than 2 non-empty cells: nothing to say
+    // Plain locale numbers on purpose: Sheets does not carry the column's
+    // format into this readout either.
+    const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    return s.numeric >= 2
+      ? `Sum: ${fmt(s.sum)} · Avg: ${fmt(s.avg)} · Min: ${fmt(s.min)} · Max: ${fmt(s.max)} · Count: ${s.numeric.toLocaleString()}`
+      : `Count: ${s.nonEmpty.toLocaleString()}`;
+  }, [gridSelection, engineVersion, streamProgress, table, rowById, engineHost, relationalValue]);
 
   // ── Active-cell tracking for the formula bar ────────────────────
   // The sheet kernel owns selection internally (and this wave does not touch
@@ -2675,14 +2763,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             </div>
             <div className="dtbl__filterwrap">
               <Filter />
-              <select value={filterCol} onChange={(e) => { setFilterCol(e.target.value); setFilterValue(""); }}>
+              <select value={filterCol} onChange={(e) => persistFilter(e.target.value, "")}>
                 <option value="">No filter</option>
                 {table.columns.filter((c) => c.type === "select" || c.type === "multi_select").map((c) => (
                   <option key={c.id} value={c.id}>{c.label}</option>
                 ))}
               </select>
               {filterColDef && (
-                <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}>
+                <select value={filterValue} onChange={(e) => persistFilter(filterCol, e.target.value)}>
                   <option value="">Any value</option>
                   {(filterColDef.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
@@ -2736,6 +2824,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
             sort={sortState}
             onSortChange={(sn) => persistSort(sn)}
+            onSelectionChange={(sel) => setGridSelection(sel)}
             renderHeader={kernelHeader}
             headerTrailing={
               <button
@@ -2757,6 +2846,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       <SheetTabsBar
         currentId={tableId}
         currentName={table.name}
+        stats={statsText}
         meta={streamProgress
           // Multi-chunk stream in flight: the muted meta span doubles as the
           // Sheets-like progress line; the normal counts return on completion.
@@ -2832,7 +2922,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
  *  (auto-suffixed against the fetched names) and navigates straight into
  *  it. Horizontal scroll on overflow; the row/column meta that used to sit
  *  in the old header lives at the bar's right end. */
-function SheetTabsBar({ currentId, currentName, meta }: { currentId: string | null; currentName: string; meta: string }) {
+function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: string | null; currentName: string; meta: string; stats?: string | null }) {
   const router = useRouter();
   const { toast } = useOsToast();
   const { bumpRowVersion } = useOsShell();
@@ -2906,6 +2996,12 @@ function SheetTabsBar({ currentId, currentName, meta }: { currentId: string | nu
           </button>
         ))}
       </div>
+      {stats ? (
+        /* Selection stats: reuses the meta span's class so the cluster
+           inherits the strip's flex push (tabs own all free space, so the
+           two spans sit adjacent at the right edge with zero new layout). */
+        <span className="shx__tabbar-meta">{stats}</span>
+      ) : null}
       <span className="shx__tabbar-meta">{meta}</span>
     </footer>
   );

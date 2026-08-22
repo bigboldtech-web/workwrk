@@ -131,6 +131,13 @@ export type SheetGridProps = {
   /** Extra inline style for a cell (conditional-formatting background).
    *  Page-owned semantics; the grid just paints what it is told. */
   cellStyle?: (rowId: string, colId: string) => React.CSSProperties | undefined;
+  /** Selection readout (Tables Phase 5b stats). Called with the range's
+   *  rowIds in CURRENT display order plus the inclusive column-index span
+   *  when a multi-cell selection settles; null when the selection clears
+   *  or collapses to a single cell. Coalesced to at most one call per
+   *  animation frame and deduped by content, so wiring it costs the page
+   *  nothing until the selection actually changes. */
+  onSelectionChange?: (sel: { rowIds: string[]; c1: number; c2: number } | null) => void;
   sort: SheetSort;
   onSortChange: (sort: SheetSort) => void;
   /** Header extras (type icon, rename input, config buttons) — the page's
@@ -148,6 +155,7 @@ export function SheetGrid({
   columns, rowIds, renderDisplay, renderEditor, onClearCells, onDeleteRows,
   onOpenRow, onRowContextMenu, sort, onSortChange, renderHeader, headerTrailing,
   footer, readOnlyCols, getRangeValues, applyMatrix, onUndo, onRedo, cellStyle,
+  onSelectionChange,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -214,6 +222,49 @@ export function SheetGrid({
 
   const inRange = (r: number, c: number) =>
     !!range && r >= range.r1 && r <= range.r2 && c >= range.c1 && c <= range.c2;
+
+  /* ── selection readout (Tables Phase 5b stats) ──────────────── */
+  // The callback lives in a ref so a page that passes an inline arrow
+  // doesn't retrigger the emission effect on every parent render.
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  useEffect(() => { onSelectionChangeRef.current = onSelectionChange; });
+  // Content key of the last emission. Starts at the no-selection key so
+  // mounting with nothing selected emits nothing. The dedupe is by VALUE,
+  // not identity, and that is load-bearing: the page passes a fresh
+  // rowIds array every render, so `range` (memoized on rowIndex, which is
+  // memoized on rowIds) gets a new identity every parent render too. An
+  // identity-keyed dedupe would then loop forever: emit → page setState →
+  // re-render → new identities → effect → emit… The value key makes the
+  // second pass a no-op and the loop terminates in one round.
+  const lastSelKeyRef = useRef("null");
+  useEffect(() => {
+    if (!onSelectionChangeRef.current) return; // unwired: zero cost
+    // One rAF per effect run, cancelled by the next run's cleanup: any
+    // burst of selection changes (shift+arrow key-repeat, rows reordering
+    // under a live range) collapses to at most one emission per animation
+    // frame, and the trailing schedule always sees the LATEST state — the
+    // settle is never lost. Every path that moves the selection funnels
+    // through setActive/setAnchor into the `range` memo above, so this one
+    // effect covers click, shift+click, shift+arrows, Cmd/Ctrl+A, Escape,
+    // paste/fill landing (selectRect) and rows vanishing under the range.
+    // The fill-handle drag never touches `range` mid-drag (it renders from
+    // fillDrag state and commits via selectRect on release), so a drag
+    // emits exactly once, at the settle.
+    const raf = requestAnimationFrame(() => {
+      const fn = onSelectionChangeRef.current;
+      if (!fn) return;
+      // A single cell is not a range: Sheets shows no readout for one
+      // cell, so the page hears null and clears its stats.
+      const sel = range != null && (range.r1 !== range.r2 || range.c1 !== range.c2)
+        ? { rowIds: rowIds.slice(range.r1, range.r2 + 1), c1: range.c1, c2: range.c2 }
+        : null;
+      const key = sel == null ? "null" : `${sel.c1}:${sel.c2}:${sel.rowIds.join("\u0000")}`;
+      if (key === lastSelKeyRef.current) return; // identity churn, not a change
+      lastSelKeyRef.current = key;
+      fn(sel);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [range, rowIds]);
 
   const scrollCellIntoView = useCallback((r: number, c: number) => {
     const el = scrollRef.current;
