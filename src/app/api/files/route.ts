@@ -123,7 +123,17 @@ export async function POST(req: NextRequest) {
   const mimeType = typeof body.mimeType === "string" ? body.mimeType : "application/octet-stream";
   const size = Number(body.size) || 0;
   const url = typeof body.url === "string" ? body.url : "";
-  const s3Key = typeof body.s3Key === "string" && body.s3Key ? body.s3Key.slice(0, 512) : null;
+  // The client passes s3Key explicitly; as a belt-and-braces for any
+  // caller that forgets, derive it from a presigned S3 URL's path
+  // (fleet finding: seven upload flows each had to remember this).
+  let s3Key = typeof body.s3Key === "string" && body.s3Key ? body.s3Key.slice(0, 512) : null;
+  if (!s3Key && typeof body.url === "string" && body.url.includes("X-Amz-")) {
+    try {
+      const path = decodeURIComponent(new URL(body.url).pathname.replace(/^\//, ""));
+      const bucket = process.env.S3_BUCKET || "";
+      s3Key = (bucket && path.startsWith(bucket + "/") ? path.slice(bucket.length + 1) : path).slice(0, 512) || null;
+    } catch { /* not a parsable URL — leave null */ }
+  }
   const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
   let spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
   const spaceFolderId = typeof body.spaceFolderId === "string" && body.spaceFolderId ? body.spaceFolderId : null;

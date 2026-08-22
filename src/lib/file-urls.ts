@@ -6,13 +6,13 @@
 // expires. Presigning is local HMAC math (no network round-trip), so
 // mapping a whole listing is cheap.
 
-import { presignGetUrl } from "@/lib/s3";
+import { presignGetUrlStable } from "@/lib/s3";
 
 export async function withFreshFileUrls<T extends { url: string; s3Key?: string | null }>(rows: T[]): Promise<T[]> {
   return Promise.all(rows.map(async (row) => {
     if (!row.s3Key) return row;
     try {
-      return { ...row, url: await presignGetUrl(row.s3Key, 3600) };
+      return { ...row, url: await presignGetUrlStable(row.s3Key) };
     } catch {
       // A presign failure (e.g. S3 unconfigured after a data migration)
       // must not blank the listing — the stale URL is better than none.

@@ -41,6 +41,7 @@ export function FileDropZone({ spaceFolderId, spaceId, disabled, label }: FileDr
         const u = await up.json();
         const url = u.url ?? u.data?.url;
         if (!url) continue;
+        const s3KeyVal = typeof (u.s3Key ?? u.data?.s3Key) === "string" ? (u.s3Key ?? u.data?.s3Key) : null;
         const res = await fetch("/api/files", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -49,6 +50,7 @@ export function FileDropZone({ spaceFolderId, spaceId, disabled, label }: FileDr
             mimeType: f.type || "application/octet-stream",
             size: f.size,
             url,
+            ...(s3KeyVal ? { s3Key: s3KeyVal } : {}),
             ...(spaceFolderId ? { spaceFolderId } : {}),
             ...(spaceId && !spaceFolderId ? { spaceId } : {}),
           }),

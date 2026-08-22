@@ -94,6 +94,17 @@ export async function presignPutUrl(params: {
  *  the browser can fetch the screenshot directly. Presigning is the
  *  right call here (vs. public-read bucket policy) because Scribe
  *  screenshots can contain internal systems, customer data, prices. */
+/** Presign with an hour-bucketed signing date: the URL is IDENTICAL for
+ *  all requests within the same clock hour (browser caches keep working
+ *  across listing refetches) and stays valid ≥ 1 hour into the next
+ *  bucket because the expiry window is two hours from the bucket start. */
+export async function presignGetUrlStable(key: string): Promise<string> {
+  const bucketStart = new Date(Math.floor(Date.now() / 3_600_000) * 3_600_000);
+  const client = getS3Client();
+  const cmd = new GetObjectCommand({ Bucket: getBucket(), Key: key });
+  return getSignedUrl(client, cmd, { expiresIn: 7200, signingDate: bucketStart });
+}
+
 export async function presignGetUrl(key: string, expiresInSeconds: number = 3600): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: getBucket(),
