@@ -8,7 +8,7 @@
  * no views, no filtering for v1 — just rows + cells + types.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
@@ -22,6 +22,7 @@ import { MenuList, MenuItem } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
+import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup" | "attachment" | "person";
@@ -40,7 +41,7 @@ type Column = {
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
 type ViewType = "grid" | "kanban" | "calendar" | "gallery";
-type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string } };
+type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" } } };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
@@ -89,6 +90,38 @@ function newId() { return Math.random().toString(36).slice(2, 10); }
 // Sticky header cells stay pinned while the grid body scrolls.
 const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, background: "#fff" };
 
+// The batch route 400s a whole request above MAX_OPS ops of one kind
+// (api/tables/[id]/rows/batch), and select-all happily spans thousands of
+// rows — so bulk work ships in slices this size.
+const BATCH_MAX_OPS = 500;
+
+// Columns that sort as magnitudes. The column type has to decide this:
+// parseFloat stops at the dash, so guessing from the string reads
+// "2026-01-15" as 2026 and every same-year date compares equal.
+const NUMERIC_SORT_TYPES = new Set<ColType>(["number", "currency", "percent", "rating"]);
+
+/** Compare two cell values for the given column type. Dates are left to the
+ *  collator on purpose: the date editor writes ISO "YYYY-MM-DD", which is
+ *  fixed-width and so already chronological as text, and numeric collation
+ *  also orders the un-padded dates a CSV import can leave behind — both
+ *  without Date()'s timezone shifts and NaN cliffs. */
+function compareCells(type: ColType, va: unknown, vb: unknown): number {
+  // formula/rollup are typed by their result, not by the column.
+  if (NUMERIC_SORT_TYPES.has(type) || (typeof va === "number" && typeof vb === "number")) {
+    const na = typeof va === "number" ? va : parseFloat(String(va));
+    const nb = typeof vb === "number" ? vb : parseFloat(String(vb));
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  }
+  return String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+/* Escape must cancel, never save. Blur is what commits every text-ish editor
+ * in this file, and Escape has to blur to close the editor — so the host
+ * raises this flag first and each blur handler reads it synchronously (a ref,
+ * not state: blur fires in the same tick). Null outside the sheet kernel,
+ * where editors commit on blur exactly as before. */
+const CellEditCancel = createContext<{ current: boolean } | null>(null);
+
 export default function TableEditorPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -107,6 +140,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [activeViewId, setActiveViewId] = useState<string>("");
   const [calMonth, setCalMonth] = useState<Date>(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [search, setSearch] = useState("");
+  const [sortState, setSortState] = useState<SheetSort>(null);
+  // Escape hatch to the pre-kernel table while the sheet kernel bakes
+  // (docs/plans/tables.md Phase 1 rollout discipline).
+  const [classicGrid, setClassicGrid] = useState(false);
+  useEffect(() => {
+    try { setClassicGrid(localStorage.getItem("workwrk:tables:classic") === "1"); } catch { /* private mode */ }
+  }, []);
   const [filterCol, setFilterCol] = useState<string>("");
   const [filterValue, setFilterValue] = useState<string>("");
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
@@ -272,6 +312,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setView(v.type);
     setKanbanCol(v.config?.kanbanCol ?? "");
     setCalCol(v.config?.calCol ?? "");
+    setSortState(v.config?.sort ?? null);
   }, [activeViewId, views]);
 
   async function addColumn(type: ColType) {
@@ -390,6 +431,50 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch { toast("Cell didn't save"); }
   }
 
+  async function clearCells(cells: { rowId: string; colId: string }[]) {
+    if (!tableId || cells.length === 0) return;
+    const byRow = new Map<string, Record<string, unknown>>();
+    for (const c of cells) {
+      const m = byRow.get(c.rowId) ?? {};
+      m[c.colId] = null;
+      byRow.set(c.rowId, m);
+    }
+    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    const updates = [...byRow].map(([id, values]) => ({ id, values }));
+    try {
+      // Sequential slices: a failure part-way stops the rest, and the reload
+      // in the catch reconciles whatever did land — the UI never keeps an
+      // optimistic clear the server rejected.
+      for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error();
+      }
+    } catch { toast("Couldn't clear cells"); void load(); }
+  }
+
+  async function bulkDeleteRows(ids: string[]) {
+    if (!tableId || ids.length === 0) return;
+    if (!(await confirm({
+      title: `Delete ${ids.length} row${ids.length === 1 ? "" : "s"}`,
+      description: "Deleted rows can't be recovered.",
+      destructive: true, confirmLabel: "Delete",
+    }))) return;
+    const doomed = new Set(ids);
+    setRows((prev) => prev ? prev.filter((r) => !doomed.has(r.id)) : prev);
+    try {
+      for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ deletes: ids.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error();
+      }
+    } catch { toast("Couldn't delete rows"); void load(); }
+  }
+
   async function deleteRow(rowId: string) {
     if (!tableId) return;
     if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
@@ -453,6 +538,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     (rows ?? []).forEach((r, i) => m.set(r.id, i));
     return m;
   }, [rows]);
+
+  // Formulas are anchored to a row's index in the unsorted `rows` array. A row
+  // the engine hasn't indexed yet (an optimistic insert still in flight) has no
+  // index: render blank rather than row 0's value, which would be plausible and
+  // wrong — a silently wrong number is worse than an empty cell.
+  const formulaValue = (colIndex: number, rowId: string): number | string => {
+    const ri = rowIndexById.get(rowId);
+    return ri === undefined ? "" : formulaEngine.cellValue(colIndex, ri);
+  };
 
   // Lookup/rollup compute: follow the column's link → gather linked rows →
   // pull a field (lookup) or aggregate it (rollup). Returns a display value.
@@ -539,6 +633,118 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const filterColDef = table.columns.find((c) => c.id === filterCol);
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
 
+  // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
+  const rowById = new Map(rows.map((r) => [r.id, r] as const));
+
+  const cellSortValue = (col: Column, r: ApiRow): unknown => {
+    const ci = table.columns.findIndex((c) => c.id === col.id);
+    if (col.type === "formula") return formulaValue(ci, r.id);
+    if (col.type === "lookup" || col.type === "rollup") return relationalValue(col, r);
+    return r.values[col.id];
+  };
+
+  const sortedRows = (() => {
+    if (!sortState) return filteredRows;
+    const col = table.columns.find((c) => c.id === sortState.colId);
+    if (!col) return filteredRows;
+    return [...filteredRows].sort((a, b) => {
+      const va = cellSortValue(col, a);
+      const vb = cellSortValue(col, b);
+      const ea = va == null || va === "";
+      const eb = vb == null || vb === "";
+      if (ea !== eb) return ea ? 1 : -1; // empties always last
+      const out = compareCells(col.type, va, vb);
+      return sortState.dir === "asc" ? out : -out;
+    });
+  })();
+
+  const displayCell = (rowId: string, colId: string): React.ReactNode => {
+    const r = rowById.get(rowId);
+    const c = table.columns.find((x) => x.id === colId);
+    if (!r || !c) return null;
+    const v = r.values[c.id];
+    switch (c.type) {
+      case "formula": {
+        const ci = table.columns.findIndex((x) => x.id === colId);
+        const fv = formulaValue(ci, r.id);
+        const err = typeof fv === "string" && fv.startsWith("#");
+        return <span style={err ? { color: "#dc2626" } : undefined}>{fv == null ? "" : String(fv)}</span>;
+      }
+      case "lookup": case "rollup": { const rv = relationalValue(c, r); return rv == null ? null : String(rv); }
+      case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null;
+      case "rating": { const n = typeof v === "number" ? v : 0; return n ? "★".repeat(n) : null; }
+      case "currency": return v == null || v === "" ? null : `$${v}`;
+      case "percent": return v == null || v === "" ? null : `${v}%`;
+      case "multi_select": return Array.isArray(v) ? (v as string[]).join(", ") : null;
+      case "person": {
+        const arr = Array.isArray(v) ? (v as string[]) : [];
+        return arr.length ? arr.map((id) => userName(orgUsers.find((u) => u.id === id))).join(", ") : null;
+      }
+      case "link": {
+        const lt = c.linkTableId ? linkedTables[c.linkTableId] : undefined;
+        const arr = Array.isArray(v) ? (v as string[]) : [];
+        return arr.length ? arr.map((id) => rowTitle(lt?.rows.find((x) => x.id === id), lt?.titleColId ?? "")).join(", ") : null;
+      }
+      case "attachment": { const arr = Array.isArray(v) ? v : []; return arr.length ? `📎 ${arr.length}` : null; }
+      default: return v == null || v === "" ? null : String(v);
+    }
+  };
+
+  const kernelHeader = (colId: string) => {
+    const c = table.columns.find((x) => x.id === colId);
+    if (!c) return null;
+    const colIndex = table.columns.findIndex((x) => x.id === colId);
+    return (
+      <div className="dtbl__col-head" style={{ position: "relative", opacity: dragColId === c.id ? 0.5 : 1 }}
+        onDragOver={(e) => { if (dragColId) e.preventDefault(); }}
+        onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
+      >
+        <span
+          className="dtbl__col-icon"
+          title={`Column ${columnLetter(colIndex)} · drag to reorder`}
+          draggable
+          onDragStart={() => setDragColId(c.id)}
+          onDragEnd={() => setDragColId(null)}
+          style={{ cursor: "grab" }}
+        >{COL_ICON[c.type]}</span>
+        <input
+          type="text"
+          value={c.label}
+          onChange={(e) => setTable({ ...table, columns: table.columns.map((x) => x.id === c.id ? { ...x, label: e.target.value } : x) })}
+          onBlur={(e) => renameColumn(c.id, e.target.value.trim() || COL_LABEL[c.type])}
+        />
+        {c.type === "formula" ? (
+          <button type="button" className="dtbl__col-del" onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
+        ) : null}
+        {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
+          <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
+        ) : null}
+        <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
+        <span
+          onMouseDown={(e) => startResize(e, c.id)}
+          title="Drag to resize"
+          style={{ position: "absolute", right: -6, top: 0, bottom: 0, width: 8, cursor: "col-resize" }}
+        />
+      </div>
+    );
+  };
+
+  const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
+    const r = rowById.get(rowId);
+    const c = table.columns.find((x) => x.id === colId);
+    if (!r || !c) return null;
+    const inner = c.type === "link" ? (
+      <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+    ) : c.type === "attachment" ? (
+      <AttachmentCell value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+    ) : c.type === "person" ? (
+      <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+    ) : (
+      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+    );
+    return <SheetEditorHost seed={opts.seed} commit={opts.commit}>{inner}</SheetEditorHost>;
+  };
+
   return (
     <div className="dtbl">
       <header className="dtbl__head">
@@ -612,6 +818,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => updateActiveView({ type: "kanban" })} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
         <button type="button" className={view === "calendar" ? "is-active" : ""} onClick={() => updateActiveView({ type: "calendar" })} disabled={dateColumns.length === 0} title={dateColumns.length === 0 ? "Add a Date column to enable Calendar" : ""}><CalIcon /> Calendar</button>
         <button type="button" className={view === "gallery" ? "is-active" : ""} onClick={() => updateActiveView({ type: "gallery" })}><LayoutGrid /> Gallery</button>
+        {view === "grid" && (
+          <button
+            type="button"
+            title={classicGrid ? "Switch to the spreadsheet grid" : "Switch to the classic grid"}
+            onClick={() => setClassicGrid((v) => {
+              const n = !v;
+              try { localStorage.setItem("workwrk:tables:classic", n ? "1" : "0"); } catch { /* private mode */ }
+              return n;
+            })}
+            style={{ opacity: 0.7 }}
+          >{classicGrid ? "⌗ Sheet" : "≡ Classic"}</button>
+        )}
         {view === "kanban" && kanbanColumns.length > 1 && (
           <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => updateActiveView({ config: { kanbanCol: e.target.value } })}>
             {kanbanColumns.map((c) => <option key={c.id} value={c.id}>Group by: {c.label}</option>)}
@@ -695,6 +913,36 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         />
       ) : view === "gallery" ? (
         <GalleryView rows={filteredRows} columns={table.columns} titleCol={titleCol} onCardClick={(rowId) => setActiveRowId(rowId)} />
+      ) : !classicGrid ? (
+        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 20px" }}>
+          <SheetGrid
+            columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
+            rowIds={sortedRows.map((r) => r.id)}
+            renderDisplay={displayCell}
+            renderEditor={kernelEditor}
+            onClearCells={(cells) => void clearCells(cells)}
+            onDeleteRows={(ids) => void bulkDeleteRows(ids)}
+            onOpenRow={(id) => setActiveRowId(id)}
+            onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
+            sort={sortState}
+            onSortChange={(sn) => { setSortState(sn); updateActiveView({ config: { sort: sn ?? undefined } }); }}
+            renderHeader={kernelHeader}
+            headerTrailing={
+              <details>
+                <summary style={{ listStyle: "none", cursor: "pointer", display: "inline-flex" }}><Plus style={{ width: 15, height: 15, color: "#71717a" }} /></summary>
+                <div className="dtbl__addcol-menu" style={{ position: "absolute", right: 8, zIndex: 40 }}>
+                  {columnTypes.map((t) => (
+                    <button key={t} type="button" onClick={() => addColumn(t)}>
+                      <span>{COL_ICON[t]}</span> {COL_LABEL[t]}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            }
+            footer={<button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>}
+            readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup").map((c) => c.id))}
+          />
+        </div>
       ) : (
       <>
       <div className="dtbl__scroll">
@@ -779,7 +1027,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 {table.columns.map((c, colIndex) => (
                   <td key={c.id} className="dtbl__cell" style={c.width ? { width: c.width, minWidth: c.width, maxWidth: c.width } : undefined}>
                     {c.type === "formula" ? (
-                      <FormulaCell value={formulaEngine.cellValue(colIndex, rowIndexById.get(r.id) ?? 0)} />
+                      <FormulaCell value={formulaValue(colIndex, r.id)} />
                     ) : c.type === "link" ? (
                       <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     ) : c.type === "lookup" || c.type === "rollup" ? (
@@ -1092,14 +1340,67 @@ function FormulaCell({ value }: { value: number | string }) {
   );
 }
 
+/** Hosts an existing cell editor inside the sheet kernel: autofocuses
+ *  the first input, applies the type-to-replace seed, and commits back
+ *  to the kernel when focus leaves the editor subtree. Existing editors
+ *  save on blur, so commit-on-focus-exit preserves their semantics — and
+ *  Escape has to suppress that save (see CellEditCancel) rather than just
+ *  close, or cancelling would write the in-progress value. */
+function SheetEditorHost({ children, seed, commit }: { children: React.ReactNode; seed: string | null; commit: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef(false);
+  useEffect(() => {
+    cancelRef.current = false; // a freshly opened editor is always committable
+    const el = ref.current?.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
+    if (!el) return;
+    el.focus();
+    const textish = (el instanceof HTMLInputElement && ["text", "number", "email", "url"].includes(el.type)) || el instanceof HTMLTextAreaElement;
+    if (seed && textish) {
+      el.value = seed;
+      try { (el as HTMLInputElement).setSelectionRange?.(seed.length, seed.length); } catch { /* number inputs */ }
+    } else if (textish && el instanceof HTMLInputElement && el.type !== "number") {
+      el.select();
+    }
+  }, [seed]);
+  return (
+    <div
+      ref={ref}
+      onBlurCapture={(e) => {
+        const next = e.relatedTarget as Node | null;
+        if (!next || !ref.current?.contains(next)) commit();
+      }}
+      onKeyDown={(e) => {
+        // Any other keystroke means the user is still editing — a stale cancel
+        // must never swallow the commit that follows it.
+        if (e.key !== "Escape") cancelRef.current = false;
+        if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) {
+          e.stopPropagation();
+          (e.target as HTMLElement).blur?.();
+        }
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          cancelRef.current = true; // set before the blur the editors commit on
+          (e.target as HTMLElement).blur?.();
+          commit(); // close even if the focused node had nothing to blur
+        }
+      }}
+    >
+      <CellEditCancel.Provider value={cancelRef}>{children}</CellEditCancel.Provider>
+    </div>
+  );
+}
+
 function CellEditor({ column, value, onChange }: { column: Column; value: unknown; onChange: (v: unknown) => void }) {
   const t = column.type;
+  // Escape cancels: the host raises this before blurring, so a blur that is
+  // really a cancel must leave the stored value alone.
+  const cancelled = useContext(CellEditCancel);
   if (t === "short_text" || t === "email" || t === "url") {
     return (
       <input
         type={t === "short_text" ? "text" : t}
         defaultValue={(value as string) ?? ""}
-        onBlur={(e) => { if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
+        onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
         className="dtbl__input"
       />
     );
@@ -1109,7 +1410,7 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
       <textarea
         rows={1}
         defaultValue={(value as string) ?? ""}
-        onBlur={(e) => { if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
+        onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
         className="dtbl__input dtbl__input--area"
       />
     );
@@ -1119,7 +1420,7 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
       <input
         type="number"
         defaultValue={(value as number | "") ?? ""}
-        onBlur={(e) => { const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
+        onBlur={(e) => { if (cancelled?.current) return; const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
         className="dtbl__input"
       />
     );
@@ -1132,7 +1433,7 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
           type="number"
           step="any"
           defaultValue={(value as number | "") ?? ""}
-          onBlur={(e) => { const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
+          onBlur={(e) => { if (cancelled?.current) return; const n = e.target.value === "" ? null : Number(e.target.value); if (n !== (value ?? null)) onChange(n); }}
           className="dtbl__input"
         />
         {t === "percent" ? <span style={{ opacity: 0.5 }}>%</span> : null}
@@ -1156,7 +1457,7 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
       <input
         type="date"
         defaultValue={(value as string) ?? ""}
-        onBlur={(e) => { if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
+        onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
         className="dtbl__input"
       />
     );
