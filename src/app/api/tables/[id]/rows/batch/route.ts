@@ -70,12 +70,25 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         return typeof x?.id === "string" && typeof x?.values === "object" && x.values !== null;
       })
     : [];
-  const inserts: { values: Record<string, unknown> }[] = Array.isArray(body?.inserts)
+  const inserts: { values: Record<string, unknown>; position?: number }[] = Array.isArray(body?.inserts)
     ? body.inserts.map((i: unknown) => {
-        const x = i as { values?: unknown };
-        return { values: (typeof x?.values === "object" && x.values !== null ? x.values : {}) as Record<string, unknown> };
+        const x = i as { values?: unknown; position?: unknown };
+        return {
+          values: (typeof x?.values === "object" && x.values !== null ? x.values : {}) as Record<string, unknown>,
+          // Optional explicit position: undo restores deleted rows WHERE THEY
+          // WERE instead of appending at the end. Absent = allocate after max.
+          ...(typeof x?.position === "number" && Number.isFinite(x.position) ? { position: x.position } : {}),
+        };
       })
     : [];
+  // Duplicate explicit positions in one payload would make the response's
+  // id-to-values mapping ambiguous (rows are matched back by position).
+  {
+    const explicit = inserts.map((i) => i.position).filter((p): p is number => p !== undefined);
+    if (new Set(explicit).size !== explicit.length) {
+      return jsonError("Duplicate insert positions", 400);
+    }
+  }
   const deletes: string[] = Array.isArray(body?.deletes)
     ? [...new Set<string>((body.deletes as unknown[]).filter((d): d is string => typeof d === "string"))]
     : [];
@@ -160,6 +173,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (inserts.length > 0) {
       const max = await tx.dataTableRow.aggregate({ where: { tableId: id }, _max: { position: true } });
       let pos = (max._max.position ?? 0) + 1;
+      const positionFor = (ins: { position?: number }) => ins.position !== undefined ? ins.position : pos++;
       // createManyAndReturn is a single INSERT … RETURNING instead of a
       // create() round trip per row. createdById matches every sibling
       // insert path (rows, import, tables) — the column is nullable, so
@@ -169,13 +183,15 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           tableId: id,
           organizationId: orgId,
           values: ins.values as Prisma.InputJsonValue,
-          position: pos++,
+          position: positionFor(ins),
           createdById: userId,
         })),
       });
-      // RETURNING order isn't contractual; the positions we just handed
-      // out are, and they follow payload order — sort by them so the
-      // client can pair each returned row back to what it sent.
+      // RETURNING order isn't contractual; positions are. Auto-allocated
+      // positions follow payload order; explicit ones are whatever the
+      // client sent (unique, enforced above) — so a client pairing rows
+      // back to its payload must send ascending positions or match by
+      // position, which the in-repo callers do.
       inserted.sort((a, b) => a.position - b.position);
     }
 

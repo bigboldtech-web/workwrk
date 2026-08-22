@@ -23,7 +23,8 @@
  * F2/double-click edits · typing replaces · Escape cancels · Delete/
  * Backspace clears the selection · Cmd/Ctrl+A selects all · Cmd/Ctrl+C/X/V
  * copy/cut/paste the selection · Cmd/Ctrl+D fills down · Cmd/Ctrl+R fills
- * right.
+ * right · Cmd/Ctrl+Z undoes · Shift+Cmd/Ctrl+Z and Ctrl+Y redo (page-owned
+ * command stack; the grid only forwards).
  *
  * Phase 2 (clipboard + fill) keeps the same division of labour: the grid
  * owns geometry and gestures, the page owns data. The grid turns a
@@ -123,6 +124,13 @@ export type SheetGridProps = {
   onDeleteRows: (rowIds: string[]) => void;
   onOpenRow: (rowId: string) => void;
   onRowContextMenu?: (rowId: string, x: number, y: number) => void;
+  /** Cmd/Ctrl+Z / Shift+Cmd/Ctrl+Z / Ctrl+Y (Tables Phase 4). The grid only
+   *  forwards the keystroke — the page owns the command stack. */
+  onUndo?: () => void;
+  onRedo?: () => void;
+  /** Extra inline style for a cell (conditional-formatting background).
+   *  Page-owned semantics; the grid just paints what it is told. */
+  cellStyle?: (rowId: string, colId: string) => React.CSSProperties | undefined;
   sort: SheetSort;
   onSortChange: (sort: SheetSort) => void;
   /** Header extras (type icon, rename input, config buttons) — the page's
@@ -139,7 +147,7 @@ type Cell = { rowId: string; c: number };
 export function SheetGrid({
   columns, rowIds, renderDisplay, renderEditor, onClearCells, onDeleteRows,
   onOpenRow, onRowContextMenu, sort, onSortChange, renderHeader, headerTrailing,
-  footer, readOnlyCols, getRangeValues, applyMatrix,
+  footer, readOnlyCols, getRangeValues, applyMatrix, onUndo, onRedo, cellStyle,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -575,6 +583,23 @@ export function SheetGrid({
       return;
     }
 
+    /* Undo/redo (Tables Phase 4). Deliberately BEHIND the EDITABLE_SEL and
+     * `editing` guards above, so a caret in a cell editor or the rename
+     * input keeps the browser's native text undo — and deliberately BEFORE
+     * the active-cell guard below, because history needs no selection.
+     * Ctrl+Y is the Windows redo; Cmd+Y stays the browser's (history). */
+    if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        const fn = e.shiftKey ? onRedo : onUndo;
+        if (fn) { e.preventDefault(); fn(); return; }
+      } else if (k === "y" && e.ctrlKey && !e.metaKey && !e.shiftKey && onRedo) {
+        e.preventDefault();
+        onRedo();
+        return;
+      }
+    }
+
     const activeR = active ? rowIndex.get(active.rowId) : undefined;
     if (!active || activeR == null) {
       // Keyboard-only entry: nothing is selected (or the selected row is
@@ -859,7 +884,15 @@ export function SheetGrid({
                         className={`flex items-center overflow-hidden border-r border-zinc-100 px-2 text-[13px] leading-tight ${
                           isActive ? "outline outline-2 -outline-offset-1 outline-[#0073EA] bg-white" : selected ? "bg-[#0073EA]/8" : ""
                         }`}
-                        style={{ width: col.width ?? COL_W, minWidth: col.width ?? COL_W }}
+                        // Conditional-formatting background sits under
+                        // everything but the ACTIVE cell, whose white ground
+                        // keeps the editor and outline legible (inline style
+                        // would beat the bg-white class).
+                        style={{
+                          width: col.width ?? COL_W,
+                          minWidth: col.width ?? COL_W,
+                          ...(isActive ? undefined : cellStyle?.(rowId, col.id)),
+                        }}
                         onMouseDown={(e) => {
                           if (isEditing) return;
                           gridRef.current?.focus();

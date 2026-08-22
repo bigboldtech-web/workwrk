@@ -1,6 +1,6 @@
 # Tables — Sheets/Excel-grade spreadsheets in WorkwrK
 
-**Date:** 2026-08-22 · **Status:** Phases 1-3 SHIPPED (engine + UI live)
+**Date:** 2026-08-22 · **Status:** Phases 1-4 SHIPPED
 **Mandate (user):** "Like Google Sheets and Excel basically where I can add formulas, do stuffs — and we'll call it Tables."
 
 ---
@@ -200,6 +200,32 @@ incremental path + aggregate/range caching. Do not attempt 50k before this.
 Minor recorded gaps: NOW()/TODAY() refresh only on edit-driven rebuilds (an
 idle table crosses midnight stale); setCell's `previous` return (the
 overwritten literal) is not yet surfaced anywhere — feed it to Phase 4 undo.
+
+## 3d. Phase 4 — undo/redo + formatting SHIPPED (2026-08-22)
+
+Command-stack undo/redo across every mutating path (12 command sites), incl.
+the two the permission decision leans on: bulk row delete restores full
+snapshots at their ORIGINAL positions (the batch route grew an explicit
+per-insert `position`) and reverts the survivors' #REF! rewrites, so
+delete→undo is byte-identical; column delete restores the def at its index,
+every cell value, and the PRE-delete formula sources. Failed undos re-push
+and toast + reload — never silently lost. Column-level number formatting
+(Intl-backed: decimals, thousands, currency, percent, negative styles, four
+date formats), conditional highlight rules v1 (first-match-wins), formatted
+or raw CSV export. Formatting is display-only: raw values, sort, formulas
+and clipboard are untouched by construction, and no-format rendering is
+pinned byte-for-byte to the old renderers.
+
+Scope note: per-CELL formats deferred (they change the stored cell shape
+and touch every reader — revisit with Phase 5's concurrency work).
+
+Recorded non-blocking gaps (verifier, ranked): command order follows server
+response order, so two same-cell edits whose PATCHes invert can misorder
+history (forward path has the same pre-existing race); CSV import is the
+one bulk mutation outside undo history; format-menu text inputs commit on
+blur and can drop a value if the popover unmounts first; formatted-CSV
+exports ratings as raw numbers; a hairline stale-ref window between queued
+undos.
 
 ## 4. Rollout discipline
 

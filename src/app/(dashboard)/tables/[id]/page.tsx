@@ -15,6 +15,7 @@ import {
   Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
   LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
   Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check, Paperclip, Users,
+  Undo2, Redo2, Paintbrush,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -22,7 +23,10 @@ import { MenuList, MenuItem } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { createTableEngine, columnLetter, type StructureResult } from "@/lib/sheet-engine-host";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
+import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
+import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
+import { ColumnFormatMenu } from "@/components/tables/column-format-menu";
 import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
@@ -39,6 +43,10 @@ type Column = {
   lookupColumnId?: string;// lookup → which column in the target table to pull
   rollupColumnId?: string;// rollup → which target column to aggregate
   rollupFn?: RollupFn;    // rollup aggregate
+  // Display-only (Tables Phase 4): both ride the existing columns Json.
+  // Raw cell values NEVER change shape — sort/formulas/clipboard read raw.
+  format?: ColumnFormat;      // column-level number/date formatting
+  rules?: ConditionalRule[];  // conditional formatting v1 (value → cell bg)
 };
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
@@ -101,6 +109,15 @@ const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, 
 // rows — so bulk work ships in slices this size.
 const BATCH_MAX_OPS = 500;
 
+// Column types the format menu (and formatCellValue routing) applies to.
+// Rating keeps its stars, text stays text — formatting is opt-in per the
+// Phase 4 scope (column-level only; per-cell formats deferred).
+const FORMATTABLE_TYPES = new Set<ColType>(["number", "currency", "percent", "date"]);
+
+// The red the grid already uses for formula errors — reused for
+// negative-styled numbers so "red negatives" match the existing token.
+const NEGATIVE_RED: React.CSSProperties = { color: "#dc2626" };
+
 /** Fold the engine host's column-formula rewrites into a columns array —
  *  a structure change can retarget a COLUMN formula too ("=SUM(B1:B5)" after
  *  B moves), and losing that rewrite silently repoints the whole column. */
@@ -119,6 +136,11 @@ function groupRewrites(cells: { colId: string; rowId: string; stored: unknown }[
     byRow.set(rw.rowId, m);
   }
   return byRow;
+}
+
+/** Rewrite list → the batch route's updates array (undo/redo replay shape). */
+function rewritesToUpdates(cells: { colId: string; rowId: string; stored: unknown }[]): { id: string; values: Record<string, unknown> }[] {
+  return [...groupRewrites(cells)].map(([id, values]) => ({ id, values }));
 }
 
 // Columns that sort as magnitudes. The column type has to decide this:
@@ -308,6 +330,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [allTables, setAllTables] = useState<{ id: string; name: string }[]>([]);
   // Column currently being configured in the relation modal (link/lookup/rollup).
   const [configColId, setConfigColId] = useState<string | null>(null);
+  // Column whose format/rules popover is open (number/currency/percent/date).
+  const [formatMenuColId, setFormatMenuColId] = useState<string | null>(null);
   // Org users (for Person columns), lazy-loaded when one exists.
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   // Column drag-reorder + resize.
@@ -352,11 +376,135 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
       setViews(savedViews);
       setActiveViewId((cur) => (savedViews.some((v) => v.id === cur) ? cur : savedViews[0].id));
+      savedColumnsRef.current = t.columns;
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
   }, [tableId]);
   useEffect(() => { void load(); }, [load]);
+
+  /* ── Undo/redo (Tables Phase 4) ──────────────────────────────────
+   * One command stack per table: useMemo re-creates it when the table id
+   * changes, so history can never replay into a different table. Every
+   * mutating path below pushes a command AFTER its optimistic action
+   * succeeded; the command's undo/redo run through the STRICT helpers,
+   * which throw on failure — a failed undo must never pretend it worked
+   * (the stack re-pushes it, we toast + reload). */
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- tableId is the RESET trigger, not a read: a new table must start with empty history
+  const undoStack = useMemo(() => createUndoStack(), [tableId]);
+  // The stack is imperative; this tick makes canUndo/canRedo render truth.
+  const [, setUndoTick] = useState(0);
+  const refreshUndoUi = useCallback(() => setUndoTick((t) => t + 1), []);
+  const pushUndo = useCallback((cmd: UndoCommand) => { undoStack.push(cmd); refreshUndoUi(); }, [undoStack, refreshUndoUi]);
+  const runUndo = useCallback(async () => {
+    const op = undoStack.undo();
+    refreshUndoUi(); // busy()/canUndo changed the moment the op started
+    try {
+      await op;
+    } catch {
+      // The stack already re-pushed the command (state unknown → retryable);
+      // the reload reconciles whatever the half-run left behind.
+      toast(`Couldn't undo ${undoStack.peekUndoLabel() ?? "the last action"} — reloading`);
+      void load();
+    } finally { refreshUndoUi(); }
+  }, [undoStack, toast, load, refreshUndoUi]);
+  const runRedo = useCallback(async () => {
+    const op = undoStack.redo();
+    refreshUndoUi();
+    try {
+      await op;
+    } catch {
+      toast(`Couldn't redo ${undoStack.peekRedoLabel() ?? "the last action"} — reloading`);
+      void load();
+    } finally { refreshUndoUi(); }
+  }, [undoStack, toast, load, refreshUndoUi]);
+
+  /* Commands outlive the render that created them, so they must read the
+   * world through refs, never through render-time closures. */
+  const tableRef = useRef<ApiTable | null>(null);
+  useEffect(() => { tableRef.current = table; });
+  /** Last columns array the SERVER confirmed. The header rename input is
+   *  controlled and mutates column state per keystroke, so by blur time the
+   *  pre-edit label only survives here. */
+  const savedColumnsRef = useRef<Column[] | null>(null);
+
+  /** Batch cell writes with optimistic local apply. THROWS on any refused
+   *  chunk — used by undo/redo bodies where honesty is the contract, and by
+   *  callers that wrap their own catch. */
+  const writeValuesBatchStrict = useCallback(async (updates: { id: string; values: Record<string, unknown> }[]) => {
+    if (!tableId || updates.length === 0) return;
+    const byRow = new Map(updates.map((u) => [u.id, u.values]));
+    // Rows deleted since the command was captured are simply absent from
+    // state and skipped by the server merge — the documented v1 semantic:
+    // such a command may no-op, but it never corrupts.
+    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+      const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+      });
+      if (!res.ok) throw new Error(`batch update HTTP ${res.status}`);
+    }
+  }, [tableId]);
+
+  /** Batch row deletes (chunked), optimistic. Throws on a refused chunk;
+   *  stale ids are tolerated by the route, which makes retries idempotent. */
+  const deleteRowsBatchStrict = useCallback(async (ids: string[]) => {
+    if (!tableId || ids.length === 0) return;
+    const doomed = new Set(ids);
+    setRows((prev) => prev ? prev.filter((r) => !doomed.has(r.id)) : prev);
+    for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
+      const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deletes: ids.slice(i, i + BATCH_MAX_OPS) }),
+      });
+      if (!res.ok) throw new Error(`batch delete HTTP ${res.status}`);
+    }
+  }, [tableId]);
+
+  /** Batch row inserts (chunked). Appends each chunk's server-created rows
+   *  locally and reports their ids via onChunk BEFORE moving on, so a
+   *  restore that dies mid-way leaves a trail its retry can clean up.
+   *  Returns every created row; throws on the first refused chunk. */
+  const insertRowsBatchStrict = useCallback(async (
+    payloads: { values: Record<string, unknown> }[],
+    onChunk?: (createdIds: string[]) => void,
+  ): Promise<ApiRow[]> => {
+    if (!tableId || payloads.length === 0) return [];
+    const all: ApiRow[] = [];
+    for (let i = 0; i < payloads.length; i += BATCH_MAX_OPS) {
+      const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inserts: payloads.slice(i, i + BATCH_MAX_OPS) }),
+      });
+      if (!res.ok) throw new Error(`batch insert HTTP ${res.status}`);
+      const d = await res.json();
+      const payload = d?.data ?? d;
+      const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
+        .map((r: { id: string; values: unknown; position: number }) => ({
+          id: r.id,
+          values: (r.values ?? {}) as Record<string, unknown>,
+          position: r.position,
+        }));
+      all.push(...created);
+      onChunk?.(created.map((r) => r.id));
+      if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
+    }
+    return all;
+  }, [tableId]);
+
+  /** Persist a full columns array, optimistic, throwing on failure — the
+   *  strict sibling of persistColumns for undo/redo bodies. */
+  const saveColumnsStrict = useCallback(async (cols: Column[]) => {
+    if (!tableId) throw new Error("no table");
+    setTable((prev) => prev ? { ...prev, columns: cols } : prev);
+    const res = await fetch(`/api/tables/${tableId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ columns: cols }),
+    });
+    if (!res.ok) throw new Error(`columns PATCH HTTP ${res.status}`);
+    savedColumnsRef.current = cols;
+  }, [tableId]);
 
   // Resolve which other tables this one references (link columns directly;
   // lookup/rollup indirectly via their link column) and fetch their rows so
@@ -417,18 +565,103 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }).catch(() => {});
   }, [configColId, allTables.length]);
 
-  async function patchTable(patch: Partial<ApiTable>) {
-    if (!tableId) return;
-    await fetch(`/api/tables/${tableId}`, {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
+  /** True when the server accepted the patch — the undo push sites need to
+   *  know an action actually landed before recording how to reverse it. */
+  async function patchTable(patch: Partial<ApiTable>): Promise<boolean> {
+    if (!tableId) return false;
+    try {
+      const res = await fetch(`/api/tables/${tableId}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      return res.ok;
+    } catch { return false; }
+  }
+
+  async function persistColumns(cols: Column[]): Promise<boolean> {
+    setSavingCols(true);
+    const ok = await patchTable({ columns: cols });
+    if (ok) savedColumnsRef.current = cols;
+    setSavingCols(false);
+    return ok;
+  }
+
+  /* ── Undoable column-op bodies (Tables Phase 4) ─────────────────
+   * The inverse of a structural op is computed against the LIVE host (via
+   * engineHostRef), not replayed from capture: undoing a rename re-rewrites
+   * [New]→[Old] header refs exactly as the forward path rewrote [Old]→[New],
+   * even if other edits landed in between. All of these THROW on persist
+   * failure — the undo stack needs the truth. */
+
+  async function performRenameStrict(colId: string, label: string) {
+    const cur = tableRef.current;
+    if (!cur) throw new Error("table gone");
+    if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since — no-op, never corrupt
+    let res: StructureResult | null = null;
+    try { res = engineHostRef.current.columnRenamed(colId, label); } catch { res = null; }
+    const cols = applyColumnRewrites(
+      cur.columns.map((c) => c.id === colId ? { ...c, label } : c),
+      res?.rewritten.columns ?? [],
+    );
+    await saveColumnsStrict(cols);
+    if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
+  }
+
+  async function performMoveStrict(colId: string, toIndex: number) {
+    const cur = tableRef.current;
+    if (!cur) throw new Error("table gone");
+    const cols = [...cur.columns];
+    const from = cols.findIndex((c) => c.id === colId);
+    const to = Math.max(0, Math.min(cols.length - 1, toIndex));
+    if (from < 0 || from === to) return;
+    let res: StructureResult | null = null;
+    try { res = engineHostRef.current.columnMoved(from, to); } catch { res = null; }
+    const [moved] = cols.splice(from, 1);
+    cols.splice(to, 0, moved);
+    const next = applyColumnRewrites(cols, res?.rewritten.columns ?? []);
+    await saveColumnsStrict(next);
+    if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
+  }
+
+  /** One column's fields changed (format, rules, formula, relation config):
+   *  a surgical patch against whatever columns exist at undo time, so the
+   *  command composes with structural commands instead of snapshotting the
+   *  whole array and clobbering later edits. */
+  function pushColumnPatch(label: string, colId: string, before: Partial<Column>, after: Partial<Column>) {
+    const apply = async (patch: Partial<Column>) => {
+      const cur = tableRef.current;
+      if (!cur) throw new Error("table gone");
+      if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since — no-op
+      await saveColumnsStrict(cur.columns.map((c) => (c.id === colId ? { ...c, ...patch } : c)));
+    };
+    pushUndo({ label, undo: () => apply(before), redo: () => apply(after) });
+  }
+
+  /** Column format / highlight rules (Phase 4). Display-only settings, but
+   *  they persist through the SAME columns path as everything else and are
+   *  therefore undoable like everything else. */
+  function setColumnFormat(colId: string, format: ColumnFormat | undefined) {
+    if (!table) return;
+    const col = table.columns.find((c) => c.id === colId);
+    if (!col) return;
+    const before = col.format;
+    const cols = table.columns.map((c) => (c.id === colId ? { ...c, format } : c));
+    setTable({ ...table, columns: cols });
+    void persistColumns(cols).then((ok) => {
+      if (ok) pushColumnPatch(`format "${col.label}"`, colId, { format: before }, { format });
     });
   }
 
-  async function persistColumns(cols: Column[]) {
-    setSavingCols(true);
-    await patchTable({ columns: cols });
-    setSavingCols(false);
+  function setColumnRules(colId: string, rules: ConditionalRule[] | undefined) {
+    if (!table) return;
+    const col = table.columns.find((c) => c.id === colId);
+    if (!col) return;
+    const before = col.rules;
+    const cols = table.columns.map((c) => (c.id === colId ? { ...c, rules } : c));
+    setTable({ ...table, columns: cols });
+    void persistColumns(cols).then((ok) => {
+      if (ok) pushColumnPatch(`highlight rules on "${col.label}"`, colId, { rules: before }, { rules });
+    });
   }
 
   // ── Saved views ──
@@ -476,22 +709,57 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       formula = f.trim();
     }
     const id = newId();
-    const cols = [...table.columns, {
+    const def: Column = {
       id, type, label: COL_LABEL[type],
       ...(type === "select" || type === "multi_select" ? { options: ["Option 1"] } : {}),
       ...(formula !== undefined ? { formula } : {}),
-    }];
+    };
+    const cols = [...table.columns, def];
     setTable({ ...table, columns: cols });
-    void persistColumns(cols);
+    const ok = await persistColumns(cols);
+    if (ok) {
+      const at = cols.length - 1;
+      pushUndo({
+        label: `add column "${def.label}"`,
+        undo: async () => {
+          // Inverse of an append: delete it, letting the live host produce
+          // whatever rewrites refs into/past it now need.
+          const cur = tableRef.current;
+          if (!cur) throw new Error("table gone");
+          if (!cur.columns.some((c) => c.id === def.id)) return;
+          let res: StructureResult | null = null;
+          try { res = engineHostRef.current.columnDeleted(def.id); } catch { res = null; }
+          const next = applyColumnRewrites(cur.columns.filter((c) => c.id !== def.id), res?.rewritten.columns ?? []);
+          await saveColumnsStrict(next);
+          if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
+        },
+        redo: async () => {
+          const cur = tableRef.current;
+          if (!cur) throw new Error("table gone");
+          if (cur.columns.some((c) => c.id === def.id)) return;
+          const next = [...cur.columns];
+          next.splice(Math.min(at, next.length), 0, { ...def });
+          await saveColumnsStrict(next);
+        },
+      });
+    }
     // Relational columns need a target/config before they do anything.
     if (type === "link" || type === "lookup" || type === "rollup") setConfigColId(id);
   }
 
   function saveColumnConfig(colId: string, patch: Partial<Column>) {
     if (!table) return;
+    const col = table.columns.find((c) => c.id === colId);
+    // Before = the same keys the patch touches, read from the pre-patch
+    // column, so undo restores only what this action changed.
+    const before = col
+      ? (Object.fromEntries(Object.keys(patch).map((k) => [k, (col as unknown as Record<string, unknown>)[k]])) as Partial<Column>)
+      : null;
     const cols = table.columns.map((c) => c.id === colId ? { ...c, ...patch } : c);
     setTable({ ...table, columns: cols });
-    void persistColumns(cols);
+    void persistColumns(cols).then((ok) => {
+      if (ok && before) pushColumnPatch(`configure "${col!.label}"`, colId, before, patch);
+    });
     setConfigColId(null);
   }
 
@@ -501,13 +769,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!col) return;
     const f = await promptDialog({ title: "Edit formula:", defaultValue: col.formula ?? "=" });
     if (f == null) return;
-    const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: f.trim() } : c);
+    const prev = col.formula;
+    const next = f.trim();
+    if (next === (prev ?? "")) return;
+    const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: next } : c);
     setTable({ ...table, columns: cols });
-    void persistColumns(cols);
+    const ok = await persistColumns(cols);
+    if (ok) pushColumnPatch(`edit formula of "${col.label}"`, colId, { formula: prev }, { formula: next });
   }
 
   function renameColumn(colId: string, label: string) {
     if (!table) return;
+    // The header input is controlled and mutates column state per keystroke,
+    // so by blur time the pre-edit label survives only in the last
+    // SERVER-CONFIRMED columns — that is the honest "before" for undo.
+    const prevLabel = savedColumnsRef.current?.find((c) => c.id === colId)?.label;
     // Rewrites come from the PRE-rename host, same as deleteColumn: [Header]
     // refs must follow the rename, and without persisting the rewritten
     // sources a rename to a label another column already carries would
@@ -519,23 +795,96 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       res?.rewritten.columns ?? [],
     );
     setTable({ ...table, columns: cols });
-    void persistColumns(cols);
-    void persistCellRewrites(res?.rewritten.cells ?? []);
+    void (async () => {
+      const ok = await persistColumns(cols);
+      // Awaited so an immediate undo can't race the rewrite POST (it never throws).
+      await persistCellRewrites(res?.rewritten.cells ?? []);
+      if (ok && prevLabel !== undefined && prevLabel !== label) {
+        pushUndo({
+          label: `rename column to "${label}"`,
+          // Inverse rename through the live host, so [New]→[Old] header
+          // refs are rewritten back exactly as the forward path did.
+          undo: () => performRenameStrict(colId, prevLabel),
+          redo: () => performRenameStrict(colId, label),
+        });
+      }
+    })();
   }
 
   async function deleteColumn(colId: string) {
     if (!table) return;
     if (!(await confirm({ title: "Delete column", description: "Delete this column? Existing cell values for it will be lost.", destructive: true, confirmLabel: "Delete" }))) return;
+    // Undo capture BEFORE anything mutates: the column def and its index,
+    // every row's stored value for it (stored formula objects included), and
+    // — once the host reports its rewrites — the PRE-delete sources those
+    // rewrites replaced, so an undo restores "=B1", never the "#REF!" the
+    // delete wrote.
+    const colIndex = table.columns.findIndex((c) => c.id === colId);
+    const colDef = table.columns[colIndex];
+    if (!colDef) return;
+    const colSnapshot: Column = { ...colDef };
+    const cellValues = (rows ?? [])
+      .filter((r) => r.values[colId] !== undefined)
+      .map((r) => ({ id: r.id, v: r.values[colId] }));
     // Rewrites come from the PRE-delete host: refs right of the column shift
     // left, refs into it become #REF! — without persisting these, every
     // stored formula silently repoints (the bug this wave closes). The host
     // itself skips the dying column's own cells.
     let res: StructureResult | null = null;
     try { res = engineHost.columnDeleted(colId); } catch { /* a rewrite failure must never block the delete */ }
-    const cols = applyColumnRewrites(table.columns.filter((c) => c.id !== colId), res?.rewritten.columns ?? []);
+    const rewCells = res?.rewritten.cells ?? [];
+    const rewCols = res?.rewritten.columns ?? [];
+    // Pre-delete stored sources of everything the delete rewrote — read
+    // from React state, which the host's own mutation never touches.
+    const priorCellSources = rewCells.map((rw) => ({
+      colId: rw.colId, rowId: rw.rowId, stored: rowById.get(rw.rowId)?.values[rw.colId] ?? null,
+    }));
+    const priorColFormulas = new Map(rewCols.map((cw) => [cw.colId, table.columns.find((c) => c.id === cw.colId)?.formula]));
+    const cols = applyColumnRewrites(table.columns.filter((c) => c.id !== colId), rewCols);
     setTable({ ...table, columns: cols });
-    void persistColumns(cols);
-    void persistCellRewrites(res?.rewritten.cells ?? []);
+    const ok = await persistColumns(cols);
+    // AWAITED (unlike the pre-Phase-4 fire-and-forget): an immediate Cmd+Z
+    // must not have its restored sources overtaken by a still-in-flight
+    // rewrite POST landing after them. persistCellRewrites never throws.
+    await persistCellRewrites(rewCells);
+    if (!ok) return; // the delete never landed on the server — nothing to undo
+    pushUndo({
+      label: `delete column "${colSnapshot.label}"`,
+      undo: async () => {
+        const cur = tableRef.current;
+        if (!cur) throw new Error("table gone");
+        if (cur.columns.some((c) => c.id === colSnapshot.id)) return; // already restored
+        const next = [...cur.columns];
+        next.splice(Math.min(colIndex, next.length), 0, { ...colSnapshot });
+        // Column formulas that were rewritten by the delete go back to
+        // their pre-delete sources (the snapshot itself carries its own).
+        const restored = next.map((c) =>
+          c.id !== colSnapshot.id && priorColFormulas.has(c.id) ? { ...c, formula: priorColFormulas.get(c.id) } : c);
+        await saveColumnsStrict(restored);
+        // Values + pre-delete cell sources, merged per row, chunked.
+        const byRow = new Map<string, Record<string, unknown>>();
+        for (const cv of cellValues) {
+          const m = byRow.get(cv.id) ?? {};
+          m[colSnapshot.id] = cv.v;
+          byRow.set(cv.id, m);
+        }
+        for (const ps of priorCellSources) {
+          const m = byRow.get(ps.rowId) ?? {};
+          m[ps.colId] = ps.stored;
+          byRow.set(ps.rowId, m);
+        }
+        await writeValuesBatchStrict([...byRow].map(([id, values]) => ({ id, values })));
+      },
+      redo: async () => {
+        const cur = tableRef.current;
+        if (!cur) throw new Error("table gone");
+        // Repeat the delete with the CAPTURED rewrites — after an undo the
+        // layout matches the original pre-delete state, so they still apply.
+        const next = applyColumnRewrites(cur.columns.filter((c) => c.id !== colSnapshot.id), rewCols);
+        await saveColumnsStrict(next);
+        if (rewCells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(rewCells));
+      },
+    });
   }
 
   // Drag-to-reorder columns (handle = the column-type icon).
@@ -554,8 +903,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     cols.splice(to, 0, moved);
     const next = applyColumnRewrites(cols, res?.rewritten.columns ?? []);
     setTable({ ...table, columns: next });
-    void persistColumns(next);
-    void persistCellRewrites(res?.rewritten.cells ?? []);
+    void (async () => {
+      const ok = await persistColumns(next);
+      // Awaited so an immediate undo can't race the rewrite POST (it never throws).
+      await persistCellRewrites(res?.rewritten.cells ?? []);
+      if (ok) {
+        pushUndo({
+          label: `move column "${moved.label}"`,
+          // Inverse move via the live host: sources follow the column back.
+          undo: () => performMoveStrict(fromId, from),
+          redo: () => performMoveStrict(fromId, to),
+        });
+      }
+    })();
   }
 
   // Column resize — width persisted on the column (optimistic update while
@@ -582,35 +942,72 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     document.addEventListener("mouseup", onUp);
   }
 
-  async function addRow() {
-    if (!tableId) return;
+  /** One creation path for the grid footer AND the kanban/calendar "add
+   *  card" buttons, so every created row is undoable the same way. */
+  async function createRow(values: Record<string, unknown>): Promise<ApiRow | null> {
+    if (!tableId) return null;
     try {
       const res = await fetch(`/api/tables/${tableId}/rows`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: {} }),
+        body: JSON.stringify({ values }),
       });
       if (!res.ok) throw new Error(`POST ${res.status}`);
       const d = await res.json();
-      const row = d.data ?? d;
+      const row: ApiRow = d.data ?? d;
       setRows((prev) => [...(prev ?? []), row]);
       // An end-append can't shift any existing ref, so this yields no
       // rewrites today — called so the contract is exercised where the page
       // inserts rows, ready for mid-table inserts later.
       try {
-        const res = engineHost.rowInserted({ id: row.id, values: row.values ?? {} }, (rows ?? []).length);
-        void persistCellRewrites(res.rewritten.cells);
+        const hostRes = engineHost.rowInserted({ id: row.id, values: row.values ?? {} }, (rows ?? []).length);
+        void persistCellRewrites(hostRes.rewritten.cells);
       } catch { /* never block the insert */ }
-    } catch { toast("Couldn't add row"); }
+      // Undo deletes the created row; redo re-inserts its values. The server
+      // returns a NEW id on redo, so the command re-captures it — otherwise
+      // a second undo would aim at an id that no longer exists.
+      let curId = row.id;
+      const snapValues = { ...(row.values ?? {}) };
+      pushUndo({
+        label: "add row",
+        undo: () => deleteRowsBatchStrict([curId]),
+        redo: async () => {
+          const created = await insertRowsBatchStrict([{ values: snapValues }]);
+          if (created[0]) curId = created[0].id;
+        },
+      });
+      return row;
+    } catch { toast("Couldn't add row"); return null; }
   }
 
-  async function patchRow(rowId: string, values: Record<string, unknown>) {
+  async function addRow() { await createRow({}); }
+
+  /** Optimistic single-row PATCH, undoable. Before-values are captured from
+   *  local state ahead of the optimistic write; the formula path passes
+   *  `opts.before` instead — engine setCell's { previous } return, which is
+   *  the authoritative overwritten value (built for exactly this wave). */
+  async function patchRow(rowId: string, values: Record<string, unknown>, opts?: { before?: Record<string, unknown>; label?: string }) {
     if (!tableId) return;
+    const prevRow = (rows ?? []).find((r) => r.id === rowId);
+    const before: Record<string, unknown> = {};
+    for (const k of Object.keys(values)) {
+      // An absent key restores as null: indistinguishable to every reader
+      // (both are the empty cell) and Json cannot hold undefined anyway.
+      before[k] = (opts?.before && k in opts.before ? opts.before[k] : prevRow?.values[k]) ?? null;
+    }
     setRows((prev) => prev ? prev.map((r) => r.id === rowId ? { ...r, values: { ...r.values, ...values } } : r) : prev);
     try {
-      await fetch(`/api/tables/${tableId}/rows`, {
+      const res = await fetch(`/api/tables/${tableId}/rows`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId, values }),
       });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      if (prevRow) {
+        pushUndo({
+          label: opts?.label ?? "cell edit",
+          undo: () => writeValuesBatchStrict([{ id: rowId, values: before }]),
+          redo: () => writeValuesBatchStrict([{ id: rowId, values }]),
+        });
+      }
     } catch { toast("Cell didn't save"); }
   }
 
@@ -637,10 +1034,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   async function clearCells(cells: { rowId: string; colId: string }[]) {
     if (!tableId || cells.length === 0) return;
     const byRow = new Map<string, Record<string, unknown>>();
+    // Before-values captured from pre-clear state, per cell actually cleared
+    // — an undo puts back EXACTLY what was there, stored formulas included.
+    const befores = new Map<string, Record<string, unknown>>();
     for (const c of cells) {
       const m = byRow.get(c.rowId) ?? {};
       m[c.colId] = null;
       byRow.set(c.rowId, m);
+      const b = befores.get(c.rowId) ?? {};
+      b[c.colId] = rowById.get(c.rowId)?.values[c.colId] ?? null;
+      befores.set(c.rowId, b);
     }
     setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     const updates = [...byRow].map(([id, values]) => ({ id, values }));
@@ -655,6 +1058,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         });
         if (!res.ok) throw new Error();
       }
+      const beforeUpdates = [...befores].map(([id, values]) => ({ id, values }));
+      pushUndo({
+        label: `clear ${cells.length} cell${cells.length === 1 ? "" : "s"}`,
+        undo: () => writeValuesBatchStrict(beforeUpdates),
+        redo: () => writeValuesBatchStrict(updates),
+      });
     } catch { toast("Couldn't clear cells"); void load(); }
   }
 
@@ -682,6 +1091,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         for (const cw of res.rewritten.columns) colRewrites.set(cw.colId, cw.formula);
       }
     } catch { /* never block the delete */ }
+    // Full snapshots BEFORE the optimistic removal — plan 3a names undo as
+    // the REQUIRED mitigation for this unrecoverable deleteMany. Positions
+    // ride along and are sent as EXPLICIT insert positions on undo, so
+    // restored rows land exactly where they were, not at the end.
+    const snapshots = (rows ?? [])
+      .filter((r) => doomed.has(r.id))
+      .map((r) => ({ values: { ...r.values }, position: r.position }));
+    // Survivors' PRE-rewrite stored values, captured before the optimistic
+    // apply: with exact-position restore below, an undo puts every ref back
+    // on the row it originally named, so the #REF! rewrites can be honestly
+    // reverted instead of left behind.
+    const rowById = new Map((rows ?? []).map((r) => [r.id, r]));
+    const survivorBefores = [...cellRewrites.values()].map((rw) => ({
+      rowId: rw.rowId,
+      colId: rw.colId,
+      before: rowById.get(rw.rowId)?.values?.[rw.colId] ?? null,
+      after: rw.stored,
+    }));
     // Same one-frame discipline as deleteRow: removals + survivor rewrites
     // apply together locally; persistence still waits for the deletes.
     const rwByRow = groupRewrites([...cellRewrites.values()]);
@@ -696,6 +1123,60 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         });
         if (!res.ok) throw new Error();
       }
+      // The server hands restored rows NEW ids, so the command re-captures
+      // them: a second undo/redo cycle acts on rows that actually exist.
+      // Restored rows keep their ORIGINAL positions, so survivors' #REF!
+      // rewrites are reverted too — the refs point at the same rows again
+      // and the table comes back byte-identical.
+      let currentIds = ids.slice();
+      let restoredIds: string[] = [];
+      pushUndo({
+        label: `delete ${ids.length} row${ids.length === 1 ? "" : "s"}`,
+        undo: async () => {
+          if (restoredIds.length > 0) {
+            // A previous undo attempt died mid-chunk: remove its partial
+            // restore first, or the retry would duplicate those rows.
+            await deleteRowsBatchStrict(restoredIds);
+            restoredIds = [];
+          }
+          const created = await insertRowsBatchStrict(
+            [...snapshots].sort((a, b) => a.position - b.position)
+              .map((s) => ({ values: s.values, position: s.position })),
+            (chunkIds) => restoredIds.push(...chunkIds),
+          );
+          currentIds = created.map((r) => r.id);
+          if (survivorBefores.length > 0) {
+            const groupSurvivor = (pick: (b: typeof survivorBefores[number]) => unknown) => {
+            const byRow = new Map<string, Record<string, unknown>>();
+            for (const b of survivorBefores) {
+              const patch = byRow.get(b.rowId) ?? {};
+              patch[b.colId] = pick(b);
+              byRow.set(b.rowId, patch);
+            }
+            return [...byRow].map(([id, values]) => ({ id, values }));
+          };
+          await writeValuesBatchStrict(groupSurvivor((b) => b.before));
+          }
+        },
+        redo: async () => {
+          await deleteRowsBatchStrict(currentIds);
+          restoredIds = [];
+          // The undo reverted the survivors' #REF! rewrites; deleting again
+          // makes them true again, so re-apply them.
+          if (survivorBefores.length > 0) {
+            const groupSurvivor = (pick: (b: typeof survivorBefores[number]) => unknown) => {
+            const byRow = new Map<string, Record<string, unknown>>();
+            for (const b of survivorBefores) {
+              const patch = byRow.get(b.rowId) ?? {};
+              patch[b.colId] = pick(b);
+              byRow.set(b.rowId, patch);
+            }
+            return [...byRow].map(([id, values]) => ({ id, values }));
+          };
+          await writeValuesBatchStrict(groupSurvivor((b) => b.after));
+          }
+        },
+      });
       void persistCellRewrites([...cellRewrites.values()]);
       if (colRewrites.size > 0 && table) {
         // Row ranges inside COLUMN formulas shrink too ("=SUM(A1:A5)").
@@ -709,6 +1190,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   async function deleteRow(rowId: string) {
     if (!tableId) return;
     if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
+    // Snapshot before anything mutates — undo restores these exact values.
+    const snapshot = (rows ?? []).find((r) => r.id === rowId);
+    const snapValues = snapshot ? { ...snapshot.values } : null;
     let res: StructureResult | null = null;
     try { res = engineHost.rowDeleted(rowId); } catch { /* never block the delete */ }
     // Removal and the survivors' ref rewrites land in ONE local update, so no
@@ -720,10 +1204,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       ? prev.filter((r) => r.id !== rowId).map((r) => rwByRow.has(r.id) ? { ...r, values: { ...r.values, ...rwByRow.get(r.id)! } } : r)
       : prev);
     try {
-      await fetch(`/api/tables/${tableId}/rows`, {
+      const delRes = await fetch(`/api/tables/${tableId}/rows`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId }),
       });
+      if (!delRes.ok) throw new Error(`DELETE ${delRes.status}`);
+      if (snapValues) {
+        // Same shape as bulk delete: the restore appends with a NEW id, the
+        // command re-captures it, and survivor rewrites stay as-is (v1).
+        let curId = rowId;
+        pushUndo({
+          label: "delete row",
+          undo: async () => {
+            const created = await insertRowsBatchStrict([{ values: snapValues }]);
+            if (created[0]) curId = created[0].id;
+          },
+          redo: () => deleteRowsBatchStrict([curId]),
+        });
+      }
       void persistCellRewrites(res?.rewritten.cells ?? []);
       const colRewrites = res?.rewritten.columns ?? [];
       if (colRewrites.length > 0 && table) {
@@ -754,7 +1252,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch { toast("Couldn't import CSV"); }
   }
 
-  function exportCsv() {
+  /** CSV export. `formatted` runs display values through formatCellValue
+   *  (what the user sees, honestly); false is the pre-Phase-4 raw export,
+   *  byte-for-byte. Sort/formulas always read raw either way. */
+  function exportCsv(formatted: boolean) {
     if (!table || rows === null) return;
     const headers = table.columns.map((c) => csvEscape(c.label)).join(",");
     const bodyRows = rows.map((r) =>
@@ -762,9 +1263,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const v = r.values[c.id];
         // Computed cells export what the user sees, never "[object Object]"
         // or a source string another program would misread as its own ref.
-        const str = c.type === "formula" || isFormulaCell(v)
-          ? String(engineHost.display(c.id, r.id) ?? "")
-          : v === undefined || v === null ? "" : Array.isArray(v) ? v.join("; ") : String(v);
+        const str = (() => {
+          if (c.type === "formula" || isFormulaCell(v)) {
+            const disp = String(engineHost.display(c.id, r.id) ?? "");
+            if (!formatted || disp.startsWith("#") || !FORMATTABLE_TYPES.has(c.type)) return disp;
+            const computed = engineHost.value(c.id, r.id);
+            if (typeof computed === "number") return formatCellValue(computed, c.type, c.format);
+            if (c.type === "date" && typeof computed === "string") return formatCellValue(computed, "date", c.format);
+            return disp;
+          }
+          if (v === undefined || v === null) return "";
+          if (formatted && FORMATTABLE_TYPES.has(c.type) && !Array.isArray(v)) return formatCellValue(v, c.type, c.format);
+          return Array.isArray(v) ? v.join("; ") : String(v);
+        })();
         return csvEscape(str);
       }).join(","),
     );
@@ -791,6 +1302,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     () => createTableEngine({ columns: table?.columns ?? [], rows: rows ?? [] }),
     [table?.columns, rows],
   );
+  // Undo/redo commands run long after the render that pushed them, so they
+  // reach the CURRENT host (rebuilt by the memo above on every state change)
+  // through a ref — a closed-over host would rewrite against a dead layout.
+  const engineHostRef = useRef(engineHost);
+  useEffect(() => { engineHostRef.current = engineHost; });
 
   // Lookup/rollup compute: follow the column's link → gather linked rows →
   // pull a field (lookup) or aggregate it (rollup). Returns a display value.
@@ -965,14 +1481,41 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // #CYCLE! error here rather than hanging a recalc).
     if (c.type === "formula" || isFormulaCell(v)) {
       const fv = String(engineHost.display(c.id, r.id) ?? "");
-      return <span style={fv.startsWith("#") ? { color: "#dc2626" } : undefined}>{fv}</span>;
+      if (fv.startsWith("#")) return <span style={NEGATIVE_RED}>{fv}</span>;
+      // A formula cell formats by its COLUMN's format (Phase 4): numbers
+      // through formatCellValue, date-typed strings through the date
+      // formats. Everything else keeps engine display verbatim — its
+      // float-noise trim and TRUE/FALSE are the shipped Phase 3 behaviour.
+      if (FORMATTABLE_TYPES.has(c.type)) {
+        const computed = engineHost.value(c.id, r.id);
+        if (typeof computed === "number") {
+          return <span style={isNegativeStyled(computed, c.format) ? NEGATIVE_RED : undefined}>{formatCellValue(computed, c.type, c.format)}</span>;
+        }
+        if (c.type === "date" && typeof computed === "string") {
+          return formatCellValue(computed, "date", c.format);
+        }
+      }
+      return <span>{fv}</span>;
     }
     switch (c.type) {
       case "lookup": case "rollup": { const rv = relationalValue(c, r); return rv == null ? null : String(rv); }
       case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null;
       case "rating": { const n = typeof v === "number" ? v : 0; return n ? "★".repeat(n) : null; }
-      case "currency": return v == null || v === "" ? null : `$${v}`;
-      case "percent": return v == null || v === "" ? null : `${v}%`;
+      case "number": case "currency": case "percent": {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : Number(String(v).trim());
+        const numeric = typeof v === "number" || (String(v).trim() !== "" && Number.isFinite(n));
+        // Strings reroute through the formatter only when a format is
+        // actually configured: with none, the pre-Phase-4 output stays
+        // byte-for-byte ("$abc" and a CSV-imported "$012" included).
+        if (!numeric || (typeof v !== "number" && !c.format)) {
+          if (c.type === "currency") return `$${v}`;
+          if (c.type === "percent") return `${v}%`;
+          return String(v);
+        }
+        return <span style={isNegativeStyled(n, c.format) ? NEGATIVE_RED : undefined}>{formatCellValue(n, c.type, c.format)}</span>;
+      }
+      case "date": return v == null || v === "" ? null : formatCellValue(v, "date", c.format);
       case "multi_select": return Array.isArray(v) ? (v as string[]).join(", ") : null;
       case "person": {
         const arr = Array.isArray(v) ? (v as string[]) : [];
@@ -986,6 +1529,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       case "attachment": { const arr = Array.isArray(v) ? v : []; return arr.length ? `📎 ${arr.length}` : null; }
       default: return v == null || v === "" ? null : String(v);
     }
+  };
+
+  /** Conditional-formatting background (Phase 4). Rules read the RAW value
+   *  (computed for formula cells) — formatting never feeds back into rules.
+   *  The winning colour paints at ~18% alpha (hex "2E"), the same tint depth
+   *  as the dept-chip pattern, so black text stays readable on any swatch. */
+  const cellBg = (rowId: string, colId: string): React.CSSProperties | undefined => {
+    const c = table.columns.find((x) => x.id === colId);
+    if (!c?.rules || c.rules.length === 0) return undefined;
+    const r = rowById.get(rowId);
+    if (!r) return undefined;
+    const v = r.values[c.id];
+    const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
+    const bg = matchRule(raw, c.rules);
+    if (!bg) return undefined;
+    return { background: /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg };
   };
 
   /* ── Clipboard + fill data half (Tables Phase 2) ──────────────
@@ -1104,6 +1663,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return;
     }
 
+    // Undo capture, BEFORE the optimistic update: the exact values every
+    // targeted cell held (paste-overwrite is plan 3a's other named
+    // unrecoverable, alongside bulk delete).
+    const befores = updates.map((u) => ({
+      id: u.id,
+      values: Object.fromEntries(Object.keys(u.values).map((k) => [k, rowById.get(u.id)?.values[k] ?? null])),
+    }));
+    const createdRows: ApiRow[] = [];
+
     if (updates.length > 0) {
       setRows((prev) => prev ? prev.map((r) => {
         const patch = updatesByRow.get(r.id);
@@ -1144,6 +1712,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             values: (r.values ?? {}) as Record<string, unknown>,
             position: r.position,
           }));
+        createdRows.push(...created);
         if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
       }
       for (let i = 0; !oneShot && i < realInserts.length; i += BATCH_MAX_OPS) {
@@ -1163,6 +1732,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             values: (r.values ?? {}) as Record<string, unknown>,
             position: r.position,
           }));
+        createdRows.push(...created);
         if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
       }
     } catch {
@@ -1171,6 +1741,39 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // Rethrow: the grid's runApply catches this and returns false, so it
       // won't move the selection as though the write had landed.
       throw new Error("batch write failed");
+    }
+
+    // Reached only when every chunk landed (the catch above rethrows), so
+    // the command records an action that fully happened. Undo restores the
+    // exact befores AND removes appended rows; redo replays the afters and
+    // re-appends (accepting the new server ids it gets back).
+    {
+      const afters = updates;
+      const insertPayloads = realInserts;
+      let createdIds = createdRows.map((r) => r.id);
+      let redoCreated: string[] = [];
+      pushUndo({
+        label: `paste/fill (${written} cell${written === 1 ? "" : "s"})`,
+        undo: async () => {
+          // Delete-then-restore order: if this dies between the two, a
+          // retry's deletes are idempotent (the route tolerates stale ids).
+          if (createdIds.length > 0) await deleteRowsBatchStrict(createdIds);
+          if (befores.length > 0) await writeValuesBatchStrict(befores);
+        },
+        redo: async () => {
+          if (afters.length > 0) await writeValuesBatchStrict(afters);
+          if (insertPayloads.length > 0) {
+            if (redoCreated.length > 0) {
+              // A previous redo attempt died mid-insert: clear its partial
+              // append before re-inserting, or rows would duplicate.
+              await deleteRowsBatchStrict(redoCreated);
+              redoCreated = [];
+            }
+            const created = await insertRowsBatchStrict(insertPayloads, (ids) => redoCreated.push(...ids));
+            createdIds = created.map((r) => r.id);
+          }
+        },
+      });
     }
 
     const notes: string[] = [];
@@ -1207,7 +1810,30 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
           <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
         ) : null}
+        {FORMATTABLE_TYPES.has(c.type) ? (
+          <button
+            type="button"
+            className="dtbl__col-del"
+            // Stop the mousedown reaching the menu's outside-click closer,
+            // or "toggle closed" would close-then-reopen in one click.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => setFormatMenuColId((cur) => (cur === c.id ? null : c.id))}
+            title="Format & highlight rules"
+          ><Paintbrush /></button>
+        ) : null}
         <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
+        {formatMenuColId === c.id ? (
+          // Absolute inside this position:relative header cell — the sticky
+          // header is a transformed/sticky container, so fixed would drift.
+          <ColumnFormatMenu
+            colType={c.type}
+            format={c.format}
+            rules={c.rules}
+            onFormatChange={(f) => setColumnFormat(c.id, f)}
+            onRulesChange={(r) => setColumnRules(c.id, r)}
+            onClose={() => setFormatMenuColId(null)}
+          />
+        ) : null}
         <span
           onMouseDown={(e) => startResize(e, c.id)}
           title="Drag to resize"
@@ -1239,8 +1865,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const res = engineHost.setCell(colId, rowId, trimmed);
         // res.affected drives re-render only: patchRow's setRows rebuilds the
         // host, which recomputes every dependent. Computed values are never
-        // sent to the server.
-        void patchRow(rowId, { [colId]: res.stored });
+        // sent to the server. res.previous — the engine's authoritative
+        // overwritten value — seeds the undo command (built for this wave).
+        void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit" });
       } catch {
         toast("Couldn't save formula");
       }
@@ -1364,6 +1991,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
         <div className="dtbl__head-actions">
+          <button
+            type="button"
+            className="dtbl__head-btn"
+            onClick={() => void runUndo()}
+            disabled={!undoStack.canUndo() || undoStack.busy()}
+            style={!undoStack.canUndo() || undoStack.busy() ? { opacity: 0.35, cursor: "default" } : undefined}
+            title={undoStack.canUndo() ? `Undo ${undoStack.peekUndoLabel()}` : "Nothing to undo"}
+            aria-label="Undo"
+          >
+            <Undo2 />
+          </button>
+          <button
+            type="button"
+            className="dtbl__head-btn"
+            onClick={() => void runRedo()}
+            disabled={!undoStack.canRedo() || undoStack.busy()}
+            style={!undoStack.canRedo() || undoStack.busy() ? { opacity: 0.35, cursor: "default" } : undefined}
+            title={undoStack.canRedo() ? `Redo ${undoStack.peekRedoLabel()}` : "Nothing to redo"}
+            aria-label="Redo"
+          >
+            <Redo2 />
+          </button>
           {tableId ? <TableFavoriteButton tableId={tableId} /> : null}
           <button
             type="button"
@@ -1391,7 +2040,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             <Upload />
             <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importCsv(f); e.target.value = ""; }} />
           </label>
-          <button type="button" className="dtbl__head-btn" onClick={exportCsv} title="Export CSV"><Download /></button>
+          {/* Export offers formatted vs raw (plan Phase 4: "honest CSV of
+              formatted values + a raw-values option"). */}
+          <details style={{ position: "relative" }}>
+            <summary className="dtbl__head-btn" style={{ listStyle: "none", cursor: "pointer" }} title="Export CSV"><Download /></summary>
+            <div className="dtbl__addcol-menu" style={{ right: 0, zIndex: 40 }}>
+              <button type="button" onClick={(e) => { exportCsv(true); const d = e.currentTarget.closest("details"); if (d) d.removeAttribute("open"); }}>
+                Formatted values
+              </button>
+              <button type="button" onClick={(e) => { exportCsv(false); const d = e.currentTarget.closest("details"); if (d) d.removeAttribute("open"); }}>
+                Raw values
+              </button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -1478,16 +2139,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           preview={cardPreview}
           onCardClick={(rowId) => setActiveRowId(rowId)}
           onAddRow={async (groupValue: string) => {
-            if (!tableId) return;
-            try {
-              const res = await fetch(`/api/tables/${tableId}/rows`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ values: { [activeCol.id]: groupValue } }),
-              });
-              if (!res.ok) throw new Error();
-              const d = await res.json();
-              setRows((prev) => [...(prev ?? []), d.data ?? d]);
-            } catch { toast("Couldn't add card"); }
+            // Shared creation path: undoable like every other row insert.
+            await createRow({ [activeCol.id]: groupValue });
           }}
           onMove={(rowId, newGroup) => void patchRow(rowId, { [activeCol.id]: newGroup })}
         />
@@ -1504,16 +2157,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onToday={() => { const d = new Date(); setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}
           onMove={(rowId, isoDate) => void patchRow(rowId, { [activeDateCol.id]: isoDate })}
           onAddRow={async (isoDate) => {
-            if (!tableId) return;
-            try {
-              const res = await fetch(`/api/tables/${tableId}/rows`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ values: { [activeDateCol.id]: isoDate } }),
-              });
-              if (!res.ok) throw new Error();
-              const d = await res.json();
-              setRows((prev) => [...(prev ?? []), d.data ?? d]);
-            } catch { toast("Couldn't add card"); }
+            // Shared creation path: undoable like every other row insert.
+            await createRow({ [activeDateCol.id]: isoDate });
           }}
         />
       ) : view === "gallery" ? (
@@ -1540,6 +2185,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             onClearCells={(cells) => void clearCells(cells)}
             getRangeValues={getRangeValues}
             applyMatrix={applyMatrix}
+            onUndo={() => void runUndo()}
+            onRedo={() => void runRedo()}
+            cellStyle={cellBg}
             onDeleteRows={(ids) => void bulkDeleteRows(ids)}
             onOpenRow={(id) => setActiveRowId(id)}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
