@@ -2,17 +2,34 @@
 // Tables Phase 1 (docs/plans/tables.md): the sheet kernel's clears,
 // bulk deletes, pastes and fills all land here instead of a request
 // per cell. Body:
-//   { updates?: [{ id, values }],   // shallow-merge per row
-//     inserts?: [{ values? }],      // appended in order after max position
+//   { updates?: [{ id, values, expect? }],  // shallow-merge per row
+//     inserts?: [{ values? }],              // appended in order after max position
 //     deletes?: [id, ...] }
 // Caps keep a runaway client from hurting the server. All-or-nothing
 // transaction so a partial paste can't half-apply.
+//
+// Phase 5c cross-client guard: an update entry may carry `expect`
+// ({ colId: previousStoredValue }). Entries whose expect no longer matches
+// the STORED row are SKIPPED (never merged, never written) and reported in
+// the response as conflicts: [{ id, current, conflictCols }]; every clean
+// entry still applies, in the same transaction as before. Update ids that
+// match no row (deleted by another client between read and write) used to
+// be dropped silently; the response now names them in missingIds: [ids] so
+// the client can evict those rows instead of believing the write landed.
+//
+// Paste / fill / clear / undo NEVER send expect, ON PURPOSE: overwriting a
+// range is those gestures' explicit intent. A per-cell 409 mid-paste would
+// shred the range into a patchwork of applied and refused cells — worse
+// than either full outcome — so bulk gestures stay last-write-wins and only
+// the single-cell commit paths (which know the exact pre-edit value they
+// are replacing) opt in.
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { DataTableRow, Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { expectConflicts } from "@/lib/sheet-conflict";
 
 const MAX_OPS = 500;
 
@@ -64,12 +81,28 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   const body = await req.json().catch(() => null);
-  const updates: { id: string; values: Record<string, unknown> }[] = Array.isArray(body?.updates)
-    ? body.updates.filter((u: unknown): u is { id: string; values: Record<string, unknown> } => {
-        const x = u as { id?: unknown; values?: unknown };
-        return typeof x?.id === "string" && typeof x?.values === "object" && x.values !== null;
-      })
-    : [];
+  const updates: { id: string; values: Record<string, unknown>; expect?: Record<string, unknown> }[] =
+    Array.isArray(body?.updates)
+      ? (body.updates as unknown[])
+          .filter((u): u is { id: string; values: Record<string, unknown> } => {
+            const x = u as { id?: unknown; values?: unknown };
+            return typeof x?.id === "string" && typeof x?.values === "object" && x.values !== null;
+          })
+          .map((u) => {
+            // Malformed expect (array, primitive) is dropped rather than
+            // 400'd: the entry then applies unconditionally, exactly as
+            // every entry did before the guard existed — matching the
+            // single-row PATCH's treatment of its expect field.
+            const rawExpect = (u as { expect?: unknown }).expect;
+            return {
+              id: u.id,
+              values: u.values,
+              ...(typeof rawExpect === "object" && rawExpect !== null && !Array.isArray(rawExpect)
+                ? { expect: rawExpect as Record<string, unknown> }
+                : {}),
+            };
+          })
+      : [];
   const inserts: { values: Record<string, unknown>; position?: number }[] = Array.isArray(body?.inserts)
     ? body.inserts.map((i: unknown) => {
         const x = i as { values?: unknown; position?: unknown };
@@ -138,30 +171,71 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     // the old findFirst+update pair per row made 2N round trips and blew
     // the transaction timeout well before the MAX_OPS cap.
     const merged = new Map<string, Record<string, unknown>>();
+    // Rows that absorbed at least one entry. Only these are written: a row
+    // whose every entry conflicted must see NO write at all (its merged
+    // value would be a byte-identical echo, and writing it would still
+    // bump updatedAt and take a pointless row lock).
+    const applied = new Set<string>();
+    const conflictsByRow = new Map<string, Set<string>>();
+    let missingIds: string[] = [];
     if (updates.length > 0) {
       const existing = await tx.dataTableRow.findMany({
         where: { tableId: id, id: { in: [...new Set(updates.map((u) => u.id))] } },
         select: { id: true, values: true },
       });
-      for (const row of existing) merged.set(row.id, { ...(row.values as Record<string, unknown>) });
+      // Immutable DB snapshot, separate from `merged`: every expect must be
+      // judged against what is STORED, never against earlier entries of
+      // this same payload already folded in memory — the client formed its
+      // expect from the store, not from ops it doesn't know about.
+      const dbValues = new Map<string, Record<string, unknown>>();
+      for (const row of existing) {
+        // ?? {}: Json null on a legacy row degrades to empty, never a throw.
+        dbValues.set(row.id, (row.values ?? {}) as Record<string, unknown>);
+        merged.set(row.id, { ...((row.values ?? {}) as Record<string, unknown>) });
+      }
+      // Update ids the findMany did not return: deleted by another client
+      // since this client's read. (Ids belonging to a DIFFERENT table were
+      // already hard-rejected before the transaction, so absence here can
+      // only mean deletion.) Named in the response instead of dropped.
+      missingIds = [...new Set(updates.map((u) => u.id))].filter((uid) => !dbValues.has(uid));
       // Fold in payload order: a paste can touch the same row twice and
       // the later entry must win only on the keys it actually sets, so
       // each merge has to compose onto the previous one rather than onto
       // the untouched DB value.
       for (const u of updates) {
         const base = merged.get(u.id);
-        if (!base) continue; // concurrently deleted — nothing to merge into
+        if (!base) continue; // concurrently deleted — reported via missingIds
+        if (u.expect) {
+          const cols = expectConflicts(dbValues.get(u.id)!, u.expect);
+          if (cols.length > 0) {
+            // Skip THIS entry only; other entries for the same row (and
+            // every other row) still judge on their own expects.
+            const set = conflictsByRow.get(u.id) ?? new Set<string>();
+            for (const c of cols) set.add(c);
+            conflictsByRow.set(u.id, set);
+            continue;
+          }
+        }
         merged.set(u.id, { ...base, ...u.values });
+        applied.add(u.id);
       }
       // Issue in id order so concurrent batches take row locks in the
       // same sequence and can't deadlock each other.
-      for (const rowId of [...merged.keys()].sort()) {
+      for (const rowId of [...applied].sort()) {
         await tx.dataTableRow.update({
           where: { id: rowId },
           data: { values: merged.get(rowId) as Prisma.InputJsonValue },
         });
       }
     }
+    // Materialised AFTER folding: `current` is the row's end-of-batch state
+    // (DB snapshot plus any clean entries that did apply), which is what
+    // the losing client needs to absorb.
+    const conflicts = [...conflictsByRow.entries()].map(([rowId, cols]) => ({
+      id: rowId,
+      current: merged.get(rowId)!,
+      conflictCols: [...cols],
+    }));
 
     let deleted = 0;
     if (deletes.length > 0) {
@@ -195,16 +269,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       inserted.sort((a, b) => a.position - b.position);
     }
 
-    return { updated: merged.size, deleted, inserted };
+    // updated counts rows that took a write, so a fully-conflicted row is
+    // not in it. Without expects, applied === every existing target row,
+    // which is exactly the old merged.size — no change for legacy callers.
+    return { updated: applied.size, deleted, inserted, conflicts, missingIds };
   }, { timeout: TX_TIMEOUT_MS, maxWait: TX_MAX_WAIT_MS });
 
   // updated/deleted are what actually landed, not what was asked for:
   // stale ids are now tolerated rather than rejected, so the client needs
-  // the real counts to notice its view has drifted.
+  // the real counts to notice its view has drifted. conflicts/missingIds
+  // are always present (empty when clean) so the client never has to
+  // undefined-guard the drift channel.
   return jsonSuccess({
     ok: true,
     updated: result.updated,
     deleted: result.deleted,
     inserted: result.inserted,
+    conflicts: result.conflicts,
+    missingIds: result.missingIds,
   });
 }

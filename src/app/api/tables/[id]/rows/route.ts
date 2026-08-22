@@ -1,6 +1,7 @@
 // GET    /api/tables/[id]/rows         list rows (keyset chunks; ?cursor=)
 // POST   /api/tables/[id]/rows         create a row { values?: Record<string, unknown> }
-// PATCH  /api/tables/[id]/rows         patch row { id, values } — shallow-merge
+// PATCH  /api/tables/[id]/rows         patch row { id, values, expect? } — shallow-merge;
+//                                      expect makes the merge conditional (409 on drift)
 // DELETE /api/tables/[id]/rows         delete by id
 
 import { NextRequest } from "next/server";
@@ -11,6 +12,7 @@ import {
 } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
 import { decodeRowCursor, encodeRowCursor, type RowCursor } from "@/lib/table-row-cursor";
+import { expectConflicts } from "@/lib/sheet-conflict";
 
 // Phase 32b — gate by parent Space visibility. Returns null when the
 // table doesn't exist OR is scoped to a Space the viewer can't read.
@@ -157,10 +159,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   });
   if (!existing) return jsonError("row not found", 404);
 
+  // Phase 5c cross-client guard. An optional `expect` map ({ colId:
+  // previousStoredValue }) makes this PATCH conditional: it is compared
+  // against the row read above — the SAME read the merge below uses, so the
+  // check costs no extra query and check+merge see one snapshot. On any
+  // mismatch NOTHING is written (not even body.position) and the 409 hands
+  // back the row's live values so the losing client absorbs them instead of
+  // silently overwriting the other author's cell. No expect = today's
+  // unconditional merge, which paste/fill/undo rely on: overwriting a range
+  // is intentional there. A concurrent write can still land in the
+  // microseconds between this read and the update below — the guard shrinks
+  // the silent-loss window, it does not (and cannot, without row locks this
+  // path doesn't otherwise need) close it; realtime sync is SSE-gated
+  // future work.
+  const expected =
+    typeof body.expect === "object" && body.expect !== null && !Array.isArray(body.expect)
+      ? (body.expect as Record<string, unknown>)
+      : null;
+  if (expected) {
+    // ?? {}: this codebase always writes an object, but a legacy/hand-edited
+    // row with Json null must degrade to "every cell absent", not a 500.
+    const conflictCols = expectConflicts((existing.values ?? {}) as Record<string, unknown>, expected);
+    if (conflictCols.length > 0) {
+      // `existing` was read scoped to THIS table (and the table to this org)
+      // above, so `current` can never leak another table's row.
+      return jsonSuccess({ conflict: true, current: existing.values, conflictCols }, 409);
+    }
+  }
+
   const incoming = typeof body.values === "object" && body.values !== null ? body.values : null;
   const data: Record<string, unknown> = {};
   if (incoming) {
-    const merged = { ...(existing.values as Record<string, unknown>), ...incoming };
+    const merged = { ...((existing.values ?? {}) as Record<string, unknown>), ...incoming };
     data.values = merged as Prisma.InputJsonValue;
   }
   if (typeof body.position === "number") data.position = body.position;

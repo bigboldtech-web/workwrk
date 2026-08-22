@@ -669,6 +669,37 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     void persistColumns(cols);
   }
 
+  /** Phase 5c: the batch route now NAMES the update ids it dropped because
+   *  the row no longer exists (deleted by another client between our read
+   *  and this write) — missingIds in the response — instead of only
+   *  skipping them silently. Single-cell edits never ride the batch route
+   *  (they PATCH /rows and get a 409 there instead), so the batch update
+   *  paths below are the only places the client can learn a target row
+   *  vanished. Deletes are deliberately NOT reported this way: deleting an
+   *  already-deleted row is idempotent success, not a conflict. */
+  function missingIdsOf(payload: unknown): string[] {
+    const ids = (payload as { missingIds?: unknown } | null)?.missingIds;
+    return Array.isArray(ids) ? ids.filter((x): x is string => typeof x === "string") : [];
+  }
+  /** missingIds out of an UNREAD batch Response. Callers that already
+   *  parsed the body (the paste one-shot needs `inserted` from the same
+   *  response) use missingIdsOf on their parse — a Response body reads
+   *  once. Parse failures read as “nothing missing”: surfacing is
+   *  best-effort and must never fail a write that the server applied. */
+  async function readBatchMissingIds(res: Response): Promise<string[]> {
+    const d = await res.json().catch(() => null);
+    return missingIdsOf(d?.data ?? d);
+  }
+  /** Toast + reload when a batch write reported rows deleted elsewhere.
+   *  A full load() rather than surgical eviction: the remote deletion also
+   *  shifted every A1 row ref below it, and the reload rebuilds the engine
+   *  host from server truth — the one guaranteed-coherent recovery. */
+  function noteRowsDeletedElsewhere(ids: ReadonlySet<string>) {
+    if (ids.size === 0) return;
+    toast(`${ids.size} row${ids.size === 1 ? " was" : "s were"} deleted elsewhere — reloading`);
+    void load();
+  }
+
   /** Batch cell writes with optimistic local apply. THROWS on any refused
    *  chunk — used by undo/redo bodies where honesty is the contract, and by
    *  callers that wrap their own catch. */
@@ -683,6 +714,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     // All chunks ride ONE queued job so another value write can't
     // interleave between the slices of a single logical batch.
+    const missing = new Set<string>();
     await writeQueueRef.current.run(async () => {
       for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
         const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -690,8 +722,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
         });
         if (!res.ok) throw new Error(`batch update HTTP ${res.status}`);
+        for (const mid of await readBatchMissingIds(res)) missing.add(mid);
       }
     });
+    // Surfaced AFTER the queued job so the reload can't interleave with a
+    // chunk still in flight — and NOT a throw: the route applied every
+    // still-live row, so an undo/redo body reporting failure here would
+    // re-push a command that mostly landed.
+    noteRowsDeletedElsewhere(missing);
   }
 
   /** Batch row deletes (chunked), optimistic. Throws on a refused chunk;
@@ -1438,11 +1476,56 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   async function addRow() { await createRow({}); }
 
+  /** Phase 5c: a guarded PATCH bounced (409) — another client changed the
+   *  cell(s) this edit vouched for. Fold ONLY the conflicted columns (where
+   *  the server provably outran us) plus server keys we hold no local value
+   *  for, through the same host-then-mirror order every optimistic write
+   *  uses. Deliberately NOT the whole row: our own queued sibling-cell
+   *  writes may still be in flight, and a wholesale absorb would clobber
+   *  their optimistic values with an older server snapshot — they land on
+   *  the server moments later, so keeping them IS the fresher truth. A
+   *  conflicted cell absent from `current` recomputes as null (the other
+   *  client cleared it). */
+  function absorbConflictRow(rowId: string, current: Record<string, unknown>, conflictCols: string[]) {
+    const localRow = (rowsRef.current ?? []).find((r) => r.id === rowId);
+    const localValues = localRow?.values ?? {};
+    const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+    const colIds = new Set([
+      ...conflictCols,
+      ...Object.keys(current).filter((k) => !hasOwn(localValues, k)),
+    ]);
+    const writes = [...colIds].map((colId) => ({
+      colId,
+      rowId,
+      // hasOwn, not bare indexing: `current` is parsed JSON, so a colId that
+      // collides with a prototype name must read as empty, not as a function.
+      raw: hasOwn(current, colId) ? current[colId] : null,
+    }));
+    driveHostWrites(writes);
+    commitRows((prev) => prev ? prev.map((r) => {
+      if (r.id !== rowId) return r;
+      const merged = { ...r.values };
+      for (const w of writes) merged[w.colId] = w.raw;
+      return { ...r, values: merged };
+    }) : prev);
+  }
+
   /** Optimistic single-row PATCH, undoable. Before-values are captured from
    *  local state ahead of the optimistic write; the formula path passes
    *  `opts.before` instead — engine setCell's { previous } return, which is
-   *  the authoritative overwritten value (built for exactly this wave). */
-  async function patchRow(rowId: string, values: Record<string, unknown>, opts?: { before?: Record<string, unknown>; label?: string; hostApplied?: boolean }) {
+   *  the authoritative overwritten value (built for exactly this wave).
+   *
+   *  opts.guard — THE Phase 5c concurrency opt-in, and the one central spot
+   *  deciding who sends `expect`. Only the single-cell commit paths
+   *  (commitEditorValue / commitCellText — they know the exact stored value
+   *  the user saw and replaced) set it; `before` doubles as `expect`, so the
+   *  server refuses the write (409) when another client changed that cell
+   *  first. Every other write path — paste, fill, clear, bulk ops, undo/redo
+   *  replay, the picker cells (link/person/attachment) and the row drawer —
+   *  stays unconditional ON PURPOSE: overwriting a range is those gestures'
+   *  explicit intent, and a per-cell refusal mid-gesture would shred it into
+   *  a patchwork of applied and refused cells. */
+  async function patchRow(rowId: string, values: Record<string, unknown>, opts?: { before?: Record<string, unknown>; label?: string; hostApplied?: boolean; guard?: boolean }) {
     if (!tableId) return;
     const prevRow = (rowsRef.current ?? []).find((r) => r.id === rowId);
     const before: Record<string, unknown> = {};
@@ -1461,10 +1544,36 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     try {
       // Queued: two rapid commits to one cell must persist in action
       // order, not response order (the recorded last-write-loses race).
+      // `before` is safe as `expect` even under queuing: it was captured
+      // from the mirror at call time, and the mirror already held every
+      // earlier queued edit's optimistic value, so back-to-back edits to
+      // one cell from THIS client can never self-conflict. Its
+      // null-for-absent normalization matches the server's compare
+      // (absence and null are the same empty cell, never a conflict).
       const res = await writeQueueRef.current.run(() => fetch(`/api/tables/${tableId}/rows`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: rowId, values }),
+        body: JSON.stringify({ id: rowId, values, ...(opts?.guard ? { expect: before } : {}) }),
       }));
+      // 409 = the guard refused the write: NOTHING landed on the server.
+      // Server truth replaces the optimistic value — the user's rejected
+      // input is dropped, the same outcome Sheets gives on refresh — and
+      // the early return keeps the rejected write out of history: pushUndo
+      // below only ever runs after an APPLIED write, so no entry exists to
+      // pop, and Ctrl+Z can never “restore” a value the server never left.
+      if (res.status === 409) {
+        const d = await res.json().catch(() => null);
+        const payload = d?.data ?? d;
+        const current = typeof payload?.current === "object" && payload.current !== null && !Array.isArray(payload.current)
+          ? (payload.current as Record<string, unknown>)
+          : null;
+        const conflictCols: string[] = Array.isArray(payload?.conflictCols)
+          ? (payload.conflictCols as unknown[]).filter((c): c is string => typeof c === "string")
+          : Object.keys(values); // body lacks the list: the vouched-for cells are the conflict set
+        if (current) absorbConflictRow(rowId, current, conflictCols);
+        else void load(); // conflict body unreadable — reload is the reconcile
+        toast("Cell updated by someone else — showing the latest value");
+        return;
+      }
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
       if (prevRow) {
         pushUndo({
@@ -1491,6 +1600,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     try {
       // Queued value write: an undo's restore enqueued a moment later must
       // land after these rewrites, never under them.
+      const missing = new Set<string>();
       await writeQueueRef.current.run(async () => {
         for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
           const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -1498,8 +1608,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
           if (!res.ok) throw new Error();
+          for (const mid of await readBatchMissingIds(res)) missing.add(mid);
         }
       });
+      noteRowsDeletedElsewhere(missing);
     } catch { toast("Couldn't rewrite formulas for the new layout"); void load(); }
   }
 
@@ -1527,6 +1639,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // the rest, the reload in the catch reconciles whatever did land —
       // the UI never keeps an optimistic clear the server rejected — and
       // no other value write can interleave between the slices.
+      const missing = new Set<string>();
       await writeQueueRef.current.run(async () => {
         for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
           const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -1534,6 +1647,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
           if (!res.ok) throw new Error();
+          for (const mid of await readBatchMissingIds(res)) missing.add(mid);
         }
       });
       const beforeUpdates = [...befores].map(([id, values]) => ({ id, values }));
@@ -1542,6 +1656,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         undo: () => writeValuesBatchStrict(beforeUpdates),
         redo: () => writeValuesBatchStrict(updates),
       });
+      noteRowsDeletedElsewhere(missing);
     } catch { toast("Couldn't clear cells"); void load(); }
   }
 
@@ -2288,6 +2403,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }) : prev);
     }
 
+    const missingRows = new Set<string>();
     try {
       // Sequential slices at the server's per-kind cap, exactly like
       // clearCells/bulkDeleteRows: a failure part-way stops the rest and the
@@ -2307,6 +2423,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
           });
           if (!res.ok) throw new Error();
+          for (const mid of await readBatchMissingIds(res)) missingRows.add(mid);
         }
         if (oneShot && (updates.length > 0 || realInserts.length > 0)) {
           const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -2319,6 +2436,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           if (!res.ok) throw new Error();
           const d = await res.json();
           const payload = d?.data ?? d;
+          // Body already consumed for `inserted`; mine the SAME parse for
+          // missingIds (a Response body reads once).
+          for (const mid of missingIdsOf(payload)) missingRows.add(mid);
           const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
             .map((r: { id: string; values: unknown; position: number }) => ({
               id: r.id,
@@ -2356,6 +2476,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // won't move the selection as though the write had landed.
       throw new Error("batch write failed");
     }
+
+    // Rows the route named in missingIds were deleted by another client
+    // mid-paste; the cells pasted onto them are gone. Surface + reload, but
+    // keep the undo entry below: replaying it is stale-tolerant (deleted
+    // targets no-op) and still restores every surviving row.
+    noteRowsDeletedElsewhere(missingRows);
 
     // Reached only when every chunk landed (the catch above rethrows), so
     // the command records an action that fully happened. Undo restores the
@@ -2503,7 +2629,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         // server. res.previous — the engine's authoritative overwritten
         // value — seeds the undo command.
         bumpEngine();
-        void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit", hostApplied: true });
+        void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit", hostApplied: true, guard: true });
       } catch {
         toast("Couldn't save formula");
       }
@@ -2516,7 +2642,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       toast("That value doesn't fit this column — nothing saved");
       return;
     }
-    void patchRow(rowId, { [colId]: res.value });
+    // Guarded (Phase 5c): this path knows the exact stored value it is
+    // replacing — see patchRow's guard note for the full opt-in policy.
+    void patchRow(rowId, { [colId]: res.value }, { guard: true });
   };
 
   /** Text editors commit through here so "=…" becomes a stored formula even
@@ -2527,7 +2655,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       commitCellText(rowId, colId, v);
       return;
     }
-    void patchRow(rowId, { [colId]: v });
+    // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
+    void patchRow(rowId, { [colId]: v }, { guard: true });
   };
 
   const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
