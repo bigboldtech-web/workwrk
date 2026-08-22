@@ -1,12 +1,14 @@
 "use client";
 
-/* Column format + highlight-rules popover (Tables Phase 4).
+/* Column type + format + highlight-rules popover (Tables Phase 4;
+ * Type section added by the Excel-ify pass).
  *
- * Opens from the sheet header's paintbrush button for number/currency/
- * percent/date columns. Everything here is DISPLAY config: it writes
- * `column.format` / `column.rules` through the page's persistColumns path
- * (which pushes the change onto the undo stack) and never touches raw cell
- * values.
+ * Opens from the sheet header's "…" button for every column. The Type
+ * section swaps col.type between the six Excel-like types this surface
+ * offers; format and rules are DISPLAY config. All of it writes
+ * `column.type` / `column.format` / `column.rules` through the page's
+ * persistColumns path (which pushes the change onto the undo stack) and
+ * never touches raw cell values.
  *
  * Positioning: absolute inside the header cell (which is position:relative),
  * NOT fixed — the grid header is sticky/transformed, and a fixed popover
@@ -24,6 +26,22 @@ import { Plus, Trash2 } from "lucide-react";
 import type { ColumnFormat, ConditionalRule } from "@/lib/sheet-format";
 
 const NUMERIC_TYPES = new Set(["number", "currency", "percent"]);
+
+/** The six types this Excel-like surface offers (Excel-ify decision 3).
+ *  Everything else either converts to one of these or is legacy. */
+export type SheetColumnType = "short_text" | "number" | "currency" | "percent" | "date" | "checkbox";
+const TYPE_CHOICES: { value: SheetColumnType; label: string }[] = [
+  { value: "short_text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "currency", label: "Currency" },
+  { value: "percent", label: "Percent" },
+  { value: "date", label: "Date" },
+  { value: "checkbox", label: "Checkbox" },
+];
+// Relational/computed legacy types are never offered here — an existing
+// column keeps working read-only, and the menu says so instead of showing
+// a chooser that could sever its config.
+const LEGACY_TYPES = new Set(["link", "lookup", "rollup", "person", "attachment", "formula"]);
 
 // Brand YBRG first (the palette the chips draw from), then two calmer
 // extras so a rule can highlight without shouting.
@@ -75,10 +93,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 const CONTROL = "h-6 rounded border border-zinc-200 bg-white px-1 text-[12px] text-zinc-800 outline-none focus:border-[#0073EA]";
 
-export function ColumnFormatMenu({ colType, format, rules, onFormatChange, onRulesChange, onClose }: {
+export function ColumnFormatMenu({ colType, format, rules, onTypeChange, onFormatChange, onRulesChange, onClose }: {
   colType: string;
   format?: ColumnFormat;
   rules?: ConditionalRule[];
+  /** Present ⇒ render the Type section (radio rows; current type checked).
+   *  Legacy colTypes render a read-only line instead of the chooser. */
+  onTypeChange?: (type: SheetColumnType) => void;
   /** Persist the whole format object (undefined clears it). */
   onFormatChange: (format: ColumnFormat | undefined) => void;
   /** Persist the whole rules array (undefined clears it). */
@@ -139,6 +160,36 @@ export function ColumnFormatMenu({ colType, format, rules, onFormatChange, onRul
       onMouseDown={(e) => e.stopPropagation()}
       className="absolute left-0 top-full z-50 mt-1 flex w-[252px] cursor-default flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-xl"
     >
+      {onTypeChange && (
+        LEGACY_TYPES.has(colType) ? (
+          <div className="text-[11px] leading-snug text-zinc-400">
+            {colType === "formula"
+              ? "Formula column — edit it via the header's Σ button"
+              : "Linked column — managed by legacy tables"}
+          </div>
+        ) : (
+          <>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Type</div>
+            <div className="grid grid-cols-2 gap-x-2">
+              {TYPE_CHOICES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => onTypeChange(t.value)}
+                  className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
+                >
+                  <span
+                    aria-hidden
+                    className={`inline-block h-3 w-3 shrink-0 rounded-full border ${colType === t.value ? "border-[4px] border-[#0073EA]" : "border-zinc-300"}`}
+                  />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )
+      )}
+
       {isNumeric && (
         <>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Number format</div>

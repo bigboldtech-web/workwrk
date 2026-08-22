@@ -30,3 +30,14 @@ export function notifyDocsChanged(): void {
   window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
   refreshSidebar();
 }
+
+/**
+ * Table (worksheet) mutations mirror the docs pattern: the Tables app
+ * sidebar listens on "workwrk:tables-changed" so a sheet created or renamed
+ * anywhere (sidebar "+", list page, CSV import) appears without a reload.
+ */
+export function notifyTablesChanged(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("workwrk:tables-changed"));
+  refreshSidebar();
+}

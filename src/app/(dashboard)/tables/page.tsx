@@ -7,6 +7,7 @@
  * a doc via the data_table block.
  */
 
+import { createExcelSheet } from "@/lib/sheet-new";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -57,16 +58,10 @@ export default function TablesPage() {
   }, [search]);
 
   async function quickAdd() {
-    const name = (await promptDialog({ title: "Table name?" }))?.trim();
+    const name = (await promptDialog({ title: "Sheet name?" }))?.trim();
     if (!name) return;
     try {
-      const res = await fetch("/api/tables", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      if (!res.ok) throw new Error(`POST ${res.status}`);
-      const d = await res.json();
-      const t = d.data ?? d;
+      const t = await createExcelSheet(name);
       router.push(`/tables/${t.id}`);
     } catch { toast("Couldn't create table"); }
   }

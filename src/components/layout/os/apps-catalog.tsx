@@ -34,6 +34,7 @@ import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { DocsSidebar } from "./docs-sidebar";
+import { TablesSidebar } from "./tables-sidebar";
 import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
@@ -1183,10 +1184,12 @@ export const APPS: AppEntry[] = [
     createActions: [{ label: "New Dashboard", icon: BarChart3, href: "/dashboards?new=1" }] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables",
     matchPaths: ["/tables"], category: "Core", defaultPinned: true,
-    Sidebar: linksSidebar([{ href: "/tables", label: "All tables", Icon: Table2 }]),
+    // TablesSidebar lists every worksheet (like Docs lists docs); the old
+    // single "All tables" link survives as a secondary row inside it.
+    Sidebar: TablesSidebar,
     // ?new=1 is an armed latch on the list page: it opens the name prompt
     // once on arrival, so the rail "+" goes straight into creation.
-    createActions: [{ label: "New table", icon: Table2, href: "/tables?new=1" }] },
+    createActions: [{ label: "New sheet", icon: Table2, href: "/tables?new=1" }] },
   { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
     matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,

@@ -1,21 +1,23 @@
 "use client";
 
-/* Tables · grid editor — Airtable-style spreadsheet view.
+/* Tables · sheet editor — an Excel-like spreadsheet.
  *
- * Inline cell edits PATCH on blur. Column header click renames the
- * column; the "+" header adds a column. Row-end "+" adds a row.
- * Right-click a row or column to delete. Lightweight: no formulas,
- * no views, no filtering for v1 — just rows + cells + types.
+ * Columns are anonymous letters (A, B, C…) with an optional small label;
+ * "+" appends a generic text column instantly; type/format/highlight live
+ * in the per-column "…" menu. The sheet kernel (SheetGrid) renders the
+ * grid; this page owns data semantics, the formula engine host, undo and
+ * CSV import/export. The old Airtable chrome (saved views, kanban/calendar/
+ * gallery renderers, the column type-picker, the classic-grid escape hatch)
+ * is gone — saved-view JSON persists server-side only to carry the sort.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2, Type, Hash,
-  Calendar as CalIcon, CheckSquare, List, Link as LinkIcon, AtSign, AlignLeft,
-  LayoutGrid, Columns, ChevronLeft, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, DollarSign, Percent, Star, Link2, Check, Paperclip, Users,
-  Undo2, Redo2, Paintbrush,
+  Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
+  Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
+  Globe, Lock, Sigma, Star, Link2, Check, MoreHorizontal,
+  Undo2, Redo2,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -55,24 +57,6 @@ type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCo
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
-const COL_LABEL: Record<ColType, string> = {
-  short_text: "Short text", long_text: "Long text", number: "Number",
-  currency: "Currency", percent: "Percent", rating: "Rating",
-  select: "Single choice", multi_select: "Multiple choice", date: "Date",
-  checkbox: "Checkbox", url: "URL", email: "Email", formula: "Formula",
-  link: "Link to table", lookup: "Lookup", rollup: "Rollup",
-  attachment: "Attachment", person: "Person",
-};
-
-const COL_ICON: Record<ColType, React.ReactNode> = {
-  short_text: <Type />, long_text: <AlignLeft />, number: <Hash />,
-  currency: <DollarSign />, percent: <Percent />, rating: <Star />,
-  select: <List />, multi_select: <List />, date: <CalIcon />,
-  checkbox: <CheckSquare />, url: <LinkIcon />, email: <AtSign />, formula: <Sigma />,
-  link: <Link2 />, lookup: <Search />, rollup: <Sigma />,
-  attachment: <Paperclip />, person: <Users />,
-};
-
 type OrgUser = { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null };
 function userName(u: OrgUser | undefined): string {
   if (!u) return "—";
@@ -100,9 +84,6 @@ function rowTitle(row: ApiRow | undefined, titleColId: string): string {
 }
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
-
-// Sticky header cells stay pinned while the grid body scrolls.
-const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, background: "#fff" };
 
 // The batch route 400s a whole request above MAX_OPS ops of one kind
 // (api/tables/[id]/rows/batch), and select-all happily spans thousands of
@@ -306,21 +287,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [rows, setRows] = useState<ApiRow[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCols, setSavingCols] = useState(false);
-  const [view, setView] = useState<ViewType>("grid");
-  const [kanbanCol, setKanbanCol] = useState<string>("");
-  const [calCol, setCalCol] = useState<string>("");
-  // Saved named views (Stackby-style). Persisted in DataTable.views.
-  const [views, setViews] = useState<SavedView[]>([]);
-  const [activeViewId, setActiveViewId] = useState<string>("");
-  const [calMonth, setCalMonth] = useState<Date>(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [search, setSearch] = useState("");
   const [sortState, setSortState] = useState<SheetSort>(null);
-  // Escape hatch to the pre-kernel table while the sheet kernel bakes
-  // (docs/plans/tables.md Phase 1 rollout discipline).
-  const [classicGrid, setClassicGrid] = useState(false);
-  useEffect(() => {
-    try { setClassicGrid(localStorage.getItem("workwrk:tables:classic") === "1"); } catch { /* private mode */ }
-  }, []);
+  // Saved-view JSON still lives in DataTable.views server-side, but the
+  // only thing this surface reads or writes there is the first view's sort
+  // — the view-switching UI is gone (Excel-ify decision 1).
+  const viewsRef = useRef<SavedView[]>([]);
   const [filterCol, setFilterCol] = useState<string>("");
   const [filterValue, setFilterValue] = useState<string>("");
   const [activeRowId, setActiveRowId] = useState<string | null>(null);
@@ -374,8 +346,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       setTable(t);
       setRows(rd.data ?? (Array.isArray(rd) ? rd : []));
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
-      setViews(savedViews);
-      setActiveViewId((cur) => (savedViews.some((v) => v.id === cur) ? cur : savedViews[0].id));
+      viewsRef.current = savedViews;
+      setSortState(savedViews[0]?.config?.sort ?? null);
       savedColumnsRef.current = t.columns;
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
@@ -597,8 +569,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cur = tableRef.current;
     if (!cur) throw new Error("table gone");
     if (!cur.columns.some((c) => c.id === colId)) return; // column deleted since — no-op, never corrupt
+    // An empty label is legal on this surface (anonymous Excel columns) but
+    // the engine can't rewrite refs INTO it — "[]" doesn't tokenize — so a
+    // clear skips the rewrite pass: [Old] refs stay and surface #NAME?,
+    // which an undo (or re-labeling) cleanly repairs.
     let res: StructureResult | null = null;
-    try { res = engineHostRef.current.columnRenamed(colId, label); } catch { res = null; }
+    if (label !== "") { try { res = engineHostRef.current.columnRenamed(colId, label); } catch { res = null; } }
     const cols = applyColumnRewrites(
       cur.columns.map((c) => c.id === colId ? { ...c, label } : c),
       res?.rewritten.columns ?? [],
@@ -664,87 +640,92 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
   }
 
-  // ── Saved views ──
-  const persistViews = useCallback((next: SavedView[]) => { setViews(next); void patchTable({ views: next }); }, [tableId]); // eslint-disable-line react-hooks/exhaustive-deps
-  const updateActiveView = useCallback((patch: Partial<SavedView>) => {
-    persistViews(views.map((v) => v.id === activeViewId ? { ...v, ...patch, config: { ...v.config, ...patch.config } } : v));
-  }, [views, activeViewId, persistViews]);
-  const addView = async () => {
-    const name = (await promptDialog({ title: "View name:", defaultValue: "New view" }))?.trim();
-    if (!name) return;
-    const id = Math.random().toString(36).slice(2, 9);
-    persistViews([...views, { id, name, type: "grid" }]);
-    setActiveViewId(id);
-  };
-  const renameView = async (id: string) => {
-    const cur = views.find((v) => v.id === id);
-    const name = (await promptDialog({ title: "Rename view:", defaultValue: cur?.name ?? "" }))?.trim();
-    if (!name) return;
-    persistViews(views.map((v) => v.id === id ? { ...v, name } : v));
-  };
-  const deleteView = async (id: string) => {
-    if (views.length <= 1) { toast("A table needs at least one view"); return; }
-    if (!(await confirm({ title: "Delete view", description: "Delete this view?", destructive: true, confirmLabel: "Delete" }))) return;
-    const next = views.filter((v) => v.id !== id);
-    persistViews(next);
-    if (activeViewId === id) setActiveViewId(next[0].id);
-  };
-
-  // Sync the working view state from the active saved view on switch.
-  useEffect(() => {
-    const v = views.find((x) => x.id === activeViewId);
-    if (!v) return;
-    setView(v.type);
-    setKanbanCol(v.config?.kanbanCol ?? "");
-    setCalCol(v.config?.calCol ?? "");
-    setSortState(v.config?.sort ?? null);
-  }, [activeViewId, views]);
-
-  async function addColumn(type: ColType) {
+  /** The column menu's Type section (Excel-ify decision 4): changing type
+   *  just sets col.type through the same persist path — stored values are
+   *  reinterpreted by the renderers, never rewritten, so a wrong pick
+   *  undoes (or re-picks) losslessly. */
+  function setColumnType(colId: string, type: ColType) {
     if (!table) return;
-    let formula: string | undefined;
-    if (type === "formula") {
-      const f = await promptDialog({ title: "Formula (e.g. =A+B, =SUM(C), =A1+B2):", defaultValue: "=" });
-      if (f == null) return; // cancelled
-      formula = f.trim();
-    }
-    const id = newId();
-    const def: Column = {
-      id, type, label: COL_LABEL[type],
-      ...(type === "select" || type === "multi_select" ? { options: ["Option 1"] } : {}),
-      ...(formula !== undefined ? { formula } : {}),
-    };
-    const cols = [...table.columns, def];
+    const col = table.columns.find((c) => c.id === colId);
+    if (!col || col.type === type) return;
+    const before = col.type;
+    const cols = table.columns.map((c) => (c.id === colId ? { ...c, type } : c));
     setTable({ ...table, columns: cols });
+    void persistColumns(cols).then((ok) => {
+      if (ok) pushColumnPatch("change column type", colId, { type: before }, { type });
+    });
+  }
+
+  /** Sort rides in the SAME DataTable.views JSON the old saved-view UI
+   *  wrote (first view's config.sort), so nothing changes server-side and
+   *  a legacy table's other views pass through untouched — they just never
+   *  render again on this surface. */
+  const persistSort = (sn: SheetSort) => {
+    setSortState(sn);
+    const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
+    const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, sort: sn ?? undefined } } : v));
+    viewsRef.current = next;
+    void patchTable({ views: next });
+  };
+
+  /** "+" appends a generic text column INSTANTLY — no dialog, no type
+   *  picker (Excel-ify decision 3). A column's type/format lives in its
+   *  "…" menu now. tableRef is bumped eagerly so rapid clicks compose
+   *  (each sees the column the previous click just appended). */
+  async function addColumn() {
+    const cur = tableRef.current ?? table;
+    if (!cur) return;
+    const def: Column = { id: newId(), type: "short_text", label: "" };
+    const cols = [...cur.columns, def];
+    tableRef.current = { ...cur, columns: cols };
+    setTable((prev) => (prev ? { ...prev, columns: [...prev.columns, def] } : prev));
     const ok = await persistColumns(cols);
     if (ok) {
       const at = cols.length - 1;
       pushUndo({
-        label: `add column "${def.label}"`,
+        label: `add column ${columnLetter(at)}`,
         undo: async () => {
           // Inverse of an append: delete it, letting the live host produce
           // whatever rewrites refs into/past it now need.
-          const cur = tableRef.current;
-          if (!cur) throw new Error("table gone");
-          if (!cur.columns.some((c) => c.id === def.id)) return;
+          const curT = tableRef.current;
+          if (!curT) throw new Error("table gone");
+          if (!curT.columns.some((c) => c.id === def.id)) return;
           let res: StructureResult | null = null;
           try { res = engineHostRef.current.columnDeleted(def.id); } catch { res = null; }
-          const next = applyColumnRewrites(cur.columns.filter((c) => c.id !== def.id), res?.rewritten.columns ?? []);
+          const next = applyColumnRewrites(curT.columns.filter((c) => c.id !== def.id), res?.rewritten.columns ?? []);
           await saveColumnsStrict(next);
           if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
         },
         redo: async () => {
-          const cur = tableRef.current;
-          if (!cur) throw new Error("table gone");
-          if (cur.columns.some((c) => c.id === def.id)) return;
-          const next = [...cur.columns];
+          const curT = tableRef.current;
+          if (!curT) throw new Error("table gone");
+          if (curT.columns.some((c) => c.id === def.id)) return;
+          const next = [...curT.columns];
           next.splice(Math.min(at, next.length), 0, { ...def });
           await saveColumnsStrict(next);
         },
       });
     }
-    // Relational columns need a target/config before they do anything.
-    if (type === "link" || type === "lookup" || type === "rollup") setConfigColId(id);
+  }
+
+  /** Excel-ify decision 4: the 8×30 blank-sheet seed for a table that has
+   *  zero columns (legacy, or a creation whose seeding failed). The list
+   *  page seeds the same shape at creation time. Not undoable on purpose —
+   *  it IS the blank sheet. */
+  async function startSheet() {
+    const cur = tableRef.current ?? table;
+    if (!cur || cur.columns.length > 0) return;
+    const cols: Column[] = Array.from({ length: 8 }, () => ({ id: newId(), type: "short_text", label: "" }));
+    // Eager tableRef bump, same as addColumn: the guard above must see the
+    // new columns immediately, or a double-click faster than the sync
+    // effect fires the 30-row seed twice (60 blank rows).
+    if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
+    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    const ok = await persistColumns(cols);
+    if (!ok) { toast("Couldn't start the sheet"); void load(); return; }
+    try {
+      await insertRowsBatchStrict(Array.from({ length: 30 }, () => ({ values: {} })));
+    } catch { toast("Couldn't add the starter rows"); }
   }
 
   function saveColumnConfig(colId: string, patch: Partial<Column>) {
@@ -788,8 +769,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // refs must follow the rename, and without persisting the rewritten
     // sources a rename to a label another column already carries would
     // silently repoint refs via the leftmost-wins rule.
+    // Empty labels never go through the engine: "[]" doesn't tokenize, so
+    // rewriting [Old] refs to it would corrupt stored formulas. They keep
+    // [Old] and show #NAME? instead — honest and undoable.
     let res: StructureResult | null = null;
-    try { res = engineHost.columnRenamed(colId, label); } catch { /* a rewrite failure must never block the rename */ }
+    if (label !== "") { try { res = engineHost.columnRenamed(colId, label); } catch { /* a rewrite failure must never block the rename */ } }
     const cols = applyColumnRewrites(
       table.columns.map((c) => c.id === colId ? { ...c, label } : c),
       res?.rewritten.columns ?? [],
@@ -942,8 +926,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     document.addEventListener("mouseup", onUp);
   }
 
-  /** One creation path for the grid footer AND the kanban/calendar "add
-   *  card" buttons, so every created row is undoable the same way. */
+  /** One creation path for every row insert on this page, so each created
+   *  row is undoable the same way. */
   async function createRow(values: Record<string, unknown>): Promise<ApiRow | null> {
     if (!tableId) return null;
     try {
@@ -1257,7 +1241,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  byte-for-byte. Sort/formulas always read raw either way. */
   function exportCsv(formatted: boolean) {
     if (!table || rows === null) return;
-    const headers = table.columns.map((c) => csvEscape(c.label)).join(",");
+    // Anonymous columns export under their letter, like Excel would —
+    // an empty header cell would make the file unreadable elsewhere.
+    const headers = table.columns.map((c, i) => csvEscape(c.label || columnLetter(i))).join(",");
     const bodyRows = rows.map((r) =>
       table.columns.map((c) => {
         const v = r.values[c.id];
@@ -1290,8 +1276,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     a.remove();
     URL.revokeObjectURL(url);
   }
-
-  const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
 
   // The formula engine host (Tables Phase 3): dependency-graph recalc over
   // the UNSORTED `rows` order — display sort must never change what a ref
@@ -1345,21 +1329,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   }, [linkedTables]);
 
   const configColumn = configColId ? (table?.columns ?? []).find((c) => c.id === configColId) ?? null : null;
-
-  const kanbanColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "select"), [table?.columns]);
-  const dateColumns = useMemo(() => (table?.columns ?? []).filter((c) => c.type === "date"), [table?.columns]);
-
-  // Auto-pick the first select column for kanban when switching to that view.
-  useEffect(() => {
-    if (view !== "kanban") return;
-    if (kanbanCol && kanbanColumns.find((c) => c.id === kanbanCol)) return;
-    setKanbanCol(kanbanColumns[0]?.id ?? "");
-  }, [view, kanbanCol, kanbanColumns]);
-  useEffect(() => {
-    if (view !== "calendar") return;
-    if (calCol && dateColumns.find((c) => c.id === calCol)) return;
-    setCalCol(dateColumns[0]?.id ?? "");
-  }, [view, calCol, dateColumns]);
 
   // ── Sheet kernel derived state ──────────────────────────────────
   // Hooks, so they can sit above the early returns AND feed the active-cell
@@ -1461,10 +1430,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
   if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
-
-  const activeCol = kanbanColumns.find((c) => c.id === kanbanCol);
-  const activeDateCol = dateColumns.find((c) => c.id === calCol);
-  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
 
   const filterColDef = table.columns.find((c) => c.id === filterCol);
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
@@ -1781,47 +1746,63 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (notes.length > 0) toast(`Pasted ${written} cell${written === 1 ? "" : "s"} · ${notes.join(" · ")}`);
   };
 
+  /** Excel-style header (Excel-ify decision 2): the column LETTER is the
+   *  primary text and the drag-reorder handle; the optional label renders
+   *  as a small second line whose input doubles as the rename affordance.
+   *  Being an <input>, it keeps the kernel's EDITABLE_SEL protection —
+   *  keystrokes in it never reach the grid's shortcuts. */
   const kernelHeader = (colId: string) => {
     const c = table.columns.find((x) => x.id === colId);
     if (!c) return null;
     const colIndex = table.columns.findIndex((x) => x.id === colId);
     return (
-      <div className="dtbl__col-head" style={{ position: "relative", opacity: dragColId === c.id ? 0.5 : 1 }}
+      <div
+        className="dtbl__col-head"
+        style={{ position: "relative", flexDirection: "column", alignItems: "stretch", justifyContent: "center", gap: 0, padding: "1px 2px", opacity: dragColId === c.id ? 0.5 : 1 }}
         onDragOver={(e) => { if (dragColId) e.preventDefault(); }}
         onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
       >
         <span
-          className="dtbl__col-icon"
           title={`Column ${columnLetter(colIndex)} · drag to reorder`}
           draggable
           onDragStart={() => setDragColId(c.id)}
           onDragEnd={() => setDragColId(null)}
-          style={{ cursor: "grab" }}
-        >{COL_ICON[c.type]}</span>
+          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "14px", color: "#3f3f46" }}
+        >{columnLetter(colIndex)}</span>
         <input
           type="text"
           value={c.label}
+          aria-label={`Label for column ${columnLetter(colIndex)}`}
           onChange={(e) => setTable({ ...table, columns: table.columns.map((x) => x.id === c.id ? { ...x, label: e.target.value } : x) })}
-          onBlur={(e) => renameColumn(c.id, e.target.value.trim() || COL_LABEL[c.type])}
+          // Empty is a legal label — columns are anonymous like Excel's.
+          onBlur={(e) => renameColumn(c.id, e.target.value.trim())}
+          style={{ flex: "none", width: "100%", height: 13, padding: 0, textAlign: "center", fontSize: 10.5, lineHeight: "13px", fontWeight: 400, color: "#71717a" }}
         />
-        {c.type === "formula" ? (
-          <button type="button" className="dtbl__col-del" onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
-        ) : null}
-        {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
-          <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
-        ) : null}
-        {FORMATTABLE_TYPES.has(c.type) ? (
+        <span
+          // Visible on header hover only (the kernel's columnheader is the
+          // group/head Tailwind group); the light backdrop keeps the icons
+          // legible over the centered label text they overlap.
+          className="opacity-0 group-hover/head:opacity-100"
+          style={{ position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)", display: "inline-flex", alignItems: "center", background: "rgba(250,250,250,0.92)", borderRadius: 4 }}
+        >
+          {c.type === "formula" ? (
+            <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
+          ) : null}
+          {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
+            <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
+          ) : null}
           <button
             type="button"
             className="dtbl__col-del"
+            style={{ opacity: 1 }}
             // Stop the mousedown reaching the menu's outside-click closer,
             // or "toggle closed" would close-then-reopen in one click.
             onMouseDown={(e) => e.stopPropagation()}
             onClick={() => setFormatMenuColId((cur) => (cur === c.id ? null : c.id))}
-            title="Format & highlight rules"
-          ><Paintbrush /></button>
-        ) : null}
-        <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
+            title="Column type, format & highlight rules"
+          ><MoreHorizontal /></button>
+          <button type="button" className="dtbl__col-del" style={{ opacity: 1 }} onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
+        </span>
         {formatMenuColId === c.id ? (
           // Absolute inside this position:relative header cell — the sticky
           // header is a transformed/sticky container, so fixed would drift.
@@ -1829,6 +1810,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             colType={c.type}
             format={c.format}
             rules={c.rules}
+            onTypeChange={(t) => setColumnType(c.id, t)}
             onFormatChange={(f) => setColumnFormat(c.id, f)}
             onRulesChange={(r) => setColumnRules(c.id, r)}
             onClose={() => setFormatMenuColId(null)}
@@ -1837,7 +1819,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         <span
           onMouseDown={(e) => startResize(e, c.id)}
           title="Drag to resize"
-          style={{ position: "absolute", right: -6, top: 0, bottom: 0, width: 8, cursor: "col-resize" }}
+          style={{ position: "absolute", right: -6, top: 0, bottom: 0, width: 8, cursor: "col-resize", zIndex: 1 }}
         />
       </div>
     );
@@ -1892,17 +1874,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return;
     }
     void patchRow(rowId, { [colId]: v });
-  };
-
-  /** Computed display for the card views (kanban/calendar/gallery): non-null
-   *  only for cells the engine computes, so the views keep their own
-   *  formatting for literals. */
-  const cardPreview = (colId: string, rowId: string): string | null => {
-    const r = rowById.get(rowId);
-    const c = table.columns.find((x) => x.id === colId);
-    if (!r || !c) return null;
-    if (c.type === "formula" || isFormulaCell(r.values[colId])) return String(engineHost.display(colId, rowId) ?? "");
-    return null;
   };
 
   const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
@@ -2056,54 +2027,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
       </header>
 
-      {/* Saved views — switch / add / rename / delete. */}
-      <nav className="dtbl__viewtabs" style={{ gap: 4, flexWrap: "wrap" }}>
-        {views.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            className={v.id === activeViewId ? "is-active" : ""}
-            onClick={() => setActiveViewId(v.id)}
-            onDoubleClick={() => renameView(v.id)}
-            title="Double-click to rename"
-            style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
-          >
-            {v.type === "kanban" ? <Columns /> : v.type === "calendar" ? <CalIcon /> : v.type === "gallery" ? <LayoutGrid /> : <TableIcon />}
-            {v.name}
-            {views.length > 1 ? <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); deleteView(v.id); }} style={{ marginLeft: 2, opacity: 0.5, cursor: "pointer" }}>×</span> : null}
-          </button>
-        ))}
-        <button type="button" onClick={addView} title="Add view"><Plus /></button>
-      </nav>
-
-      {/* Active view's display type + grouping. */}
+      {/* Search + filter toolbar. The saved-view tabs, kanban/calendar/
+          gallery renderers and the classic-grid toggle are gone — /tables
+          is one Excel-like sheet per table (Excel-ify decision 1). */}
       <nav className="dtbl__viewtabs">
-        <button type="button" className={view === "grid" ? "is-active" : ""} onClick={() => updateActiveView({ type: "grid" })}><LayoutGrid /> Grid</button>
-        <button type="button" className={view === "kanban" ? "is-active" : ""} onClick={() => updateActiveView({ type: "kanban" })} disabled={kanbanColumns.length === 0} title={kanbanColumns.length === 0 ? "Add a Single-choice column to enable Kanban" : ""}><Columns /> Kanban</button>
-        <button type="button" className={view === "calendar" ? "is-active" : ""} onClick={() => updateActiveView({ type: "calendar" })} disabled={dateColumns.length === 0} title={dateColumns.length === 0 ? "Add a Date column to enable Calendar" : ""}><CalIcon /> Calendar</button>
-        <button type="button" className={view === "gallery" ? "is-active" : ""} onClick={() => updateActiveView({ type: "gallery" })}><LayoutGrid /> Gallery</button>
-        {view === "grid" && (
-          <button
-            type="button"
-            title={classicGrid ? "Switch to the spreadsheet grid" : "Switch to the classic grid"}
-            onClick={() => setClassicGrid((v) => {
-              const n = !v;
-              try { localStorage.setItem("workwrk:tables:classic", n ? "1" : "0"); } catch { /* private mode */ }
-              return n;
-            })}
-            style={{ opacity: 0.7 }}
-          >{classicGrid ? "⌗ Sheet" : "≡ Classic"}</button>
-        )}
-        {view === "kanban" && kanbanColumns.length > 1 && (
-          <select className="dtbl__viewgroup" value={kanbanCol} onChange={(e) => updateActiveView({ config: { kanbanCol: e.target.value } })}>
-            {kanbanColumns.map((c) => <option key={c.id} value={c.id}>Group by: {c.label}</option>)}
-          </select>
-        )}
-        {view === "calendar" && dateColumns.length > 1 && (
-          <select className="dtbl__viewgroup" value={calCol} onChange={(e) => updateActiveView({ config: { calCol: e.target.value } })}>
-            {dateColumns.map((c) => <option key={c.id} value={c.id}>By: {c.label}</option>)}
-          </select>
-        )}
         <div className="dtbl__filterbar">
           <div className="dtbl__searchwrap">
             <Search />
@@ -2130,40 +2057,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         </div>
       </nav>
 
-      {view === "kanban" && activeCol ? (
-        <KanbanView
-          table={table}
-          rows={filteredRows}
-          groupCol={activeCol}
-          titleCol={titleCol}
-          preview={cardPreview}
-          onCardClick={(rowId) => setActiveRowId(rowId)}
-          onAddRow={async (groupValue: string) => {
-            // Shared creation path: undoable like every other row insert.
-            await createRow({ [activeCol.id]: groupValue });
-          }}
-          onMove={(rowId, newGroup) => void patchRow(rowId, { [activeCol.id]: newGroup })}
-        />
-      ) : view === "calendar" && activeDateCol ? (
-        <CalendarView
-          rows={filteredRows}
-          dateCol={activeDateCol}
-          titleCol={titleCol}
-          preview={cardPreview}
-          onCardClick={(rowId) => setActiveRowId(rowId)}
-          month={calMonth}
-          onPrev={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))}
-          onNext={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))}
-          onToday={() => { const d = new Date(); setCalMonth(new Date(d.getFullYear(), d.getMonth(), 1)); }}
-          onMove={(rowId, isoDate) => void patchRow(rowId, { [activeDateCol.id]: isoDate })}
-          onAddRow={async (isoDate) => {
-            // Shared creation path: undoable like every other row insert.
-            await createRow({ [activeDateCol.id]: isoDate });
-          }}
-        />
-      ) : view === "gallery" ? (
-        <GalleryView rows={filteredRows} columns={table.columns} titleCol={titleCol} preview={cardPreview} onCardClick={(rowId) => setActiveRowId(rowId)} />
-      ) : !classicGrid ? (
+      {table.columns.length === 0 ? (
+        /* A columnless table must still open as a spreadsheet, never a
+           card: one click applies the standard 8×30 blank-sheet seed. */
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button type="button" className="dtbl__addrow" onClick={() => void startSheet()}><Plus /> Start sheet</button>
+        </div>
+      ) : (
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 20px" }}>
           <FormulaBar
             cell={barCell}
@@ -2192,135 +2092,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             onOpenRow={(id) => setActiveRowId(id)}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
             sort={sortState}
-            onSortChange={(sn) => { setSortState(sn); updateActiveView({ config: { sort: sn ?? undefined } }); }}
+            onSortChange={(sn) => persistSort(sn)}
             renderHeader={kernelHeader}
             headerTrailing={
-              <details>
-                <summary style={{ listStyle: "none", cursor: "pointer", display: "inline-flex" }}><Plus style={{ width: 15, height: 15, color: "#71717a" }} /></summary>
-                <div className="dtbl__addcol-menu" style={{ position: "absolute", right: 8, zIndex: 40 }}>
-                  {columnTypes.map((t) => (
-                    <button key={t} type="button" onClick={() => addColumn(t)}>
-                      <span>{COL_ICON[t]}</span> {COL_LABEL[t]}
-                    </button>
-                  ))}
-                </div>
-              </details>
+              <button
+                type="button"
+                onClick={() => void addColumn()}
+                title="Add column"
+                className="inline-flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600"
+              >
+                <Plus style={{ width: 15, height: 15 }} />
+              </button>
             }
             footer={<button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>}
             readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup").map((c) => c.id))}
           />
           </div>
         </div>
-      ) : (
-      <>
-      <div className="dtbl__scroll">
-        <table className="dtbl__grid">
-          <thead>
-            <tr>
-              <th className="dtbl__rowhandle" style={STICKY_TH} />
-              <th className="dtbl__rowexpand" style={STICKY_TH} />
-              {table.columns.map((c, colIndex) => (
-                <th
-                  key={c.id}
-                  className="dtbl__col"
-                  style={{ ...STICKY_TH, ...(c.width ? { width: c.width, minWidth: c.width } : {}), position: "sticky", opacity: dragColId === c.id ? 0.5 : 1 }}
-                  onDragOver={(e) => { if (dragColId) e.preventDefault(); }}
-                  onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
-                >
-                  <div className="dtbl__col-head" style={{ position: "relative" }}>
-                    <span
-                      className="dtbl__col-icon"
-                      title={`Column ${columnLetter(colIndex)} · drag to reorder`}
-                      draggable
-                      onDragStart={() => setDragColId(c.id)}
-                      onDragEnd={() => setDragColId(null)}
-                      style={{ cursor: "grab" }}
-                    >{COL_ICON[c.type]}</span>
-                    <input
-                      type="text"
-                      value={c.label}
-                      onChange={(e) => setTable({ ...table, columns: table.columns.map((x) => x.id === c.id ? { ...x, label: e.target.value } : x) })}
-                      onBlur={(e) => renameColumn(c.id, e.target.value.trim() || COL_LABEL[c.type])}
-                    />
-                    {c.type === "formula" ? (
-                      <button type="button" className="dtbl__col-del" onClick={() => editFormula(c.id)} title={`Edit formula (${c.formula || "none"})`}><Sigma /></button>
-                    ) : null}
-                    {c.type === "link" || c.type === "lookup" || c.type === "rollup" ? (
-                      <button type="button" className="dtbl__col-del" onClick={() => setConfigColId(c.id)} title="Configure relation"><Link2 /></button>
-                    ) : null}
-                    <button type="button" className="dtbl__col-del" onClick={() => deleteColumn(c.id)} title="Delete column"><Trash2 /></button>
-                    {/* Resize handle */}
-                    <span
-                      onMouseDown={(e) => startResize(e, c.id)}
-                      title="Drag to resize"
-                      style={{ position: "absolute", right: -4, top: 0, bottom: 0, width: 8, cursor: "col-resize" }}
-                    />
-                  </div>
-                </th>
-              ))}
-              <th className="dtbl__addcol">
-                <details>
-                  <summary><Plus /></summary>
-                  <div className="dtbl__addcol-menu">
-                    {columnTypes.map((t) => (
-                      <button key={t} type="button" onClick={() => addColumn(t)}>
-                        <span>{COL_ICON[t]}</span> {COL_LABEL[t]}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.length === 0 ? (
-              <tr><td colSpan={table.columns.length + 3} className="dtbl__empty">{rows.length === 0 ? "No rows yet. Add one below." : "No rows match the current search/filter."}</td></tr>
-            ) : filteredRows.map((r) => (
-              <tr
-                key={r.id}
-                onContextMenu={(e) => {
-                  // Let inputs / editable cells keep their native menu (same
-                  // guard as the board table rows).
-                  if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
-                  e.preventDefault();
-                  setRowMenu({ rowId: r.id, x: e.clientX, y: e.clientY });
-                }}
-              >
-                <td className="dtbl__rowhandle">
-                  <button type="button" onClick={() => deleteRow(r.id)} title="Delete row"><Trash2 /></button>
-                </td>
-                <td className="dtbl__rowexpand">
-                  <button type="button" onClick={() => setActiveRowId(r.id)} title="Open row"><ChevronRight /></button>
-                </td>
-                {table.columns.map((c) => (
-                  <td key={c.id} className="dtbl__cell" style={c.width ? { width: c.width, minWidth: c.width, maxWidth: c.width } : undefined}>
-                    {c.type === "formula" || isFormulaCell(r.values[c.id]) ? (
-                      // Per-cell formulas render computed (read-only) in the
-                      // classic escape hatch too — the editor lives in the
-                      // sheet view, but the number must be the same here.
-                      <FormulaCell value={String(engineHost.display(c.id, r.id) ?? "")} />
-                    ) : c.type === "link" ? (
-                      <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
-                    ) : c.type === "lookup" || c.type === "rollup" ? (
-                      <FormulaCell value={relationalValue(c, r)} />
-                    ) : c.type === "attachment" ? (
-                      <AttachmentCell value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
-                    ) : c.type === "person" ? (
-                      <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
-                    ) : (
-                      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
-                    )}
-                  </td>
-                ))}
-                <td />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>
-      </>)}
+      )}
 
       {rowMenu ? (
         <MorePortal
@@ -2381,37 +2170,6 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   );
 }
 
-function GalleryView({ rows, columns, titleCol, preview, onCardClick }: {
-  rows: ApiRow[]; columns: Column[]; titleCol: Column | undefined;
-  preview?: (colId: string, rowId: string) => string | null;
-  onCardClick: (rowId: string) => void;
-}) {
-  const fieldCols = columns.filter((c) => c.id !== titleCol?.id).slice(0, 5);
-  const fmt = (v: unknown): string => {
-    if (v == null || v === "") return "";
-    if (Array.isArray(v)) return `${v.length}`;
-    if (typeof v === "boolean") return v ? "Yes" : "No";
-    return String(v);
-  };
-  if (rows.length === 0) return <div className="dtbl__empty" style={{ padding: 24 }}>No rows yet.</div>;
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, padding: 12 }}>
-      {rows.map((r) => (
-        <button key={r.id} type="button" onClick={() => onCardClick(r.id)} style={{ textAlign: "left", background: "white", border: "1px solid #e4e4e7", borderRadius: 10, padding: 12, cursor: "pointer" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#18181b", marginBottom: 6 }}>{(titleCol && preview?.(titleCol.id, r.id)) || rowTitle(r, titleCol?.id ?? "")}</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {fieldCols.map((c) => {
-              const s = preview?.(c.id, r.id) ?? fmt(r.values[c.id]);
-              if (!s) return null;
-              return <div key={c.id} style={{ fontSize: 11.5, color: "#71717a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><span style={{ color: "#a1a1aa" }}>{c.label}:</span> {s}</div>;
-            })}
-          </div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelete }: {
   table: ApiTable; row: ApiRow;
   onClose: () => void;
@@ -2442,9 +2200,9 @@ function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelet
           </div>
         </header>
         <div className="dtbl__modal-body">
-          {table.columns.map((c) => (
+          {table.columns.map((c, ci) => (
             <div key={c.id} className="dtbl__modal-field">
-              <label>{c.label}</label>
+              <label>{c.label || columnLetter(ci)}</label>
               {isFormulaCell(row.values[c.id]) ? (
                 // The literal editor would show "[object Object]" and a blur
                 // would overwrite the formula with it — display-only here;
@@ -2457,67 +2215,6 @@ function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelet
           ))}
         </div>
       </aside>
-    </div>
-  );
-}
-
-function KanbanView({ table, rows, groupCol, titleCol, preview, onAddRow, onMove, onCardClick }: {
-  table: ApiTable; rows: ApiRow[]; groupCol: Column; titleCol: Column | undefined;
-  preview?: (colId: string, rowId: string) => string | null;
-  onAddRow: (groupValue: string) => Promise<void>;
-  onMove: (rowId: string, newGroup: string) => void;
-  onCardClick: (rowId: string) => void;
-}) {
-  const options = groupCol.options ?? [];
-  const lanes = [...options, "—"]; // trailing "—" lane for rows with no value
-  const grouped = useMemo(() => {
-    const m = new Map<string, ApiRow[]>();
-    for (const lane of lanes) m.set(lane, []);
-    for (const r of rows) {
-      const v = String(r.values[groupCol.id] ?? "—");
-      const lane = lanes.includes(v) ? v : "—";
-      m.get(lane)!.push(r);
-    }
-    return m;
-  }, [rows, groupCol.id, lanes]);
-
-  return (
-    <div className="dtbl__kanban">
-      {lanes.map((lane) => (
-        <section key={lane} className="dtbl__lane">
-          <header className="dtbl__lane-head">
-            <h3>{lane}</h3>
-            <span>{grouped.get(lane)?.length ?? 0}</span>
-          </header>
-          <div className="dtbl__lane-body"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              const rowId = e.dataTransfer.getData("text/plain");
-              if (rowId && lane !== "—") onMove(rowId, lane);
-              else if (rowId && lane === "—") onMove(rowId, "");
-            }}
-          >
-            {(grouped.get(lane) ?? []).map((r) => (
-              <article key={r.id} className="dtbl__card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
-                <div className="dtbl__card-title">{titleCol ? (preview?.(titleCol.id, r.id) || rowTitle(r, titleCol.id)) : "Untitled"}</div>
-                <div className="dtbl__card-meta">
-                  {table.columns
-                    .filter((c) => c.id !== titleCol?.id && c.id !== groupCol.id)
-                    .slice(0, 3)
-                    .map((c) => {
-                      const v = r.values[c.id];
-                      if (v === undefined || v === null || v === "") return null;
-                      return <span key={c.id} className="dtbl__card-chip"><em>{c.label}:</em> {preview?.(c.id, r.id) ?? String(Array.isArray(v) ? v.join(", ") : v)}</span>;
-                    })}
-                </div>
-              </article>
-            ))}
-            {lane !== "—" && (
-              <button type="button" className="dtbl__lane-add" onClick={() => void onAddRow(lane)}><Plus /> Add card</button>
-            )}
-          </div>
-        </section>
-      ))}
     </div>
   );
 }
@@ -2828,97 +2525,6 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
     return <span className="dtbl__input" style={{ display: "inline-block", opacity: 0.5 }}>{n ? `${n} item${n === 1 ? "" : "s"} (edit in grid)` : "edit in grid"}</span>;
   }
   return null;
-}
-
-function CalendarView({ rows, dateCol, titleCol, preview, month, onPrev, onNext, onToday, onMove, onAddRow, onCardClick }: {
-  rows: ApiRow[];
-  dateCol: Column;
-  titleCol: Column | undefined;
-  preview?: (colId: string, rowId: string) => string | null;
-  month: Date;
-  onPrev: () => void;
-  onNext: () => void;
-  onToday: () => void;
-  onMove: (rowId: string, isoDate: string) => void;
-  onAddRow: (isoDate: string) => Promise<void>;
-  onCardClick: (rowId: string) => void;
-}) {
-  const year = month.getFullYear();
-  const m = month.getMonth();
-  const first = new Date(year, m, 1);
-  const last = new Date(year, m + 1, 0);
-  const startWeekday = first.getDay(); // 0 = Sunday
-  const totalDays = last.getDate();
-  const cells: Array<{ date: Date | null; iso: string }> = [];
-  for (let i = 0; i < startWeekday; i++) cells.push({ date: null, iso: "" });
-  for (let d = 1; d <= totalDays; d++) {
-    const dt = new Date(year, m, d);
-    const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
-    cells.push({ date: dt, iso });
-  }
-  while (cells.length % 7 !== 0) cells.push({ date: null, iso: "" });
-
-  const byDate = useMemo(() => {
-    const m = new Map<string, ApiRow[]>();
-    for (const r of rows) {
-      const v = r.values[dateCol.id];
-      if (typeof v !== "string" || !v) continue;
-      const iso = v.slice(0, 10);
-      if (!m.has(iso)) m.set(iso, []);
-      m.get(iso)!.push(r);
-    }
-    return m;
-  }, [rows, dateCol.id]);
-
-  const todayIso = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`; })();
-  const monthLabel = month.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-
-  return (
-    <div className="dtbl__cal">
-      <header className="dtbl__cal-head">
-        <button type="button" onClick={onPrev}><ChevronLeft /></button>
-        <h3>{monthLabel}</h3>
-        <button type="button" onClick={onNext}><ChevronRight /></button>
-        <button type="button" className="dtbl__cal-today" onClick={onToday}>Today</button>
-      </header>
-      <div className="dtbl__cal-weekdays">
-        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => <div key={d}>{d}</div>)}
-      </div>
-      <div className="dtbl__cal-grid">
-        {cells.map((cell, i) => {
-          const isToday = cell.iso === todayIso;
-          const dayRows = cell.iso ? byDate.get(cell.iso) ?? [] : [];
-          return (
-            <div
-              key={i}
-              className={`dtbl__cal-cell ${cell.date ? "" : "is-empty"} ${isToday ? "is-today" : ""}`}
-              onDragOver={(e) => { if (cell.iso) e.preventDefault(); }}
-              onDrop={(e) => {
-                const rowId = e.dataTransfer.getData("text/plain");
-                if (rowId && cell.iso) onMove(rowId, cell.iso);
-              }}
-            >
-              {cell.date && (
-                <>
-                  <header>
-                    <span>{cell.date.getDate()}</span>
-                    <button type="button" onClick={() => void onAddRow(cell.iso)} title="Add card"><Plus /></button>
-                  </header>
-                  <div className="dtbl__cal-cards">
-                    {dayRows.map((r) => (
-                      <div key={r.id} className="dtbl__cal-card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
-                        {titleCol ? (preview?.(titleCol.id, r.id) || rowTitle(r, titleCol.id)) : "Untitled"}
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function csvEscape(v: string): string {
