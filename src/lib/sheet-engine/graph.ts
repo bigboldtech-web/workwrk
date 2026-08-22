@@ -33,6 +33,7 @@ import {
   type SheetAccess,
 } from "./evaluate";
 import { parseFormula } from "./parser";
+import { PassCache } from "./pass-cache";
 import {
   MAX_COLUMN_INDEX,
   cellError,
@@ -254,6 +255,13 @@ export class SheetGraph {
   private readonly dirty = new Set<CellKey>();
   private readonly cellDependents = new Map<CellKey, Set<CellKey>>();
   private readonly blockDependents = new Map<number, Set<CellKey>>();
+  /** Whole-column rectangles, keyed by each column they cover. A formula
+   *  column of n `SUM([Amount])` cells would otherwise put n entries in the
+   *  scan list and make every dependency query O(n) — the second O(n²)
+   *  hiding behind the aggregate one. Here "who reads this column?" is one
+   *  Map lookup, and the scan list keeps only rectangles that are neither
+   *  block-indexable nor whole-column. */
+  private readonly columnDependents = new Map<number, Set<CellKey>>();
   private readonly scanDependents = new Set<CellKey>();
 
   constructor(options: SheetGraphOptions) {
@@ -398,13 +406,17 @@ export class SheetGraph {
     return this.directDependents(cellKey(row, col)).map(keyPoint);
   }
 
-  /** Index occupancy, so a test can prove ranges are never expanded. */
+  /** Index occupancy, so a test can prove ranges are never expanded. The
+   *  per-column entries count as scans: both answer whole-column coverage,
+   *  they just answer it at different speeds. */
   indexSize(): { cells: number; blocks: number; scans: number } {
     let cells = 0;
     for (const set of this.cellDependents.values()) cells += set.size;
     let blocks = 0;
     for (const set of this.blockDependents.values()) blocks += set.size;
-    return { cells, blocks, scans: this.scanDependents.size };
+    let scans = this.scanDependents.size;
+    for (const set of this.columnDependents.values()) scans += set.size;
+    return { cells, blocks, scans };
   }
 
   findCycles(): CellPoint[][] {
@@ -461,6 +473,12 @@ export class SheetGraph {
   }
 
   private run(affected: Set<CellKey>): RecalcResult {
+    // One cache per pass, NEVER longer: values move between passes, and a
+    // surviving cache would serve the world from before the edit. Within
+    // the pass, `settle` invalidates on every value that actually changed,
+    // so a cached range or memoized aggregate is indistinguishable from a
+    // fresh read even if a covered formula cell recomputes mid-pass.
+    const cache = new PassCache();
     const nodes = [...affected].sort((a, b) => a - b);
     const adjacency = new Map<CellKey, CellKey[]>();
     const inDegree = new Map<CellKey, number>();
@@ -483,6 +501,7 @@ export class SheetGraph {
 
     const settle = (key: CellKey, value: CellValue) => {
       const previous = this.values.get(key);
+      if (!sameValue(previous, value)) cache.invalidate(keyRow(key), keyCol(key));
       this.values.set(key, value);
       this.dirty.delete(key);
       done.add(key);
@@ -499,7 +518,7 @@ export class SheetGraph {
       while (heap.size > 0) {
         const key = heap.pop() as CellKey;
         if (done.has(key)) continue;
-        settle(key, this.compute(key));
+        settle(key, this.compute(key, cache));
       }
       if (done.size >= nodes.length) break;
 
@@ -540,7 +559,7 @@ export class SheetGraph {
     return { computed, changed, cycles: cycles.sort((a, b) => order(a[0], b[0])) };
   }
 
-  private compute(key: CellKey): CellValue {
+  private compute(key: CellKey, cache: PassCache): CellValue {
     const record = this.formulas.get(key);
     if (!record) return FORMULA_ERROR;
     if (!record.ast) return FORMULA_ERROR;
@@ -551,6 +570,7 @@ export class SheetGraph {
       coercions: this.coercions,
       now: this.nowFn,
       maxRangeCells: this.maxRangeCells,
+      cache,
     });
   }
 
@@ -631,19 +651,31 @@ export class SheetGraph {
     }
     for (const rect of record.deps.rects) {
       const blocks = this.blocksFor(rect);
-      if (!blocks) {
-        record.wide = true;
-        this.scanDependents.add(record.key);
+      if (blocks) {
+        for (const block of blocks) {
+          let owners = this.blockDependents.get(block);
+          if (!owners) {
+            owners = new Set();
+            this.blockDependents.set(block, owners);
+          }
+          owners.add(record.key);
+        }
         continue;
       }
-      for (const block of blocks) {
-        let owners = this.blockDependents.get(block);
-        if (!owners) {
-          owners = new Set();
-          this.blockDependents.set(block, owners);
+      const columns = this.columnsFor(rect);
+      if (columns) {
+        for (const column of columns) {
+          let owners = this.columnDependents.get(column);
+          if (!owners) {
+            owners = new Set();
+            this.columnDependents.set(column, owners);
+          }
+          owners.add(record.key);
         }
-        owners.add(record.key);
+        continue;
       }
+      record.wide = true;
+      this.scanDependents.add(record.key);
     }
   }
 
@@ -658,18 +690,42 @@ export class SheetGraph {
     }
     for (const rect of record.deps.rects) {
       const blocks = this.blocksFor(rect);
-      if (!blocks) continue;
-      for (const block of blocks) {
-        const owners = this.blockDependents.get(block);
+      if (blocks) {
+        for (const block of blocks) {
+          const owners = this.blockDependents.get(block);
+          if (!owners) continue;
+          owners.delete(key);
+          if (owners.size === 0) this.blockDependents.delete(block);
+        }
+        continue;
+      }
+      const columns = this.columnsFor(rect);
+      if (!columns) continue;
+      for (const column of columns) {
+        const owners = this.columnDependents.get(column);
         if (!owners) continue;
         owners.delete(key);
-        if (owners.size === 0) this.blockDependents.delete(block);
+        if (owners.size === 0) this.columnDependents.delete(column);
       }
     }
     if (record.wide) {
       this.scanDependents.delete(key);
       record.wide = false;
     }
+  }
+
+  /** Columns for the per-column index: only a rectangle that covers EVERY
+   *  row of its columns qualifies (whole-column refs are built as top 0,
+   *  bottom Infinity), because the index answers "does this rect cover
+   *  (row, col)?" from the column alone. A pathologically wide span falls
+   *  back to the scan list like an oversized block count does. */
+  private columnsFor(rect: DependencyRect): number[] | null {
+    if (rect.bottom !== Infinity || rect.top > 0) return null;
+    const left = Math.max(rect.left, 0);
+    if (rect.right - left + 1 > this.maxIndexedBlocks) return null;
+    const columns: number[] = [];
+    for (let column = left; column <= rect.right; column++) columns.push(column);
+    return columns;
   }
 
   private blocksFor(rect: DependencyRect): number[] | null {
@@ -700,6 +756,13 @@ export class SheetGraph {
     const candidates = this.blockDependents.get(block);
     if (candidates) {
       for (const owner of candidates) {
+        if (out.has(owner)) continue;
+        if (this.rectsCover(owner, row, col)) out.add(owner);
+      }
+    }
+    const columnOwners = this.columnDependents.get(col);
+    if (columnOwners) {
+      for (const owner of columnOwners) {
         if (out.has(owner)) continue;
         if (this.rectsCover(owner, row, col)) out.add(owner);
       }

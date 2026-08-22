@@ -27,6 +27,11 @@
 
 import { parseFormula } from "./parser";
 import {
+  RANGE_CACHE_MIN_CELLS,
+  type CacheRect,
+  type PassCache,
+} from "./pass-cache";
+import {
   cellError,
   isErrorValue,
   type Ast,
@@ -108,6 +113,14 @@ export interface FunctionEntry {
    * indices. Overrides `DEFAULT_RANGE_ARGUMENTS`.
    */
   rangeArgs?: boolean | readonly number[];
+  /**
+   * True when the result is a pure function of the resolved arguments and
+   * the pass clock — i.e. the implementation never reads `ctx.origin`.
+   * Opts the call into per-pass memoization; default false because a custom
+   * registry CAN read the origin, and memoizing such a function would hand
+   * one row's answer to every other row.
+   */
+  cacheable?: boolean;
 }
 
 /** A registry may hold bare functions or entries; both are accepted. */
@@ -361,6 +374,8 @@ interface EvalContext extends ResolveContext {
   now: () => Date;
   maxRangeCells: number;
   depth: number;
+  /** Per-pass range/call cache; absent means every read is direct. */
+  cache?: PassCache;
 }
 
 /** Narrow a ref to one value. Multi-cell refs are #VALUE! unless 1x1. */
@@ -378,33 +393,84 @@ function refToScalar(ref: Ref, ctx: EvalContext): CellValue {
   return VALUE_ERROR;
 }
 
-/** Materialise a box, clamped to the sheet. Out-of-sheet yields no cells. */
-function materialize(box: RefBox, ctx: EvalContext): RangeValue | ErrorValue {
+/** A box clamped to the sheet, or null when nothing of it is on the sheet.
+ *  The clamped rectangle is the cache identity of a range read: `A:A` and
+ *  `A1:A10000` clamp to the same rows and are the same read. */
+function clampBox(box: RefBox, ctx: ResolveContext): CacheRect | null {
   const top = Math.max(box.top, 0);
   const left = Math.max(box.left, 0);
   const bottom = Math.min(box.bottom, ctx.rows - 1);
   const right = Math.min(box.right, ctx.cols - 1);
-  if (top > bottom || left > right) return { kind: "range", rows: [] };
-  const area = (bottom - top + 1) * (right - left + 1);
+  if (top > bottom || left > right) return null;
+  return { top, left, bottom, right };
+}
+
+function rectArea(rect: CacheRect): number {
+  return (rect.bottom - rect.top + 1) * (rect.right - rect.left + 1);
+}
+
+function rectKey(rect: CacheRect): string {
+  return `R:${rect.top},${rect.left},${rect.bottom},${rect.right}`;
+}
+
+/** Materialise a clamped box. Reads big enough to matter go through the
+ *  per-pass cache; the owner invalidates on every mid-pass write, so a hit
+ *  is indistinguishable from a fresh read. */
+function materializeClamped(
+  rect: CacheRect,
+  ctx: EvalContext,
+): RangeValue | ErrorValue {
+  const area = rectArea(rect);
   if (area > ctx.maxRangeCells) return NUM_ERROR;
+  const cache = area >= RANGE_CACHE_MIN_CELLS ? ctx.cache : undefined;
+  const key = cache ? rectKey(rect) : "";
+  if (cache) {
+    const hit = cache.readRange(key);
+    if (hit) return hit;
+  }
   const rows: CellValue[][] = [];
-  for (let r = top; r <= bottom; r++) {
+  for (let r = rect.top; r <= rect.bottom; r++) {
     const line: CellValue[] = [];
-    for (let c = left; c <= right; c++) line.push(ctx.sheet.getCell(r, c));
+    for (let c = rect.left; c <= rect.right; c++) line.push(ctx.sheet.getCell(r, c));
     rows.push(line);
   }
-  return { kind: "range", rows };
+  const value: RangeValue = { kind: "range", rows };
+  if (cache) cache.writeRange(key, rect, value);
+  return value;
+}
+
+/** Cache identity of a scalar argument VALUE. Two calls whose arguments key
+ *  identically must return the same result, so keys are typed (a number is
+ *  never mistaken for the text of its digits) and strings are JSON-escaped
+ *  (the joiner, a control char, cannot survive escaping into a string key). */
+function scalarArgKey(value: CellValue): string {
+  if (value === null) return "V:z";
+  if (isErrorValue(value)) return "V:e" + value.err;
+  if (typeof value === "number") return "V:n" + value;
+  if (typeof value === "boolean") return value ? "V:b1" : "V:b0";
+  return "V:s" + JSON.stringify(value);
+}
+
+/** A resolved argument plus its cache identity. `rect` is set only for a
+ *  rectangle-keyed range, whose CONTENTS are not part of the key — those
+ *  entries are what mid-pass invalidation must be able to find. */
+interface KeyedArg {
+  value: FunctionArg;
+  key: string;
+  rect: CacheRect | null;
 }
 
 /**
  * A ref in an argument position reaches a function as a RANGE, even when it
  * covers one cell: that is what lets `AVERAGE(A1,2)` skip a blank A1 while
  * still counting the literal 2. The single exception is a whole-column ref in
- * a scalar parameter, which narrows to the current row.
+ * a scalar parameter, which narrows to the current row — that read is keyed
+ * by its VALUE (prefix X:), never by the column rectangle, so memoizing a
+ * call can never hand one row's answer to another row.
  */
-function refToArg(ref: Ref, ctx: EvalContext, context: RefContext): FunctionArg {
+function refToArg(ref: Ref, ctx: EvalContext, context: RefContext): KeyedArg {
   const box = resolveRefBox(ref, ctx);
-  if (isErrorValue(box)) return box;
+  if (isErrorValue(box)) return { value: box, key: scalarArgKey(box), rect: null };
   if (
     box.wholeColumn &&
     context === "scalar" &&
@@ -412,10 +478,19 @@ function refToArg(ref: Ref, ctx: EvalContext, context: RefContext): FunctionArg 
     ctx.origin
   ) {
     const value = readCell(ctx, ctx.origin.row, box.left);
-    if (isErrorValue(value)) return value;
-    return { kind: "range", rows: [[value]] };
+    if (isErrorValue(value)) return { value, key: scalarArgKey(value), rect: null };
+    return {
+      value: { kind: "range", rows: [[value]] },
+      key: "X:" + scalarArgKey(value),
+      rect: null,
+    };
   }
-  return materialize(box, ctx);
+  const clamped = clampBox(box, ctx);
+  // Every empty read is the same empty range, whatever box it came from.
+  if (!clamped) return { value: { kind: "range", rows: [] }, key: "R:0", rect: null };
+  const value = materializeClamped(clamped, ctx);
+  if (isErrorValue(value)) return { value, key: scalarArgKey(value), rect: null };
+  return { value, key: rectKey(clamped), rect: clamped };
 }
 
 // --- Operators -------------------------------------------------------------
@@ -544,12 +619,39 @@ function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue {
   if (entry.minArgs !== undefined && args.length < entry.minArgs) return cellError("#N/A");
   if (entry.maxArgs !== undefined && args.length > entry.maxArgs) return cellError("#N/A");
 
+  // A `cacheable` call is memoized per pass under (name, argument keys):
+  // this is what turns n copies of `SUM([Amount])` from n folds into one.
+  // The key must capture the arguments COMPLETELY, so it is abandoned the
+  // moment any argument lacks an identity, and only calls folding at least
+  // one real rectangle are worth a slot (see pass-cache.ts on caps).
+  const cache = entry.cacheable ? ctx.cache : undefined;
+  const keys: string[] = [];
+  const rects: CacheRect[] = [];
+  let keyed = cache !== undefined;
+  let worthCaching = false;
+
   const values: FunctionArg[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const context = argumentContext(name, entry, i);
-    const value: FunctionArg =
-      arg.type === "ref" ? refToArg(arg.ref, ctx, context) : evalNode(arg, ctx);
+    let value: FunctionArg;
+    if (arg.type === "ref") {
+      const resolved = refToArg(arg.ref, ctx, context);
+      value = resolved.value;
+      if (keyed) {
+        keys.push(resolved.key);
+        if (resolved.rect) {
+          rects.push(resolved.rect);
+          if (rectArea(resolved.rect) >= RANGE_CACHE_MIN_CELLS) worthCaching = true;
+        }
+      }
+    } else {
+      value = evalNode(arg, ctx);
+      // evalNode never yields a range today; the guard keeps a future one
+      // from being keyed as a scalar and silently conflating two calls.
+      if (isRangeValue(value)) keyed = false;
+      else if (keyed) keys.push(scalarArgKey(value));
+    }
     // Errors inside a materialised range are the function's business; only a
     // scalar argument short-circuits, so IFERROR can still see its own input.
     if (!entry.acceptsErrors && !isRangeValue(value) && isErrorValue(value)) {
@@ -558,11 +660,19 @@ function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue {
     values.push(value);
   }
 
-  return entry.call(values, {
+  const callKey =
+    cache && keyed && worthCaching ? name + "(" + keys.join("\u0000") + ")" : null;
+  if (cache && callKey) {
+    const hit = cache.readCall(callKey);
+    if (hit) return hit.value;
+  }
+  const result = entry.call(values, {
     now: ctx.now,
     origin: ctx.origin,
     coercions: ctx.coercions,
   });
+  if (cache && callKey) cache.writeCall(callKey, rects, result);
+  return result;
 }
 
 export interface EvaluateOptions {
@@ -573,6 +683,10 @@ export interface EvaluateOptions {
   coercions?: Coercions;
   now?: () => Date;
   maxRangeCells?: number;
+  /** Per-pass cache owned by the CALLER, who must create one per recalc
+   *  pass and call `invalidate` on every mid-pass write. Absent means every
+   *  range read and call is computed directly. */
+  cache?: PassCache;
 }
 
 function makeContext(options: EvaluateOptions): EvalContext {
@@ -588,6 +702,7 @@ function makeContext(options: EvaluateOptions): EvalContext {
     now: clock,
     maxRangeCells: options.maxRangeCells ?? MAX_RANGE_CELLS,
     depth: 0,
+    cache: options.cache,
   };
 }
 

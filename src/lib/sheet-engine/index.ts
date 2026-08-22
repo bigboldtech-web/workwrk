@@ -74,6 +74,10 @@ function adapt(entry: SheetFunction): FunctionEntry {
     // Declared by the library, never inferred from the evaluator's fallback
     // table — that table cannot know about functions added here later.
     rangeArgs: RANGE_ARGUMENTS.get(entry.name),
+    // Provably safe for per-pass memoization: the adapter below hands the
+    // library ONLY the resolved arguments and the pass clock — a library
+    // function cannot read ctx.origin even if it wanted to.
+    cacheable: true,
     call: (args, ctx) =>
       entry.call(
         args.map((value) => () => value),
@@ -192,6 +196,12 @@ export {
   type RecalcResult,
   type SheetGraphOptions,
 } from "./graph";
+
+export {
+  PassCache,
+  RANGE_CACHE_MIN_CELLS,
+  type CacheRect,
+} from "./pass-cache";
 
 // The canonical range shape lives in `coerce.ts`; `evaluate.ts` declares a
 // structurally identical copy so it can stand alone.

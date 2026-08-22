@@ -72,6 +72,15 @@ made before Phase 5's 50k target:
 Recommendation: (a), because Tables is sold as a spreadsheet and silently
 sorting a partial set is a correctness bug, not a perf trade.
 
+**DECIDED 2026-08-22 (delegated call): (a) server sort + keyset pagination.**
+Sorting a partial set is a correctness bug and Tables is sold as a
+spreadsheet — options (b)/(c) trade correctness or add a mode seam users
+can hit mid-scroll. Implementation lands with Phase 5 (after the recalc-
+perf gate below): sort + filter move server-side, `GET /rows` keysets on
+`position` (or the sort key + position tiebreak), views[0].config.sort
+stays the persisted source of truth. The engine is unaffected either way —
+it is built from UNSORTED storage order by design.
+
 ### Phase 1 (original scope, for reference)
 Virtualized grid (rows + columns), active cell + anchor + range selection
 (mouse + Shift/Cmd), full keyboard nav (arrows, Tab/Enter commit-and-move,

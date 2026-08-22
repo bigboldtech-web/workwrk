@@ -31,7 +31,8 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { MenuList, MenuItem } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { createTableEngine, columnLetter, type StructureResult } from "@/lib/sheet-engine-host";
+import { createTableEngine, columnLetter, type StructureResult, type TableEngine } from "@/lib/sheet-engine-host";
+import { createSerialQueue } from "@/lib/sheet-serial-queue";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
 import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
@@ -301,7 +302,57 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const promptDialog = usePrompt();
   const [tableId, setTableId] = useState<string | null>(null);
   const [table, setTable] = useState<ApiTable | null>(null);
-  const [rows, setRows] = useState<ApiRow[] | null>(null);
+  const [rows, setRowsState] = useState<ApiRow[] | null>(null);
+  /* Eagerly-updated mirror of `rows`. The persistent engine host (below) is
+   * driven BEFORE each optimistic setState, and swap-rebuilds read the rows
+   * of record synchronously — React state only commits at the next render,
+   * so every rows write goes through commitRows, which updates the mirror
+   * in call order and hands React the very same array. */
+  const rowsRef = useRef<ApiRow[] | null>(null);
+  const commitRows = useCallback((next: ApiRow[] | null | ((prev: ApiRow[] | null) => ApiRow[] | null)) => {
+    const value = typeof next === "function" ? next(rowsRef.current) : next;
+    rowsRef.current = value;
+    setRowsState(value);
+  }, []);
+
+  /* ── The formula engine host (Tables Phase 3; persistent since the Phase 5
+   * gating work) ─────────────────────────────────────────────────
+   * ONE host per loaded table, held in a ref and driven INCREMENTALLY:
+   * every value write flows through setCell/setCells and every row change
+   * through rowInserted/rowDeleted BEFORE its optimistic setState, so the
+   * dep-graph recalc replaces the old rebuild-per-edit (whose constructor
+   * ran a full pass — 560ms at 2k rows, 11.8s at 10k). The host still
+   * computes over the UNSORTED rows order: display sort never reaches it,
+   * which is what keeps a sorted grid from changing any formula's value.
+   *
+   * A full SWAP (new instance) happens ONLY on bulk data arrival (initial
+   * load, refetch, CSV import's reload) and on column structure/type
+   * changes without an incremental host op (add, type change, column-op
+   * undo/redo replays) — a column's TYPE changes engine semantics (numeric
+   * text only counts in aggregates in numeric-typed columns), so the
+   * rebuild is the CORRECT lever there, and cheap now that structure
+   * changes are rare events rather than every keystroke.
+   *
+   * engineVersion bumps after every host mutation so memos and renders
+   * re-read a host whose identity did not change. */
+  const engineHostRef = useRef<TableEngine | null>(null);
+  const [engineVersion, setEngineVersion] = useState(0);
+  /** Re-render + re-derive after an in-place host mutation. */
+  const bumpEngine = useCallback(() => setEngineVersion((v) => v + 1), []);
+  /** Swap in a brand-new host built from canonical page state. */
+  const rebuildEngine = useCallback((columns: readonly Column[], rowList: readonly ApiRow[]) => {
+    engineHostRef.current = createTableEngine({ columns, rows: rowList });
+    setEngineVersion((v) => v + 1);
+  }, []);
+
+  /* Row-VALUE persistence (single-cell PATCH + batch value writes) is
+   * serialized through one per-table promise chain, so persistence order =
+   * user action order — the recorded rapid-same-cell-edit race, where two
+   * quick commits could land their PATCHes inverted (last-write-loses).
+   * Reads, row creates and column ops deliberately do NOT queue, and the
+   * optimistic state updates stay synchronous: only the fetches wait. */
+  const writeQueueRef = useRef(createSerialQueue());
+  useEffect(() => { writeQueueRef.current = createSerialQueue(); }, [tableId]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savingCols, setSavingCols] = useState(false);
   const [search, setSearch] = useState("");
@@ -400,8 +451,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const rd = await rRes.json();
       const t: ApiTable = td.data ?? td;
       t.columns = Array.isArray(t.columns) ? t.columns : [];
+      const rowsArr: ApiRow[] = rd.data ?? (Array.isArray(rd) ? rd : []);
       setTable(t);
-      setRows(rd.data ?? (Array.isArray(rd) ? rd : []));
+      commitRows(rowsArr);
+      // Bulk data arrival (initial load, refetch, CSV import's reload) is a
+      // swap trigger: rebuild the host once from server truth. This also
+      // heals any host/state drift, which is why every failure path reloads.
+      rebuildEngine(t.columns, rowsArr);
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
       viewsRef.current = savedViews;
       setSortState(savedViews[0]?.config?.sort ?? null);
@@ -409,7 +465,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, [tableId]);
+  }, [tableId, commitRows, rebuildEngine]);
   useEffect(() => { void load(); }, [load]);
 
   /* ── Undo/redo (Tables Phase 4) ──────────────────────────────────
@@ -457,31 +513,98 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  pre-edit label only survives here. */
   const savedColumnsRef = useRef<Column[] | null>(null);
 
+  /** Push value writes into the persistent host as ONE setCells pass (one
+   *  clock snapshot, one recalc — a 500-cell batch is one pass, not 500),
+   *  ahead of the caller's optimistic setState. Writes to rows no longer in
+   *  the mirror are dropped, matching the server merge's stale-id
+   *  tolerance; unknown columns are dropped via the host's own column map.
+   *  If the host still refuses an id — drift, which would mean a missed
+   *  mutation site — the swap IS the recovery: rebuild from canonical
+   *  state on the next microtask, i.e. AFTER the caller's synchronous
+   *  commitRows, so the value the user just typed is in the mirror the
+   *  rebuild reads. */
+  function driveHostWrites(writes: { colId: string; rowId: string; raw: unknown }[]) {
+    const host = engineHostRef.current;
+    if (!host || writes.length === 0) return;
+    const liveRows = new Set((rowsRef.current ?? []).map((r) => r.id));
+    const accepted = writes.filter((w) => liveRows.has(w.rowId) && host.columnLetterOf(w.colId) !== null);
+    if (accepted.length === 0) return;
+    try {
+      host.setCells(accepted);
+      bumpEngine();
+    } catch {
+      queueMicrotask(() => rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []));
+    }
+  }
+
+  /** Fold host-produced COLUMN formula rewrites into state + persistence.
+   *  The host already applied them to its own model; this mirrors them to
+   *  React state and the server (non-strict: persistColumns toasts nothing
+   *  itself and the next reload reconciles a miss). */
+  function applyEngineColumnRewrites(rewrites: { colId: string; formula: string }[]) {
+    if (rewrites.length === 0) return;
+    const cur = tableRef.current;
+    if (!cur) return;
+    const cols = applyColumnRewrites(cur.columns, rewrites);
+    tableRef.current = { ...cur, columns: cols };
+    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    void persistColumns(cols);
+  }
+
   /** Batch cell writes with optimistic local apply. THROWS on any refused
    *  chunk — used by undo/redo bodies where honesty is the contract, and by
    *  callers that wrap their own catch. */
-  const writeValuesBatchStrict = useCallback(async (updates: { id: string; values: Record<string, unknown> }[]) => {
+  async function writeValuesBatchStrict(updates: { id: string; values: Record<string, unknown> }[]) {
     if (!tableId || updates.length === 0) return;
     const byRow = new Map(updates.map((u) => [u.id, u.values]));
-    // Rows deleted since the command was captured are simply absent from
-    // state and skipped by the server merge — the documented v1 semantic:
-    // such a command may no-op, but it never corrupts.
-    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
-    for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-      const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
-      });
-      if (!res.ok) throw new Error(`batch update HTTP ${res.status}`);
-    }
-  }, [tableId]);
+    // Host first, then the mirror. Rows deleted since the command was
+    // captured are simply absent from state and skipped by the server merge
+    // — the documented v1 semantic: such a command may no-op, but it never
+    // corrupts — and driveHostWrites drops them the same way.
+    driveHostWrites(updates.flatMap((u) => Object.entries(u.values).map(([colId, raw]) => ({ colId, rowId: u.id, raw }))));
+    commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    // All chunks ride ONE queued job so another value write can't
+    // interleave between the slices of a single logical batch.
+    await writeQueueRef.current.run(async () => {
+      for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error(`batch update HTTP ${res.status}`);
+      }
+    });
+  }
 
   /** Batch row deletes (chunked), optimistic. Throws on a refused chunk;
-   *  stale ids are tolerated by the route, which makes retries idempotent. */
-  const deleteRowsBatchStrict = useCallback(async (ids: string[]) => {
+   *  stale ids are tolerated by the route, which makes retries idempotent.
+   *  Drives the host row by row (cumulative: later deletes see the shape
+   *  earlier ones left) and persists the SURVIVORS' ref rewrites — but only
+   *  after every delete chunk landed, so a refused delete never leaves
+   *  rewritten sources on the server for a delete that didn't happen. */
+  async function deleteRowsBatchStrict(ids: string[]) {
     if (!tableId || ids.length === 0) return;
     const doomed = new Set(ids);
-    setRows((prev) => prev ? prev.filter((r) => !doomed.has(r.id)) : prev);
+    const host = engineHostRef.current;
+    const live = new Set((rowsRef.current ?? []).map((r) => r.id));
+    const cellRewrites = new Map<string, { colId: string; rowId: string; stored: unknown }>();
+    const colRewrites = new Map<string, string>();
+    let hostOk = host !== null;
+    if (host) {
+      try {
+        for (const id of ids) {
+          if (!live.has(id)) continue; // stale id — the route tolerates it, so does the host drive
+          const res = host.rowDeleted(id);
+          for (const rw of res.rewritten.cells) {
+            if (!doomed.has(rw.rowId)) cellRewrites.set(`${rw.rowId}:${rw.colId}`, rw);
+          }
+          for (const cw of res.rewritten.columns) colRewrites.set(cw.colId, cw.formula);
+        }
+      } catch { hostOk = false; }
+    }
+    commitRows((prev) => prev ? prev.filter((r) => !doomed.has(r.id)) : prev);
+    if (hostOk) bumpEngine();
+    else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
       const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -489,16 +612,74 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       });
       if (!res.ok) throw new Error(`batch delete HTTP ${res.status}`);
     }
-  }, [tableId]);
+    if (cellRewrites.size > 0) void persistCellRewrites([...cellRewrites.values()]);
+    applyEngineColumnRewrites([...colRewrites].map(([colId, formula]) => ({ colId, formula })));
+  }
 
-  /** Batch row inserts (chunked). Appends each chunk's server-created rows
-   *  locally and reports their ids via onChunk BEFORE moving on, so a
-   *  restore that dies mid-way leaves a trail its retry can clean up.
+  /** Fold server-created rows into the persistent host AND the local
+   *  mirror at the index their POSITION dictates. Appends (auto-allocated
+   *  position = max+1) land at the end; an undo restore's explicit
+   *  original positions land back in the middle — the engine's row
+   *  indices, and therefore every A1 ref, then match what a reload would
+   *  compute from the server's position-ordered list (row anchoring is
+   *  the law: engine rows = original storage order, and storage order IS
+   *  position order). */
+  function absorbCreatedRows(created: ApiRow[]) {
+    if (created.length === 0) return;
+    const host = engineHostRef.current;
+    const next = [...(rowsRef.current ?? [])];
+    const sorted = [...created].sort((a, b) => a.position - b.position);
+    /** Index that keeps the mirror position-sorted; an append runs the
+     *  walk zero times. */
+    const insertAt = (row: ApiRow) => {
+      let at = next.length;
+      while (at > 0 && next[at - 1].position > row.position) at--;
+      return at;
+    };
+    // rowInserted is internally a full graph rebuild, so k of them cost k
+    // rebuilds — a LARGE batch (blank-sheet seed, bulk-undo restore, big
+    // paste) absorbs as ONE swap instead. No rewrite is lost that way:
+    // appends can't shift any ref, and the only mid-table bulk insert —
+    // bulk-delete undo — restores the survivors' sources itself right
+    // after this returns.
+    if (host === null || created.length > 16) {
+      for (const row of sorted) next.splice(insertAt(row), 0, row);
+      commitRows(next);
+      rebuildEngine(tableRef.current?.columns ?? [], next);
+      return;
+    }
+    const cellRewrites: { colId: string; rowId: string; stored: unknown }[] = [];
+    const colRewrites: { colId: string; formula: string }[] = [];
+    let hostOk = true;
+    for (const row of sorted) {
+      const at = insertAt(row);
+      if (hostOk) {
+        try {
+          const res = host.rowInserted({ id: row.id, values: row.values }, at);
+          cellRewrites.push(...res.rewritten.cells);
+          colRewrites.push(...res.rewritten.columns);
+        } catch { hostOk = false; }
+      }
+      next.splice(at, 0, row);
+    }
+    commitRows(next);
+    if (hostOk) bumpEngine();
+    else rebuildEngine(tableRef.current?.columns ?? [], next);
+    // A mid-table insert shifts refs at/below it down; those rewrites
+    // persist like every other host rewrite. End-appends yield none.
+    if (cellRewrites.length > 0) void persistCellRewrites(cellRewrites);
+    applyEngineColumnRewrites(colRewrites);
+  }
+
+  /** Batch row inserts (chunked). Absorbs each chunk's server-created rows
+   *  locally (host + mirror, at their position-true indices) and reports
+   *  their ids via onChunk BEFORE moving on, so a restore that dies
+   *  mid-way leaves a trail its retry can clean up.
    *  Returns every created row; throws on the first refused chunk. */
-  const insertRowsBatchStrict = useCallback(async (
+  async function insertRowsBatchStrict(
     payloads: { values: Record<string, unknown> }[],
     onChunk?: (createdIds: string[]) => void,
-  ): Promise<ApiRow[]> => {
+  ): Promise<ApiRow[]> {
     if (!tableId || payloads.length === 0) return [];
     const all: ApiRow[] = [];
     for (let i = 0; i < payloads.length; i += BATCH_MAX_OPS) {
@@ -517,23 +698,33 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         }));
       all.push(...created);
       onChunk?.(created.map((r) => r.id));
-      if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
+      absorbCreatedRows(created);
     }
     return all;
-  }, [tableId]);
+  }
 
   /** Persist a full columns array, optimistic, throwing on failure — the
-   *  strict sibling of persistColumns for undo/redo bodies. */
-  const saveColumnsStrict = useCallback(async (cols: Column[]) => {
+   *  strict sibling of persistColumns for undo/redo bodies. Column-op
+   *  undo/redo replays arbitrary columns arrays (structure and type may
+   *  both differ), so by default this SWAPS the engine host — the correct
+   *  lever for structure/type changes, and a cheap one now that they are
+   *  rare events. Callers that already drove the host incrementally
+   *  (rename/move/delete inverses) pass hostAlreadyCurrent to skip it. */
+  async function saveColumnsStrict(cols: Column[], opts?: { hostAlreadyCurrent?: boolean }) {
     if (!tableId) throw new Error("no table");
+    // Eager tableRef bump (the addColumn/applyColumnPatches discipline):
+    // value writes later in the same command must see the columns THIS
+    // call just installed, not last render's.
+    if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => prev ? { ...prev, columns: cols } : prev);
+    if (!opts?.hostAlreadyCurrent) rebuildEngine(cols, rowsRef.current ?? []);
     const res = await fetch(`/api/tables/${tableId}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ columns: cols }),
     });
     if (!res.ok) throw new Error(`columns PATCH HTTP ${res.status}`);
     savedColumnsRef.current = cols;
-  }, [tableId]);
+  }
 
   // Resolve which other tables this one references (link columns directly;
   // lookup/rollup indirectly via their link column) and fetch their rows so
@@ -631,12 +822,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // clear skips the rewrite pass: [Old] refs stay and surface #NAME?,
     // which an undo (or re-labeling) cleanly repairs.
     let res: StructureResult | null = null;
-    if (label !== "") { try { res = engineHostRef.current.columnRenamed(colId, label); } catch { res = null; } }
+    if (label !== "") { try { res = engineHostRef.current?.columnRenamed(colId, label) ?? null; } catch { res = null; } }
+    if (res) bumpEngine();
     const cols = applyColumnRewrites(
       cur.columns.map((c) => c.id === colId ? { ...c, label } : c),
       res?.rewritten.columns ?? [],
     );
-    await saveColumnsStrict(cols);
+    // columnRenamed drove the host incrementally; an empty label (the
+    // engine can't rewrite refs into "[]") or a thrown rewrite falls back
+    // to the swap, so the in-session host always matches what a reload
+    // would compute — [Old] refs then show #NAME?, honestly.
+    await saveColumnsStrict(cols, { hostAlreadyCurrent: res !== null });
     if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
   }
 
@@ -648,11 +844,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const to = Math.max(0, Math.min(cols.length - 1, toIndex));
     if (from < 0 || from === to) return;
     let res: StructureResult | null = null;
-    try { res = engineHostRef.current.columnMoved(from, to); } catch { res = null; }
+    try { res = engineHostRef.current?.columnMoved(from, to) ?? null; } catch { res = null; }
     const [moved] = cols.splice(from, 1);
     cols.splice(to, 0, moved);
     const next = applyColumnRewrites(cols, res?.rewritten.columns ?? []);
-    await saveColumnsStrict(next);
+    if (res) bumpEngine();
+    // columnMoved drove the host incrementally (a thrown res falls back to
+    // the swap below via the default).
+    await saveColumnsStrict(next, { hostAlreadyCurrent: res !== null });
     if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
   }
 
@@ -711,6 +910,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols = cur.columns.map((c) => (byId.has(c.id) ? { ...c, ...byId.get(c.id)!.after } : c));
     tableRef.current = { ...cur, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    // TYPE (numeric-text coercion in aggregates keys off it) and formula
+    // change what the engine computes — the swap is the correct lever for
+    // those. format/rules are display-only: no host action at all.
+    if (patches.some((p) => "type" in p.after || "formula" in p.after || "label" in p.after)) {
+      rebuildEngine(cols, rowsRef.current ?? []);
+    }
     void persistColumns(cols).then((ok) => {
       if (!ok) return;
       const apply = async (pick: "before" | "after") => {
@@ -769,6 +974,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const cols = [...cur.columns, def];
     tableRef.current = { ...cur, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: [...prev.columns, def] } : prev));
+    // Column structure changed with no incremental host op — swap. An
+    // appended empty column can't change any existing value, so the
+    // rebuild's pass is the cheap kind.
+    rebuildEngine(cols, rowsRef.current ?? []);
     const ok = await persistColumns(cols);
     if (ok) {
       const at = cols.length - 1;
@@ -781,9 +990,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           if (!curT) throw new Error("table gone");
           if (!curT.columns.some((c) => c.id === def.id)) return;
           let res: StructureResult | null = null;
-          try { res = engineHostRef.current.columnDeleted(def.id); } catch { res = null; }
+          try { res = engineHostRef.current?.columnDeleted(def.id) ?? null; } catch { res = null; }
+          if (res) bumpEngine();
           const next = applyColumnRewrites(curT.columns.filter((c) => c.id !== def.id), res?.rewritten.columns ?? []);
-          await saveColumnsStrict(next);
+          await saveColumnsStrict(next, { hostAlreadyCurrent: res !== null });
           if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
         },
         redo: async () => {
@@ -812,6 +1022,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // effect fires the 100-row seed twice (200 blank rows).
     if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    // 26 fresh columns on an empty table: swap (trivially cheap here).
+    rebuildEngine(cols, rowsRef.current ?? []);
     const ok = await persistColumns(cols);
     if (!ok) { toast("Couldn't start the sheet"); void load(); return; }
     try {
@@ -829,6 +1041,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       : null;
     const cols = table.columns.map((c) => c.id === colId ? { ...c, ...patch } : c);
     setTable({ ...table, columns: cols });
+    // Relation config (link/lookup/rollup wiring) computes outside the
+    // engine; only type/formula/label patches reach engine semantics.
+    if ("type" in patch || "formula" in patch || "label" in patch) {
+      rebuildEngine(cols, rowsRef.current ?? []);
+    }
     void persistColumns(cols).then((ok) => {
       if (ok && before) pushColumnPatch(`configure "${col!.label}"`, colId, before, patch);
     });
@@ -846,6 +1063,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (next === (prev ?? "")) return;
     const cols = table.columns.map((c) => c.id === colId ? { ...c, formula: next } : c);
     setTable({ ...table, columns: cols });
+    // A column FORMULA change re-fills every cell of the column — engine
+    // semantics, no incremental op: swap.
+    rebuildEngine(cols, rowsRef.current ?? []);
     const ok = await persistColumns(cols);
     if (ok) pushColumnPatch(`edit formula of "${col.label}"`, colId, { formula: prev }, { formula: next });
   }
@@ -864,12 +1084,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // rewriting [Old] refs to it would corrupt stored formulas. They keep
     // [Old] and show #NAME? instead — honest and undoable.
     let res: StructureResult | null = null;
-    if (label !== "") { try { res = engineHost.columnRenamed(colId, label); } catch { /* a rewrite failure must never block the rename */ } }
+    if (label !== "") { try { res = engineHostRef.current?.columnRenamed(colId, label) ?? null; } catch { /* a rewrite failure must never block the rename */ } }
     const cols = applyColumnRewrites(
       table.columns.map((c) => c.id === colId ? { ...c, label } : c),
       res?.rewritten.columns ?? [],
     );
     setTable({ ...table, columns: cols });
+    if (res) bumpEngine();
+    else rebuildEngine(cols, rowsRef.current ?? []);
     void (async () => {
       const ok = await persistColumns(cols);
       // Awaited so an immediate undo can't race the rewrite POST (it never throws).
@@ -894,11 +1116,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // — once the host reports its rewrites — the PRE-delete sources those
     // rewrites replaced, so an undo restores "=B1", never the "#REF!" the
     // delete wrote.
-    const colIndex = table.columns.findIndex((c) => c.id === colId);
-    const colDef = table.columns[colIndex];
+    // Re-resolve BOTH from the live refs: the confirm await spans user time,
+    // and render-scope table/rows captured before the dialog would snapshot
+    // (and later restore) values a concurrent mutation already replaced.
+    const curTable = tableRef.current;
+    if (!curTable) return;
+    const colIndex = curTable.columns.findIndex((c) => c.id === colId);
+    const colDef = curTable.columns[colIndex];
     if (!colDef) return;
     const colSnapshot: Column = { ...colDef };
-    const cellValues = (rows ?? [])
+    const cellValues = (rowsRef.current ?? [])
       .filter((r) => r.values[colId] !== undefined)
       .map((r) => ({ id: r.id, v: r.values[colId] }));
     // Rewrites come from the PRE-delete host: refs right of the column shift
@@ -906,17 +1133,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // stored formula silently repoints (the bug this wave closes). The host
     // itself skips the dying column's own cells.
     let res: StructureResult | null = null;
-    try { res = engineHost.columnDeleted(colId); } catch { /* a rewrite failure must never block the delete */ }
+    // Ref, not the render-scope host: the awaited confirm above can span a
+    // refetch's swap, and rewrites computed on a dead instance would be lost.
+    try { res = engineHostRef.current?.columnDeleted(colId) ?? null; } catch { /* a rewrite failure must never block the delete */ }
     const rewCells = res?.rewritten.cells ?? [];
     const rewCols = res?.rewritten.columns ?? [];
     // Pre-delete stored sources of everything the delete rewrote — read
     // from React state, which the host's own mutation never touches.
+    const liveRowById = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
     const priorCellSources = rewCells.map((rw) => ({
-      colId: rw.colId, rowId: rw.rowId, stored: rowById.get(rw.rowId)?.values[rw.colId] ?? null,
+      colId: rw.colId, rowId: rw.rowId, stored: liveRowById.get(rw.rowId)?.values[rw.colId] ?? null,
     }));
-    const priorColFormulas = new Map(rewCols.map((cw) => [cw.colId, table.columns.find((c) => c.id === cw.colId)?.formula]));
-    const cols = applyColumnRewrites(table.columns.filter((c) => c.id !== colId), rewCols);
-    setTable({ ...table, columns: cols });
+    const priorColFormulas = new Map(rewCols.map((cw) => [cw.colId, curTable.columns.find((c) => c.id === cw.colId)?.formula]));
+    const cols = applyColumnRewrites(curTable.columns.filter((c) => c.id !== colId), rewCols);
+    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+    if (res) bumpEngine();
+    else rebuildEngine(cols, rowsRef.current ?? []);
     const ok = await persistColumns(cols);
     // AWAITED (unlike the pre-Phase-4 fire-and-forget): an immediate Cmd+Z
     // must not have its restored sources overtaken by a still-in-flight
@@ -973,11 +1205,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // "=B1" keeps meaning the same cell after B becomes C. The host takes
     // the same (from, to) indices the splice below uses.
     let res: StructureResult | null = null;
-    try { res = engineHost.columnMoved(from, to); } catch { /* never block the move */ }
+    try { res = engineHostRef.current?.columnMoved(from, to) ?? null; } catch { /* never block the move */ }
     const [moved] = cols.splice(from, 1);
     cols.splice(to, 0, moved);
     const next = applyColumnRewrites(cols, res?.rewritten.columns ?? []);
     setTable({ ...table, columns: next });
+    if (res) bumpEngine();
+    else rebuildEngine(next, rowsRef.current ?? []);
     void (async () => {
       const ok = await persistColumns(next);
       // Awaited so an immediate undo can't race the rewrite POST (it never throws).
@@ -1033,14 +1267,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (!res.ok) throw new Error(`POST ${res.status}`);
       const d = await res.json();
       const row: ApiRow = d.data ?? d;
-      setRows((prev) => [...(prev ?? []), row]);
-      // An end-append can't shift any existing ref, so this yields no
-      // rewrites today — called so the contract is exercised where the page
-      // inserts rows, ready for mid-table inserts later.
-      try {
-        const hostRes = engineHost.rowInserted({ id: row.id, values: row.values ?? {} }, (rows ?? []).length);
-        void persistCellRewrites(hostRes.rewritten.cells);
-      } catch { /* never block the insert */ }
+      // Host + mirror through the one absorption path (position-true
+      // index; an end-append yields no rewrites).
+      absorbCreatedRows([{ ...row, values: row.values ?? {} }]);
       // Undo deletes the created row; redo re-inserts its values. The server
       // returns a NEW id on redo, so the command re-captures it — otherwise
       // a second undo would aim at an id that no longer exists.
@@ -1064,21 +1293,29 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  local state ahead of the optimistic write; the formula path passes
    *  `opts.before` instead — engine setCell's { previous } return, which is
    *  the authoritative overwritten value (built for exactly this wave). */
-  async function patchRow(rowId: string, values: Record<string, unknown>, opts?: { before?: Record<string, unknown>; label?: string }) {
+  async function patchRow(rowId: string, values: Record<string, unknown>, opts?: { before?: Record<string, unknown>; label?: string; hostApplied?: boolean }) {
     if (!tableId) return;
-    const prevRow = (rows ?? []).find((r) => r.id === rowId);
+    const prevRow = (rowsRef.current ?? []).find((r) => r.id === rowId);
     const before: Record<string, unknown> = {};
     for (const k of Object.keys(values)) {
       // An absent key restores as null: indistinguishable to every reader
       // (both are the empty cell) and Json cannot hold undefined anyway.
       before[k] = (opts?.before && k in opts.before ? opts.before[k] : prevRow?.values[k]) ?? null;
     }
-    setRows((prev) => prev ? prev.map((r) => r.id === rowId ? { ...r, values: { ...r.values, ...values } } : r) : prev);
+    // Host before mirror. The formula commit path already ran the host's
+    // setCell itself (it needed { previous }); hostApplied skips the
+    // duplicate recalc pass.
+    if (!opts?.hostApplied) {
+      driveHostWrites(Object.entries(values).map(([colId, raw]) => ({ colId, rowId, raw })));
+    }
+    commitRows((prev) => prev ? prev.map((r) => r.id === rowId ? { ...r, values: { ...r.values, ...values } } : r) : prev);
     try {
-      const res = await fetch(`/api/tables/${tableId}/rows`, {
+      // Queued: two rapid commits to one cell must persist in action
+      // order, not response order (the recorded last-write-loses race).
+      const res = await writeQueueRef.current.run(() => fetch(`/api/tables/${tableId}/rows`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId, values }),
-      });
+      }));
       if (!res.ok) throw new Error(`PATCH ${res.status}`);
       if (prevRow) {
         pushUndo({
@@ -1097,16 +1334,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   async function persistCellRewrites(cells: { colId: string; rowId: string; stored: unknown }[]) {
     if (!tableId || cells.length === 0) return;
     const byRow = groupRewrites(cells);
-    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    // Deliberately NO driveHostWrites here: these writes ORIGINATE from the
+    // host's own rewrite pass (its model already holds them), so pushing
+    // them back through setCells would only burn a redundant recalc.
+    commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     const updates = [...byRow].map(([id, values]) => ({ id, values }));
     try {
-      for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
-        });
-        if (!res.ok) throw new Error();
-      }
+      // Queued value write: an undo's restore enqueued a moment later must
+      // land after these rewrites, never under them.
+      await writeQueueRef.current.run(async () => {
+        for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+          });
+          if (!res.ok) throw new Error();
+        }
+      });
     } catch { toast("Couldn't rewrite formulas for the new layout"); void load(); }
   }
 
@@ -1124,19 +1368,25 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       b[c.colId] = rowById.get(c.rowId)?.values[c.colId] ?? null;
       befores.set(c.rowId, b);
     }
-    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    // ONE setCells pass clears every cell in the host before the paint —
+    // a select-all clear is one recalc, not one per cell.
+    driveHostWrites(cells.map((c) => ({ colId: c.colId, rowId: c.rowId, raw: null })));
+    commitRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
     const updates = [...byRow].map(([id, values]) => ({ id, values }));
     try {
-      // Sequential slices: a failure part-way stops the rest, and the reload
-      // in the catch reconciles whatever did land — the UI never keeps an
-      // optimistic clear the server rejected.
-      for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
-        });
-        if (!res.ok) throw new Error();
-      }
+      // Sequential slices riding one queued job: a failure part-way stops
+      // the rest, the reload in the catch reconciles whatever did land —
+      // the UI never keeps an optimistic clear the server rejected — and
+      // no other value write can interleave between the slices.
+      await writeQueueRef.current.run(async () => {
+        for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+          });
+          if (!res.ok) throw new Error();
+        }
+      });
       const beforeUpdates = [...befores].map(([id, values]) => ({ id, values }));
       pushUndo({
         label: `clear ${cells.length} cell${cells.length === 1 ? "" : "s"}`,
@@ -1160,40 +1410,46 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // earlier ones left — the merged map (last write wins) is cumulative.
     const cellRewrites = new Map<string, { colId: string; rowId: string; stored: unknown }>();
     const colRewrites = new Map<string, string>();
+    let hostOk = true;
     try {
       for (const id of ids) {
-        const res = engineHost.rowDeleted(id);
+        const res = engineHostRef.current!.rowDeleted(id); // ref: the confirm await can span a swap
         for (const rw of res.rewritten.cells) {
           if (doomed.has(rw.rowId)) continue;
           cellRewrites.set(`${rw.rowId}:${rw.colId}`, rw);
         }
         for (const cw of res.rewritten.columns) colRewrites.set(cw.colId, cw.formula);
       }
-    } catch { /* never block the delete */ }
+    } catch { hostOk = false; /* never block the delete — the rebuild below recovers */ }
     // Full snapshots BEFORE the optimistic removal — plan 3a names undo as
     // the REQUIRED mitigation for this unrecoverable deleteMany. Positions
     // ride along and are sent as EXPLICIT insert positions on undo, so
     // restored rows land exactly where they were, not at the end.
-    const snapshots = (rows ?? [])
+    // rowsRef, not render-scope rows: the confirm await above spans user
+    // time, and a paste chunk or refetch landing meanwhile would make a
+    // pre-dialog snapshot restore stale values on undo.
+    const snapshots = (rowsRef.current ?? [])
       .filter((r) => doomed.has(r.id))
       .map((r) => ({ values: { ...r.values }, position: r.position }));
     // Survivors' PRE-rewrite stored values, captured before the optimistic
     // apply: with exact-position restore below, an undo puts every ref back
     // on the row it originally named, so the #REF! rewrites can be honestly
     // reverted instead of left behind.
-    const rowById = new Map((rows ?? []).map((r) => [r.id, r]));
+    const liveById = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
     const survivorBefores = [...cellRewrites.values()].map((rw) => ({
       rowId: rw.rowId,
       colId: rw.colId,
-      before: rowById.get(rw.rowId)?.values?.[rw.colId] ?? null,
+      before: liveById.get(rw.rowId)?.values?.[rw.colId] ?? null,
       after: rw.stored,
     }));
     // Same one-frame discipline as deleteRow: removals + survivor rewrites
     // apply together locally; persistence still waits for the deletes.
     const rwByRow = groupRewrites([...cellRewrites.values()]);
-    setRows((prev) => prev
+    commitRows((prev) => prev
       ? prev.filter((r) => !doomed.has(r.id)).map((r) => rwByRow.has(r.id) ? { ...r, values: { ...r.values, ...rwByRow.get(r.id)! } } : r)
       : prev);
+    if (hostOk) bumpEngine();
+    else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     try {
       for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
         const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -1270,18 +1526,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (!tableId) return;
     if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
     // Snapshot before anything mutates — undo restores these exact values.
-    const snapshot = (rows ?? []).find((r) => r.id === rowId);
+    // rowsRef, not render-scope rows: the confirm await can span mutations.
+    const snapshot = (rowsRef.current ?? []).find((r) => r.id === rowId);
     const snapValues = snapshot ? { ...snapshot.values } : null;
     let res: StructureResult | null = null;
-    try { res = engineHost.rowDeleted(rowId); } catch { /* never block the delete */ }
+    try { res = engineHostRef.current?.rowDeleted(rowId) ?? null; } catch { /* never block the delete */ }
     // Removal and the survivors' ref rewrites land in ONE local update, so no
     // frame renders shifted rows against un-shifted refs. The server write of
     // the rewrites still waits for the delete to succeed: if the delete
     // fails, nothing rewritten was persisted and the reload restores truth.
     const rwByRow = groupRewrites(res?.rewritten.cells ?? []);
-    setRows((prev) => prev
+    commitRows((prev) => prev
       ? prev.filter((r) => r.id !== rowId).map((r) => rwByRow.has(r.id) ? { ...r, values: { ...r.values, ...rwByRow.get(r.id)! } } : r)
       : prev);
+    if (res) bumpEngine();
+    else rebuildEngine(tableRef.current?.columns ?? [], rowsRef.current ?? []);
     try {
       const delRes = await fetch(`/api/tables/${tableId}/rows`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
@@ -1372,20 +1631,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     URL.revokeObjectURL(url);
   }
 
-  // The formula engine host (Tables Phase 3): dependency-graph recalc over
-  // the UNSORTED `rows` order — display sort must never change what a ref
-  // resolves to, so the host is never handed sorted rows. Rebuilt whenever
-  // rows/columns change; every edit flows through setRows, so a fresh host
-  // always computes against exactly what the grid renders.
-  const engineHost = useMemo(
-    () => createTableEngine({ columns: table?.columns ?? [], rows: rows ?? [] }),
-    [table?.columns, rows],
-  );
-  // Undo/redo commands run long after the render that pushed them, so they
-  // reach the CURRENT host (rebuilt by the memo above on every state change)
-  // through a ref — a closed-over host would rewrite against a dead layout.
-  const engineHostRef = useRef(engineHost);
-  useEffect(() => { engineHostRef.current = engineHost; });
+  // The persistent host lives in engineHostRef (declared with the mutation
+  // helpers above). Lazy-created here so the very first render — before
+  // load() delivers data and swaps in the real one — still has a host to
+  // read from; writing a ref during render is React's sanctioned lazy-init
+  // pattern, and it runs exactly once.
+  if (engineHostRef.current === null) {
+    engineHostRef.current = createTableEngine({ columns: table?.columns ?? [], rows: rows ?? [] });
+  }
+  const engineHost = engineHostRef.current;
 
   // Lookup/rollup compute: follow the column's link → gather linked rows →
   // pull a field (lookup) or aggregate it (rollup). Returns a display value.
@@ -1431,6 +1685,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const rowById = useMemo(() => new Map((rows ?? []).map((r) => [r.id, r] as const)), [rows]);
 
   const filteredRows = useMemo(() => {
+    // The persistent host mutates in place; engineVersion is its change
+    // signal (the host's identity only changes on a swap).
+    void engineVersion;
     const cols = table?.columns ?? [];
     let list = rows ?? [];
     if (search.trim()) {
@@ -1456,9 +1713,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       });
     }
     return list;
-  }, [rows, table?.columns, search, filterCol, filterValue, engineHost]);
+  }, [rows, table?.columns, search, filterCol, filterValue, engineHost, engineVersion]);
 
   const sortedRows = useMemo(() => {
+    void engineVersion; // computed sort keys change when the host mutates
     if (!sortState) return filteredRows;
     const cols = table?.columns ?? [];
     const col = cols.find((c) => c.id === sortState.colId);
@@ -1484,7 +1742,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const out = compareCells(col.type, va, vb);
       return sortState.dir === "asc" ? out : -out;
     });
-  }, [filteredRows, sortState, table?.columns, engineHost, relationalValue]);
+  }, [filteredRows, sortState, table?.columns, engineHost, relationalValue, engineVersion]);
 
   // ── Active-cell tracking for the formula bar ────────────────────
   // The sheet kernel owns selection internally (and this wave does not touch
@@ -1805,7 +2063,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const createdRows: ApiRow[] = [];
 
     if (updates.length > 0) {
-      setRows((prev) => prev ? prev.map((r) => {
+      // ONE setCells pass for the whole paste/fill before the paint — this
+      // is the batch path the Phase 5 seam work exists for: a 500-cell
+      // paste is one recalc, not 500 engine rebuilds.
+      driveHostWrites(updates.flatMap((u) => Object.entries(u.values).map(([colId, raw]) => ({ colId, rowId: u.id, raw }))));
+      commitRows((prev) => prev ? prev.map((r) => {
         const patch = updatesByRow.get(r.id);
         return patch ? { ...r, values: { ...r.values, ...patch } } : r;
       }) : prev);
@@ -1819,54 +2081,59 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // whole paste fits in a single call, send both keys together and keep
       // that guarantee. Only an oversized paste has to be split, and then
       // the reload below reconciles whatever committed.
-      const oneShot = updates.length <= BATCH_MAX_OPS && realInserts.length <= BATCH_MAX_OPS;
-      for (let i = 0; !oneShot && i < updates.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
-        });
-        if (!res.ok) throw new Error();
-      }
-      if (oneShot && (updates.length > 0 || realInserts.length > 0)) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...(updates.length > 0 ? { updates } : {}),
-            ...(realInserts.length > 0 ? { inserts: realInserts } : {}),
-          }),
-        });
-        if (!res.ok) throw new Error();
-        const d = await res.json();
-        const payload = d?.data ?? d;
-        const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
-          .map((r: { id: string; values: unknown; position: number }) => ({
-            id: r.id,
-            values: (r.values ?? {}) as Record<string, unknown>,
-            position: r.position,
-          }));
-        createdRows.push(...created);
-        if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
-      }
-      for (let i = 0; !oneShot && i < realInserts.length; i += BATCH_MAX_OPS) {
-        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ inserts: realInserts.slice(i, i + BATCH_MAX_OPS) }),
-        });
-        if (!res.ok) throw new Error();
-        // The route returns the rows it created, in payload order. Take the
-        // ids from there — a guessed id would break every rowId-keyed thing
-        // in the kernel the moment the real row arrived.
-        const d = await res.json();
-        const payload = d?.data ?? d;
-        const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
-          .map((r: { id: string; values: unknown; position: number }) => ({
-            id: r.id,
-            values: (r.values ?? {}) as Record<string, unknown>,
-            position: r.position,
-          }));
-        createdRows.push(...created);
-        if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
-      }
+      // The whole sequence rides ONE queued job (it carries value updates,
+      // which must not race other value writes); created rows are absorbed
+      // as each response lands, exactly as before.
+      await writeQueueRef.current.run(async () => {
+        const oneShot = updates.length <= BATCH_MAX_OPS && realInserts.length <= BATCH_MAX_OPS;
+        for (let i = 0; !oneShot && i < updates.length; i += BATCH_MAX_OPS) {
+          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+          });
+          if (!res.ok) throw new Error();
+        }
+        if (oneShot && (updates.length > 0 || realInserts.length > 0)) {
+          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...(updates.length > 0 ? { updates } : {}),
+              ...(realInserts.length > 0 ? { inserts: realInserts } : {}),
+            }),
+          });
+          if (!res.ok) throw new Error();
+          const d = await res.json();
+          const payload = d?.data ?? d;
+          const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
+            .map((r: { id: string; values: unknown; position: number }) => ({
+              id: r.id,
+              values: (r.values ?? {}) as Record<string, unknown>,
+              position: r.position,
+            }));
+          createdRows.push(...created);
+          absorbCreatedRows(created);
+        }
+        for (let i = 0; !oneShot && i < realInserts.length; i += BATCH_MAX_OPS) {
+          const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ inserts: realInserts.slice(i, i + BATCH_MAX_OPS) }),
+          });
+          if (!res.ok) throw new Error();
+          // The route returns the rows it created, in payload order. Take the
+          // ids from there — a guessed id would break every rowId-keyed thing
+          // in the kernel the moment the real row arrived.
+          const d = await res.json();
+          const payload = d?.data ?? d;
+          const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
+            .map((r: { id: string; values: unknown; position: number }) => ({
+              id: r.id,
+              values: (r.values ?? {}) as Record<string, unknown>,
+              position: r.position,
+            }));
+          createdRows.push(...created);
+          absorbCreatedRows(created);
+        }
+      });
     } catch {
       toast("Couldn't paste — reloading the table");
       void load();
@@ -2014,12 +2281,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       try {
         // Trimmed, because the host classifies by FIRST character — " =A1"
         // would slip through as a literal.
-        const res = engineHost.setCell(colId, rowId, trimmed);
-        // res.affected drives re-render only: patchRow's setRows rebuilds the
-        // host, which recomputes every dependent. Computed values are never
-        // sent to the server. res.previous — the engine's authoritative
-        // overwritten value — seeds the undo command (built for this wave).
-        void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit" });
+        const res = (engineHostRef.current ?? engineHost).setCell(colId, rowId, trimmed);
+        // The setCell above IS the host drive — incremental, only the
+        // transitive dependents recomputed — so patchRow skips its own
+        // pass (hostApplied). Computed values are never sent to the
+        // server. res.previous — the engine's authoritative overwritten
+        // value — seeds the undo command.
+        bumpEngine();
+        void patchRow(rowId, { [colId]: res.stored }, { before: { [colId]: res.previous }, label: "formula edit", hostApplied: true });
       } catch {
         toast("Couldn't save formula");
       }

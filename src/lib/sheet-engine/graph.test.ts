@@ -530,3 +530,36 @@ describe("stronglyConnected", () => {
     ]);
   });
 });
+
+describe("whole-column dependent index", () => {
+  // Whole-column rectangles are indexed per column (see columnDependents),
+  // not scanned: these pin the classifier's edges so the fast path cannot
+  // silently widen or leak.
+
+  it("a multi-column ref answers from either column and unindexes clean", () => {
+    const f = fixture();
+    f.graph.setFormula(0, 3, "SUM(A:B)");
+    // One entry per covered column: both columns answer, a third does not.
+    expect(f.graph.indexSize()).toEqual({ cells: 0, blocks: 0, scans: 2 });
+    expect(f.graph.dependentsOf(999_999, 0)).toEqual([{ row: 0, col: 3 }]);
+    expect(f.graph.dependentsOf(5, 1)).toEqual([{ row: 0, col: 3 }]);
+    expect(f.graph.dependentsOf(5, 2)).toEqual([]);
+
+    f.graph.removeFormula(0, 3);
+    expect(f.graph.indexSize()).toEqual({ cells: 0, blocks: 0, scans: 0 });
+    expect(f.graph.dependentsOf(5, 0)).toEqual([]);
+  });
+
+  it("many readers of one column stay one lookup for a cell OUTSIDE it", () => {
+    // The pre-index scan list made every dependency query O(readers): a
+    // 10k-cell formula column paid 10k containment tests per cell. Readers
+    // of column A must not be candidates for a query about column D.
+    const f = fixture(64, 8);
+    for (let r = 0; r < 64; r++) f.graph.setFormula(r, 3, "SUM(A)");
+    expect(f.graph.dependentsOf(0, 0)).toHaveLength(64);
+    expect(f.graph.dependentsOf(0, 4)).toEqual([]);
+    // The formula cells themselves live in column D; editing one of THEM
+    // must not consult the 64 column-A readers.
+    expect(f.graph.dependentsOf(5, 3)).toEqual([]);
+  });
+});

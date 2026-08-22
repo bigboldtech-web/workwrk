@@ -256,3 +256,234 @@ describe("helpers", () => {
     expect(sum?.summary.length).toBeGreaterThan(0);
   });
 });
+
+describe("setCells: one pass for a whole batch", () => {
+  const make = () =>
+    createTableEngine({
+      columns: [col("a", "number"), col("b", "number"), col("sum", "formula", "Sum", "=[A]+[B]")],
+      rows: [row("r1", { a: 1, b: 2 }), row("r2", { a: 3, b: 4 })],
+    });
+
+  it("applies every write and reports per-write stored/previous", () => {
+    const engine = make();
+    const { results } = engine.setCells([
+      { colId: "a", rowId: "r1", raw: 10 },
+      { colId: "b", rowId: "r2", raw: "=A1*2" },
+    ]);
+    expect(results).toEqual([
+      { colId: "a", rowId: "r1", stored: 10, previous: 1 },
+      { colId: "b", rowId: "r2", stored: { "=": "A1*2" }, previous: 4 },
+    ]);
+    expect(engine.value("sum", "r1")).toBe(12);
+    expect(engine.value("b", "r2")).toBe(20);
+    expect(engine.value("sum", "r2")).toBe(23);
+  });
+
+  it("two writes to one cell: last wins, both report the PRE-BATCH value", () => {
+    const engine = make();
+    const { results } = engine.setCells([
+      { colId: "a", rowId: "r1", raw: 100 },
+      { colId: "a", rowId: "r1", raw: 7 },
+    ]);
+    expect(results[0]).toEqual({ colId: "a", rowId: "r1", stored: 100, previous: 1 });
+    expect(results[1]).toEqual({ colId: "a", rowId: "r1", stored: 7, previous: 1 });
+    expect(engine.value("a", "r1")).toBe(7);
+    expect(engine.value("sum", "r1")).toBe(9);
+  });
+
+  it("formula then literal on the same cell reverts to the literal", () => {
+    const engine = make();
+    engine.setCells([
+      { colId: "b", rowId: "r1", raw: "=A1*10" },
+      { colId: "b", rowId: "r1", raw: 5 },
+    ]);
+    expect(engine.isFormulaCell("b", "r1")).toBe(false);
+    expect(engine.value("b", "r1")).toBe(5);
+    expect(engine.value("sum", "r1")).toBe(6);
+  });
+
+  it("matches one-by-one setCell for distinct cells, in one pass", () => {
+    const batch = make();
+    const oneByOne = make();
+    const writes = [
+      { colId: "a", rowId: "r1", raw: 8 },
+      { colId: "b", rowId: "r1", raw: "=A1+1" },
+      { colId: "a", rowId: "r2", raw: "" },
+    ];
+    const { results } = batch.setCells(writes);
+    for (const w of writes) {
+      const res = oneByOne.setCell(w.colId, w.rowId, w.raw);
+      const mine = results.find((r) => r.colId === w.colId && r.rowId === w.rowId);
+      expect(mine?.stored).toEqual(res.stored);
+      expect(mine?.previous).toEqual(res.previous);
+    }
+    for (const c of ["a", "b", "sum"]) {
+      for (const r of ["r1", "r2"]) {
+        expect(batch.display(c, r)).toBe(oneByOne.display(c, r));
+      }
+    }
+  });
+
+  it("one batch = one clock snapshot", () => {
+    // A ticking clock: two NOW() cells written in one batch must agree;
+    // written one at a time they must not, or the batch ran two passes.
+    let calls = 0;
+    const mk = () =>
+      createTableEngine({
+        columns: [col("a", "date"), col("b", "date")],
+        rows: [row("r1", {})],
+        clock: () => new Date(Date.UTC(2026, 0, 1 + calls++)),
+      });
+    const batched = mk();
+    batched.setCells([
+      { colId: "a", rowId: "r1", raw: "=NOW()" },
+      { colId: "b", rowId: "r1", raw: "=NOW()" },
+    ]);
+    expect(batched.value("a", "r1")).toBe(batched.value("b", "r1"));
+
+    const sequential = mk();
+    sequential.setCell("a", "r1", "=NOW()");
+    sequential.setCell("b", "r1", "=NOW()");
+    expect(sequential.value("a", "r1")).not.toBe(sequential.value("b", "r1"));
+  });
+
+  it("an unknown id throws before ANY write is applied", () => {
+    const engine = make();
+    expect(() =>
+      engine.setCells([
+        { colId: "a", rowId: "r1", raw: 99 },
+        { colId: "nope", rowId: "r1", raw: 1 },
+      ]),
+    ).toThrow(/unknown cell/);
+    expect(engine.value("a", "r1")).toBe(1);
+    expect(engine.value("sum", "r1")).toBe(3);
+  });
+
+  it("an empty batch is a no-op", () => {
+    const engine = make();
+    expect(engine.setCells([]).results).toEqual([]);
+    expect(engine.value("sum", "r1")).toBe(3);
+  });
+
+  it("keeps the mirror honest: a later edit's affected list is a true diff", () => {
+    const engine = make();
+    engine.setCells([{ colId: "a", rowId: "r1", raw: 10 }]);
+    // Writing the same value back changes nothing, so nothing is affected.
+    const res = engine.setCell("a", "r1", 10);
+    expect(res.affected).toEqual([]);
+    // A real change reports exactly the dependent formula cell.
+    const res2 = engine.setCell("a", "r1", 11);
+    expect(res2.affected).toEqual([{ colId: "sum", rowId: "r1" }]);
+  });
+});
+
+describe("aggregate caching stays invisible", () => {
+  // The per-pass cache must be indistinguishable from uncached evaluation:
+  // these tests pin the killer shapes against hand-computed oracles.
+
+  it("per-row scalar + whole-column aggregate matches a hand-built oracle", () => {
+    const n = 200;
+    const rows: HostRow[] = [];
+    let total = 0;
+    for (let i = 0; i < n; i++) {
+      const amount = (i % 7) + 1;
+      total += amount;
+      rows.push(row("r" + i, { amount }));
+    }
+    const engine = createTableEngine({
+      columns: [
+        { id: "amount", label: "Amount", type: "number" },
+        { id: "share", label: "Share", type: "formula", formula: "=[Amount]/SUM([Amount])" },
+      ],
+      rows,
+    });
+    for (let i = 0; i < n; i++) {
+      const expected = ((i % 7) + 1) / total;
+      expect(engine.value("share", "r" + i)).toBe(expected);
+    }
+  });
+
+  it("an aggregate over a column recomputed in the SAME pass sees new values", () => {
+    // A literal feeds a formula column, which feeds an aggregate: the edit's
+    // one pass recomputes [Double] AND every SUM([Double]) reader. A cache
+    // that survived the pass, or one that failed to invalidate, would leave
+    // [Total] holding sums of the old doubles.
+    const n = 100;
+    const rows: HostRow[] = [];
+    for (let i = 0; i < n; i++) rows.push(row("r" + i, { base: i + 1 }));
+    const engine = createTableEngine({
+      columns: [
+        { id: "base", label: "Base", type: "number" },
+        { id: "double", label: "Double", type: "formula", formula: "=[Base]*2" },
+        { id: "total", label: "Total", type: "formula", formula: "=SUM([Double])+[Base]" },
+      ],
+      rows,
+    });
+    const sumDoubles = (n * (n + 1)) / 2 * 2;
+    expect(engine.value("total", "r0")).toBe(sumDoubles + 1);
+    expect(engine.value("total", "r" + (n - 1))).toBe(sumDoubles + n);
+
+    engine.setCell("base", "r3", 1000); // was 4
+    const newSum = sumDoubles - 8 + 2000;
+    expect(engine.value("double", "r3")).toBe(2000);
+    for (let i = 0; i < n; i++) {
+      const base = i === 3 ? 1000 : i + 1;
+      expect(engine.value("total", "r" + i)).toBe(newSum + base);
+    }
+  });
+
+  it("a batch touching the aggregated column recomputes every reader once, correctly", () => {
+    const rows: HostRow[] = [];
+    for (let i = 0; i < 50; i++) rows.push(row("r" + i, { v: 1 }));
+    const engine = createTableEngine({
+      columns: [
+        { id: "v", label: "V", type: "number" },
+        { id: "share", label: "Share", type: "formula", formula: "=[V]/SUM([V])" },
+      ],
+      rows,
+    });
+    engine.setCells([
+      { colId: "v", rowId: "r0", raw: 26 },
+      { colId: "v", rowId: "r1", raw: 26 },
+    ]);
+    // Total is now 26+26+48 = 100.
+    expect(engine.value("share", "r0")).toBe(0.26);
+    expect(engine.value("share", "r1")).toBe(0.26);
+    expect(engine.value("share", "r2")).toBe(0.01);
+  });
+
+  it("errors propagate through a cached aggregate and clear when fixed", () => {
+    const rows: HostRow[] = [];
+    for (let i = 0; i < 80; i++) rows.push(row("r" + i, { v: 1 }));
+    const engine = createTableEngine({
+      columns: [
+        { id: "v", label: "V", type: "number" },
+        { id: "sum", label: "Sum", type: "formula", formula: "=SUM([V])" },
+      ],
+      rows,
+    });
+    engine.setCell("v", "r5", "=1/0");
+    expect(engine.display("sum", "r0")).toBe("#DIV/0!");
+    expect(engine.display("sum", "r79")).toBe("#DIV/0!");
+    engine.setCell("v", "r5", 21);
+    expect(engine.value("sum", "r0")).toBe(100);
+  });
+
+  it("numeric text counts only in numeric-typed columns, cached or not", () => {
+    const rows: HostRow[] = [];
+    for (let i = 0; i < 80; i++) rows.push(row("r" + i, { num: "1", txt: "1" }));
+    const engine = createTableEngine({
+      columns: [
+        { id: "num", label: "Num", type: "number" },
+        { id: "txt", label: "Txt", type: "short_text" },
+        { id: "sumnum", label: "SumNum", type: "formula", formula: "=SUM([Num])" },
+        { id: "sumtxt", label: "SumTxt", type: "formula", formula: "=SUM([Txt])" },
+      ],
+      rows,
+    });
+    // 80 numeric-text cells in a number column each read as 1; the same
+    // text in a text column is text, which SUM ignores.
+    expect(engine.value("sumnum", "r0")).toBe(80);
+    expect(engine.value("sumtxt", "r0")).toBe(0);
+  });
+});
