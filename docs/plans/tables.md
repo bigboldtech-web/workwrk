@@ -1,6 +1,6 @@
 # Tables — Sheets/Excel-grade spreadsheets in WorkwrK
 
-**Date:** 2026-08-22 · **Status:** PLANNED — starts after Comms Hub ("Room") acceptance
+**Date:** 2026-08-22 · **Status:** Phase 1 SHIPPED (95c9961) · Phase 2 IN BUILD
 **Mandate (user):** "Like Google Sheets and Excel basically where I can add formulas, do stuffs — and we'll call it Tables."
 
 ---
@@ -50,7 +50,29 @@ the existing Airtable-style tables must keep working untouched throughout.
 
 ## 3. Phases
 
-### Phase 1 — Grid kernel (feel like a spreadsheet)
+### Phase 1 — Grid kernel — SHIPPED 2026-08-22 (95c9961)
+Landed with a 30-agent adversarial review; 13 confirmed defects fixed before
+deploy, incl. a data-loss blocker (Backspace in the column-rename input ran
+the grid's clear-cells shortcut), an editor that dropped typed text when its
+row scrolled out of the virtual window, Escape saving instead of cancelling,
+index-keyed editing that jumped rows mid-sort, date columns sorting by year
+only, and a batch transaction that could not finish at its own 500-op cap.
+
+**NOT delivered in Phase 1 — cursor pagination.** `GET /rows` is still
+`take: 5000`, so the 5k ceiling stands. It was deferred deliberately once a
+conflict surfaced: Phase 1 also shipped **client-side** sorting, and you
+cannot correctly sort a keyset-paginated set on the client — you would only
+be sorting the rows that happen to be loaded. Resolving it is a real choice,
+made before Phase 5's 50k target:
+  (a) move sort (and filter) to the server, keyset-paginate, accept a
+      round-trip per sort — correct at any size;
+  (b) keep client sort and load the whole table, accept a hard row ceiling
+      and raise it (today 5k);
+  (c) hybrid: client sort under a threshold, server sort above it.
+Recommendation: (a), because Tables is sold as a spreadsheet and silently
+sorting a partial set is a correctness bug, not a perf trade.
+
+### Phase 1 (original scope, for reference)
 Virtualized grid (rows + columns), active cell + anchor + range selection
 (mouse + Shift/Cmd), full keyboard nav (arrows, Tab/Enter commit-and-move,
 type-to-replace, F2/dbl-click to edit, Escape), frozen first column,
@@ -94,6 +116,34 @@ guard on batch writes (row `updatedAt` precondition — two editors can't
 silently clobber each other; loser gets a refresh prompt), 20s
 co-presence poll ("Priya is editing" chip) reusing the Room polling
 pattern. Load test at 50k rows.
+
+## 3a. Decision — who may edit table data (2026-08-22)
+
+**Decided: read access to a Space implies write access to its tables.** All
+five table write routes stay on the reader gate. Reasons:
+
+- `ORG` visibility already means "the whole organization can use this Space".
+  A tool whose shared table is visible-but-frozen to most of the company is
+  not a collaboration tool, and every comparable product (ClickUp, Notion,
+  Airtable) lets a viewer of a shared table edit it unless it is explicitly
+  restricted.
+- The obvious tightening (`canEditSpace`: org admin, or SpaceMember
+  OWNER/ADMIN) is worse than it looks: an ordinary member of an `ORG` Space
+  has **no SpaceMember row at all**, so it would revoke table editing from
+  most of the company overnight.
+- It must be all five routes or none. Hardening only `/rows/batch` (tried,
+  reverted in 95c9961) produced an incoherent product: edit a cell one at a
+  time, 200; clear the same cell in bulk, 403.
+
+**The real risk is not who edits — it is that destruction is unrecoverable.**
+Bulk row delete is a hard `deleteMany`. That is the exposure worth money to
+close, and the mitigation is recoverability, not a permission tier:
+- Phase 4's undo/redo MUST cover bulk delete and paste-overwrite.
+- Phase 5, where migrations are allowed, should soft-delete rows
+  (`deletedAt`) so a mis-click survives a page refresh, and reuse the
+  existing Trash surface.
+Revisit the permission tier only if a customer asks for locked/published
+tables — that is a per-table lock feature, not a Space-role change.
 
 ## 4. Rollout discipline
 
