@@ -21,11 +21,21 @@
  * Keyboard map: arrows move · Shift+arrows extend · Tab/Shift+Tab move
  * horizontally · Enter edits (or commits an edit and moves down) ·
  * F2/double-click edits · typing replaces · Escape cancels · Delete/
- * Backspace clears the selection · Cmd/Ctrl+A selects all.
+ * Backspace clears the selection · Cmd/Ctrl+A selects all · Cmd/Ctrl+C/X/V
+ * copy/cut/paste the selection · Cmd/Ctrl+D fills down · Cmd/Ctrl+R fills
+ * right.
+ *
+ * Phase 2 (clipboard + fill) keeps the same division of labour: the grid
+ * owns geometry and gestures, the page owns data. The grid turns a
+ * selection into a rectangle of { rowId, columnIndex } and asks the page to
+ * read it (getRangeValues) or write it (applyMatrix); read-only columns,
+ * row appends, batch chunking, optimistic update and rollback all live on
+ * the page side of that line.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronRight, Trash2 } from "lucide-react";
+import { fillSeries, parseClipboard, toHTMLTable, toTSV, type Matrix } from "@/lib/sheet-clipboard";
 
 export const SHEET_ROW_H = 33;
 const OVERSCAN = 8;
@@ -45,6 +55,53 @@ const SEED_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "P
 
 export type SheetSort = { colId: string; dir: "asc" | "desc" } | null;
 
+/** A selection rectangle in CURRENT display coordinates. Only ever lives
+ *  inside one interaction — every rectangle is resolved to rowIds against
+ *  the live `rowIds` prop before it reaches the page. */
+type Rect = { r1: number; r2: number; c1: number; c2: number };
+
+/* Async Clipboard API write. Used only when the browser handed us no native
+ * copy/cut event to write into: inside such an event `clipboardData.setData`
+ * is synchronous and cannot half-fail after we have already suppressed the
+ * browser's own copy, so it wins whenever it is available. Resolves false on
+ * a denied permission rather than rejecting — a blocked clipboard must never
+ * throw into React, and a cut must be able to see that the copy failed. */
+async function writeClipboardAsync(tsv: string, html: string): Promise<boolean> {
+  if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([tsv], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      return true;
+    } catch {
+      // Permission denied, unsupported MIME type, or the document lost
+      // focus — fall through to the plain-text path.
+    }
+  }
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(tsv);
+      return true;
+    } catch {
+      // Nothing else to try; the caller keeps the cells intact.
+    }
+  }
+  return false;
+}
+
+/** Column overflow is clipped, never auto-creates columns. Rows are NOT
+ *  clipped: overflowing the last row is an append, which the page performs.
+ *  Short rows stay short (they write fewer cells) and empty rows stay in
+ *  place — dropping one would shift every row below it up by one. */
+function clipMatrix(m: string[][], c0: number, colCount: number): string[][] {
+  const maxW = colCount - c0;
+  if (maxW <= 0) return [];
+  return m.map((row) => (Array.isArray(row) ? (row.length > maxW ? row.slice(0, maxW) : row) : []));
+}
+
 export type SheetGridProps = {
   columns: { id: string; label: string; width?: number }[];
   rowIds: string[];
@@ -53,8 +110,16 @@ export type SheetGridProps = {
   /** Live editor for the active cell. Call commit() (with the editor's
    *  blur) when done; the kernel moves focus back to the grid. */
   renderEditor: (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => React.ReactNode;
-  /** Clear these cells (Delete key / future paste-empty). */
+  /** Clear these cells (Delete key). */
   onClearCells: (cells: { rowId: string; colId: string }[]) => void;
+  /** Read values for a rectangular block. Grid supplies geometry, page owns
+   *  data. cells is row-major: cells[r][c] = { rowId, c: columnIndex }. */
+  getRangeValues: (cells: { rowId: string; c: number }[][]) => string[][];
+  /** Write a matrix anchored at topLeft, row-major. The page is responsible
+   *  for: skipping read-only columns, appending rows when the matrix
+   *  overflows the bottom of the table, chunking to the batch cap, and
+   *  optimistic update + rollback. Grid awaits it and does nothing else. */
+  applyMatrix: (topLeft: { rowId: string; c: number }, matrix: string[][]) => Promise<void>;
   onDeleteRows: (rowIds: string[]) => void;
   onOpenRow: (rowId: string) => void;
   onRowContextMenu?: (rowId: string, x: number, y: number) => void;
@@ -74,7 +139,7 @@ type Cell = { rowId: string; c: number };
 export function SheetGrid({
   columns, rowIds, renderDisplay, renderEditor, onClearCells, onDeleteRows,
   onOpenRow, onRowContextMenu, sort, onSortChange, renderHeader, headerTrailing,
-  footer, readOnlyCols,
+  footer, readOnlyCols, getRangeValues, applyMatrix,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -83,6 +148,11 @@ export function SheetGrid({
   const [anchor, setAnchor] = useState<Cell | null>(null);
   const [editing, setEditing] = useState<{ rowId: string; c: number; seed: string | null } | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
+  /* Fill-handle drag. Kept in state, not a ref: the preview rectangle is
+   * rendered from it, and reading a ref during render is forbidden. */
+  const [fillDrag, setFillDrag] = useState<{ base: Rect; to: number } | null>(null);
+  const [applying, setApplying] = useState(false);
+  const applyingRef = useRef(false);
 
   const rowCount = rowIds.length;
   const colCount = columns.length;
@@ -198,6 +268,292 @@ export function SheetGrid({
     }
   }, [editing]);
 
+  /* ── clipboard + fill (Phase 2) ─────────────────────────────── */
+
+  /** Row-major geometry for a rectangle, resolved against the CURRENT row
+   *  order. A rectangle is display geometry; what leaves the grid is always
+   *  rowIds, because a sort (or an instant-commit editor that changes the
+   *  sorted-by value) can renumber every row between gesture and write. */
+  const rectCells = useCallback((rect: Rect) => {
+    const cells: { rowId: string; c: number }[][] = [];
+    for (let r = rect.r1; r <= rect.r2; r++) {
+      const rowId = rowIds[r];
+      if (!rowId) continue;
+      const row: { rowId: string; c: number }[] = [];
+      for (let c = rect.c1; c <= rect.c2 && c < colCount; c++) row.push({ rowId, c });
+      if (row.length > 0) cells.push(row);
+    }
+    return cells;
+  }, [rowIds, colCount]);
+
+  /** Values for a rectangle, normalised to a dense string matrix of exactly
+   *  the geometry we asked for — the page's reader is not trusted to be
+   *  rectangular, and a hole must read as "" rather than reach toTSV or
+   *  fillSeries as undefined. */
+  const readRect = useCallback((rect: Rect): Matrix | null => {
+    const cells = rectCells(rect);
+    if (cells.length === 0) return null;
+    let raw: string[][];
+    try {
+      raw = getRangeValues(cells);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(raw)) return null;
+    return cells.map((row, r) => row.map((_, c) => {
+      const v = raw[r]?.[c];
+      return v == null ? "" : String(v);
+    }));
+  }, [rectCells, getRangeValues]);
+
+  const payloadFor = useCallback((rect: Rect) => {
+    const m = readRect(rect);
+    if (!m) return null;
+    try {
+      return { tsv: toTSV(m), html: toHTMLTable(m) };
+    } catch {
+      return null;
+    }
+  }, [readRect]);
+
+  /** The single writer. Every block mutation funnels through here: one write
+   *  in flight at a time (a second paste landing mid-flight would race the
+   *  page's optimistic update), column overflow clipped, and a rejected
+   *  write reported back as false instead of thrown — the page owns the
+   *  rollback and the message, but a cut must not clear on a failed copy and
+   *  a fill must not move the selection onto cells it never wrote. */
+  const runApply = useCallback(async (topLeft: { rowId: string; c: number }, matrix: string[][]) => {
+    if (applyingRef.current) return false;
+    const clipped = clipMatrix(matrix, topLeft.c, colCount);
+    if (!clipped.some((row) => row.length > 0)) return false;
+    applyingRef.current = true;
+    setApplying(true);
+    try {
+      await applyMatrix(topLeft, clipped);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      applyingRef.current = false;
+      setApplying(false);
+    }
+  }, [applyMatrix, colCount]);
+
+  /** Land the selection on a rectangle after a write. Clamped to rows that
+   *  exist: rows the page appended have ids this render hasn't seen. */
+  const selectRect = useCallback((rect: Rect) => {
+    if (rowCount === 0 || colCount === 0) return;
+    const top = rowIds[Math.max(0, Math.min(rowCount - 1, rect.r1))];
+    const bottom = rowIds[Math.max(0, Math.min(rowCount - 1, rect.r2))];
+    if (!top || !bottom) return;
+    setAnchor({ rowId: top, c: Math.max(0, Math.min(colCount - 1, rect.c1)) });
+    setActive({ rowId: bottom, c: Math.max(0, Math.min(colCount - 1, rect.c2)) });
+  }, [rowIds, rowCount, colCount]);
+
+  const clearRect = useCallback(async (rect: Rect) => {
+    const rowId = rowIds[rect.r1];
+    if (!rowId) return false;
+    const height = Math.min(rect.r2, rowCount - 1) - rect.r1 + 1;
+    const width = Math.min(rect.c2, colCount - 1) - rect.c1 + 1;
+    if (height <= 0 || width <= 0) return false;
+    const blank = Array.from({ length: height }, () => Array.from({ length: width }, () => ""));
+    return runApply({ rowId, c: rect.c1 }, blank);
+  }, [rowIds, rowCount, colCount, runApply]);
+
+  const applyPaste = useCallback(async (m: Matrix, target: Rect) => {
+    if (!Array.isArray(m) || m.length === 0 || !Array.isArray(m[0]) || m[0].length === 0) return;
+    const height = target.r2 - target.r1 + 1;
+    const width = target.c2 - target.c1 + 1;
+    // Sheets behaviour: a single value pasted over a range fills the range.
+    // A single EMPTY value does not: parseClipboard bottoms out at 1x1 blank
+    // for a payload it can't read (an html-only clipboard with no table, an
+    // image), and expanding that would silently wipe the whole selection.
+    // Pasting a genuinely empty cell still clears the anchor cell, so the
+    // blast radius of a junk clipboard is one cell; Delete clears a range.
+    const single = m.length === 1 && m[0].length === 1;
+    const matrix = single && (m[0][0] ?? "") !== "" && (height > 1 || width > 1)
+      ? Array.from({ length: height }, () => Array.from({ length: width }, () => m[0][0]))
+      : m;
+    const rowId = rowIds[target.r1];
+    if (!rowId) return;
+    const ok = await runApply({ rowId, c: target.c1 }, matrix);
+    if (!ok) return;
+    selectRect({
+      r1: target.r1,
+      r2: target.r1 + matrix.length - 1,
+      c1: target.c1,
+      c2: target.c1 + (matrix[0]?.length ?? 1) - 1,
+    });
+  }, [rowIds, runApply, selectRect]);
+
+  /* The native copy/cut/paste events are the primary path: their
+   * DataTransfer is synchronous, needs no permission prompt, carries
+   * text/html both ways, and also covers the Edit and context menus. Not
+   * every browser fires them for a non-editable selection (cut especially),
+   * so the shortcut schedules an async-Clipboard-API attempt that runs only
+   * if no event arrived on this tick. */
+  const clipSeqRef = useRef(0);
+  const fallbackTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (fallbackTimerRef.current != null) window.clearTimeout(fallbackTimerRef.current);
+  }, []);
+  const ifNoClipboardEvent = useCallback((run: () => void) => {
+    const seq = clipSeqRef.current;
+    if (fallbackTimerRef.current != null) window.clearTimeout(fallbackTimerRef.current);
+    fallbackTimerRef.current = window.setTimeout(() => {
+      fallbackTimerRef.current = null;
+      if (clipSeqRef.current === seq) run();
+    }, 0);
+  }, []);
+
+  const asyncCopy = useCallback(async (rect: Rect, cut: boolean) => {
+    // A cut whose clear would be refused (a write is already in flight)
+    // would leave the user believing the cells were moved. Do nothing.
+    if (cut && applyingRef.current) return;
+    const payload = payloadFor(rect);
+    if (!payload) return;
+    const ok = await writeClipboardAsync(payload.tsv, payload.html);
+    // A cut clears only once the copy is confirmed: a denied clipboard
+    // permission must not destroy cells with nothing to paste back.
+    if (ok && cut) await clearRect(rect);
+  }, [payloadFor, clearRect]);
+
+  const asyncPaste = useCallback(async (target: Rect) => {
+    if (!navigator.clipboard?.readText) return;
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      return; // denied — the user sees nothing happen, which beats a throw
+    }
+    if (!text) return;
+    await applyPaste(parseClipboard({ text }), target);
+  }, [applyPaste]);
+
+  const onClipboardCopy = (e: React.ClipboardEvent, cut: boolean) => {
+    // Same guard as the keyboard handler: a caret inside a cell editor or
+    // the column-rename input keeps the browser's own copy.
+    if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+    if (editing || !range) return;
+    // Same reason as asyncCopy: never half-perform a cut.
+    if (cut && applyingRef.current) return;
+    const payload = payloadFor(range);
+    if (!payload) {
+      clipSeqRef.current += 1; // nothing to copy — don't let the fallback try
+      return;
+    }
+    const dt = e.clipboardData;
+    if (!dt) return; // no DataTransfer: leave it to the async fallback
+    e.preventDefault();
+    dt.setData("text/plain", payload.tsv);
+    dt.setData("text/html", payload.html);
+    clipSeqRef.current += 1;
+    if (cut) void clearRect(range);
+  };
+
+  const onClipboardPaste = (e: React.ClipboardEvent) => {
+    if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+    if (editing || !range) return;
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const text = dt.getData("text/plain");
+    const html = dt.getData("text/html");
+    clipSeqRef.current += 1;
+    if (!text && !html) return; // image or file paste — not ours
+    e.preventDefault();
+    void applyPaste(parseClipboard({ text: text || undefined, html: html || undefined }), range);
+  };
+
+  /** Cmd/Ctrl+D and Cmd/Ctrl+R. A plain copy of the leading row/column, not
+   *  a series: that is what a spreadsheet's fill-down does, and it keeps the
+   *  result predictable (a lone "Item 1" stays "Item 1"). A one-row (or
+   *  one-column) selection fills from the neighbour above/left, like Excel. */
+  const fillFromEdge = useCallback(async (dir: "down" | "right") => {
+    if (!range) return;
+    const { r1, r2, c1, c2 } = range;
+    if (dir === "down") {
+      const srcR = r2 > r1 ? r1 : r1 - 1;
+      const dstR = r2 > r1 ? r1 + 1 : r1;
+      if (srcR < 0) return;
+      const src = readRect({ r1: srcR, r2: srcR, c1, c2 });
+      const srcRow = src?.[0];
+      if (!srcRow) return;
+      const rowId = rowIds[dstR];
+      if (!rowId) return;
+      await runApply({ rowId, c: c1 }, Array.from({ length: r2 - dstR + 1 }, () => [...srcRow]));
+      return;
+    }
+    const srcC = c2 > c1 ? c1 : c1 - 1;
+    const dstC = c2 > c1 ? c1 + 1 : c1;
+    if (srcC < 0) return;
+    const src = readRect({ r1, r2, c1: srcC, c2: srcC });
+    if (!src || src.length === 0) return;
+    const rowId = rowIds[r1];
+    if (!rowId) return;
+    const width = c2 - dstC + 1;
+    await runApply({ rowId, c: dstC }, src.map((row) => Array.from({ length: width }, () => row[0] ?? "")));
+  }, [range, readRect, rowIds, runApply]);
+
+  /** Which row a pointer is over. The header sits in normal flow at the top
+   *  of the scrolled content, so body row r starts at (r + 1) * ROW_H. */
+  const rowFromClientY = useCallback((clientY: number) => {
+    const el = scrollRef.current;
+    if (!el || rowCount === 0) return null;
+    const y = clientY - el.getBoundingClientRect().top - el.clientTop + el.scrollTop - SHEET_ROW_H;
+    return Math.max(0, Math.min(rowCount - 1, Math.floor(y / SHEET_ROW_H)));
+  }, [rowCount]);
+
+  const commitFill = useCallback(async (base: Rect, to: number) => {
+    const down = to > base.r2;
+    // Dragging back inside the seed is a no-op. Sheets would shrink the
+    // range by clearing cells; we never destroy data the drag didn't add.
+    const count = down ? to - base.r2 : base.r1 - to;
+    if (count <= 0) return;
+    const seed = readRect(base);
+    if (!seed) return;
+    const width = Math.min(base.c2, colCount - 1) - base.c1 + 1;
+    if (width <= 0) return;
+    // One series per column — a two-column seed extends each column
+    // independently, like Sheets.
+    const series: string[][] = [];
+    for (let ci = 0; ci < width; ci++) {
+      series.push(fillSeries(seed.map((row) => row[ci] ?? ""), count, !down));
+    }
+    // fillSeries returns values in drag order: index 0 is the cell adjacent
+    // to the seed, index count-1 the far end of the drag. An upward fill is
+    // therefore written bottom-up.
+    const matrix: string[][] = [];
+    for (let i = 0; i < count; i++) {
+      const k = down ? i : count - 1 - i;
+      matrix.push(series.map((vals) => vals[k] ?? ""));
+    }
+    const topR = down ? base.r2 + 1 : to;
+    const rowId = rowIds[topR];
+    if (!rowId) return;
+    const ok = await runApply({ rowId, c: base.c1 }, matrix);
+    if (ok) selectRect({ r1: Math.min(base.r1, to), r2: Math.max(base.r2, to), c1: base.c1, c2: base.c2 });
+  }, [readRect, colCount, rowIds, runApply, selectRect]);
+
+  const releaseFillPointer = (e: React.PointerEvent) => {
+    const el = e.currentTarget as HTMLElement;
+    try {
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    } catch {
+      // Capture was never taken (or already lost) — nothing to release.
+    }
+  };
+
+  /** End of a fill drag. Browsers disagree on whether lostpointercapture
+   *  lands before or after pointerup, so both end the drag; if they both
+   *  fire in one tick they see the same pre-batch state and both commit —
+   *  harmless, because runApply is single-flight and refuses the second. */
+  const endFillDrag = (commit: boolean) => {
+    const drag = fillDrag;
+    if (!drag) return;
+    setFillDrag(null);
+    if (commit) void commitFill(drag.base, drag.to);
+  };
+
   // A row can vanish under an open editor (deleted, or filtered out by a
   // value the editor itself just changed). Close without committing —
   // there is no longer a record to write to — so the grid isn't left
@@ -228,6 +584,45 @@ export function SheetGrid({
       e.preventDefault();
       seedActive();
       return;
+    }
+
+    /* Cmd/Ctrl shortcuts. They sit behind the EDITABLE_SEL and `editing`
+     * guards above, so a caret inside a cell editor or the column-rename
+     * input keeps the browser's own copy/cut/paste/select-all. Handled here
+     * rather than as `case "c"` in the switch below, so the same letters
+     * still reach type-to-replace when no modifier is held. Anything not
+     * listed falls through to the switch — Cmd+Arrow still navigates.
+     *
+     * Shift and Alt combinations are left to the browser: Cmd+Shift+R has to
+     * stay a hard reload, and Cmd+Shift+V still pastes through the paste
+     * event below, which is where the work actually happens. */
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+      switch (e.key.toLowerCase()) {
+        case "a":
+          e.preventDefault();
+          if (rowCount > 0 && colCount > 0) { setAnchor({ rowId: rowIds[0], c: 0 }); setActive({ rowId: rowIds[rowCount - 1], c: colCount - 1 }); }
+          return;
+        case "c":
+        case "x": {
+          // Deliberately NOT prevented: letting the keystroke through is
+          // what makes the browser fire the copy/cut event we prefer.
+          if (!range) return;
+          const rect = { ...range };
+          const cut = e.key.toLowerCase() === "x";
+          ifNoClipboardEvent(() => { void asyncCopy(rect, cut); });
+          return;
+        }
+        case "v": {
+          if (!range) return;
+          const rect = { ...range };
+          ifNoClipboardEvent(() => { void asyncPaste(rect); });
+          return;
+        }
+        // Cmd+D bookmarks and Cmd+R reloads — both have to be swallowed
+        // once the grid owns them.
+        case "d": e.preventDefault(); void fillFromEdge("down"); return;
+        case "r": e.preventDefault(); void fillFromEdge("right"); return;
+      }
     }
 
     const extend = e.shiftKey;
@@ -274,12 +669,6 @@ export function SheetGrid({
         return;
       }
       case "Escape": setAnchor(null); return;
-      case "a": case "A":
-        if (e.metaKey || e.ctrlKey) {
-          e.preventDefault();
-          if (rowCount > 0 && colCount > 0) { setAnchor({ rowId: rowIds[0], c: 0 }); setActive({ rowId: rowIds[rowCount - 1], c: colCount - 1 }); }
-        }
-        return;
       default: {
         const colId = columns[active.c]?.id;
         if (!colId || readOnlyCols?.has(colId)) return;
@@ -341,6 +730,21 @@ export function SheetGrid({
     else if (editingR >= last) mounted.push({ rowId: editing.rowId, r: editingR });
   }
 
+  /* Fill handle: the bottom-right corner of the selection. Hidden while an
+   * editor is open (it would sit on top of the editor's own corner) and
+   * while a write is in flight. Kept out of the tab order on purpose — it is
+   * a pointer affordance; Cmd+D / Cmd+R are its keyboard equivalent. */
+  const fillAnchor = range && rowCount > 0 && colCount > 0 && !editing
+    ? { r: Math.min(range.r2, rowCount - 1), c: Math.min(range.c2, colCount - 1) }
+    : null;
+  const fillPreview = fillDrag ? (() => {
+    const r1 = Math.min(fillDrag.base.r1, fillDrag.to);
+    const r2 = Math.max(fillDrag.base.r2, fillDrag.to);
+    const left = colOffsets[fillDrag.base.c1] ?? HANDLE_W;
+    const right = colOffsets[Math.min(fillDrag.base.c2, colCount - 1) + 1] ?? left;
+    return { top: r1 * SHEET_ROW_H, height: (r2 - r1 + 1) * SHEET_ROW_H, left, width: Math.max(0, right - left) };
+  })() : null;
+
   /* ── render ─────────────────────────────────────────────────── */
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -371,6 +775,9 @@ export function SheetGrid({
           aria-colcount={colCount}
           tabIndex={0}
           onKeyDown={onKeyDown}
+          onCopy={(e) => onClipboardCopy(e, false)}
+          onCut={(e) => onClipboardCopy(e, true)}
+          onPaste={onClipboardPaste}
           className="relative outline-none"
           style={{ width: gridWidth, minWidth: "100%" }}
         >
@@ -478,6 +885,49 @@ export function SheetGrid({
                   })}
                 </div>
               ))
+            )}
+
+            {fillPreview && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute z-10 border-2 border-dashed border-[#0073EA]"
+                style={fillPreview}
+              />
+            )}
+            {fillAnchor && (
+              <div
+                aria-hidden
+                title="Drag to fill"
+                className="absolute z-10 flex items-center justify-center"
+                style={{
+                  top: (fillAnchor.r + 1) * SHEET_ROW_H - 7,
+                  left: (colOffsets[fillAnchor.c + 1] ?? HANDLE_W) - 7,
+                  width: 14,
+                  height: 14,
+                  cursor: "crosshair",
+                  touchAction: "none",
+                  pointerEvents: applying ? "none" : "auto",
+                }}
+                onPointerDown={(e) => {
+                  if (!range || applyingRef.current) return;
+                  // Stop the gesture reaching the cell underneath, which
+                  // would collapse the selection we are about to fill from.
+                  e.preventDefault();
+                  e.stopPropagation();
+                  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                  setFillDrag({ base: { ...range }, to: range.r2 });
+                }}
+                onPointerMove={(e) => {
+                  if (!fillDrag) return;
+                  const r = rowFromClientY(e.clientY);
+                  if (r != null && r !== fillDrag.to) setFillDrag({ base: fillDrag.base, to: r });
+                }}
+                onPointerUp={(e) => { releaseFillPointer(e); endFillDrag(true); }}
+                onPointerCancel={(e) => { releaseFillPointer(e); endFillDrag(false); }}
+                onLostPointerCapture={() => endFillDrag(true)}
+              >
+                <div className="h-[7px] w-[7px] rounded-[1px] border border-white bg-[#0073EA]" />
+              </div>
             )}
           </div>
         </div>

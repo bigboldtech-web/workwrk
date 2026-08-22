@@ -115,6 +115,132 @@ function compareCells(type: ColType, va: unknown, vb: unknown): number {
   return String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
+/* ── Clipboard + fill coercion (Tables Phase 2) ──────────────────
+ * The grid owns geometry; this file owns what a cell VALUE means. Text
+ * arriving from Excel/Sheets has to become the stored shape each column
+ * type expects, and a paste must never invent data it cannot justify. */
+
+// What a checkbox copies OUT as, plus everything paste takes back in.
+// TRUE/FALSE is what Excel and Sheets themselves write, so a round trip
+// through either application survives.
+const CHECKBOX_TRUE = new Set(["true", "t", "yes", "y", "1", "x", "✓", "☑"]);
+const CHECKBOX_FALSE = new Set(["false", "f", "no", "n", "0"]);
+
+/** A cell holding nothing. Lets a real skip be told apart from a
+ *  blank-onto-blank no-op, which isn't worth reporting to the user. */
+function isEmptyCell(v: unknown): boolean {
+  return v == null || v === "" || v === false || (Array.isArray(v) && v.length === 0);
+}
+
+/** Excel and Sheets copy numbers with their formatting attached:
+ *  "$1,234.50", "45%", "(120)" for a negative. Undo exactly those, and
+ *  only where the grouping shape is unambiguous — "1,5" stays unparseable
+ *  rather than silently becoming fifteen for a user who meant 1.5. */
+function parseNumericCell(text: string): number | null {
+  let s = text.replace(/[\s\u00a0]/g, "");
+  let neg = false;
+  if (/^\(.+\)$/.test(s)) { neg = true; s = s.slice(1, -1); } // (120) = -120
+  s = s.replace(/^([-+]?)[$€£¥₹]/, "$1");
+  const sm = /^[-+]/.exec(s);
+  const sign = sm ? sm[0] : "";
+  if (sm) s = s.slice(1);
+  s = s.replace(/%$/, "");
+  if (/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s)) s = s.replace(/,/g, "");
+  if (!/^(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/.test(s)) return null;
+  const n = Number(sign + s);
+  if (!Number.isFinite(n)) return null;
+  return neg ? -Math.abs(n) : n;
+}
+
+/** Date columns store ISO "YYYY-MM-DD" — what the date editor writes and
+ *  what compareCells sorts on. An ISO datetime is truncated to its day.
+ *  Nothing else is guessed: "01/02/2026" is January 2nd to half the world
+ *  and February 1st to the other half. */
+function normalizeIsoDate(text: string): string | null {
+  const m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]|$)/.exec(text);
+  if (!m) return null;
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1) return null;
+  // Reject impossible days, not merely d > 31: storing 2026-02-30 makes a
+  // later fill-down on the column silently degrade from a date series to
+  // copy-down, because the clipboard lib's stricter parser rejects it.
+  const y = Number(m[1]);
+  const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+  if (d > daysInMonth) return null;
+  return `${m[1]}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/** One clipboard string → what to store in one cell.
+ *  - write: store this (null clears the cell — pasting a blank over a
+ *           value clears it, same as Sheets).
+ *  - empty: the text has no reading in this column, so the cell is
+ *           CLEARED and the count surfaced. The user aimed at this cell;
+ *           leaving the old number sitting under the paste is the worse
+ *           lie. Dates are the exception (see below).
+ *  - skip:  leave the cell exactly as it was, and count it. */
+type PasteCoercion = { kind: "write"; value: unknown } | { kind: "skip" };
+
+function coercePaste(col: Column, raw: string): PasteCoercion {
+  const text = raw.trim();
+  switch (col.type) {
+    // Computed. readOnlyCols already tells the grid these can't be edited;
+    // a paste over one is dropped rather than written and immediately
+    // recomputed away.
+    case "formula": case "lookup": case "rollup":
+      return { kind: "skip" };
+    // A row id, a user id and an uploaded file have no text encoding a
+    // paste could safely invent — "Acme Corp" is a title, not an id, and
+    // resolving it by guess would point the link at the wrong record.
+    case "link": case "person": case "attachment":
+      return { kind: "skip" };
+    case "checkbox": {
+      if (text === "") return { kind: "write", value: null };
+      const t = text.toLowerCase();
+      if (CHECKBOX_TRUE.has(t)) return { kind: "write", value: true };
+      if (CHECKBOX_FALSE.has(t)) return { kind: "write", value: false };
+      return { kind: "skip" };
+    }
+    case "number": case "currency": case "percent": case "rating": {
+      if (text === "") return { kind: "write", value: null };
+      const n = parseNumericCell(text);
+      if (n === null) return { kind: "skip" };
+      if (col.type === "rating") {
+        const r = Math.min(5, Math.max(0, Math.round(n)));
+        return { kind: "write", value: r === 0 ? null : r };
+      }
+      return { kind: "write", value: n };
+    }
+    case "date": {
+      if (text === "") return { kind: "write", value: null };
+      // Skip, never clear. An unreadable value is a gap in our parser, not
+      // a value the user asked to erase — "N/A" or a European "1.234,50" in
+      // one row of a pasted report must not delete the good number already
+      // in the cell. Only an explicitly empty source cell clears.
+      const iso = normalizeIsoDate(text);
+      return iso ? { kind: "write", value: iso } : { kind: "skip" };
+    }
+    case "select": {
+      if (text === "") return { kind: "write", value: null };
+      const hit = (col.options ?? []).find((o) => o.toLowerCase() === text.toLowerCase());
+      return hit ? { kind: "write", value: hit } : { kind: "skip" };
+    }
+    case "multi_select": {
+      if (text === "") return { kind: "write", value: null };
+      const opts = col.options ?? [];
+      const chosen: string[] = [];
+      for (const part of text.split(",").map((p) => p.trim()).filter(Boolean)) {
+        const hit = opts.find((o) => o.toLowerCase() === part.toLowerCase());
+        if (!hit) return { kind: "skip" }; // one unknown choice leaves the whole cell alone
+        if (!chosen.includes(hit)) chosen.push(hit);
+      }
+      return { kind: "write", value: chosen.length ? chosen : null };
+    }
+    default: // short_text, long_text, url, email
+      return { kind: "write", value: text === "" ? null : raw };
+  }
+}
+
 /* Escape must cancel, never save. Blur is what commits every text-ish editor
  * in this file, and Escape has to blur to close the editor — so the host
  * raises this flag first and each blur handler reads it synchronously (a ref,
@@ -690,6 +816,194 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }
   };
 
+  /* ── Clipboard + fill data half (Tables Phase 2) ──────────────
+   * The grid supplies geometry (which rowIds, which column indexes); this
+   * file supplies and stores the values. */
+
+  /** A cell as clipboard text. Deliberately NOT displayCell: that one
+   *  renders "$12" / "20%" / "★★★" for humans and none of those survive a
+   *  round trip back through paste. This is the stored value spelled the
+   *  way the editors read and write it — bare numbers, ISO dates, and
+   *  TRUE/FALSE for a checkbox (the token coercePaste takes back). */
+  const cellText = (col: Column, r: ApiRow): string => {
+    const v = r.values[col.id];
+    switch (col.type) {
+      case "formula": {
+        const ci = table.columns.findIndex((x) => x.id === col.id);
+        const fv = formulaValue(ci, r.id);
+        return fv == null ? "" : String(fv);
+      }
+      case "lookup": case "rollup": {
+        const rv = relationalValue(col, r);
+        return rv == null ? "" : String(rv);
+      }
+      case "checkbox": return v ? "TRUE" : "FALSE";
+      case "multi_select": return Array.isArray(v) ? (v as string[]).join(", ") : "";
+      case "person": {
+        const arr = Array.isArray(v) ? (v as string[]) : [];
+        return arr.map((id) => userName(orgUsers.find((u) => u.id === id))).join(", ");
+      }
+      case "link": {
+        const lt = col.linkTableId ? linkedTables[col.linkTableId] : undefined;
+        const arr = Array.isArray(v) ? (v as string[]) : [];
+        return arr.map((id) => rowTitle(lt?.rows.find((x) => x.id === id), lt?.titleColId ?? "")).join(", ");
+      }
+      case "attachment": {
+        const arr = Array.isArray(v) ? (v as Attachment[]) : [];
+        return arr.map((f) => f?.name ?? "").filter(Boolean).join(", ");
+      }
+      default: return v == null ? "" : Array.isArray(v) ? (v as unknown[]).join(", ") : String(v);
+    }
+  };
+
+  /** Read a rectangular block for copy/cut/fill. A rowId that no longer
+   *  resolves contributes "" so the matrix stays rectangular. */
+  const getRangeValues = (cells: { rowId: string; c: number }[][]): string[][] =>
+    cells.map((line) => line.map(({ rowId, c }) => {
+      const r = rowById.get(rowId);
+      const col = table.columns[c];
+      return r && col ? cellText(col, r) : "";
+    }));
+
+  /** Write a matrix anchored at topLeft, walking DOWN the current display
+   *  order (sortedRows) — the grid may be sorted or filtered, and Phase 1
+   *  keys everything by rowId for exactly this reason.
+   *
+   *  Column mapping: matrix column k targets display column topLeft.c + k
+   *  INCLUDING read-only ones, so the pasted block keeps its shape; the
+   *  read-only ones simply emit no write. Columns past the last one are
+   *  clipped — a paste never creates columns. Rows past the last one are
+   *  appended, which is what Sheets does.
+   *
+   *  Optimistic in-place for existing rows; appended rows are added only
+   *  from what the server actually created, never from guessed ids. Any
+   *  failed chunk stops the run, tells the user, and reloads, so the grid
+   *  can't keep showing a write that didn't land. */
+  const applyMatrix = async (topLeft: { rowId: string; c: number }, matrix: string[][]) => {
+    if (!tableId || matrix.length === 0) return;
+    const cols = table.columns;
+    const anchorIdx = sortedRows.findIndex((r) => r.id === topLeft.rowId);
+    if (anchorIdx < 0) return; // anchor fell out of the filtered set mid-gesture
+
+    const updatesByRow = new Map<string, Record<string, unknown>>();
+    const inserts: { values: Record<string, unknown> }[] = [];
+    let skipped = 0;    // left untouched: read-only, unmatched choice, unreadable value
+
+    for (let j = 0; j < matrix.length; j++) {
+      const line = matrix[j];
+      const target = sortedRows[anchorIdx + j] as ApiRow | undefined; // undefined ⇒ past the last row
+      const values: Record<string, unknown> = {};
+      for (let k = 0; k < line.length; k++) {
+        const c = topLeft.c + k;
+        if (c < 0) continue;         // defensive: the geometry comes from the grid
+        if (c >= cols.length) break; // clipped
+        const col = cols[c];
+        const raw = line[k] ?? "";
+        const res = coercePaste(col, raw);
+        if (res.kind === "skip") {
+          // Blank onto blank changed nothing, so it isn't worth reporting.
+          if (raw.trim() !== "" || !isEmptyCell(target?.values[col.id])) skipped++;
+          continue;
+        }
+        values[col.id] = res.value;
+      }
+      if (target) {
+        if (Object.keys(values).length > 0) {
+          updatesByRow.set(target.id, { ...(updatesByRow.get(target.id) ?? {}), ...values });
+        }
+      } else {
+        // A brand-new row has nothing to clear, so nulls are dropped.
+        inserts.push({ values: Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null)) });
+      }
+    }
+
+    const updates = [...updatesByRow].map(([id, values]) => ({ id, values }));
+    const realInserts = inserts.some((i) => Object.keys(i.values).length > 0) ? inserts : [];
+    const written =
+      updates.reduce((n, u) => n + Object.keys(u.values).length, 0) +
+      realInserts.reduce((n, i) => n + Object.keys(i.values).length, 0);
+
+    // Everything landed on read-only or unmatched cells: say so, write nothing,
+    // and don't append blank rows to carry a paste that has no payload.
+    if (updates.length === 0 && realInserts.length === 0) {
+      if (skipped > 0) toast(`Nothing pasted · ${skipped} cell${skipped === 1 ? "" : "s"} skipped (read-only or unmatched value)`);
+      return;
+    }
+
+    if (updates.length > 0) {
+      setRows((prev) => prev ? prev.map((r) => {
+        const patch = updatesByRow.get(r.id);
+        return patch ? { ...r, values: { ...r.values, ...patch } } : r;
+      }) : prev);
+    }
+
+    try {
+      // Sequential slices at the server's per-kind cap, exactly like
+      // clearCells/bulkDeleteRows: a failure part-way stops the rest and the
+      // reload below reconciles whatever did commit.
+      // The route commits updates + inserts in ONE transaction, so when the
+      // whole paste fits in a single call, send both keys together and keep
+      // that guarantee. Only an oversized paste has to be split, and then
+      // the reload below reconciles whatever committed.
+      const oneShot = updates.length <= BATCH_MAX_OPS && realInserts.length <= BATCH_MAX_OPS;
+      for (let i = 0; !oneShot && i < updates.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error();
+      }
+      if (oneShot && (updates.length > 0 || realInserts.length > 0)) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(updates.length > 0 ? { updates } : {}),
+            ...(realInserts.length > 0 ? { inserts: realInserts } : {}),
+          }),
+        });
+        if (!res.ok) throw new Error();
+        const d = await res.json();
+        const payload = d?.data ?? d;
+        const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
+          .map((r: { id: string; values: unknown; position: number }) => ({
+            id: r.id,
+            values: (r.values ?? {}) as Record<string, unknown>,
+            position: r.position,
+          }));
+        if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
+      }
+      for (let i = 0; !oneShot && i < realInserts.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ inserts: realInserts.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error();
+        // The route returns the rows it created, in payload order. Take the
+        // ids from there — a guessed id would break every rowId-keyed thing
+        // in the kernel the moment the real row arrived.
+        const d = await res.json();
+        const payload = d?.data ?? d;
+        const created: ApiRow[] = (Array.isArray(payload?.inserted) ? payload.inserted : [])
+          .map((r: { id: string; values: unknown; position: number }) => ({
+            id: r.id,
+            values: (r.values ?? {}) as Record<string, unknown>,
+            position: r.position,
+          }));
+        if (created.length > 0) setRows((prev) => prev ? [...prev, ...created] : prev);
+      }
+    } catch {
+      toast("Couldn't paste — reloading the table");
+      void load();
+      // Rethrow: the grid's runApply catches this and returns false, so it
+      // won't move the selection as though the write had landed.
+      throw new Error("batch write failed");
+    }
+
+    const notes: string[] = [];
+    if (skipped > 0) notes.push(`${skipped} skipped (read-only or unmatched value)`);
+    if (notes.length > 0) toast(`Pasted ${written} cell${written === 1 ? "" : "s"} · ${notes.join(" · ")}`);
+  };
+
   const kernelHeader = (colId: string) => {
     const c = table.columns.find((x) => x.id === colId);
     if (!c) return null;
@@ -921,6 +1235,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             renderDisplay={displayCell}
             renderEditor={kernelEditor}
             onClearCells={(cells) => void clearCells(cells)}
+            getRangeValues={getRangeValues}
+            applyMatrix={applyMatrix}
             onDeleteRows={(ids) => void bulkDeleteRows(ids)}
             onOpenRow={(id) => setActiveRowId(id)}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
