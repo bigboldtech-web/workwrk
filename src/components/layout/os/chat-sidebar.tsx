@@ -23,6 +23,18 @@ const LIST_POLL_MS = 20_000;
 
 type ChannelRow = { id: string; name: string | null; memberCount: number; isMember: boolean };
 
+type MessageHit = {
+  messageId: string;
+  conversationId: string;
+  conversationType: string;
+  conversationName: string | null;
+  members: { userId: string; user: { id: string; firstName: string; lastName: string; avatar: string | null } }[];
+  author: { id: string; firstName: string; lastName: string };
+  snippet: string;
+  createdAt: string;
+  inThread: boolean;
+};
+
 export function ChatSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
@@ -33,6 +45,7 @@ export function ChatSidebar() {
 
   const [rows, setRows] = useState<ConversationListRow[] | null>(null);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
+  const [msgResults, setMsgResults] = useState<MessageHit[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [channelModalOpen, setChannelModalOpen] = useState(false);
   const [joining, setJoining] = useState<string | null>(null);
@@ -79,6 +92,21 @@ export function ChatSidebar() {
   }, []);
 
   const q = query.trim().toLowerCase();
+
+  // Message search rides the same sidebar search box: 2+ chars kicks
+  // off a debounced lookup across my conversations.
+  useEffect(() => {
+    if (q.length < 2) { setMsgResults(null); return; }
+    let active = true;
+    const t = setTimeout(() => {
+      fetch(`/api/conversations/search-messages?q=${encodeURIComponent(q)}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (active) setMsgResults((d?.results ?? []) as MessageHit[]); })
+        .catch(() => { if (active) setMsgResults([]); });
+    }, 300);
+    return () => { active = false; clearTimeout(t); };
+  }, [q]);
+
   const filtered = useMemo(() => {
     if (!rows) return null;
     const direct = rows.filter((r) => r.type !== "CHANNEL");
@@ -102,13 +130,13 @@ export function ChatSidebar() {
     // An explicit open is consent — clear any "just left" marker so the
     // page's auto-join guard doesn't block this deliberate rejoin.
     try { sessionStorage.removeItem(`workwrk:chat-left:${c.id}`); } catch { /* private mode */ }
-    if (c.isMember) { router.push(`/chat/${c.id}`); return; }
+    if (c.isMember) { router.push(`/room/${c.id}`); return; }
     setJoining(c.id);
     try {
       const r = await fetch(`/api/conversations/${c.id}/join`, { method: "POST" });
       if (r.ok) {
         window.dispatchEvent(new Event("workwrk:chat-changed"));
-        router.push(`/chat/${c.id}`);
+        router.push(`/room/${c.id}`);
       } else {
         toast("Couldn't join the channel — try again");
       }
@@ -125,7 +153,7 @@ export function ChatSidebar() {
         className="flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200 mb-2"
       >
         <Plus className="w-4 h-4 text-zinc-500" />
-        New chat
+        New message
       </button>
 
       {filtered !== null && (visibleChannels.length > 0 || q === "") && (
@@ -138,7 +166,7 @@ export function ChatSidebar() {
           </div>
           <ul className="flex flex-col gap-0.5 mb-2">
             {visibleChannels.map((c) => {
-              const active = pathname === `/chat/${c.id}`;
+              const active = pathname === `/room/${c.id}`;
               const unread = channelUnread.get(c.id) ?? 0;
               return (
                 <li key={c.id}>
@@ -178,22 +206,27 @@ export function ChatSidebar() {
         <div className="px-2 py-6 text-center">
           <MessageCircle className="w-5 h-5 text-zinc-300 mx-auto mb-2" />
           <p className="text-[13px] text-zinc-500">
-            {q ? "No conversations match" : "No conversations yet. Start one with New chat."}
+            {q ? "No conversations match" : "No conversations yet. Start one with New message."}
           </p>
         </div>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {filtered.map((row) => {
-            const active = pathname === `/chat/${row.id}`;
+            const active = pathname === `/room/${row.id}`;
             const title = conversationTitle(row, meId);
             const avatarUser = conversationAvatarUser(row, meId);
+            const lastMeta = row.lastMessage?.metadata as { kind?: string; attachments?: unknown[] } | null;
+            const lastBody = row.lastMessage
+              ? lastMeta?.kind === "call" ? "📞 Call"
+                : row.lastMessage.body || (lastMeta?.attachments?.length ? "📎 Attachment" : "")
+              : "";
             const preview = row.lastMessage
-              ? `${row.lastMessage.authorId === meId ? "You: " : ""}${(row.lastMessage.metadata as { kind?: string } | null)?.kind === "call" ? "📞 Call" : row.lastMessage.body}`
+              ? `${row.lastMessage.authorId === meId ? "You: " : ""}${lastBody}`
               : "No messages yet";
             return (
               <li key={row.id}>
                 <Link
-                  href={`/chat/${row.id}`}
+                  href={`/room/${row.id}`}
                   className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md ${
                     active ? "bg-zinc-100" : "hover:bg-zinc-50"
                   }`}
@@ -225,13 +258,48 @@ export function ChatSidebar() {
         </ul>
       )}
 
+      {q.length >= 2 && msgResults !== null && (
+        <>
+          <div className="px-2 pt-3 pb-1">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Messages</span>
+          </div>
+          {msgResults.length === 0 ? (
+            <p className="px-2 py-2 text-[13px] text-zinc-400">No messages match</p>
+          ) : (
+            <ul className="flex flex-col gap-0.5">
+              {msgResults.map((hit) => {
+                const convTitle = hit.conversationType === "CHANNEL"
+                  ? `#${hit.conversationName ?? "channel"}`
+                  : conversationTitle(
+                      { type: hit.conversationType, name: hit.conversationName, members: hit.members },
+                      meId,
+                    );
+                return (
+                  <li key={hit.messageId}>
+                    <Link href={`/room/${hit.conversationId}`} className="block px-2 py-1.5 rounded-md hover:bg-zinc-50">
+                      <span className="block truncate text-[13px] font-medium text-zinc-800">
+                        {convTitle}
+                        {hit.inThread && <span className="ml-1 text-[11px] font-normal text-zinc-400">in thread</span>}
+                      </span>
+                      <span className="block truncate text-[12px] text-zinc-500">
+                        {hit.author.firstName}: {hit.snippet}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </>
+      )}
+
       {channelModalOpen && (
         <NewChannelDialog
           onClose={() => setChannelModalOpen(false)}
           onCreated={(id) => {
             setChannelModalOpen(false);
             window.dispatchEvent(new Event("workwrk:chat-changed"));
-            router.push(`/chat/${id}`);
+            router.push(`/room/${id}`);
           }}
         />
       )}
@@ -243,7 +311,7 @@ export function ChatSidebar() {
           onCreated={(id) => {
             setModalOpen(false);
             window.dispatchEvent(new Event("workwrk:chat-changed"));
-            router.push(`/chat/${id}`);
+            router.push(`/room/${id}`);
           }}
         />
       )}
@@ -322,7 +390,7 @@ function NewChatModal({ meId, onClose, onCreated }: {
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>New chat</DialogTitle>
+          <DialogTitle>New message</DialogTitle>
         </DialogHeader>
 
         {picked.length > 0 && (

@@ -1149,7 +1149,7 @@ function TimesheetsSidebar() {
 
 export const APPS: AppEntry[] = [
   // ── Core (always pinned by default) ──────────────────────────
-  { key: "home", label: "Home", Icon: Home, defaultHref: "/today",
+  { key: "home", label: "Work", Icon: Home, defaultHref: "/today",
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" },
@@ -1163,10 +1163,10 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
-  { key: "chat", label: "Chat", Icon: MessageCircle, defaultHref: "/chat",
-    matchPaths: ["/chat"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+  { key: "chat", label: "Room", Icon: MessageCircle, defaultHref: "/room",
+    matchPaths: ["/room"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
     createActions: [
-      { label: "New chat", icon: MessageCircle, event: "chat-new" },
+      { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },
     ] },
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",

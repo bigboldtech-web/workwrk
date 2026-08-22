@@ -21,7 +21,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   await Promise.all([
     prisma.conversationMember.update({ where: { id: membership.id }, data: { lastReadAt: new Date() } }),
     prisma.notification.updateMany({
-      where: { userId, link: `/chat/${id}`, read: false },
+      where: { userId, link: { in: [`/room/${id}`, `/chat/${id}`] }, read: false },
       data: { read: true },
     }),
   ]);

@@ -1,6 +1,6 @@
 # Comms Hub — Slack × Zoom × Meet, inside WorkwrK
 
-**Date:** 2026-08-21 · **Status:** Phases 0–4 LIVE (46e7324, d2402a0, f026745), Phases 5–6 planned
+**Date:** 2026-08-22 · **Status:** Phases 0–5 LIVE, Phase 6 gated on measured load · **The surface is named "Room"** (user, 2026-08-22; routes /room, /chat redirects kept)
 **Mandate (user):** "Slack, Zoom and Google Meet infused. Chat with team members, video call them, have a group of people in a meeting, audio calls. Plan it so seamless and so light that it doesn't put load on the WorkwrK system. Get it live slowly, slowly, and test it out."
 
 ---
@@ -142,10 +142,21 @@ bells are mention-only by default — mentions arrive in Phase 5; badges
 count everything. Space-linked channels deferred to a later pass
 (`spaceId` column is ready).
 
-### Phase 5 — Comfort layer
-Reactions + attachments (reuse `/api/upload`; files dropped in chat also land
-in Library per the files system), message edit/delete, basic search
-(`ILIKE` on recent, indexed later), threads via `parentId`.
+### Phase 5 — Comfort layer ✅ LIVE
+Reactions (8-emoji quick bar, FOR-UPDATE toggle), own-message edit/delete
+(server-side redaction — removed bodies never leave the API), @mentions
+(composer autocomplete, boundary-safe matching, mention bells ring through
+channels' quiet default), attachments (composer picker + drag-drop, s3Key
+stored so reads re-presign — stored presigned URLs die in an hour; Library
+copies registered), threads (parentId + side sheet + reply chips; parent
+updatedAt bumped so counts propagate), search (sidebar box → recent-match
+list). One migration: ConversationMessage.updatedAt + index — the poll is
+now a keyset cursor (updatedAt, id) with drain-on-full-page, immune to the
+backfill's identical timestamps. Fleet round 2 findings all fixed (s3Key
+blocker, poll livelock, deleted-content leak, composer caret/upload races).
+KNOWN FOLLOW-UP: FileEntry has no s3Key column — the Library itself serves
+stored URLs that will expire once real S3 keys are configured; needs its
+own migration + re-presign pass.
 
 ### Phase 6 — Realtime upgrade (only if measured need)
 SSE endpoint + in-process pub/sub replacing the 4s poll for open panes;

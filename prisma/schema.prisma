@@ -5573,6 +5573,9 @@ model ConversationMessage {
   author         User         @relation("ConversationMessageAuthor", fields: [authorId], references: [id], onDelete: Cascade)
   body           String
   createdAt      DateTime     @default(now())
+  /// Bumped on every mutation (edit, delete, reaction) — the poll's
+  /// after-cursor keys on this so changes to old messages propagate.
+  updatedAt      DateTime     @default(now()) @updatedAt
   editedAt       DateTime?
   /// Soft delete — body is blanked, row stays for thread continuity.
   deletedAt      DateTime?
@@ -5582,6 +5585,7 @@ model ConversationMessage {
   metadata       Json?
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, updatedAt])
 }
 
 // ==========================================

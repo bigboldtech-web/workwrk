@@ -1,6 +1,6 @@
 "use client";
 
-// /chat landing — jump straight into the most recent conversation
+// /room landing — jump straight into the most recent conversation
 // (Slack behavior). With nothing to open, an honest empty state that
 // hands off to the sidebar's New-chat flow.
 
@@ -19,7 +19,7 @@ export default function ChatLandingPage() {
       .then((d) => {
         if (!active) return;
         const first = d?.conversations?.[0];
-        if (first?.id) router.replace(`/chat/${first.id}`);
+        if (first?.id) router.replace(`/room/${first.id}`);
         else setEmpty(true);
       })
       .catch(() => { if (active) setEmpty(true); });
@@ -33,7 +33,7 @@ export default function ChatLandingPage() {
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-[#0073EA]/10 text-[#0073EA] mb-3">
             <MessageCircle className="w-6 h-6" />
           </span>
-          <h1 className="text-[17px] font-semibold text-zinc-900">Chat with your team</h1>
+          <h1 className="text-[17px] font-semibold text-zinc-900">Your team Room</h1>
           <p className="mt-1 text-[14px] text-zinc-500">
             Direct messages, group chats, and one-click audio or video calls — all inside WorkwrK.
           </p>
