@@ -25,8 +25,7 @@ import {
   Library as LibraryIcon, Folder, Trash2,
   LayoutDashboard, Target, GaugeCircle,
   type LucideIcon,
-  MessageCircle, Hash,
-} from "lucide-react";
+  MessageCircle, Hash, Table2 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
 import { usePathname, useRouter } from "next/navigation";
@@ -1182,6 +1181,12 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New Dashboard", icon: BarChart3, href: "/dashboards?new=1" }] },
+  { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables",
+    matchPaths: ["/tables"], category: "Core", defaultPinned: true,
+    Sidebar: linksSidebar([{ href: "/tables", label: "All tables", Icon: Table2 }]),
+    // ?new=1 is an armed latch on the list page: it opens the name prompt
+    // once on arrival, so the rail "+" goes straight into creation.
+    createActions: [{ label: "New table", icon: Table2, href: "/tables?new=1" }] },
   { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
     matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,

@@ -7,8 +7,8 @@
  * a doc via the data_table block.
  */
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Table as TableIcon, Plus, Rows, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -42,6 +42,19 @@ export default function TablesPage() {
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("tables");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
+
+  // ?new=1 (the rail "+") opens the create prompt once on arrival. Ref
+  // latch: StrictMode double-effects and later re-renders must not re-open
+  // the dialog.
+  const search = useSearchParams();
+  const newLatchRef = useRef(false);
+  useEffect(() => {
+    if (search.get("new") !== "1" || newLatchRef.current) return;
+    newLatchRef.current = true;
+    router.replace("/tables");
+    void quickAdd();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per arrival
+  }, [search]);
 
   async function quickAdd() {
     const name = (await promptDialog({ title: "Table name?" }))?.trim();
