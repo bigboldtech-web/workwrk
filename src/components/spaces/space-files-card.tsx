@@ -68,13 +68,16 @@ export function SpaceFilesCard({ spaceId, spaceName, canEdit }: { spaceId: strin
         const up = await fetch("/api/upload", { method: "POST", body: fd });
         if (!up.ok) { toast(`Couldn't upload ${f.name}`); continue; }
         const u = await up.json();
-      const s3KeyVal = typeof (u.s3Key ?? u.data?.s3Key) === "string" ? (u.s3Key ?? u.data?.s3Key) : null;
+        const s3KeyVal = typeof (u.s3Key ?? u.data?.s3Key) === "string" ? (u.s3Key ?? u.data?.s3Key) : null;
         const url = u.url ?? u.data?.url;
         if (!url) { toast(`Couldn't upload ${f.name}`); continue; }
         const res = await fetch("/api/files", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, url, spaceId }),
+          body: JSON.stringify({
+            name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, url, spaceId,
+            ...(s3KeyVal ? { s3Key: s3KeyVal } : {}),
+          }),
         });
         if (!res.ok) toast(`Couldn't save ${f.name}`);
       }
