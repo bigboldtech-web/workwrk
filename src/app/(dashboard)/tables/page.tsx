@@ -7,14 +7,13 @@
  * a doc via the data_table block.
  */
 
-import { createExcelSheet } from "@/lib/sheet-new";
+import { createUntitledSheet } from "@/lib/sheet-new";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Table as TableIcon, Plus, Rows, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { usePrompt } from "@/components/ui/dialog-provider";
 
 type ApiTable = {
   id: string; name: string; description?: string | null;
@@ -28,7 +27,6 @@ export default function TablesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
-  const promptDialog = usePrompt();
 
   const load = useCallback(async () => {
     try {
@@ -44,9 +42,9 @@ export default function TablesPage() {
   const v = rowVersion("tables");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  // ?new=1 (the rail "+") opens the create prompt once on arrival. Ref
-  // latch: StrictMode double-effects and later re-renders must not re-open
-  // the dialog.
+  // ?new=1 (the rail "+") creates an untitled sheet once on arrival — no
+  // prompt anymore. Ref latch: StrictMode double-effects and later
+  // re-renders must not create twice.
   const search = useSearchParams();
   const newLatchRef = useRef(false);
   useEffect(() => {
@@ -57,13 +55,20 @@ export default function TablesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per arrival
   }, [search]);
 
+  const quickAddBusyRef = useRef(false);
   async function quickAdd() {
-    const name = (await promptDialog({ title: "Sheet name?" }))?.trim();
-    if (!name) return;
+    // Same double-click latch as the sidebar: promptless create must not
+    // mint duplicates on a fast second click.
+    if (quickAddBusyRef.current) return;
+    quickAddBusyRef.current = true;
     try {
-      const t = await createExcelSheet(name);
+      // No name prompt (Sheets model): "Untitled spreadsheet" with the
+      // cosmetic " 2"/" 3" suffix from whatever list is loaded, straight
+      // into the grid; the title is renamed inline there.
+      const t = await createUntitledSheet((tables ?? []).map((tb) => tb.name));
       router.push(`/tables/${t.id}`);
     } catch { toast("Couldn't create table"); }
+    finally { quickAddBusyRef.current = false; }
   }
 
   const [aiImporting, setAiImporting] = useState(false);

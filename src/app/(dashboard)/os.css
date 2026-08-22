@@ -16887,13 +16887,6 @@ table.os-tbl {
 
 /* ─── Tables · grid editor ─── */
 .dtbl { display: flex; flex-direction: column; height: 100%; background: var(--os-bg); }
-.dtbl__head { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--os-line); background: var(--os-surface); }
-.dtbl__title-wrap { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.dtbl__title-wrap > svg { width: 18px; height: 18px; color: var(--os-c-teal); flex: 0 0 auto; }
-.dtbl__title-wrap input { flex: 1; min-width: 0; font-size: 18px; font-weight: 600; border: none; background: transparent; padding: 4px 6px; border-radius: 4px; outline: none; color: var(--os-ink); }
-.dtbl__title-wrap input:focus { background: var(--os-bg-2); }
-.dtbl__meta { font-size: 13px; color: var(--os-ink-3); }
-.dtbl__meta em { color: var(--os-c-blue); font-style: normal; }
 .dtbl__scroll { flex: 1; overflow: auto; padding: 16px 20px; }
 .dtbl__grid { border-collapse: separate; border-spacing: 0; font-size: 14px; min-width: 100%; }
 .dtbl__grid th, .dtbl__grid td { border: 1px solid var(--os-line); padding: 0; vertical-align: middle; background: var(--os-surface); }
@@ -17041,7 +17034,6 @@ table.os-tbl {
 .dtbl__cal-card:hover { background: var(--os-bg); }
 
 /* ─── Tables · header actions, search/filter, row expand, modal ─── */
-.dtbl__head-actions { display: flex; gap: 4px; }
 .dtbl__head-btn { display: inline-flex; align-items: center; padding: 6px 8px; background: var(--os-bg-2); border: 1px solid var(--os-line); border-radius: 6px; cursor: pointer; color: var(--os-ink-2); }
 .dtbl__head-btn:hover { background: var(--os-bg); color: var(--os-c-teal); }
 .dtbl__head-btn > svg { width: 14px; height: 14px; }
@@ -33947,4 +33939,115 @@ table.os-tbl {
 }
 :root.dark .workwrk-os .recharts-pie .recharts-sector {
   stroke: #14171D;
+}
+
+/* ════════════════════════════════════════════════════════════════
+ * TABLES · SHEETS CHROME (shx) — the Google-Sheets-style shell around
+ * the sheet kernel: title row, one dense toolbar, fx bar, grid filling
+ * the viewport, bottom sheet tabs. Additive block only; nothing above
+ * this banner changes. The shx__np class marks chrome hidden on print.
+ * ════════════════════════════════════════════════════════════════ */
+
+/* Title row: small inline-editable name, star + share on the right. */
+.shx__titlebar { display: flex; align-items: center; gap: 6px; padding: 6px 12px 2px; background: var(--os-surface); }
+.shx__title-icon { width: 16px; height: 16px; color: var(--os-c-green); flex: 0 0 auto; }
+.shx__title-input {
+  min-width: 140px; max-width: 440px; flex: 0 1 auto;
+  font-size: 15px; font-weight: 600; color: var(--os-ink);
+  border: 1px solid transparent; background: transparent;
+  padding: 2px 6px; border-radius: 4px; outline: none;
+}
+.shx__title-input:hover { border-color: var(--os-line); }
+.shx__title-input:focus { border-color: var(--os-c-blue); background: var(--os-surface); }
+.shx__saving { font-size: 12px; color: var(--os-c-blue); font-style: normal; }
+.shx__title-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+
+/* Toolbar: one dense pill row, current-Sheets style. */
+.shx__toolbar {
+  display: flex; align-items: center; gap: 2px;
+  margin: 4px 12px 6px; padding: 3px 8px;
+  background: var(--os-bg-2); border: 1px solid var(--os-line); border-radius: 999px;
+}
+.shx__tb-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  min-width: 26px; height: 26px; padding: 0 6px;
+  border: none; border-radius: 6px; background: transparent;
+  color: var(--os-ink-2); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.shx__tb-btn:hover:not(:disabled) { background: var(--os-bg); color: var(--os-ink); }
+.shx__tb-btn:disabled { opacity: .35; cursor: default; }
+.shx__tb-btn > svg { width: 14px; height: 14px; }
+.shx__tb-btn.is-on { background: color-mix(in srgb, var(--os-c-blue) 14%, transparent); color: var(--os-c-blue); }
+.shx__tb-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; letter-spacing: -0.02em; }
+.shx__tb-sep { width: 1px; height: 18px; background: var(--os-line); margin: 0 4px; flex: 0 0 auto; }
+.shx__tb-flex { flex: 1 1 auto; }
+.shx__tb-zoom {
+  height: 26px; padding: 0 2px; border: none; border-radius: 6px;
+  background: transparent; color: var(--os-ink-2);
+  font-size: 12px; font-weight: 600; outline: none; cursor: pointer;
+}
+.shx__tb-zoom:hover { background: var(--os-bg); color: var(--os-ink); }
+
+/* Toolbar dropdowns (123 menu, File menu) via details/summary. */
+.shx__dd { position: relative; }
+.shx__dd > summary { list-style: none; cursor: pointer; }
+.shx__dd > summary::-webkit-details-marker { display: none; }
+.shx__dd-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 40;
+  min-width: 190px; display: flex; flex-direction: column; padding: 4px;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+}
+.shx__dd--right .shx__dd-menu { left: auto; right: 0; }
+.shx__dd-menu button, .shx__dd-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; border: none; background: none; border-radius: 6px;
+  font-size: 12.5px; font-weight: 400; color: var(--os-ink); text-align: left; cursor: pointer;
+}
+.shx__dd-menu button:hover, .shx__dd-item:hover { background: var(--os-bg-2); }
+.shx__dd-menu svg { width: 13px; height: 13px; color: var(--os-ink-3); flex: 0 0 auto; }
+
+/* fx bar + grid: the grid owns all remaining vertical space. */
+.shx__sheet { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 12px; }
+.shx__fx { flex: 0 0 auto; }
+.shx__grid { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Bottom sheet-tabs bar, pinned under the grid. */
+.shx__tabbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 3px 12px; border-top: 1px solid var(--os-line); background: var(--os-bg-2);
+}
+.shx__tab-add {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: none; border-radius: 6px;
+  background: transparent; color: var(--os-ink-2); cursor: pointer; flex: 0 0 auto;
+}
+.shx__tab-add:hover:not(:disabled) { background: var(--os-bg); color: var(--os-ink); }
+.shx__tab-add:disabled { opacity: .4; cursor: default; }
+.shx__tab-add svg { width: 14px; height: 14px; }
+.shx__tabs { display: flex; align-items: stretch; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: thin; }
+.shx__tab {
+  flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 4px 12px; border: none; border-radius: 6px 6px 0 0;
+  background: transparent; font-size: 12.5px; color: var(--os-ink-2); cursor: pointer;
+}
+.shx__tab:hover { background: var(--os-bg); color: var(--os-ink); }
+.shx__tab.is-active { background: var(--os-surface); color: var(--os-ink); font-weight: 600; box-shadow: inset 0 2px 0 var(--os-c-green); }
+.shx__tabbar-meta { flex: 0 0 auto; font-size: 11.5px; color: var(--os-ink-3); padding: 0 4px; margin-left: auto; }
+
+/* Print: the grid IS the document. All sheet chrome (shx__np) and the
+ * shell around the sheet page step aside; heights unlock so the grid
+ * area can paginate. Best-effort v1: the virtualized body prints the
+ * rows it has mounted. Scoped with :has so only sheet pages (.dtbl)
+ * change how the shell prints. */
+@media print {
+  .shx__np { display: none !important; }
+  .workwrk-os:has(.dtbl) > *:not(:has(.dtbl)) { display: none !important; }
+  .workwrk-os:has(.dtbl) > div:has(.dtbl) > *:not(main) { display: none !important; }
+  .workwrk-os:has(.dtbl) { height: auto !important; padding: 0 !important; overflow: visible !important; }
+  .workwrk-os:has(.dtbl) > div:has(.dtbl) { height: auto !important; overflow: visible !important; }
+  .workwrk-os:has(.dtbl) main { height: auto !important; overflow: visible !important; border: none !important; border-radius: 0 !important; }
+  .workwrk-os .dtbl { height: auto !important; }
+  .workwrk-os .shx__sheet { padding: 0 !important; }
+  .workwrk-os .shx__grid, .workwrk-os .shx__grid > div { height: auto !important; overflow: visible !important; }
 }

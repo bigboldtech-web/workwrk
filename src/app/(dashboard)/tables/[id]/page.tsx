@@ -1,14 +1,22 @@
 "use client";
 
-/* Tables · sheet editor — an Excel-like spreadsheet.
+/* Tables · sheet editor — a Google-Sheets-style spreadsheet.
+ *
+ * Chrome, top to bottom (the Sheets layout the user asked for verbatim):
+ * an inline-editable title row, ONE dense toolbar (undo/redo, print, zoom,
+ * currency/percent/decimals, the "123" number-format menu, filter toggle,
+ * Σ, and a right-aligned File menu carrying CSV import/export), the fx
+ * bar, the grid filling the rest of the viewport, and a bottom bar of
+ * sheet tabs with a promptless "+". Every toolbar control is real — no
+ * dead buttons (per-cell bold/italic/color does not exist yet, so those
+ * controls are deliberately absent).
  *
  * Columns are anonymous letters (A, B, C…) with an optional small label;
- * "+" appends a generic text column instantly; type/format/highlight live
- * in the per-column "…" menu. The sheet kernel (SheetGrid) renders the
- * grid; this page owns data semantics, the formula engine host, undo and
- * CSV import/export. The old Airtable chrome (saved views, kanban/calendar/
- * gallery renderers, the column type-picker, the classic-grid escape hatch)
- * is gone — saved-view JSON persists server-side only to carry the sort.
+ * "+" appends a generic text column instantly; format/highlight live in
+ * the per-column "…" menu, whose "123" section shares its kind mapping
+ * with the toolbar via lib/sheet-format-actions. The sheet kernel
+ * (SheetGrid) renders the grid; this page owns data semantics, the
+ * formula engine host, undo and CSV import/export.
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -17,7 +25,7 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
   Globe, Lock, Sigma, Star, Link2, Check, MoreHorizontal,
-  Undo2, Redo2,
+  Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -27,11 +35,20 @@ import { createTableEngine, columnLetter, type StructureResult } from "@/lib/she
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
 import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
+import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
+import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
+import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { ColumnFormatMenu } from "@/components/tables/column-format-menu";
 import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
+
+// The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
+// (not transform scale) so the layout REFLOWS: the kernel's virtualizer
+// keeps computing against real layout px and its math stays consistent.
+const ZOOM_LEVELS = [75, 90, 100, 125, 150];
 
 type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup" | "attachment" | "person";
 
@@ -304,6 +321,46 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [configColId, setConfigColId] = useState<string | null>(null);
   // Column whose format/rules popover is open (number/currency/percent/date).
   const [formatMenuColId, setFormatMenuColId] = useState<string | null>(null);
+  // Toolbar filter toggle: the search/filter row hides behind the funnel
+  // icon (Sheets keeps its toolbar dense; the row appears on demand).
+  const [filterOpen, setFilterOpen] = useState(false);
+  // The toolbar's details dropdowns (123, File) close on outside click —
+  // with two menus side by side, leaving both open reads as broken.
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      document.querySelectorAll("details.shx__dd[open]").forEach((d) => {
+        if (!d.contains(e.target as Node)) d.removeAttribute("open");
+      });
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, []);
+  // Zoom (75..150), persisted per table in localStorage so a sheet reopens
+  // at the zoom it was left at. Applied as CSS `zoom` on the grid wrapper.
+  const [zoom, setZoom] = useState(100);
+  useEffect(() => {
+    if (!tableId) return;
+    try {
+      const v = Number(window.localStorage.getItem(`workwrk:sheet-zoom:${tableId}`));
+      setZoom(ZOOM_LEVELS.includes(v) ? v : 100);
+    } catch { /* storage unavailable: stay at 100 */ }
+  }, [tableId]);
+  const changeZoom = (v: number) => {
+    setZoom(v);
+    if (!tableId) return;
+    try { window.localStorage.setItem(`workwrk:sheet-zoom:${tableId}`, String(v)); } catch { /* best effort */ }
+  };
+  // The toolbar Σ upgrade: while set, the very next "=" seed the kernel
+  // opens an editor with becomes this string. See insertSumSeed below.
+  const sigmaSeedRef = useRef<string | null>(null);
+  // The Σ upgrade snapshotted for the WHOLE editing session (keyed by cell):
+  // the host re-seeds its input whenever the seed prop CHANGES, and the
+  // kernel re-renders the editor on every scroll — so a seed that flapped
+  // back to "=" after the one-tick sigmaSeedRef clear would wipe the draft
+  // mid-edit. Cleared when the session commits/cancels.
+  const sigmaSessionRef = useRef<{ rowId: string; colId: string; seed: string } | null>(null);
+  // Name at title-focus time, so an edit-free blur skips the PATCH.
+  const titleBeforeEditRef = useRef<string | null>(null);
   // Org users (for Person columns), lazy-loaded when one exists.
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   // Column drag-reorder + resize.
@@ -640,20 +697,53 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
   }
 
-  /** The column menu's Type section (Excel-ify decision 4): changing type
-   *  just sets col.type through the same persist path — stored values are
-   *  reinterpreted by the renderers, never rewritten, so a wrong pick
-   *  undoes (or re-picks) losslessly. */
-  function setColumnType(colId: string, type: ColType) {
-    if (!table) return;
-    const col = table.columns.find((c) => c.id === colId);
-    if (!col || col.type === type) return;
-    const before = col.type;
-    const cols = table.columns.map((c) => (c.id === colId ? { ...c, type } : c));
-    setTable({ ...table, columns: cols });
+  /** Apply per-column before/after patches as ONE optimistic columns write
+   *  and ONE undo command — the multi-column sibling of pushColumnPatch, for
+   *  toolbar buttons that act on every column the selection intersects. The
+   *  undo/redo bodies re-read live columns through tableRef (a column
+   *  deleted since is skipped, never corrupted), and tableRef is bumped
+   *  eagerly so rapid toolbar clicks compose like addColumn's do. */
+  function applyColumnPatches(patches: { colId: string; before: Partial<Column>; after: Partial<Column> }[], label: string) {
+    if (patches.length === 0) return;
+    const cur = tableRef.current ?? table;
+    if (!cur) return;
+    const byId = new Map(patches.map((p) => [p.colId, p]));
+    const cols = cur.columns.map((c) => (byId.has(c.id) ? { ...c, ...byId.get(c.id)!.after } : c));
+    tableRef.current = { ...cur, columns: cols };
+    setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
     void persistColumns(cols).then((ok) => {
-      if (ok) pushColumnPatch("change column type", colId, { type: before }, { type });
+      if (!ok) return;
+      const apply = async (pick: "before" | "after") => {
+        const live = tableRef.current;
+        if (!live) throw new Error("table gone");
+        await saveColumnsStrict(live.columns.map((c) => (byId.has(c.id) ? { ...c, ...byId.get(c.id)![pick] } : c)));
+      };
+      pushUndo({ label, undo: () => apply("before"), redo: () => apply("after") });
     });
+  }
+
+  /** The "123" menu's one action (Sheets' Format → Number → Currency mental
+   *  model, replacing the rejected Type submenu): a kind sets col.type AND a
+   *  starter col.format together, in a single write so a single undo
+   *  restores both. The kind→patch mapping is shared with the column "…"
+   *  popover via lib/sheet-format-actions, so the two menus cannot drift.
+   *  Legacy/relational columns are skipped — the popover shows them a
+   *  read-only line instead. */
+  function applyNumberFormat(colIds: string[], kind: NumberFormatKind) {
+    const cur = tableRef.current ?? table;
+    if (!cur) return;
+    const patch = formatPatchFor(kind);
+    applyColumnPatches(
+      colIds
+        .map((id) => cur.columns.find((c) => c.id === id))
+        .filter((c): c is Column => !!c && kindForColType(c.type) !== undefined)
+        .map((c) => ({
+          colId: c.id,
+          before: { type: c.type, format: c.format },
+          after: { type: patch.type as ColType, format: patch.format },
+        })),
+      `format as ${kind}`,
+    );
   }
 
   /** Sort rides in the SAME DataTable.views JSON the old saved-view UI
@@ -708,23 +798,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  /** Excel-ify decision 4: the 8×30 blank-sheet seed for a table that has
-   *  zero columns (legacy, or a creation whose seeding failed). The list
-   *  page seeds the same shape at creation time. Not undoable on purpose —
+  /** The blank-sheet seed for a table that has zero columns (legacy, or a
+   *  creation whose seeding failed): the SAME 26-column (A..Z) × 100-row
+   *  shape lib/sheet-new seeds at creation time, so every sheet opens as
+   *  the sea of empty cells the user asked for. Not undoable on purpose —
    *  it IS the blank sheet. */
   async function startSheet() {
     const cur = tableRef.current ?? table;
     if (!cur || cur.columns.length > 0) return;
-    const cols: Column[] = Array.from({ length: 8 }, () => ({ id: newId(), type: "short_text", label: "" }));
+    const cols: Column[] = Array.from({ length: NEW_SHEET_COLUMNS }, () => ({ id: newId(), type: "short_text", label: "" }));
     // Eager tableRef bump, same as addColumn: the guard above must see the
     // new columns immediately, or a double-click faster than the sync
-    // effect fires the 30-row seed twice (60 blank rows).
+    // effect fires the 100-row seed twice (200 blank rows).
     if (tableRef.current) tableRef.current = { ...tableRef.current, columns: cols };
     setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
     const ok = await persistColumns(cols);
     if (!ok) { toast("Couldn't start the sheet"); void load(); return; }
     try {
-      await insertRowsBatchStrict(Array.from({ length: 30 }, () => ({ values: {} })));
+      await insertRowsBatchStrict(Array.from({ length: NEW_SHEET_ROWS }, () => ({ values: {} })));
     } catch { toast("Couldn't add the starter rows"); }
   }
 
@@ -910,11 +1001,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   function startResize(e: React.MouseEvent, colId: string) {
     e.preventDefault();
     const col = table?.columns.find((c) => c.id === colId);
+    // clientX deltas are visual px, scaled by the grid's CSS zoom; column
+    // widths are unscaled layout px. Normalize by the zoom in effect when
+    // the drag started (it cannot change mid-drag).
+    const z = zoom / 100 || 1;
     resizeRef.current = { colId, startX: e.clientX, startW: col?.width ?? 160 };
     const onMove = (ev: MouseEvent) => {
       const st = resizeRef.current;
       if (!st) return;
-      setColumnWidthLocal(st.colId, Math.max(80, st.startW + (ev.clientX - st.startX)));
+      setColumnWidthLocal(st.colId, Math.max(80, Math.round(st.startW + (ev.clientX - st.startX) / z)));
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
@@ -1434,6 +1529,78 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const filterColDef = table.columns.find((c) => c.id === filterCol);
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
 
+  // ── Toolbar plumbing (Sheets chrome) ────────────────────────────
+
+  /** Column ids the kernel's current selection intersects, read from the
+   *  DOM the kernel renders (aria-selected on gridcells) — selection state
+   *  belongs to the kernel and this page deliberately doesn't mirror it.
+   *  Falls back to the active cell's column. Virtualization caveat: only
+   *  MOUNTED rows carry aria-selected, but every selection includes the
+   *  active row, which is on screen while the user reaches for the toolbar. */
+  const selectionColumnIds = (): string[] => {
+    const ids = new Set<string>();
+    gridWrapElRef.current?.querySelectorAll('[role="gridcell"][aria-selected="true"]').forEach((el) => {
+      const c = Number(el.getAttribute("aria-colindex")) - 1;
+      const id = table.columns[c]?.id;
+      if (id) ids.add(id);
+    });
+    if (ids.size === 0 && activeCell) ids.add(activeCell.colId);
+    return [...ids];
+  };
+
+  /** Toolbar currency/percent/123 choices: apply the kind to every column
+   *  the selection touches. Formatting is COLUMN-level in v1 (ColumnFormat
+   *  rides the columns Json); per-cell format is the known next step. */
+  const applyKindToSelection = (kind: NumberFormatKind) => {
+    const eligible = selectionColumnIds().filter((id) => {
+      const c = table.columns.find((x) => x.id === id);
+      return !!c && kindForColType(c.type) !== undefined;
+    });
+    if (eligible.length === 0) { toast("Select a cell first"); return; }
+    applyNumberFormat(eligible, kind);
+  };
+
+  /** Toolbar decimal steppers (same column-level v1 scope): only columns
+   *  that RENDER numerically can meaningfully step decimals. */
+  const stepColumnDecimals = (delta: 1 | -1) => {
+    const targets = selectionColumnIds()
+      .map((id) => table.columns.find((c) => c.id === id))
+      .filter((c): c is Column =>
+        !!c && (c.type === "number" || c.type === "currency" || c.type === "percent" || c.format?.style !== undefined));
+    if (targets.length === 0) { toast("Select cells in a numeric column first"); return; }
+    applyColumnPatches(
+      targets.map((c) => ({ colId: c.id, before: { format: c.format }, after: { format: adjustDecimals(c.format, c.type, delta) } })),
+      delta > 0 ? "increase decimals" : "decrease decimals",
+    );
+  };
+
+  /** Σ button: open the active cell's editor seeded with "=SUM(" through
+   *  the kernel's own type-to-replace path — a real "=" keydown dispatched
+   *  at the grid (the exact mechanism typing uses; React's root listener
+   *  routes dispatched events like trusted ones), with sigmaSeedRef
+   *  upgrading that one-char seed to "=SUM(" in kernelEditor. The formula
+   *  editor opens seeded, caret at the end, autocomplete taking over. */
+  const insertSumSeed = () => {
+    const gridEl = gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]');
+    if (!gridEl || !activeCell) { toast("Select a cell first"); return; }
+    const col = table.columns.find((c) => c.id === activeCell.colId);
+    if (!col || col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
+      toast("This cell is computed by its column — pick another cell");
+      return;
+    }
+    sigmaSeedRef.current = "=SUM(";
+    gridEl.focus();
+    gridEl.dispatchEvent(new KeyboardEvent("keydown", { key: "=", bubbles: true, cancelable: true }));
+    // The kernel consumed the seed synchronously (the dispatch re-rendered
+    // the editor); anything later must never see a stale Σ seed.
+    window.setTimeout(() => { sigmaSeedRef.current = null; }, 0);
+  };
+
+  /** Close the nearest details dropdown after a menu item click. */
+  const closeDetails = (e: React.MouseEvent<HTMLElement>) => {
+    e.currentTarget.closest("details")?.removeAttribute("open");
+  };
+
   // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
 
   const displayCell = (rowId: string, colId: string): React.ReactNode => {
@@ -1810,7 +1977,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             colType={c.type}
             format={c.format}
             rules={c.rules}
-            onTypeChange={(t) => setColumnType(c.id, t)}
+            // ONE call per 123 choice: type + starter format land in a
+            // single write, so a single undo restores both (the menu's
+            // deprecated onTypeChange fallback is not used here).
+            onNumberFormat={(kind) => applyNumberFormat([c.id], kind)}
             onFormatChange={(f) => setColumnFormat(c.id, f)}
             onRulesChange={(r) => setColumnRules(c.id, r)}
             onClose={() => setFormatMenuColId(null)}
@@ -1893,10 +2063,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // commit baseline stays the ORIGINAL source, so a seeded value that is
       // left as-is still commits (and Escape still cancels via the ref).
       const src = hasFormula ? String(engineHost.cellSource(colId, rowId) ?? "=") : "";
+      // The toolbar's Σ rides the kernel's own type-to-replace: it
+      // dispatched the "=" keydown that opened this editor, and the ref
+      // upgrades that one-char seed to "=SUM(". The upgrade is snapshotted
+      // per cell so every re-render of this session passes the SAME seed —
+      // see sigmaSessionRef for why it must never flap back to "=".
+      if (formulaSeed && sigmaSeedRef.current) sigmaSessionRef.current = { rowId, colId, seed: sigmaSeedRef.current };
+      const sigma = sigmaSessionRef.current;
+      const seed = formulaSeed && sigma && sigma.rowId === rowId && sigma.colId === colId ? sigma.seed : opts.seed;
       return (
-        <SheetEditorHost seed={opts.seed} commit={opts.commit}>
+        <SheetEditorHost seed={seed} commit={() => { sigmaSessionRef.current = null; opts.commit(); }}>
           <SheetFormulaEditor
-            initial={opts.seed ?? src}
+            initial={seed ?? src}
             baseline={src}
             onCommit={(raw) => commitCellText(rowId, colId, raw)}
           />
@@ -1948,42 +2126,32 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="dtbl">
-      <header className="dtbl__head">
-        <button type="button" className="frmb__back" onClick={() => router.push("/tables")} aria-label="Back"><ArrowLeft /></button>
-        <div className="dtbl__title-wrap">
-          <TableIcon />
-          <input
-            type="text"
-            value={table.name}
-            onChange={(e) => setTable({ ...table, name: e.target.value })}
-            onBlur={(e) => void patchTable({ name: e.target.value.trim() || "Untitled table" })}
-            placeholder="Untitled table"
-          />
-        </div>
-        <div className="dtbl__meta">{rows.length} row{rows.length === 1 ? "" : "s"} · {table.columns.length} column{table.columns.length === 1 ? "" : "s"} {savingCols && <em>· saving…</em>}</div>
-        <div className="dtbl__head-actions">
-          <button
-            type="button"
-            className="dtbl__head-btn"
-            onClick={() => void runUndo()}
-            disabled={!undoStack.canUndo() || undoStack.busy()}
-            style={!undoStack.canUndo() || undoStack.busy() ? { opacity: 0.35, cursor: "default" } : undefined}
-            title={undoStack.canUndo() ? `Undo ${undoStack.peekUndoLabel()}` : "Nothing to undo"}
-            aria-label="Undo"
-          >
-            <Undo2 />
-          </button>
-          <button
-            type="button"
-            className="dtbl__head-btn"
-            onClick={() => void runRedo()}
-            disabled={!undoStack.canRedo() || undoStack.busy()}
-            style={!undoStack.canRedo() || undoStack.busy() ? { opacity: 0.35, cursor: "default" } : undefined}
-            title={undoStack.canRedo() ? `Redo ${undoStack.peekRedoLabel()}` : "Nothing to redo"}
-            aria-label="Redo"
-          >
-            <Redo2 />
-          </button>
+      {/* ── Title row: small inline-editable name, Sheets-style ── */}
+      <header className="shx__titlebar">
+        <button type="button" className="frmb__back shx__np" onClick={() => router.push("/tables")} aria-label="Back"><ArrowLeft /></button>
+        <TableIcon className="shx__title-icon" aria-hidden />
+        <input
+          className="shx__title-input"
+          type="text"
+          value={table.name}
+          onChange={(e) => setTable({ ...table, name: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          onFocus={(e) => { titleBeforeEditRef.current = e.target.value; }}
+          onBlur={(e) => {
+            const name = e.target.value.trim() || UNTITLED_SHEET_NAME;
+            if (name !== e.target.value) setTable((prev) => (prev ? { ...prev, name } : prev));
+            // An untouched focus/blur must cost nothing: no PATCH, and no
+            // global notify (each fires a refetch in every mounted sidebar
+            // and the tab bar).
+            if (name === titleBeforeEditRef.current) return;
+            // Sidebar + the bottom sheet tabs both list this name — tell them.
+            void patchTable({ name }).then((ok) => { if (ok) notifyTablesChanged(); });
+          }}
+          placeholder={UNTITLED_SHEET_NAME}
+          aria-label="Spreadsheet name"
+        />
+        {savingCols && <em className="shx__saving">saving…</em>}
+        <span className="shx__title-actions shx__np">
           {tableId ? <TableFavoriteButton tableId={tableId} /> : null}
           <button
             type="button"
@@ -2007,64 +2175,129 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
               <LinkIcon />
             </button>
           )}
-          <label className="dtbl__head-btn" title="Import CSV">
-            <Upload />
-            <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importCsv(f); e.target.value = ""; }} />
-          </label>
-          {/* Export offers formatted vs raw (plan Phase 4: "honest CSV of
-              formatted values + a raw-values option"). */}
-          <details style={{ position: "relative" }}>
-            <summary className="dtbl__head-btn" style={{ listStyle: "none", cursor: "pointer" }} title="Export CSV"><Download /></summary>
-            <div className="dtbl__addcol-menu" style={{ right: 0, zIndex: 40 }}>
-              <button type="button" onClick={(e) => { exportCsv(true); const d = e.currentTarget.closest("details"); if (d) d.removeAttribute("open"); }}>
-                Formatted values
-              </button>
-              <button type="button" onClick={(e) => { exportCsv(false); const d = e.currentTarget.closest("details"); if (d) d.removeAttribute("open"); }}>
-                Raw values
-              </button>
-            </div>
-          </details>
-        </div>
+        </span>
       </header>
 
-      {/* Search + filter toolbar. The saved-view tabs, kanban/calendar/
-          gallery renderers and the classic-grid toggle are gone — /tables
-          is one Excel-like sheet per table (Excel-ify decision 1). */}
-      <nav className="dtbl__viewtabs">
-        <div className="dtbl__filterbar">
-          <div className="dtbl__searchwrap">
-            <Search />
-            <input type="search" placeholder="Search rows…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      {/* ── The one dense toolbar. Honesty rule: every control here works
+          today — no font/bold/color buttons, because per-cell styling
+          does not exist yet on this surface. ── */}
+      <div className="shx__toolbar shx__np" role="toolbar" aria-label="Sheet toolbar">
+        <button
+          type="button"
+          className="shx__tb-btn"
+          onClick={() => void runUndo()}
+          disabled={!undoStack.canUndo() || undoStack.busy()}
+          title={undoStack.canUndo() ? `Undo ${undoStack.peekUndoLabel()}` : "Nothing to undo"}
+          aria-label="Undo"
+        ><Undo2 /></button>
+        <button
+          type="button"
+          className="shx__tb-btn"
+          onClick={() => void runRedo()}
+          disabled={!undoStack.canRedo() || undoStack.busy()}
+          title={undoStack.canRedo() ? `Redo ${undoStack.peekRedoLabel()}` : "Nothing to redo"}
+          aria-label="Redo"
+        ><Redo2 /></button>
+        <button type="button" className="shx__tb-btn" onClick={() => window.print()} title="Print" aria-label="Print"><Printer /></button>
+        <select
+          className="shx__tb-zoom"
+          value={zoom}
+          onChange={(e) => changeZoom(Number(e.target.value))}
+          title="Zoom"
+          aria-label="Zoom"
+        >
+          {ZOOM_LEVELS.map((z) => <option key={z} value={z}>{z}%</option>)}
+        </select>
+        <span className="shx__tb-sep" aria-hidden />
+        <button type="button" className="shx__tb-btn" onClick={() => applyKindToSelection("currency")} title="Format as currency" aria-label="Format as currency"><DollarSign /></button>
+        <button type="button" className="shx__tb-btn" onClick={() => applyKindToSelection("percent")} title="Format as percent" aria-label="Format as percent"><Percent /></button>
+        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(-1)} title="Decrease decimal places" aria-label="Decrease decimal places">.0</button>
+        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(1)} title="Increase decimal places" aria-label="Increase decimal places">.00</button>
+        <details className="shx__dd">
+          <summary className="shx__tb-btn shx__tb-text" title="Number format" aria-label="Number format">123<ChevronDown /></summary>
+          <div className="shx__dd-menu">
+            {NUMBER_FORMAT_CHOICES.map((t) => (
+              <button key={t.kind} type="button" onClick={(e) => { applyKindToSelection(t.kind); closeDetails(e); }}>
+                {t.label}
+              </button>
+            ))}
           </div>
-          <div className="dtbl__filterwrap">
-            <Filter />
-            <select value={filterCol} onChange={(e) => { setFilterCol(e.target.value); setFilterValue(""); }}>
-              <option value="">No filter</option>
-              {table.columns.filter((c) => c.type === "select" || c.type === "multi_select").map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-            {filterColDef && (
-              <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}>
-                <option value="">Any value</option>
-                {(filterColDef.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </details>
+        <span className="shx__tb-sep" aria-hidden />
+        <button
+          type="button"
+          className={`shx__tb-btn ${filterOpen || search || filterValue ? "is-on" : ""}`}
+          onClick={() => setFilterOpen((o) => !o)}
+          title="Search and filter rows"
+          aria-label="Toggle search and filter"
+        ><Filter /></button>
+        <button type="button" className="shx__tb-btn" onClick={insertSumSeed} title="Insert SUM in the active cell" aria-label="Functions"><Sigma /></button>
+        <span className="shx__tb-flex" aria-hidden />
+        <details className="shx__dd shx__dd--right">
+          <summary className="shx__tb-btn shx__tb-text" title="File">File<ChevronDown /></summary>
+          <div className="shx__dd-menu">
+            <label className="shx__dd-item">
+              <Upload /> Import CSV
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void importCsv(f);
+                  e.target.value = "";
+                  e.currentTarget.closest("details")?.removeAttribute("open");
+                }}
+              />
+            </label>
+            {/* Export offers formatted vs raw (plan Phase 4: "honest CSV of
+                formatted values + a raw-values option"). */}
+            <button type="button" onClick={(e) => { exportCsv(true); closeDetails(e); }}><Download /> Export CSV (formatted)</button>
+            <button type="button" onClick={(e) => { exportCsv(false); closeDetails(e); }}><Download /> Export CSV (raw values)</button>
+          </div>
+        </details>
+      </div>
+
+      {/* Search + filter row, shown on demand from the toolbar's funnel. */}
+      {filterOpen && (
+        <nav className="dtbl__viewtabs shx__np">
+          <div className="dtbl__filterbar">
+            <div className="dtbl__searchwrap">
+              <Search />
+              <input type="search" placeholder="Search rows…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            </div>
+            <div className="dtbl__filterwrap">
+              <Filter />
+              <select value={filterCol} onChange={(e) => { setFilterCol(e.target.value); setFilterValue(""); }}>
+                <option value="">No filter</option>
+                {table.columns.filter((c) => c.type === "select" || c.type === "multi_select").map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
               </select>
+              {filterColDef && (
+                <select value={filterValue} onChange={(e) => setFilterValue(e.target.value)}>
+                  <option value="">Any value</option>
+                  {(filterColDef.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              )}
+            </div>
+            {(search || filterValue) && (
+              <span className="dtbl__filterhint">{filteredRows.length} of {rows.length}</span>
             )}
           </div>
-          {(search || filterValue) && (
-            <span className="dtbl__filterhint">{filteredRows.length} of {rows.length}</span>
-          )}
-        </div>
-      </nav>
+        </nav>
+      )}
 
       {table.columns.length === 0 ? (
         /* A columnless table must still open as a spreadsheet, never a
-           card: one click applies the standard 8×30 blank-sheet seed. */
+           card: one click applies the standard 26×100 blank-sheet seed. */
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <button type="button" className="dtbl__addrow" onClick={() => void startSheet()}><Plus /> Start sheet</button>
         </div>
       ) : (
-        <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 20px" }}>
+        <div className="shx__sheet">
+          {/* fx bar: address box, fx glyph, formula input (formula-bar.tsx). */}
+          <div className="shx__fx shx__np">
           <FormulaBar
             cell={barCell}
             onCommit={(raw) => {
@@ -2076,7 +2309,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             }}
             onReadOnlyEdit={(reason) => toast(reason)}
           />
-          <div ref={attachGridWrap} className="flex min-h-0 flex-1 flex-col">
+          </div>
+          {/* CSS zoom, not transform: zoom reflows layout, so the kernel's
+              virtualizer math (row offsets, viewport height) stays true. */}
+          <div ref={attachGridWrap} className="shx__grid" style={{ zoom: zoom / 100 }}>
           <SheetGrid
             columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
             rowIds={sortedRows.map((r) => r.id)}
@@ -2110,6 +2346,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       )}
+
+      <SheetTabsBar
+        currentId={tableId}
+        currentName={table.name}
+        meta={`${rows.length} row${rows.length === 1 ? "" : "s"} · ${table.columns.length} col${table.columns.length === 1 ? "" : "s"}`}
+      />
 
       {rowMenu ? (
         <MorePortal
@@ -2167,6 +2409,92 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         />
       )}
     </div>
+  );
+}
+
+/** Sheets-style bottom tab bar: every sheet in the org as a tab — the same
+ *  GET /api/tables the worksheet sidebar reads, kept fresh through the same
+ *  tables-changed and sidebar-refresh events — with the current sheet
+ *  highlighted and a promptless "+" that creates an Untitled spreadsheet
+ *  (auto-suffixed against the fetched names) and navigates straight into
+ *  it. Horizontal scroll on overflow; the row/column meta that used to sit
+ *  in the old header lives at the bar's right end. */
+function SheetTabsBar({ currentId, currentName, meta }: { currentId: string | null; currentName: string; meta: string }) {
+  const router = useRouter();
+  const { toast } = useOsToast();
+  const { bumpRowVersion } = useOsShell();
+  const [sheets, setSheets] = useState<{ id: string; name: string }[] | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tables", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      // jsonSuccess historically wrapped in {data}; accept both shapes like
+      // the sidebar and list page do.
+      const list = (d.data ?? (Array.isArray(d) ? d : [])) as { id: string; name: string }[];
+      setSheets(list.map((t) => ({ id: t.id, name: t.name })));
+    } catch {
+      // Keep whatever tabs are already showing; an empty bar helps nobody.
+      setSheets((prev) => prev ?? []);
+    }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const onChange = () => { void load(); };
+    window.addEventListener("workwrk:tables-changed", onChange);
+    const offRefresh = onSidebarRefresh(onChange);
+    return () => {
+      window.removeEventListener("workwrk:tables-changed", onChange);
+      offRefresh();
+    };
+  }, [load]);
+
+  // The current sheet always shows, and with the freshest LOCAL name — a
+  // rename mid-edit must not wait for the refetch, and a just-created sheet
+  // must not be missing from its own tab bar.
+  const tabs = useMemo(() => {
+    const list = (sheets ?? []).map((s) => (s.id === currentId ? { ...s, name: currentName } : s));
+    if (currentId && !list.some((s) => s.id === currentId)) list.unshift({ id: currentId, name: currentName });
+    return list;
+  }, [sheets, currentId, currentName]);
+
+  const addSheet = async () => {
+    if (creating) return; // double-click guard: one "+" press, one sheet
+    setCreating(true);
+    try {
+      const t = await createUntitledSheet((sheets ?? []).map((s) => s.name || ""));
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      router.push(`/tables/${t.id}`);
+    } catch {
+      toast("Couldn't create sheet");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <footer className="shx__tabbar shx__np">
+      <button type="button" className="shx__tab-add" onClick={() => void addSheet()} disabled={creating} title="New sheet" aria-label="New sheet">
+        {creating ? <Loader2 className="frmb__spin" /> : <Plus />}
+      </button>
+      <div className="shx__tabs">
+        {tabs.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`shx__tab ${s.id === currentId ? "is-active" : ""}`}
+            onClick={() => { if (s.id !== currentId) router.push(`/tables/${s.id}`); }}
+            title={s.name || UNTITLED_SHEET_NAME}
+          >
+            {s.name || UNTITLED_SHEET_NAME}
+          </button>
+        ))}
+      </div>
+      <span className="shx__tabbar-meta">{meta}</span>
+    </footer>
   );
 }
 

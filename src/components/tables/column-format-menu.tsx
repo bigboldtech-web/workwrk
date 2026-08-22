@@ -1,14 +1,18 @@
 "use client";
 
-/* Column type + format + highlight-rules popover (Tables Phase 4;
- * Type section added by the Excel-ify pass).
+/* Column format + highlight-rules popover (Tables Phase 4; Type radios
+ * replaced by the Sheets-style "123" Number-format section).
  *
- * Opens from the sheet header's "…" button for every column. The Type
- * section swaps col.type between the six Excel-like types this surface
- * offers; format and rules are DISPLAY config. All of it writes
- * `column.type` / `column.format` / `column.rules` through the page's
- * persistColumns path (which pushes the change onto the undo stack) and
- * never touches raw cell values.
+ * Opens from the sheet header's "…" button for every column. There is no
+ * "column type" UI anymore (rejected twice): the Number format section IS
+ * the type — picking Currency sets col.type AND a starter col.format in
+ * one host write (Sheets' Format → Number → Currency mental model). The
+ * kind→patch mapping lives in lib/sheet-format-actions so the toolbar's
+ * 123 menu and this popover cannot drift. Detail controls (decimals,
+ * negative style, date display) and highlight rules are DISPLAY config.
+ * All of it writes `column.type` / `column.format` / `column.rules`
+ * through the page's persistColumns path (which pushes the change onto
+ * the undo stack) and never touches raw cell values.
  *
  * Positioning: absolute inside the header cell (which is position:relative),
  * NOT fixed — the grid header is sticky/transformed, and a fixed popover
@@ -24,20 +28,14 @@
 import { useEffect, useRef } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { ColumnFormat, ConditionalRule } from "@/lib/sheet-format";
+import {
+  NUMBER_FORMAT_CHOICES,
+  kindForColType,
+  type NumberFormatKind,
+} from "@/lib/sheet-format-actions";
 
 const NUMERIC_TYPES = new Set(["number", "currency", "percent"]);
 
-/** The six types this Excel-like surface offers (Excel-ify decision 3).
- *  Everything else either converts to one of these or is legacy. */
-export type SheetColumnType = "short_text" | "number" | "currency" | "percent" | "date" | "checkbox";
-const TYPE_CHOICES: { value: SheetColumnType; label: string }[] = [
-  { value: "short_text", label: "Text" },
-  { value: "number", label: "Number" },
-  { value: "currency", label: "Currency" },
-  { value: "percent", label: "Percent" },
-  { value: "date", label: "Date" },
-  { value: "checkbox", label: "Checkbox" },
-];
 // Relational/computed legacy types are never offered here — an existing
 // column keeps working read-only, and the menu says so instead of showing
 // a chooser that could sever its config.
@@ -93,13 +91,15 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 const CONTROL = "h-6 rounded border border-zinc-200 bg-white px-1 text-[12px] text-zinc-800 outline-none focus:border-[#0073EA]";
 
-export function ColumnFormatMenu({ colType, format, rules, onTypeChange, onFormatChange, onRulesChange, onClose }: {
+export function ColumnFormatMenu({ colType, format, rules, onNumberFormat, onFormatChange, onRulesChange, onClose }: {
   colType: string;
   format?: ColumnFormat;
   rules?: ConditionalRule[];
-  /** Present ⇒ render the Type section (radio rows; current type checked).
-   *  Legacy colTypes render a read-only line instead of the chooser. */
-  onTypeChange?: (type: SheetColumnType) => void;
+  /** Present ⇒ render the 123 Number-format section (current kind checked).
+   *  One call per choice; the host applies formatPatchFor(kind) as ONE
+   *  persistColumns write so type+format undo together. Legacy colTypes
+   *  render a read-only line instead of the chooser. */
+  onNumberFormat?: (kind: NumberFormatKind) => void;
   /** Persist the whole format object (undefined clears it). */
   onFormatChange: (format: ColumnFormat | undefined) => void;
   /** Persist the whole rules array (undefined clears it). */
@@ -160,7 +160,7 @@ export function ColumnFormatMenu({ colType, format, rules, onTypeChange, onForma
       onMouseDown={(e) => e.stopPropagation()}
       className="absolute left-0 top-full z-50 mt-1 flex w-[252px] cursor-default flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-xl"
     >
-      {onTypeChange && (
+      {onNumberFormat && (
         LEGACY_TYPES.has(colType) ? (
           <div className="text-[11px] leading-snug text-zinc-400">
             {colType === "formula"
@@ -169,18 +169,18 @@ export function ColumnFormatMenu({ colType, format, rules, onTypeChange, onForma
           </div>
         ) : (
           <>
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Type</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Number format</div>
             <div className="grid grid-cols-2 gap-x-2">
-              {TYPE_CHOICES.map((t) => (
+              {NUMBER_FORMAT_CHOICES.map((t) => (
                 <button
-                  key={t.value}
+                  key={t.kind}
                   type="button"
-                  onClick={() => onTypeChange(t.value)}
+                  onClick={() => onNumberFormat(t.kind)}
                   className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left text-[12px] text-zinc-700 hover:bg-zinc-50"
                 >
                   <span
                     aria-hidden
-                    className={`inline-block h-3 w-3 shrink-0 rounded-full border ${colType === t.value ? "border-[4px] border-[#0073EA]" : "border-zinc-300"}`}
+                    className={`inline-block h-3 w-3 shrink-0 rounded-full border ${kindForColType(colType) === t.kind ? "border-[4px] border-[#0073EA]" : "border-zinc-300"}`}
                   />
                   {t.label}
                 </button>
@@ -192,7 +192,9 @@ export function ColumnFormatMenu({ colType, format, rules, onTypeChange, onForma
 
       {isNumeric && (
         <>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Number format</div>
+          {/* Detail knobs under the kind picker — "Options" so the header
+           * doesn't repeat the Number format section right above it. */}
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Options</div>
           <Row label="Style">
             <select
               className={CONTROL}

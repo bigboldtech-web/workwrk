@@ -13,11 +13,13 @@
  *   did not consume, so the page can wire it into the same
  *   cancel-ref/blur-commit contract its cell editors use.
  *
- *   FormulaBar — the slim bar above the sheet grid: active-cell address,
- *   the cell's source, and an editable FormulaTextInput with the same
- *   Enter-commits / Escape-cancels / blur-commits semantics as in-cell
- *   editing (cancel is a ref raised BEFORE blur, because blur fires in
- *   the same tick and must read it synchronously).
+ *   FormulaBar — the fx bar above the sheet grid, laid out like Google
+ *   Sheets': a bordered cell-address box on the left, an italic "fx"
+ *   glyph, then the formula input stretching the full width. Behaviour is
+ *   unchanged from the pre-reskin bar: the cell's source is editable with
+ *   the same Enter-commits / Escape-cancels / blur-commits semantics as
+ *   in-cell editing (cancel is a ref raised BEFORE blur, because blur
+ *   fires in the same tick and must read it synchronously).
  *
  * The bar lives OUTSIDE the grid element, so its keystrokes never reach
  * the grid's keydown handler at all — no shortcut stealing in either
@@ -25,7 +27,6 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sigma } from "lucide-react";
 import { FUNCTIONS, tokenize } from "@/lib/sheet-engine";
 
 /* Distinct colour per distinct ref, cycling — how Sheets/Excel paint the
@@ -310,15 +311,18 @@ function FormulaBarRow({ cell, onCommit, onReadOnlyEdit }: FormulaBarProps) {
   };
 
   return (
-    <div className="mb-1.5 flex h-8 shrink-0 items-stretch overflow-visible rounded-lg border border-zinc-200 bg-white">
+    // Sheets layout: square-edged full-width strip sitting flush between
+    // the toolbar and the grid (border-b only), address box + "fx" glyph +
+    // the input. overflow-visible stays: the autocomplete menu hangs below.
+    <div className="flex h-7 shrink-0 items-stretch overflow-visible border-b border-t border-zinc-200 bg-white">
       <div
-        className="flex w-20 shrink-0 items-center justify-center border-r border-zinc-200 font-mono text-[12px] font-medium text-zinc-600"
+        className="flex w-16 shrink-0 items-center justify-center border-r border-zinc-200 font-mono text-[12px] font-medium text-zinc-600"
         title="Active cell"
       >
         {address}
       </div>
-      <div className="flex w-8 shrink-0 items-center justify-center border-r border-zinc-100 text-zinc-400" title="Formula">
-        <Sigma className="h-3.5 w-3.5" />
+      <div className="flex w-8 shrink-0 items-center justify-center border-r border-zinc-100 font-serif text-[13px] italic text-zinc-400 select-none" title="Formula" aria-hidden>
+        fx
       </div>
       <FormulaTextInput
         value={shown}

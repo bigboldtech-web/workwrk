@@ -8,7 +8,7 @@
 // one opens the spreadsheet directly — the card overview at /tables stays
 // reachable via a small secondary "All tables" row.
 
-import { createExcelSheet } from "@/lib/sheet-new";
+import { createUntitledSheet } from "@/lib/sheet-new";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -17,7 +17,6 @@ import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh, notifyTablesChanged } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
-import { usePrompt } from "@/components/ui/dialog-provider";
 
 type SheetRow = {
   id: string;
@@ -32,7 +31,6 @@ export function TablesSidebar() {
   const { query } = useSidebarSearch();
   const { rowVersion, bumpRowVersion } = useOsShell();
   const { toast } = useOsToast();
-  const promptDialog = usePrompt();
 
   const [sheets, setSheets] = useState<SheetRow[] | null>(null);
 
@@ -80,11 +78,16 @@ export function TablesSidebar() {
     void load();
   }, [pathname, sheets, load]);
 
+  const createSheetBusyRef = useRef(false);
   const createSheet = useCallback(async () => {
-    const name = (await promptDialog({ title: "Sheet name?" }))?.trim();
-    if (!name) return;
+    // Promptless create means a double-click would fire two POSTs and mint
+    // two identical "Untitled spreadsheet"s — latch until the first lands.
+    if (createSheetBusyRef.current) return;
+    createSheetBusyRef.current = true;
     try {
-      const t = await createExcelSheet(name);
+      // No name prompt (Sheets model): born "Untitled spreadsheet", the
+      // loaded list only feeds the cosmetic " 2"/" 3" suffix.
+      const t = await createUntitledSheet((sheets ?? []).map((s) => s.name));
       // Both notify channels: the event keeps other mounted sidebars in
       // sync (each listener refetches), the rowVersion bump refreshes the
       // /tables card overview. No explicit load() on top — three fetches
@@ -94,8 +97,10 @@ export function TablesSidebar() {
       router.push(`/tables/${t.id}`);
     } catch {
       toast("Couldn't create sheet");
+    } finally {
+      createSheetBusyRef.current = false;
     }
-  }, [promptDialog, bumpRowVersion, load, router, toast]);
+  }, [sheets, bumpRowVersion, router, toast]);
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(

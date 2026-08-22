@@ -507,7 +507,14 @@ export function SheetGrid({
   const rowFromClientY = useCallback((clientY: number) => {
     const el = scrollRef.current;
     if (!el || rowCount === 0) return null;
-    const y = clientY - el.getBoundingClientRect().top - el.clientTop + el.scrollTop - SHEET_ROW_H;
+    const rect = el.getBoundingClientRect();
+    // clientY is visual px — scaled when an ancestor applies CSS zoom (the
+    // page's zoom control) — while scrollTop/ROW_H are unscaled layout px.
+    // Normalize the client-space offset before mixing the two, or a fill
+    // drag at 75%/150% writes into rows the user never touched.
+    const cssZoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom
+      ?? (el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1);
+    const y = (clientY - rect.top) / (cssZoom || 1) - el.clientTop + el.scrollTop - SHEET_ROW_H;
     return Math.max(0, Math.min(rowCount - 1, Math.floor(y / SHEET_ROW_H)));
   }, [rowCount]);
 
