@@ -20,9 +20,11 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { MenuList, MenuItem } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { makeFormulaEngine, columnLetter } from "@/lib/sheet-formula";
+import { createTableEngine, columnLetter, type StructureResult } from "@/lib/sheet-engine-host";
+import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
+import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 type ColType = "short_text" | "long_text" | "number" | "currency" | "percent" | "rating" | "select" | "multi_select" | "date" | "checkbox" | "url" | "email" | "formula" | "link" | "lookup" | "rollup" | "attachment" | "person";
@@ -82,6 +84,10 @@ function titleColumnId(columns: Column[]): string {
 function rowTitle(row: ApiRow | undefined, titleColId: string): string {
   if (!row) return "—";
   const v = row.values[titleColId];
+  // A per-cell formula in another table can't be computed here (its engine
+  // would need that table's rows) — show its source rather than
+  // "[object Object]".
+  if (isFormulaCell(v)) return `=${v[FORMULA_KEY]}`;
   return v == null || v === "" ? "Untitled" : String(v);
 }
 
@@ -94,6 +100,26 @@ const STICKY_TH: React.CSSProperties = { position: "sticky", top: 0, zIndex: 3, 
 // (api/tables/[id]/rows/batch), and select-all happily spans thousands of
 // rows — so bulk work ships in slices this size.
 const BATCH_MAX_OPS = 500;
+
+/** Fold the engine host's column-formula rewrites into a columns array —
+ *  a structure change can retarget a COLUMN formula too ("=SUM(B1:B5)" after
+ *  B moves), and losing that rewrite silently repoints the whole column. */
+function applyColumnRewrites(cols: Column[], rewrites: { colId: string; formula: string }[]): Column[] {
+  if (rewrites.length === 0) return cols;
+  const byId = new Map(rewrites.map((c) => [c.colId, c.formula]));
+  return cols.map((c) => (byId.has(c.id) ? { ...c, formula: byId.get(c.id)! } : c));
+}
+
+/** Cell rewrites grouped per row, as a values patch. */
+function groupRewrites(cells: { colId: string; rowId: string; stored: unknown }[]): Map<string, Record<string, unknown>> {
+  const byRow = new Map<string, Record<string, unknown>>();
+  for (const rw of cells) {
+    const m = byRow.get(rw.rowId) ?? {};
+    m[rw.colId] = rw.stored;
+    byRow.set(rw.rowId, m);
+  }
+  return byRow;
+}
 
 // Columns that sort as magnitudes. The column type has to decide this:
 // parseFloat stops at the dash, so guessing from the string reads
@@ -482,17 +508,34 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   function renameColumn(colId: string, label: string) {
     if (!table) return;
-    const cols = table.columns.map((c) => c.id === colId ? { ...c, label } : c);
+    // Rewrites come from the PRE-rename host, same as deleteColumn: [Header]
+    // refs must follow the rename, and without persisting the rewritten
+    // sources a rename to a label another column already carries would
+    // silently repoint refs via the leftmost-wins rule.
+    let res: StructureResult | null = null;
+    try { res = engineHost.columnRenamed(colId, label); } catch { /* a rewrite failure must never block the rename */ }
+    const cols = applyColumnRewrites(
+      table.columns.map((c) => c.id === colId ? { ...c, label } : c),
+      res?.rewritten.columns ?? [],
+    );
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
+    void persistCellRewrites(res?.rewritten.cells ?? []);
   }
 
   async function deleteColumn(colId: string) {
     if (!table) return;
     if (!(await confirm({ title: "Delete column", description: "Delete this column? Existing cell values for it will be lost.", destructive: true, confirmLabel: "Delete" }))) return;
-    const cols = table.columns.filter((c) => c.id !== colId);
+    // Rewrites come from the PRE-delete host: refs right of the column shift
+    // left, refs into it become #REF! — without persisting these, every
+    // stored formula silently repoints (the bug this wave closes). The host
+    // itself skips the dying column's own cells.
+    let res: StructureResult | null = null;
+    try { res = engineHost.columnDeleted(colId); } catch { /* a rewrite failure must never block the delete */ }
+    const cols = applyColumnRewrites(table.columns.filter((c) => c.id !== colId), res?.rewritten.columns ?? []);
     setTable({ ...table, columns: cols });
     void persistColumns(cols);
+    void persistCellRewrites(res?.rewritten.cells ?? []);
   }
 
   // Drag-to-reorder columns (handle = the column-type icon).
@@ -502,10 +545,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const from = cols.findIndex((c) => c.id === fromId);
     const to = cols.findIndex((c) => c.id === toId);
     if (from < 0 || to < 0) return;
+    // Same discipline as deleteColumn: stored sources follow the move so
+    // "=B1" keeps meaning the same cell after B becomes C. The host takes
+    // the same (from, to) indices the splice below uses.
+    let res: StructureResult | null = null;
+    try { res = engineHost.columnMoved(from, to); } catch { /* never block the move */ }
     const [moved] = cols.splice(from, 1);
     cols.splice(to, 0, moved);
-    setTable({ ...table, columns: cols });
-    void persistColumns(cols);
+    const next = applyColumnRewrites(cols, res?.rewritten.columns ?? []);
+    setTable({ ...table, columns: next });
+    void persistColumns(next);
+    void persistCellRewrites(res?.rewritten.cells ?? []);
   }
 
   // Column resize — width persisted on the column (optimistic update while
@@ -543,6 +593,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const d = await res.json();
       const row = d.data ?? d;
       setRows((prev) => [...(prev ?? []), row]);
+      // An end-append can't shift any existing ref, so this yields no
+      // rewrites today — called so the contract is exercised where the page
+      // inserts rows, ready for mid-table inserts later.
+      try {
+        const res = engineHost.rowInserted({ id: row.id, values: row.values ?? {} }, (rows ?? []).length);
+        void persistCellRewrites(res.rewritten.cells);
+      } catch { /* never block the insert */ }
     } catch { toast("Couldn't add row"); }
   }
 
@@ -555,6 +612,26 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({ id: rowId, values }),
       });
     } catch { toast("Cell didn't save"); }
+  }
+
+  /** Persist the engine host's per-cell rewrites after a structure change.
+   *  The stored value is the { "=": source } object the host built — the
+   *  same shape a formula edit stores — through the same batch path as every
+   *  other bulk write. Computed values are derived and are never persisted. */
+  async function persistCellRewrites(cells: { colId: string; rowId: string; stored: unknown }[]) {
+    if (!tableId || cells.length === 0) return;
+    const byRow = groupRewrites(cells);
+    setRows((prev) => prev ? prev.map((r) => byRow.has(r.id) ? { ...r, values: { ...r.values, ...byRow.get(r.id)! } } : r) : prev);
+    const updates = [...byRow].map(([id, values]) => ({ id, values }));
+    try {
+      for (let i = 0; i < updates.length; i += BATCH_MAX_OPS) {
+        const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ updates: updates.slice(i, i + BATCH_MAX_OPS) }),
+        });
+        if (!res.ok) throw new Error();
+      }
+    } catch { toast("Couldn't rewrite formulas for the new layout"); void load(); }
   }
 
   async function clearCells(cells: { rowId: string; colId: string }[]) {
@@ -589,7 +666,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       destructive: true, confirmLabel: "Delete",
     }))) return;
     const doomed = new Set(ids);
-    setRows((prev) => prev ? prev.filter((r) => !doomed.has(r.id)) : prev);
+    // Rewrites for the SURVIVORS, computed before local state loses the rows:
+    // refs below a deleted row shift up, refs into it become #REF!. Each
+    // hook call mutates the host's model, so later calls see the shape the
+    // earlier ones left — the merged map (last write wins) is cumulative.
+    const cellRewrites = new Map<string, { colId: string; rowId: string; stored: unknown }>();
+    const colRewrites = new Map<string, string>();
+    try {
+      for (const id of ids) {
+        const res = engineHost.rowDeleted(id);
+        for (const rw of res.rewritten.cells) {
+          if (doomed.has(rw.rowId)) continue;
+          cellRewrites.set(`${rw.rowId}:${rw.colId}`, rw);
+        }
+        for (const cw of res.rewritten.columns) colRewrites.set(cw.colId, cw.formula);
+      }
+    } catch { /* never block the delete */ }
+    // Same one-frame discipline as deleteRow: removals + survivor rewrites
+    // apply together locally; persistence still waits for the deletes.
+    const rwByRow = groupRewrites([...cellRewrites.values()]);
+    setRows((prev) => prev
+      ? prev.filter((r) => !doomed.has(r.id)).map((r) => rwByRow.has(r.id) ? { ...r, values: { ...r.values, ...rwByRow.get(r.id)! } } : r)
+      : prev);
     try {
       for (let i = 0; i < ids.length; i += BATCH_MAX_OPS) {
         const res = await fetch(`/api/tables/${tableId}/rows/batch`, {
@@ -598,18 +696,41 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         });
         if (!res.ok) throw new Error();
       }
+      void persistCellRewrites([...cellRewrites.values()]);
+      if (colRewrites.size > 0 && table) {
+        // Row ranges inside COLUMN formulas shrink too ("=SUM(A1:A5)").
+        const cols = applyColumnRewrites(table.columns, [...colRewrites].map(([colId, formula]) => ({ colId, formula })));
+        setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+        void persistColumns(cols);
+      }
     } catch { toast("Couldn't delete rows"); void load(); }
   }
 
   async function deleteRow(rowId: string) {
     if (!tableId) return;
     if (!(await confirm({ title: "Delete row", description: "Delete this row?", destructive: true, confirmLabel: "Delete" }))) return;
-    setRows((prev) => prev ? prev.filter((r) => r.id !== rowId) : prev);
+    let res: StructureResult | null = null;
+    try { res = engineHost.rowDeleted(rowId); } catch { /* never block the delete */ }
+    // Removal and the survivors' ref rewrites land in ONE local update, so no
+    // frame renders shifted rows against un-shifted refs. The server write of
+    // the rewrites still waits for the delete to succeed: if the delete
+    // fails, nothing rewritten was persisted and the reload restores truth.
+    const rwByRow = groupRewrites(res?.rewritten.cells ?? []);
+    setRows((prev) => prev
+      ? prev.filter((r) => r.id !== rowId).map((r) => rwByRow.has(r.id) ? { ...r, values: { ...r.values, ...rwByRow.get(r.id)! } } : r)
+      : prev);
     try {
       await fetch(`/api/tables/${tableId}/rows`, {
         method: "DELETE", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: rowId }),
       });
+      void persistCellRewrites(res?.rewritten.cells ?? []);
+      const colRewrites = res?.rewritten.columns ?? [];
+      if (colRewrites.length > 0 && table) {
+        const cols = applyColumnRewrites(table.columns, colRewrites);
+        setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+        void persistColumns(cols);
+      }
     } catch { toast("Couldn't delete row"); void load(); }
   }
 
@@ -639,7 +760,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const bodyRows = rows.map((r) =>
       table.columns.map((c) => {
         const v = r.values[c.id];
-        const str = v === undefined || v === null ? "" : Array.isArray(v) ? v.join("; ") : String(v);
+        // Computed cells export what the user sees, never "[object Object]"
+        // or a source string another program would misread as its own ref.
+        const str = c.type === "formula" || isFormulaCell(v)
+          ? String(engineHost.display(c.id, r.id) ?? "")
+          : v === undefined || v === null ? "" : Array.isArray(v) ? v.join("; ") : String(v);
         return csvEscape(str);
       }).join(","),
     );
@@ -657,22 +782,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   const columnTypes = useMemo(() => Object.keys(COL_LABEL) as ColType[], []);
 
-  // Formula engine over the current grid + stable row-index lookup.
-  const formulaEngine = useMemo(() => makeFormulaEngine(table?.columns ?? [], rows ?? []), [table?.columns, rows]);
-  const rowIndexById = useMemo(() => {
-    const m = new Map<string, number>();
-    (rows ?? []).forEach((r, i) => m.set(r.id, i));
-    return m;
-  }, [rows]);
-
-  // Formulas are anchored to a row's index in the unsorted `rows` array. A row
-  // the engine hasn't indexed yet (an optimistic insert still in flight) has no
-  // index: render blank rather than row 0's value, which would be plausible and
-  // wrong — a silently wrong number is worse than an empty cell.
-  const formulaValue = (colIndex: number, rowId: string): number | string => {
-    const ri = rowIndexById.get(rowId);
-    return ri === undefined ? "" : formulaEngine.cellValue(colIndex, ri);
-  };
+  // The formula engine host (Tables Phase 3): dependency-graph recalc over
+  // the UNSORTED `rows` order — display sort must never change what a ref
+  // resolves to, so the host is never handed sorted rows. Rebuilt whenever
+  // rows/columns change; every edit flows through setRows, so a fresh host
+  // always computes against exactly what the grid renders.
+  const engineHost = useMemo(
+    () => createTableEngine({ columns: table?.columns ?? [], rows: rows ?? [] }),
+    [table?.columns, rows],
+  );
 
   // Lookup/rollup compute: follow the column's link → gather linked rows →
   // pull a field (lookup) or aggregate it (rollup). Returns a display value.
@@ -727,22 +845,26 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setCalCol(dateColumns[0]?.id ?? "");
   }, [view, calCol, dateColumns]);
 
-  if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
-  if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
+  // ── Sheet kernel derived state ──────────────────────────────────
+  // Hooks, so they can sit above the early returns AND feed the active-cell
+  // refs the formula bar's DOM observer reads between renders.
+  const rowById = useMemo(() => new Map((rows ?? []).map((r) => [r.id, r] as const)), [rows]);
 
-  const activeCol = kanbanColumns.find((c) => c.id === kanbanCol);
-  const activeDateCol = dateColumns.find((c) => c.id === calCol);
-  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
-
-  const filteredRows = (() => {
-    let list = rows;
+  const filteredRows = useMemo(() => {
+    const cols = table?.columns ?? [];
+    let list = rows ?? [];
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((r) =>
-        table.columns.some((c) => {
+        cols.some((c) => {
           const v = r.values[c.id];
           if (v === undefined || v === null) return false;
-          return String(Array.isArray(v) ? v.join(" ") : v).toLowerCase().includes(q);
+          // Search matches what the user SEES in a formula cell, not its
+          // stored object.
+          const text = isFormulaCell(v)
+            ? String(engineHost.display(c.id, r.id) ?? "")
+            : String(Array.isArray(v) ? v.join(" ") : v);
+          return text.toLowerCase().includes(q);
         }),
       );
     }
@@ -754,48 +876,98 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       });
     }
     return list;
-  })();
+  }, [rows, table?.columns, search, filterCol, filterValue, engineHost]);
 
-  const filterColDef = table.columns.find((c) => c.id === filterCol);
-  const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
-
-  // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
-  const rowById = new Map(rows.map((r) => [r.id, r] as const));
-
-  const cellSortValue = (col: Column, r: ApiRow): unknown => {
-    const ci = table.columns.findIndex((c) => c.id === col.id);
-    if (col.type === "formula") return formulaValue(ci, r.id);
-    if (col.type === "lookup" || col.type === "rollup") return relationalValue(col, r);
-    return r.values[col.id];
-  };
-
-  const sortedRows = (() => {
+  const sortedRows = useMemo(() => {
     if (!sortState) return filteredRows;
-    const col = table.columns.find((c) => c.id === sortState.colId);
+    const cols = table?.columns ?? [];
+    const col = cols.find((c) => c.id === sortState.colId);
     if (!col) return filteredRows;
+    // Sorting reads COMPUTED values but reorders only the display list —
+    // formulas keep evaluating against the unsorted `rows` order (the
+    // Phase 1 row-anchoring rule).
+    const sortValue = (r: ApiRow): unknown => {
+      if (col.type === "formula" || isFormulaCell(r.values[col.id])) {
+        // Computed value; the host flattens errors to their code strings,
+        // which sort as text.
+        return engineHost.value(col.id, r.id);
+      }
+      if (col.type === "lookup" || col.type === "rollup") return relationalValue(col, r);
+      return r.values[col.id];
+    };
     return [...filteredRows].sort((a, b) => {
-      const va = cellSortValue(col, a);
-      const vb = cellSortValue(col, b);
+      const va = sortValue(a);
+      const vb = sortValue(b);
       const ea = va == null || va === "";
       const eb = vb == null || vb === "";
       if (ea !== eb) return ea ? 1 : -1; // empties always last
       const out = compareCells(col.type, va, vb);
       return sortState.dir === "asc" ? out : -out;
     });
-  })();
+  }, [filteredRows, sortState, table?.columns, engineHost, relationalValue]);
+
+  // ── Active-cell tracking for the formula bar ────────────────────
+  // The sheet kernel owns selection internally (and this wave does not touch
+  // it), so the bar reads the active cell from the DOM the kernel renders:
+  // exactly one gridcell carries the active-outline class. A MutationObserver
+  // follows it through clicks, keys, and post-paste selection moves. When the
+  // active row scrolls out of the virtual window its node unmounts and the
+  // last known cell is kept — scrolling away is not deselection.
+  const [activeCell, setActiveCell] = useState<{ rowId: string; colId: string } | null>(null);
+  const displayRowIdsRef = useRef<string[]>([]);
+  const colIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    displayRowIdsRef.current = sortedRows.map((r) => r.id);
+    colIdsRef.current = (table?.columns ?? []).map((c) => c.id);
+  });
+  const gridWrapElRef = useRef<HTMLDivElement | null>(null);
+  const gridObserverRef = useRef<MutationObserver | null>(null);
+  const attachGridWrap = useCallback((el: HTMLDivElement | null) => {
+    gridObserverRef.current?.disconnect();
+    gridObserverRef.current = null;
+    gridWrapElRef.current = el;
+    if (!el) return;
+    const read = () => {
+      const cellEl = el.querySelector('[role="gridcell"][class*="outline"]');
+      if (!cellEl) return; // active cell unmounted (scrolled away) — keep the last one
+      const r = Number(cellEl.closest('[role="row"]')?.getAttribute("aria-rowindex")) - 1;
+      const c = Number(cellEl.getAttribute("aria-colindex")) - 1;
+      const rowId = displayRowIdsRef.current[r];
+      const colId = colIdsRef.current[c];
+      if (!rowId || !colId) return;
+      setActiveCell((prev) => (prev && prev.rowId === rowId && prev.colId === colId ? prev : { rowId, colId }));
+    };
+    const mo = new MutationObserver(read);
+    mo.observe(el, { subtree: true, childList: true, attributes: true, attributeFilter: ["class"] });
+    gridObserverRef.current = mo;
+    read();
+  }, []);
+
+  if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
+  if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
+
+  const activeCol = kanbanColumns.find((c) => c.id === kanbanCol);
+  const activeDateCol = dateColumns.find((c) => c.id === calCol);
+  const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
+
+  const filterColDef = table.columns.find((c) => c.id === filterCol);
+  const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
+
+  // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
 
   const displayCell = (rowId: string, colId: string): React.ReactNode => {
     const r = rowById.get(rowId);
     const c = table.columns.find((x) => x.id === colId);
     if (!r || !c) return null;
     const v = r.values[c.id];
+    // Computed first: a formula column, or a per-cell formula stored in ANY
+    // column, renders the engine host's display value (a cycle renders its
+    // #CYCLE! error here rather than hanging a recalc).
+    if (c.type === "formula" || isFormulaCell(v)) {
+      const fv = String(engineHost.display(c.id, r.id) ?? "");
+      return <span style={fv.startsWith("#") ? { color: "#dc2626" } : undefined}>{fv}</span>;
+    }
     switch (c.type) {
-      case "formula": {
-        const ci = table.columns.findIndex((x) => x.id === colId);
-        const fv = formulaValue(ci, r.id);
-        const err = typeof fv === "string" && fv.startsWith("#");
-        return <span style={err ? { color: "#dc2626" } : undefined}>{fv == null ? "" : String(fv)}</span>;
-      }
       case "lookup": case "rollup": { const rv = relationalValue(c, r); return rv == null ? null : String(rv); }
       case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null;
       case "rating": { const n = typeof v === "number" ? v : 0; return n ? "★".repeat(n) : null; }
@@ -827,12 +999,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  TRUE/FALSE for a checkbox (the token coercePaste takes back). */
   const cellText = (col: Column, r: ApiRow): string => {
     const v = r.values[col.id];
+    // A computed cell copies its DISPLAY value. Copying the SOURCE would be
+    // the in-grid ideal, but "=A1+B2" pasted into Excel would resolve against
+    // EXCEL's A1 — cross-app source transfer is a later feature, and the
+    // display value at least round-trips as the literal the user saw.
+    if (col.type === "formula" || isFormulaCell(v)) {
+      return String(engineHost.display(col.id, r.id) ?? "");
+    }
     switch (col.type) {
-      case "formula": {
-        const ci = table.columns.findIndex((x) => x.id === col.id);
-        const fv = formulaValue(ci, r.id);
-        return fv == null ? "" : String(fv);
-      }
       case "lookup": case "rollup": {
         const rv = relationalValue(col, r);
         return rv == null ? "" : String(rv);
@@ -1043,10 +1217,94 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     );
   };
 
+  /** One text-commit path for the formula bar, the in-cell formula editor
+   *  and any "=" typed into a plain text editor. A formula persists as the
+   *  { "=": source } object through the SAME patchRow path as a literal;
+   *  the computed value is derived and never persisted. */
+  const commitCellText = (rowId: string, colId: string, raw: string) => {
+    const col = table.columns.find((c) => c.id === colId);
+    if (!col || !rowById.has(rowId)) return;
+    if (col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
+      // Column-governed cells stay that way this wave: a per-cell formula
+      // over a column formula would silently fork the column's meaning.
+      toast("This cell is computed by its column — edit the column instead");
+      return;
+    }
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("=")) {
+      if (trimmed === "=") return; // a lone "=" is an abandoned edit, not a formula
+      try {
+        // Trimmed, because the host classifies by FIRST character — " =A1"
+        // would slip through as a literal.
+        const res = engineHost.setCell(colId, rowId, trimmed);
+        // res.affected drives re-render only: patchRow's setRows rebuilds the
+        // host, which recomputes every dependent. Computed values are never
+        // sent to the server.
+        void patchRow(rowId, { [colId]: res.stored });
+      } catch {
+        toast("Couldn't save formula");
+      }
+      return;
+    }
+    // A literal replacing a formula (or typed in the bar) is coerced with the
+    // same rules as paste, so the stored shape matches the column type.
+    const res = coercePaste(col, raw);
+    if (res.kind === "skip") {
+      toast("That value doesn't fit this column — nothing saved");
+      return;
+    }
+    void patchRow(rowId, { [colId]: res.value });
+  };
+
+  /** Text editors commit through here so "=…" becomes a stored formula even
+   *  when the editor was opened plain (F2 first, "=" typed after) — the
+   *  seed path below only catches type-to-replace. */
+  const commitEditorValue = (rowId: string, colId: string, v: unknown) => {
+    if (typeof v === "string" && v.trimStart().startsWith("=")) {
+      commitCellText(rowId, colId, v);
+      return;
+    }
+    void patchRow(rowId, { [colId]: v });
+  };
+
+  /** Computed display for the card views (kanban/calendar/gallery): non-null
+   *  only for cells the engine computes, so the views keep their own
+   *  formatting for literals. */
+  const cardPreview = (colId: string, rowId: string): string | null => {
+    const r = rowById.get(rowId);
+    const c = table.columns.find((x) => x.id === colId);
+    if (!r || !c) return null;
+    if (c.type === "formula" || isFormulaCell(r.values[colId])) return String(engineHost.display(colId, rowId) ?? "");
+    return null;
+  };
+
   const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
     const r = rowById.get(rowId);
     const c = table.columns.find((x) => x.id === colId);
     if (!r || !c) return null;
+    // A formula cell always edits as its SOURCE (never the computed value —
+    // the user must see what their edit replaces), and a "=" seed opens the
+    // formula editor in ANY editable cell: number/date/choice editors cannot
+    // even type "=", so the formula editor takes over for them.
+    const hasFormula = engineHost.isFormulaCell(colId, rowId);
+    const formulaSeed = opts.seed != null && opts.seed.trimStart().startsWith("=");
+    if (hasFormula || formulaSeed) {
+      // cellSource returns "=SRC" (with the "=") for any computed cell. ANY
+      // seed wins over the source — type-to-replace on a formula cell starts
+      // from what was typed, exactly like the plain editors — while the
+      // commit baseline stays the ORIGINAL source, so a seeded value that is
+      // left as-is still commits (and Escape still cancels via the ref).
+      const src = hasFormula ? String(engineHost.cellSource(colId, rowId) ?? "=") : "";
+      return (
+        <SheetEditorHost seed={opts.seed} commit={opts.commit}>
+          <SheetFormulaEditor
+            initial={opts.seed ?? src}
+            baseline={src}
+            onCommit={(raw) => commitCellText(rowId, colId, raw)}
+          />
+        </SheetEditorHost>
+      );
+    }
     const inner = c.type === "link" ? (
       <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : c.type === "attachment" ? (
@@ -1054,10 +1312,41 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     ) : c.type === "person" ? (
       <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : (
-      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
     );
     return <SheetEditorHost seed={opts.seed} commit={opts.commit}>{inner}</SheetEditorHost>;
   };
+
+  // ── Formula bar plumbing (Tables Phase 3) ───────────────────────
+  const activeColDef = activeCell ? table.columns.find((c) => c.id === activeCell.colId) : undefined;
+  const activeCellRow = activeCell ? rowById.get(activeCell.rowId) : undefined;
+  let barCell: FormulaBarCell | null = null;
+  if (activeCell && activeColDef && activeCellRow) {
+    const colIndex = table.columns.findIndex((c) => c.id === activeCell.colId);
+    // The address row number is the UNSORTED index — the row an A1 ref in a
+    // formula would actually resolve to — not the display-sorted position.
+    const rowNumber = rows.findIndex((r) => r.id === activeCell.rowId) + 1;
+    if (colIndex >= 0 && rowNumber > 0) {
+      const computedCol = activeColDef.type === "lookup" || activeColDef.type === "rollup";
+      const pickerCol = activeColDef.type === "link" || activeColDef.type === "person" || activeColDef.type === "attachment";
+      // cellSource returns "=SRC" for any computed cell (a column-formula
+      // fill included, which is what the bar shows read-only for a formula
+      // column); for literals the bar edits the text the editors write.
+      const src = engineHost.isFormulaCell(activeCell.colId, activeCell.rowId)
+        ? String(engineHost.cellSource(activeCell.colId, activeCell.rowId) ?? "=")
+        : null;
+      barCell = {
+        address: `${columnLetter(colIndex)}${rowNumber}`,
+        source: src ?? cellText(activeColDef, activeCellRow),
+        readOnly: activeColDef.type === "formula" || computedCol || pickerCol,
+        readOnlyReason: activeColDef.type === "formula"
+          ? "This column computes its formula — edit it from the column header (Σ)"
+          : computedCol
+            ? "Computed column — configure it from the column header"
+            : "This column edits through its picker in the grid",
+      };
+    }
+  }
 
   return (
     <div className="dtbl">
@@ -1186,6 +1475,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           rows={filteredRows}
           groupCol={activeCol}
           titleCol={titleCol}
+          preview={cardPreview}
           onCardClick={(rowId) => setActiveRowId(rowId)}
           onAddRow={async (groupValue: string) => {
             if (!tableId) return;
@@ -1206,6 +1496,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           rows={filteredRows}
           dateCol={activeDateCol}
           titleCol={titleCol}
+          preview={cardPreview}
           onCardClick={(rowId) => setActiveRowId(rowId)}
           month={calMonth}
           onPrev={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))}
@@ -1226,9 +1517,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           }}
         />
       ) : view === "gallery" ? (
-        <GalleryView rows={filteredRows} columns={table.columns} titleCol={titleCol} onCardClick={(rowId) => setActiveRowId(rowId)} />
+        <GalleryView rows={filteredRows} columns={table.columns} titleCol={titleCol} preview={cardPreview} onCardClick={(rowId) => setActiveRowId(rowId)} />
       ) : !classicGrid ? (
         <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "12px 20px" }}>
+          <FormulaBar
+            cell={barCell}
+            onCommit={(raw) => {
+              if (!activeCell) return;
+              commitCellText(activeCell.rowId, activeCell.colId, raw);
+              // Hand the keyboard back to the grid, so Enter-commit flows
+              // straight into navigation like an in-cell commit does.
+              gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus();
+            }}
+            onReadOnlyEdit={(reason) => toast(reason)}
+          />
+          <div ref={attachGridWrap} className="flex min-h-0 flex-1 flex-col">
           <SheetGrid
             columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
             rowIds={sortedRows.map((r) => r.id)}
@@ -1258,6 +1561,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             footer={<button type="button" className="dtbl__addrow" onClick={addRow}><Plus /> New row</button>}
             readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup").map((c) => c.id))}
           />
+          </div>
         </div>
       ) : (
       <>
@@ -1340,10 +1644,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 <td className="dtbl__rowexpand">
                   <button type="button" onClick={() => setActiveRowId(r.id)} title="Open row"><ChevronRight /></button>
                 </td>
-                {table.columns.map((c, colIndex) => (
+                {table.columns.map((c) => (
                   <td key={c.id} className="dtbl__cell" style={c.width ? { width: c.width, minWidth: c.width, maxWidth: c.width } : undefined}>
-                    {c.type === "formula" ? (
-                      <FormulaCell value={formulaValue(colIndex, r.id)} />
+                    {c.type === "formula" || isFormulaCell(r.values[c.id]) ? (
+                      // Per-cell formulas render computed (read-only) in the
+                      // classic escape hatch too — the editor lives in the
+                      // sheet view, but the number must be the same here.
+                      <FormulaCell value={String(engineHost.display(c.id, r.id) ?? "")} />
                     ) : c.type === "link" ? (
                       <LinkCell value={r.values[c.id]} linked={c.linkTableId ? linkedTables[c.linkTableId] : undefined} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     ) : c.type === "lookup" || c.type === "rollup" ? (
@@ -1353,7 +1660,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                     ) : c.type === "person" ? (
                       <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
                     ) : (
-                      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
+                      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
                     )}
                   </td>
                 ))}
@@ -1397,7 +1704,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           table={table}
           row={activeRow}
           onClose={() => setActiveRowId(null)}
-          onChange={(values) => void patchRow(activeRow.id, values)}
+          onChange={(values) => {
+            // "=…" typed into a modal field becomes a stored formula through
+            // the same path as the grid; everything else stays a literal.
+            const literals: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(values)) {
+              if (typeof v === "string" && v.trimStart().startsWith("=")) commitCellText(activeRow.id, k, v);
+              else literals[k] = v;
+            }
+            if (Object.keys(literals).length > 0) void patchRow(activeRow.id, literals);
+          }}
+          formulaDisplay={(colId) => String(engineHost.display(colId, activeRow.id) ?? "")}
           onDelete={() => { void deleteRow(activeRow.id); setActiveRowId(null); }}
         />
       )}
@@ -1416,8 +1733,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   );
 }
 
-function GalleryView({ rows, columns, titleCol, onCardClick }: {
-  rows: ApiRow[]; columns: Column[]; titleCol: Column | undefined; onCardClick: (rowId: string) => void;
+function GalleryView({ rows, columns, titleCol, preview, onCardClick }: {
+  rows: ApiRow[]; columns: Column[]; titleCol: Column | undefined;
+  preview?: (colId: string, rowId: string) => string | null;
+  onCardClick: (rowId: string) => void;
 }) {
   const fieldCols = columns.filter((c) => c.id !== titleCol?.id).slice(0, 5);
   const fmt = (v: unknown): string => {
@@ -1431,10 +1750,10 @@ function GalleryView({ rows, columns, titleCol, onCardClick }: {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, padding: 12 }}>
       {rows.map((r) => (
         <button key={r.id} type="button" onClick={() => onCardClick(r.id)} style={{ textAlign: "left", background: "white", border: "1px solid #e4e4e7", borderRadius: 10, padding: 12, cursor: "pointer" }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#18181b", marginBottom: 6 }}>{rowTitle(r, titleCol?.id ?? "")}</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#18181b", marginBottom: 6 }}>{(titleCol && preview?.(titleCol.id, r.id)) || rowTitle(r, titleCol?.id ?? "")}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {fieldCols.map((c) => {
-              const s = fmt(r.values[c.id]);
+              const s = preview?.(c.id, r.id) ?? fmt(r.values[c.id]);
               if (!s) return null;
               return <div key={c.id} style={{ fontSize: 11.5, color: "#71717a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><span style={{ color: "#a1a1aa" }}>{c.label}:</span> {s}</div>;
             })}
@@ -1445,14 +1764,18 @@ function GalleryView({ rows, columns, titleCol, onCardClick }: {
   );
 }
 
-function RowDetailModal({ table, row, onClose, onChange, onDelete }: {
+function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelete }: {
   table: ApiTable; row: ApiRow;
   onClose: () => void;
   onChange: (values: Record<string, unknown>) => void;
+  /** Computed display for a per-cell formula (the modal has no engine). */
+  formulaDisplay?: (colId: string) => string;
   onDelete: () => void;
 }) {
   const titleCol = table.columns.find((c) => c.type === "short_text") ?? table.columns[0];
-  const title = titleCol ? String(row.values[titleCol.id] ?? "Untitled") : "Untitled";
+  const title = titleCol
+    ? (isFormulaCell(row.values[titleCol.id]) ? (formulaDisplay?.(titleCol.id) || rowTitle(row, titleCol.id)) : String(row.values[titleCol.id] ?? "Untitled"))
+    : "Untitled";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -1474,7 +1797,14 @@ function RowDetailModal({ table, row, onClose, onChange, onDelete }: {
           {table.columns.map((c) => (
             <div key={c.id} className="dtbl__modal-field">
               <label>{c.label}</label>
-              <CellEditor column={c} value={row.values[c.id]} onChange={(v) => onChange({ [c.id]: v })} />
+              {isFormulaCell(row.values[c.id]) ? (
+                // The literal editor would show "[object Object]" and a blur
+                // would overwrite the formula with it — display-only here;
+                // the formula edits in the grid or the formula bar.
+                <FormulaCell value={formulaDisplay?.(c.id) ?? ""} />
+              ) : (
+                <CellEditor column={c} value={row.values[c.id]} onChange={(v) => onChange({ [c.id]: v })} />
+              )}
             </div>
           ))}
         </div>
@@ -1483,8 +1813,9 @@ function RowDetailModal({ table, row, onClose, onChange, onDelete }: {
   );
 }
 
-function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardClick }: {
+function KanbanView({ table, rows, groupCol, titleCol, preview, onAddRow, onMove, onCardClick }: {
   table: ApiTable; rows: ApiRow[]; groupCol: Column; titleCol: Column | undefined;
+  preview?: (colId: string, rowId: string) => string | null;
   onAddRow: (groupValue: string) => Promise<void>;
   onMove: (rowId: string, newGroup: string) => void;
   onCardClick: (rowId: string) => void;
@@ -1520,7 +1851,7 @@ function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardC
           >
             {(grouped.get(lane) ?? []).map((r) => (
               <article key={r.id} className="dtbl__card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
-                <div className="dtbl__card-title">{titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}</div>
+                <div className="dtbl__card-title">{titleCol ? (preview?.(titleCol.id, r.id) || rowTitle(r, titleCol.id)) : "Untitled"}</div>
                 <div className="dtbl__card-meta">
                   {table.columns
                     .filter((c) => c.id !== titleCol?.id && c.id !== groupCol.id)
@@ -1528,7 +1859,7 @@ function KanbanView({ table, rows, groupCol, titleCol, onAddRow, onMove, onCardC
                     .map((c) => {
                       const v = r.values[c.id];
                       if (v === undefined || v === null || v === "") return null;
-                      return <span key={c.id} className="dtbl__card-chip"><em>{c.label}:</em> {String(Array.isArray(v) ? v.join(", ") : v)}</span>;
+                      return <span key={c.id} className="dtbl__card-chip"><em>{c.label}:</em> {preview?.(c.id, r.id) ?? String(Array.isArray(v) ? v.join(", ") : v)}</span>;
                     })}
                 </div>
               </article>
@@ -1706,6 +2037,36 @@ function SheetEditorHost({ children, seed, commit }: { children: React.ReactNode
   );
 }
 
+/** In-cell formula editor: source text with ref highlighting, hosted inside
+ *  SheetEditorHost like every other editor — the host's Enter blurs into the
+ *  commit below, and its Escape raises the cancel ref BEFORE that blur, so a
+ *  cancelled edit never overwrites the formula it was showing. Autocomplete
+ *  stays off in-cell (the cell clips its own overflow, so a dropdown would
+ *  be unreadable); the formula bar carries it. */
+function SheetFormulaEditor({ initial, baseline, onCommit }: {
+  /** What the editor opens showing (the seed, else the source). */
+  initial: string;
+  /** The cell's pre-edit source — commit fires only when the draft differs
+   *  from THIS, so an untouched open cancels silently but an unedited SEED
+   *  (type-to-replace) still commits. */
+  baseline: string;
+  onCommit: (raw: string) => void;
+}) {
+  const cancelled = useContext(CellEditCancel);
+  const [draft, setDraft] = useState(initial);
+  return (
+    <FormulaTextInput
+      value={draft}
+      onValueChange={setDraft}
+      className="h-[29px]"
+      onBlur={() => {
+        if (cancelled?.current) return;
+        if (draft !== baseline) onCommit(draft);
+      }}
+    />
+  );
+}
+
 function CellEditor({ column, value, onChange }: { column: Column; value: unknown; onChange: (v: unknown) => void }) {
   const t = column.type;
   // Escape cancels: the host raises this before blurring, so a blur that is
@@ -1821,10 +2182,11 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
   return null;
 }
 
-function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday, onMove, onAddRow, onCardClick }: {
+function CalendarView({ rows, dateCol, titleCol, preview, month, onPrev, onNext, onToday, onMove, onAddRow, onCardClick }: {
   rows: ApiRow[];
   dateCol: Column;
   titleCol: Column | undefined;
+  preview?: (colId: string, rowId: string) => string | null;
   month: Date;
   onPrev: () => void;
   onNext: () => void;
@@ -1897,7 +2259,7 @@ function CalendarView({ rows, dateCol, titleCol, month, onPrev, onNext, onToday,
                   <div className="dtbl__cal-cards">
                     {dayRows.map((r) => (
                       <div key={r.id} className="dtbl__cal-card" draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", r.id)} onClick={() => onCardClick(r.id)}>
-                        {titleCol ? String(r.values[titleCol.id] ?? "Untitled") : "Untitled"}
+                        {titleCol ? (preview?.(titleCol.id, r.id) || rowTitle(r, titleCol.id)) : "Untitled"}
                       </div>
                     ))}
                   </div>

@@ -1,6 +1,6 @@
 # Tables — Sheets/Excel-grade spreadsheets in WorkwrK
 
-**Date:** 2026-08-22 · **Status:** Phase 1 + 2 SHIPPED · Phase 3 engine merged (UI wave next)
+**Date:** 2026-08-22 · **Status:** Phases 1-3 SHIPPED (engine + UI live)
 **Mandate (user):** "Like Google Sheets and Excel basically where I can add formulas, do stuffs — and we'll call it Tables."
 
 ---
@@ -171,6 +171,35 @@ for a table product, and the existing test asserting row-narrowing was right.
   one policy (Sheets propagates) and make the conditional aggregates match.
 - Arity failures now report `#N/A` everywhere (was `#VALUE!` in the
   evaluator, `#N/A` in the library — they disagreed).
+
+## 3c. Phase 3 Wave 2 — engine live in the UI (2026-08-22)
+
+Per-cell `=` formulas, formula bar (address, source editing, function
+autocomplete from the engine's own signatures, ref highlighting), engine
+swap (`sheet-formula.ts` is import-dead), and structure ops that REWRITE AND
+PERSIST stored formula sources on column delete/move/rename and row
+insert/delete — the old silent-repointing bug is closed, including rename
+(wired after review).
+
+**Migration semantics decision, settled with production evidence.** The new
+engine is Sheets-correct where the old one was folk-typed: SUM over a text
+column of numeric strings is 0 (Sheets ignores text in ranges), AVG of an
+empty column is #DIV/0!, junk like "5px" is an error, not a 5. Surveyed
+production before shipping: 2 tables, 0 rows, 0 formula columns — there is
+no legacy number that can silently change. Strict semantics ship; no
+compatibility shim.
+
+**PHASE 5 GATING ITEM — recalc perf.** The page seam rebuilds the engine
+(constructor runs a full pass) on every committed edit, because the host is
+memoized on [columns, rows]. Measured: 560ms at 2k rows / 11.8s at 10k with
+an aggregate formula column (O(n²): n cells × O(n) aggregate, no range
+caching). Harmless at today's sizes (prod max is 0 rows; API cap 5k), but
+Phase 5's 50k target REQUIRES a persistent host driven by setCell's
+incremental path + aggregate/range caching. Do not attempt 50k before this.
+
+Minor recorded gaps: NOW()/TODAY() refresh only on edit-driven rebuilds (an
+idle table crosses midnight stale); setCell's `previous` return (the
+overwritten literal) is not yet surfaced anywhere — feed it to Phase 4 undo.
 
 ## 4. Rollout discipline
 
