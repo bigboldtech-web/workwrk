@@ -12,6 +12,7 @@
 //      Idempotent — upserts on (source, target, relation).
 
 import { NextResponse } from "next/server";
+import { withFreshFileUrls } from "@/lib/file-urls";
 import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
@@ -160,9 +161,10 @@ async function hydrate(
       } else if (type === "FILE") {
         const files = await prisma.fileEntry.findMany({
           where: { organizationId: orgId, id: { in: ids } },
-          select: { id: true, name: true, mimeType: true, size: true, url: true, spaceId: true },
+          select: { id: true, name: true, mimeType: true, size: true, url: true, s3Key: true, spaceId: true },
         });
-        for (const f of files) {
+        const freshFiles = await withFreshFileUrls(files);
+        for (const f of freshFiles) {
           titleByKey.set(`${type}:${f.id}`, {
             title: f.name,
             subtitle: `${f.mimeType} · ${Math.max(1, Math.round(f.size / 1024))} KB`,

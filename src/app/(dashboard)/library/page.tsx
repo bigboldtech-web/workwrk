@@ -518,6 +518,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
         return;
       }
       const upData = await upRes.json();
+      const s3KeyVal = typeof (upData.s3Key ?? upData.data?.s3Key) === "string" ? (upData.s3Key ?? upData.data?.s3Key) : null;
       const entryRes = await fetch("/api/files", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -526,6 +527,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
           mimeType: file.type || "application/octet-stream",
           size: upData.size ?? file.size,
           url: upData.url,
+          ...(s3KeyVal ? { s3Key: s3KeyVal } : {}),
         }),
       });
       if (!entryRes.ok) {

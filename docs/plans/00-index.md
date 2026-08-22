@@ -63,6 +63,9 @@ embeds) · per-node "…" menus (rename/icon/favorite/archive) · `/api/me/items
 - **`ai-performance-manager.md`** — per-person AI manager agent that scores KRA/KPI/Goal delivery monthly and
   ranks org performance. Builds on the existing `Agent` runtime + alignment models. The payoff of the
   "AI controls the people" pillar; layered on top of this parity work, not part of it.
+- **`tables.md`** — Sheets/Excel-grade Tables (user-mandated, next after Room acceptance): virtualized grid
+  kernel w/ selection+keyboard, Excel/Sheets clipboard interop + fill handle, per-cell formula engine v2
+  (dep graph, ~30 functions, tested), undo/redo + Intl formatting, concurrency guard. 5 phases.
 - **`comms-hub.md`** — Slack × Zoom × Meet inside WorkwrK: team chat (DMs/groups/channels) + video/audio
   calls, built LIGHT (Jitsi carries all media, polling-first realtime, 3 lean tables). Phase 0 (meeting
   calls + public guest door for external people and AI notetakers) is live; chat phases ship one at a time.

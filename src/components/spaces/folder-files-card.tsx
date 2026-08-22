@@ -66,6 +66,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
         const up = await fetch("/api/upload", { method: "POST", body: fd });
         if (!up.ok) { toast(`Couldn't upload ${f.name}`); continue; }
         const u = await up.json();
+      const s3KeyVal = typeof (u.s3Key ?? u.data?.s3Key) === "string" ? (u.s3Key ?? u.data?.s3Key) : null;
         const url = u.url ?? u.data?.url;
         if (!url) { toast(`Couldn't upload ${f.name}`); continue; }
         const res = await fetch("/api/files", {

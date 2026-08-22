@@ -4,6 +4,7 @@
 // Phase 89. FileEntry visibility-gates via its parent Space (Phase 22).
 
 import { NextResponse } from "next/server";
+import { withFreshFileUrls } from "@/lib/file-urls";
 import { z } from "zod";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -25,7 +26,7 @@ export async function GET() {
 
   const rows = await prisma.fileEntry.findMany({
     where: { organizationId: u.organizationId, id: { in: ids } },
-    select: { id: true, name: true, mimeType: true, size: true, url: true, spaceId: true },
+    select: { id: true, name: true, mimeType: true, size: true, url: true, s3Key: true, spaceId: true },
   });
   const accessLevel = u.accessLevel ?? "EMPLOYEE";
   const visible = (await Promise.all(
@@ -38,7 +39,8 @@ export async function GET() {
 
   const order = new Map(ids.map((id, i) => [id, i]));
   visible.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  return NextResponse.json({ files: visible });
+  const fresh = await withFreshFileUrls(visible);
+  return NextResponse.json({ files: fresh });
 }
 
 const bodySchema = z.object({

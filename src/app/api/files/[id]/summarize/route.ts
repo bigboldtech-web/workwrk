@@ -10,6 +10,7 @@
 // existing job system.
 
 import { NextRequest } from "next/server";
+import { withFreshFileUrl } from "@/lib/file-urls";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -24,13 +25,14 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
   const file = await prisma.fileEntry.findFirst({
     where: { id, organizationId: orgId },
-    select: { id: true, name: true, mimeType: true, url: true },
+    select: { id: true, name: true, mimeType: true, url: true, s3Key: true },
   });
   if (!file) return jsonError("not found", 404);
 
   let text: string;
   try {
-    text = await extractText(file.url, file.mimeType);
+    const freshFile = await withFreshFileUrl(file);
+    text = await extractText(freshFile.url, freshFile.mimeType);
   } catch (err) {
     console.error(`summarize: extract failed for ${file.id}`, err);
     return jsonError(err instanceof Error ? err.message : "extraction failed", 415);

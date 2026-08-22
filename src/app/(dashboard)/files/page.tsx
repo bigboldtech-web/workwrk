@@ -177,10 +177,13 @@ export default function FilesPage() {
         fd.append("file", f);
         const up = await fetch("/api/upload", { method: "POST", body: fd });
         if (!up.ok) { done += 1; setUploading(list.length - done); continue; }
-        const { url } = await up.json();
+        const { url, s3Key } = await up.json();
         await fetch("/api/files", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, url, folderId }),
+          body: JSON.stringify({
+            name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, url, folderId,
+            ...(typeof s3Key === "string" && s3Key ? { s3Key } : {}),
+          }),
         });
       } catch { /* skip */ }
       done += 1;

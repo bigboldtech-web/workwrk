@@ -25,6 +25,7 @@ export async function uploadDroppedFiles(
       const u = await up.json();
       const url = u.url ?? u.data?.url;
       if (!url) continue;
+      const s3Key = typeof (u.s3Key ?? u.data?.s3Key) === "string" ? (u.s3Key ?? u.data?.s3Key) : null;
       const res = await fetch("/api/files", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -33,6 +34,7 @@ export async function uploadDroppedFiles(
           mimeType: f.type || "application/octet-stream",
           size: f.size,
           url,
+          ...(s3Key ? { s3Key } : {}),
           ...(anchor.spaceFolderId ? { spaceFolderId: anchor.spaceFolderId } : {}),
           ...(anchor.spaceId && !anchor.spaceFolderId ? { spaceId: anchor.spaceId } : {}),
         }),

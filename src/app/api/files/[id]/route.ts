@@ -3,6 +3,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withFreshFileUrl } from "@/lib/file-urls";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
@@ -75,7 +76,7 @@ export async function PATCH(
   if (typeof body.description === "string" || body.description === null) data.description = body.description?.slice?.(0, 500) ?? null;
 
   const updated = await prisma.fileEntry.update({ where: { id }, data });
-  return jsonSuccess(updated);
+  return jsonSuccess(await withFreshFileUrl(updated));
 }
 
 export async function DELETE(

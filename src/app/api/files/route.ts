@@ -5,6 +5,7 @@
 // the DB record + folder placement. Star/rename/move/delete via [id].
 
 import { NextRequest } from "next/server";
+import { withFreshFileUrls } from "@/lib/file-urls";
 import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
@@ -52,7 +53,8 @@ export async function GET(req: NextRequest) {
     // Map each file back to one of its source items for "open task".
     const itemByFile = new Map<string, string>();
     for (const l of links) if (!itemByFile.has(l.targetId)) itemByFile.set(l.targetId, l.sourceId);
-    return jsonSuccess(files.map((f) => ({ ...f, itemId: itemByFile.get(f.id) ?? null })));
+    const fresh = await withFreshFileUrls(files);
+    return jsonSuccess(fresh.map((f) => ({ ...f, itemId: itemByFile.get(f.id) ?? null })));
   }
 
   const folderIdRaw = sp.get("folderId");
@@ -100,7 +102,8 @@ export async function GET(req: NextRequest) {
   const spInfo = spIds.length
     ? new Map((await prisma.space.findMany({ where: { id: { in: spIds } }, select: { id: true, name: true, slug: true } })).map((x) => [x.id, x]))
     : new Map<string, { id: string; name: string; slug: string }>();
-  const enriched = gated.map((f) => ({
+  const freshGated = await withFreshFileUrls(gated);
+  const enriched = freshGated.map((f) => ({
     ...f,
     spaceFolder: f.spaceFolderId && sfNames.has(f.spaceFolderId) ? { id: f.spaceFolderId, name: sfNames.get(f.spaceFolderId)! } : null,
     space: f.spaceId && !f.spaceFolderId && spInfo.has(f.spaceId) ? spInfo.get(f.spaceId)! : null,
@@ -120,6 +123,7 @@ export async function POST(req: NextRequest) {
   const mimeType = typeof body.mimeType === "string" ? body.mimeType : "application/octet-stream";
   const size = Number(body.size) || 0;
   const url = typeof body.url === "string" ? body.url : "";
+  const s3Key = typeof body.s3Key === "string" && body.s3Key ? body.s3Key.slice(0, 512) : null;
   const folderId = typeof body.folderId === "string" && body.folderId ? body.folderId : null;
   let spaceId = typeof body.spaceId === "string" && body.spaceId ? body.spaceId : null;
   const spaceFolderId = typeof body.spaceFolderId === "string" && body.spaceFolderId ? body.spaceFolderId : null;
@@ -153,7 +157,8 @@ export async function POST(req: NextRequest) {
   }
 
   const entry = await prisma.fileEntry.create({
-    data: { organizationId: orgId, name, mimeType, size, url, folderId, spaceId, spaceFolderId, uploadedById: userId, description },
+    data: { organizationId: orgId, name, mimeType, size, url,
+      s3Key, folderId, spaceId, spaceFolderId, uploadedById: userId, description },
   });
 
   return jsonSuccess(entry, 201);

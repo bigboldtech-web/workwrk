@@ -533,6 +533,7 @@ export function CreateTaskModal() {
           const fd = new FormData();
           fd.append("file", file);
           const up = await fetch("/api/upload", { method: "POST", body: fd }).then((r) => r.json());
+          const s3KeyVal = typeof (up.s3Key ?? up.data?.s3Key) === "string" ? (up.s3Key ?? up.data?.s3Key) : null;
           const entry = await fetch("/api/files", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -541,6 +542,7 @@ export function CreateTaskModal() {
               mimeType: file.type || "application/octet-stream",
               size: up.size ?? file.size,
               url: up.url,
+          ...(s3KeyVal ? { s3Key: s3KeyVal } : {}),
               spaceId: selectedList?.spaceId ?? undefined,
             }),
           }).then((r) => r.json());
