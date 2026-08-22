@@ -33,6 +33,7 @@ import { MenuList, MenuItem } from "@/components/ui/menu";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { createTableEngine, columnLetter, type StructureResult, type TableEngine } from "@/lib/sheet-engine-host";
 import { createSerialQueue } from "@/lib/sheet-serial-queue";
+import { streamRows } from "@/lib/sheet-stream";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
 import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
@@ -354,6 +355,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const writeQueueRef = useRef(createSerialQueue());
   useEffect(() => { writeQueueRef.current = createSerialQueue(); }, [tableId]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /* ── Phase 5a streaming transport (docs/plans/tables.md, amended
+   * decision): rows arrive in keyset chunks until the WHOLE table is
+   * resident. loadGenRef guards every async effect of load() — a refetch
+   * started during a slow stream must never interleave rows into the newer
+   * load. streamProgress is non-null ONLY while a MULTI-chunk stream is in
+   * flight; it is both the tab-bar progress line's data and the honesty
+   * flag: while set, computed cells render a pending mark, because the
+   * engine host still holds the pre-stream world and any value it produced
+   * would come from a partial (or previous) row set. */
+  const loadGenRef = useRef(0);
+  const [streamProgress, setStreamProgress] = useState<{ loaded: number; total: number | null } | null>(null);
   const [savingCols, setSavingCols] = useState(false);
   const [search, setSearch] = useState("");
   const [sortState, setSortState] = useState<SheetSort>(null);
@@ -441,28 +453,111 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   const load = useCallback(async () => {
     if (!tableId) return;
+    // Every load owns a generation. Chunk application and ALL completion
+    // effects below check it and bail when superseded, so a refetch that
+    // starts during a slow stream can never interleave rows or rebuild the
+    // engine over the newer load's world.
+    const gen = ++loadGenRef.current;
     try {
-      const [tRes, rRes] = await Promise.all([
-        fetch(`/api/tables/${tableId}`),
-        fetch(`/api/tables/${tableId}/rows`),
-      ]);
+      // One page of the Phase 5a row stream. Tolerates the pre-stream
+      // server shape (bare {data}, no nextCursor) as a single-chunk stream.
+      const fetchRowPage = async (cursor: string | null) => {
+        // A superseded stream stops fetching at its next page turn.
+        if (gen !== loadGenRef.current) throw new Error("superseded");
+        const url = cursor === null
+          ? `/api/tables/${tableId}/rows`
+          : `/api/tables/${tableId}/rows?cursor=${encodeURIComponent(cursor)}`;
+        const rRes = await fetch(url);
+        if (!rRes.ok) throw new Error(`HTTP ${rRes.status}`);
+        const rd = await rRes.json();
+        return {
+          data: (Array.isArray(rd.data) ? rd.data : Array.isArray(rd) ? rd : []) as unknown[],
+          nextCursor: typeof rd.nextCursor === "string" ? rd.nextCursor : null,
+          total: typeof rd.total === "number" ? rd.total : undefined,
+        };
+      };
+      // The table fetch and the FIRST row page run in parallel — the same
+      // wire timing as the old Promise.all — and the stream helper then
+      // consumes the pre-started page as page one.
+      let firstPage: ReturnType<typeof fetchRowPage> | null = fetchRowPage(null);
+      // If the table fetch throws first, the abandoned page must not
+      // surface as an unhandled rejection; awaiting it later still throws.
+      firstPage.catch(() => undefined);
+      const tRes = await fetch(`/api/tables/${tableId}`);
       if (!tRes.ok) throw new Error(`HTTP ${tRes.status}`);
       const td = await tRes.json();
-      const rd = await rRes.json();
       const t: ApiTable = td.data ?? td;
       t.columns = Array.isArray(t.columns) ? t.columns : [];
-      const rowsArr: ApiRow[] = rd.data ?? (Array.isArray(rd) ? rd : []);
-      setTable(t);
-      commitRows(rowsArr);
-      // Bulk data arrival (initial load, refetch, CSV import's reload) is a
-      // swap trigger: rebuild the host once from server truth. This also
-      // heals any host/state drift, which is why every failure path reloads.
-      rebuildEngine(t.columns, rowsArr);
+      if (gen !== loadGenRef.current) return;
+
+      /* THE HONESTY RULE: rows appear progressively, but the engine host is
+       * rebuilt exactly ONCE, after the FINAL chunk — the formula engine is
+       * client-side and a value computed over a partial row set would be
+       * silently wrong (the one forbidden sin). A single-chunk stream —
+       * every table within the old 5k ceiling — buffers its one chunk and
+       * applies it below in the exact pre-stream order, so today's tables
+       * render identically, with no pending state ever shown. */
+      let firstChunk: ApiRow[] | null = null;
+      let multi = false;
+      const allRows = await streamRows(
+        (cursor) => {
+          if (firstPage !== null) { const p = firstPage; firstPage = null; return p; }
+          return fetchRowPage(cursor);
+        },
+        (chunk, loaded, total) => {
+          if (gen !== loadGenRef.current) return; // superseded: drop; fetchRowPage ends the loop
+          const rowsChunk = chunk as ApiRow[];
+          if (!multi && firstChunk === null && (total === null || loaded >= total)) {
+            // First chunk and the count says this is the whole table: hold
+            // it for the single-shot path after the stream resolves.
+            firstChunk = rowsChunk;
+            return;
+          }
+          if (!multi) {
+            // The stream just proved itself multi-chunk: show the table
+            // shell now and let the grid fill as chunks land. Computed
+            // cells render pending (streamProgress gates them) until the
+            // completion rebuild.
+            multi = true;
+            setTable(t);
+            commitRows(firstChunk ? [...firstChunk, ...rowsChunk] : rowsChunk);
+            firstChunk = null;
+          } else {
+            commitRows((prev) => [...(prev ?? []), ...rowsChunk]);
+          }
+          setStreamProgress({ loaded, total });
+        },
+      );
+      if (gen !== loadGenRef.current) return; // a newer load owns every effect below
+      if (!multi) {
+        // Single chunk: the pre-stream sequence, byte-for-byte — table,
+        // rows and engine land together. (The progress clear is a no-op
+        // here unless this load superseded a mid-stream one.)
+        setStreamProgress(null);
+        const rowsArr = (firstChunk ?? allRows) as ApiRow[];
+        setTable(t);
+        commitRows(rowsArr);
+        // Bulk data arrival (initial load, refetch, CSV import's reload) is a
+        // swap trigger: rebuild the host once from server truth. This also
+        // heals any host/state drift, which is why every failure path reloads.
+        rebuildEngine(t.columns, rowsArr);
+      } else {
+        // Completion rebuild reads rowsRef, NOT allRows: value edits made
+        // while streaming went through commitRows into the mirror, and
+        // commitRows is synchronous — every chunk append of this generation
+        // has already landed by the time the stream resolves.
+        setStreamProgress(null);
+        rebuildEngine(t.columns, rowsRef.current ?? []);
+      }
       const savedViews: SavedView[] = Array.isArray(t.views) && t.views.length ? t.views : [{ id: "default", name: "Grid", type: "grid" }];
       viewsRef.current = savedViews;
       setSortState(savedViews[0]?.config?.sort ?? null);
       savedColumnsRef.current = t.columns;
     } catch (e) {
+      // A stale stream that failed (or was deliberately aborted by the
+      // generation check) must not touch the newer load's UI.
+      if (gen !== loadGenRef.current) return;
+      setStreamProgress(null);
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
   }, [tableId, commitRows, rebuildEngine]);
@@ -749,14 +844,29 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (missing.length === 0) return;
     void Promise.all(missing.map(async (id) => {
       try {
-        const [tRes, rRes] = await Promise.all([fetch(`/api/tables/${id}`), fetch(`/api/tables/${id}/rows`)]);
+        // Rows stream to COMPLETION before the table enters linkedTables —
+        // a rollup aggregates these rows client-side, so a partial set here
+        // would be the same silent-aggregate sin the main grid guards
+        // against. Until then relationalValue keeps rendering its "…".
+        const [tRes, rs] = await Promise.all([
+          fetch(`/api/tables/${id}`),
+          streamRows(async (cursor) => {
+            const rRes = await fetch(cursor === null
+              ? `/api/tables/${id}/rows`
+              : `/api/tables/${id}/rows?cursor=${encodeURIComponent(cursor)}`);
+            if (!rRes.ok) throw new Error(`HTTP ${rRes.status}`);
+            const rd = await rRes.json();
+            return {
+              data: (Array.isArray(rd.data) ? rd.data : Array.isArray(rd) ? rd : []) as unknown[],
+              nextCursor: typeof rd.nextCursor === "string" ? rd.nextCursor : null,
+            };
+          }, () => undefined),
+        ]);
         if (!tRes.ok) return null;
         const td = await tRes.json();
-        const rd = await rRes.json();
         const t = td.data ?? td;
         const columns: Column[] = Array.isArray(t.columns) ? t.columns : [];
-        const rs: ApiRow[] = rd.data ?? (Array.isArray(rd) ? rd : []);
-        return { id, name: t.name as string, columns, titleColId: titleColumnId(columns), rows: rs } as LinkedTable;
+        return { id, name: t.name as string, columns, titleColId: titleColumnId(columns), rows: rs as ApiRow[] } as LinkedTable;
       } catch { return null; }
     })).then((results) => {
       if (!active) return;
@@ -1595,6 +1705,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  byte-for-byte. Sort/formulas always read raw either way. */
   function exportCsv(formatted: boolean) {
     if (!table || rows === null) return;
+    // Streaming honesty gate: a CSV cut mid-stream would be a silently
+    // partial table, and computed cells would read a stale engine. Refuse
+    // out loud instead; the stream completes in seconds.
+    if (streamProgress) { toast("Rows are still loading, try again in a moment"); return; }
     // Anonymous columns export under their letter, like Excel would —
     // an empty header cell would make the file unreadable elsewhere.
     const headers = table.columns.map((c, i) => csvEscape(c.label || columnLetter(i))).join(",");
@@ -1697,9 +1811,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           const v = r.values[c.id];
           if (v === undefined || v === null) return false;
           // Search matches what the user SEES in a formula cell, not its
-          // stored object.
+          // stored object. Mid-stream the host is empty (fresh) or one
+          // world behind (refetch), so formula cells sit search-dark until
+          // the set completes rather than matching against stale values.
           const text = isFormulaCell(v)
-            ? String(engineHost.display(c.id, r.id) ?? "")
+            ? (streamProgress ? "" : String(engineHost.display(c.id, r.id) ?? ""))
             : String(Array.isArray(v) ? v.join(" ") : v);
           return text.toLowerCase().includes(q);
         }),
@@ -1713,7 +1829,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       });
     }
     return list;
-  }, [rows, table?.columns, search, filterCol, filterValue, engineHost, engineVersion]);
+  }, [rows, table?.columns, search, filterCol, filterValue, engineHost, engineVersion, streamProgress]);
 
   const sortedRows = useMemo(() => {
     void engineVersion; // computed sort keys change when the host mutates
@@ -1870,6 +1986,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // column, renders the engine host's display value (a cycle renders its
     // #CYCLE! error here rather than hanging a recalc).
     if (c.type === "formula" || isFormulaCell(v)) {
+      // Streaming honesty gate: while a multi-chunk stream is in flight the
+      // host still holds the pre-stream world, so any computed value would
+      // come from a partial (or previous) row set. Neutral pending mark
+      // until the completion rebuild lands.
+      if (streamProgress) return <span style={{ color: "var(--os-ink-3)" }}>…</span>;
       const fv = String(engineHost.display(c.id, r.id) ?? "");
       if (fv.startsWith("#")) return <span style={NEGATIVE_RED}>{fv}</span>;
       // A formula cell formats by its COLUMN's format (Phase 4): numbers
@@ -1931,6 +2052,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const r = rowById.get(rowId);
     if (!r) return undefined;
     const v = r.values[c.id];
+    // Streaming honesty gate: a rule must not paint from a computed value
+    // we refuse to display (the host is stale until the completion rebuild).
+    if (streamProgress && (c.type === "formula" || isFormulaCell(v))) return undefined;
     const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
     const bg = matchRule(raw, c.rules);
     if (!bg) return undefined;
@@ -1953,6 +2077,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // EXCEL's A1 — cross-app source transfer is a later feature, and the
     // display value at least round-trips as the literal the user saw.
     if (col.type === "formula" || isFormulaCell(v)) {
+      // Streaming honesty gate: copy copies what the user sees, and during
+      // a stream that is the pending mark — never a stale computed value.
+      if (streamProgress) return "…";
       return String(engineHost.display(col.id, r.id) ?? "");
     }
     switch (col.type) {
@@ -2323,7 +2450,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // the user must see what their edit replaces), and a "=" seed opens the
     // formula editor in ANY editable cell: number/date/choice editors cannot
     // even type "=", so the formula editor takes over for them.
-    const hasFormula = engineHost.isFormulaCell(colId, rowId);
+    // Raw stored shape FIRST: during a multi-chunk stream (or a refetch's
+    // stale window) the host doesn't know this table's cells yet, and a
+    // plain editor opened on an unrecognized formula cell would commit a
+    // literal over it — silent destruction. The {"=": ...} shape is
+    // stream-independent truth; the host only ADDS formula-column fills.
+    const rawStored = r.values[colId];
+    const rawFormula = isFormulaCell(rawStored);
+    const hasFormula = rawFormula || engineHost.isFormulaCell(colId, rowId);
     const formulaSeed = opts.seed != null && opts.seed.trimStart().startsWith("=");
     if (hasFormula || formulaSeed) {
       // cellSource returns "=SRC" (with the "=") for any computed cell. ANY
@@ -2331,7 +2465,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // from what was typed, exactly like the plain editors — while the
       // commit baseline stays the ORIGINAL source, so a seeded value that is
       // left as-is still commits (and Escape still cancels via the ref).
-      const src = hasFormula ? String(engineHost.cellSource(colId, rowId) ?? "=") : "";
+      // The raw source outranks the host's: raw is current-world truth even
+      // while the host is empty (fresh stream) or one world behind (refetch).
+      const src = hasFormula
+        ? (rawFormula ? `=${rawStored[FORMULA_KEY]}` : String(engineHost.cellSource(colId, rowId) ?? "="))
+        : "";
       // The toolbar's Σ rides the kernel's own type-to-replace: it
       // dispatched the "=" keydown that opened this editor, and the ref
       // upgrades that one-char seed to "=SUM(". The upgrade is snapshotted
@@ -2619,7 +2757,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       <SheetTabsBar
         currentId={tableId}
         currentName={table.name}
-        meta={`${rows.length} row${rows.length === 1 ? "" : "s"} · ${table.columns.length} col${table.columns.length === 1 ? "" : "s"}`}
+        meta={streamProgress
+          // Multi-chunk stream in flight: the muted meta span doubles as the
+          // Sheets-like progress line; the normal counts return on completion.
+          ? (streamProgress.total !== null
+            ? `Loading rows — ${streamProgress.loaded.toLocaleString()} of ${streamProgress.total.toLocaleString()}`
+            : `Loading rows — ${streamProgress.loaded.toLocaleString()}…`)
+          : `${rows.length} row${rows.length === 1 ? "" : "s"} · ${table.columns.length} col${table.columns.length === 1 ? "" : "s"}`}
       />
 
       {rowMenu ? (
@@ -2662,7 +2806,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             }
             if (Object.keys(literals).length > 0) void patchRow(activeRow.id, literals);
           }}
-          formulaDisplay={(colId) => String(engineHost.display(colId, activeRow.id) ?? "")}
+          formulaDisplay={(colId) => streamProgress ? "…" : String(engineHost.display(colId, activeRow.id) ?? "")}
           onDelete={() => { void deleteRow(activeRow.id); setActiveRowId(null); }}
         />
       )}

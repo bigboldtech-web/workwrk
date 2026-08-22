@@ -72,14 +72,25 @@ made before Phase 5's 50k target:
 Recommendation: (a), because Tables is sold as a spreadsheet and silently
 sorting a partial set is a correctness bug, not a perf trade.
 
-**DECIDED 2026-08-22 (delegated call): (a) server sort + keyset pagination.**
-Sorting a partial set is a correctness bug and Tables is sold as a
-spreadsheet — options (b)/(c) trade correctness or add a mode seam users
-can hit mid-scroll. Implementation lands with Phase 5 (after the recalc-
-perf gate below): sort + filter move server-side, `GET /rows` keysets on
-`position` (or the sort key + position tiebreak), views[0].config.sort
-stays the persisted source of truth. The engine is unaffected either way —
-it is built from UNSORTED storage order by design.
+**DELIVERED in Phase 5a (2026-08-22):** keyset streaming shipped per the
+amended decision below: transport only, the full table always ends up
+resident client-side, client sort intact, engine rebuilt once after the
+final chunk (computed cells render pending while a multi-chunk stream is
+in flight).
+
+**DECIDED 2026-08-22, AMENDED same night: (b)-shaped — keyset pagination
+as STREAMING TRANSPORT, full table always resident, client sort stays.**
+The first call was (a) server sort; scoping the implementation surfaced
+the architectural fact that overrules it: the formula engine is CLIENT-
+side (locked in §2), and `SUM([Amount])` needs every row in the browser.
+A true server-side window would make aggregates silently wrong — the one
+sin this product must never commit — and moving evaluation server-side
+is a different product. So `GET /rows` keysets on `position` purely as
+transport: the page streams chunks until the WHOLE table is loaded
+(progress surfaced while partial), the 5k ceiling dies, client sort is
+correct the moment loading completes, and the engine keeps its unsorted
+storage-order world. Server sort is NOT built. The real 50k limits are
+payload and engine-pass time — both measured, both fine post-caching.
 
 ### Phase 1 (original scope, for reference)
 Virtualized grid (rows + columns), active cell + anchor + range selection
