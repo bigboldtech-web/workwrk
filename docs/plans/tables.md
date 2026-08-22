@@ -1,6 +1,6 @@
 # Tables — Sheets/Excel-grade spreadsheets in WorkwrK
 
-**Date:** 2026-08-22 · **Status:** Phase 1 SHIPPED (95c9961) · Phase 2 IN BUILD
+**Date:** 2026-08-22 · **Status:** Phase 1 + 2 SHIPPED · Phase 3 engine merged (UI wave next)
 **Mandate (user):** "Like Google Sheets and Excel basically where I can add formulas, do stuffs — and we'll call it Tables."
 
 ---
@@ -144,6 +144,33 @@ close, and the mitigation is recoverability, not a permission tier:
   existing Trash surface.
 Revisit the permission tier only if a customer asks for locked/published
 tables — that is a per-table lock feature, not a Space-role change.
+
+## 3b. Phase 3 Wave 1 — engine merged, NOT yet wired (2026-08-22)
+
+`src/lib/sheet-engine/` (tokenizer, parser, coerce, 36-function library,
+evaluate, dependency graph, ref rewriting, facade) with **441 tests** — the
+old engine shipped with none. Nothing imports it yet: `sheet-formula.ts`
+stays live and the UI is untouched, so this carries no user-visible risk.
+vitest was added to make "Engine is pure + tested" real (`npm test`).
+
+**Semantics decided while fixing the review's blocking finding.** A bare
+`[Header]` ref narrows to the CURRENT ROW in a scalar parameter and means
+the whole column only inside an aggregate (SUM/AVERAGE/MIN/MAX/COUNT/COUNTA)
+or an explicit positional range (COUNTIF/SUMIF/AVERAGEIF/VLOOKUP/INDEX/
+MATCH). CONCAT/AND/OR are deliberately row-narrowing: in a table
+`=CONCAT([First]," ",[Last])` and `=AND([Active],[Approved])` are the common
+formulas, and an explicit range (`CONCAT(B1:B3)`) still folds a column where
+that is actually wanted. The review recommended the opposite; it was wrong
+for a table product, and the existing test asserting row-narrowing was right.
+
+**Known follow-ups for the UI wave (not blocking the merge):**
+- `NOW()`/`TODAY()` are evaluated per call, not once per recalc, so a pass
+  spanning midnight can yield two different `TODAY()` values in one table.
+  Capture the clock once when the recalc starts.
+- `SUMIF`/`COUNTIF`/`AVERAGEIF` swallow errors that `SUM` propagates. Pick
+  one policy (Sheets propagates) and make the conditional aggregates match.
+- Arity failures now report `#N/A` everywhere (was `#VALUE!` in the
+  evaluator, `#N/A` in the library — they disagreed).
 
 ## 4. Rollout discipline
 

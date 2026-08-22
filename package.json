@@ -20,7 +20,9 @@
     "db:studio": "prisma studio",
     "build:extension": "node scripts/build-extension-zip.mjs",
     "scribe:backfill": "tsx scripts/backfill-scribe-screenshots.ts",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
@@ -118,7 +120,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.7"
   },
   "overrides": {
     "next-auth": {
