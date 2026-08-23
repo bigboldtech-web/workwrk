@@ -28,7 +28,7 @@ import {
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
   Globe, Lock, Sigma, Star, Link2, Check,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown,
-  ArrowDownAZ, ArrowUpZA, X,
+  ArrowDownAZ, ArrowUpZA, X, Pencil,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -3264,8 +3264,30 @@ function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: stri
   const router = useRouter();
   const { toast } = useOsToast();
   const { bumpRowVersion } = useOsShell();
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
   const [sheets, setSheets] = useState<{ id: string; name: string }[] | null>(null);
   const [creating, setCreating] = useState(false);
+  // Right-click a tab (Sheets' own model): Rename / Delete. Before this
+  // menu existed there was NO way to delete a spreadsheet anywhere in the
+  // UI — the DELETE route sat unused.
+  const [tabMenu, setTabMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
+  const tabMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
+  const tabMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!tabMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (tabMenuPanelRef.current?.contains(e.target as Node)) return;
+      setTabMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setTabMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [tabMenu]);
 
   const load = useCallback(async () => {
     try {
@@ -3301,6 +3323,41 @@ function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: stri
     return list;
   }, [sheets, currentId, currentName]);
 
+  const renameSheet = async (id: string, name: string) => {
+    const next = await promptDialog({ title: "Rename sheet", defaultValue: name || UNTITLED_SHEET_NAME });
+    if (next == null) return;
+    const trimmed = next.trim() || UNTITLED_SHEET_NAME;
+    if (trimmed === name) return;
+    try {
+      const res = await fetch(`/api/tables/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      if (id === currentId) router.refresh();
+    } catch { toast("Couldn't rename sheet"); }
+  };
+
+  /** DELETE is a soft delete server-side (moveToTrash), so this is
+   *  recoverable — the confirm still names it as a deletion because that
+   *  is what the user sees. Deleting the OPEN sheet navigates to the next
+   *  tab (or the overview when it was the last one). */
+  const deleteSheet = async (id: string, name: string) => {
+    const label = name || UNTITLED_SHEET_NAME;
+    if (!(await confirm({ title: "Delete sheet", description: `Delete "${label}"? It moves to Trash.`, destructive: true, confirmLabel: "Delete" }))) return;
+    try {
+      const res = await fetch(`/api/tables/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`DELETE ${res.status}`);
+      const remaining = (sheets ?? []).filter((s) => s.id !== id);
+      setSheets(remaining);
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      if (id === currentId) router.push(remaining[0] ? `/tables/${remaining[0].id}` : "/tables");
+    } catch { toast("Couldn't delete sheet"); }
+  };
+
   const addSheet = async () => {
     if (creating) return; // double-click guard: one "+" press, one sheet
     setCreating(true);
@@ -3328,12 +3385,21 @@ function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: stri
             type="button"
             className={`shx__tab ${s.id === currentId ? "is-active" : ""}`}
             onClick={() => { if (s.id !== currentId) router.push(`/tables/${s.id}`); }}
+            onContextMenu={(e) => { e.preventDefault(); setTabMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
             title={s.name || UNTITLED_SHEET_NAME}
           >
             {s.name || UNTITLED_SHEET_NAME}
           </button>
         ))}
       </div>
+      {tabMenu ? (
+        <MorePortal anchorRef={tabMenuAnchorRef} panelRef={tabMenuPanelRef} width={180} open placement="below" point={{ x: tabMenu.x, y: tabMenu.y }}>
+          <MenuList className="min-w-[180px]">
+            <MenuItem icon={Pencil} label="Rename" onClick={() => { const t = tabMenu; setTabMenu(null); void renameSheet(t.id, t.name); }} />
+            <MenuItem icon={Trash2} label="Delete sheet" destructive onClick={() => { const t = tabMenu; setTabMenu(null); void deleteSheet(t.id, t.name); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
       {stats ? (
         /* Selection stats: reuses the meta span's class so the cluster
            inherits the strip's flex push (tabs own all free space, so the

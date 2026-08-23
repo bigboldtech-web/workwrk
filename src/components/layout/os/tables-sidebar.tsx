@@ -12,11 +12,14 @@ import { createUntitledSheet } from "@/lib/sheet-new";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, Plus, Table2 } from "lucide-react";
+import { LayoutGrid, Pencil, Plus, Table2, Trash2 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh, notifyTablesChanged } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
+import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
+import { MenuList, MenuItem } from "@/components/ui/menu";
+import { MorePortal } from "./more-portal";
 
 type SheetRow = {
   id: string;
@@ -78,6 +81,61 @@ export function TablesSidebar() {
     void load();
   }, [pathname, sheets, load]);
 
+  // Right-click a worksheet row: Rename / Delete (Sheets' tab menu, mirrored
+  // here so the sidebar can manage sheets without opening them). DELETE is
+  // a soft delete (Trash) server-side.
+  const confirm = useConfirm();
+  const promptDialog = usePrompt();
+  const [rowMenu, setRowMenu] = useState<{ id: string; name: string; x: number; y: number } | null>(null);
+  const rowMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
+  const rowMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!rowMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (rowMenuPanelRef.current?.contains(e.target as Node)) return;
+      setRowMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setRowMenu(null); };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [rowMenu]);
+
+  const renameSheet = useCallback(async (id: string, name: string) => {
+    const next = await promptDialog({ title: "Rename sheet", defaultValue: name || "Untitled spreadsheet" });
+    if (next == null) return;
+    const trimmed = next.trim() || "Untitled spreadsheet";
+    if (trimmed === name) return;
+    try {
+      const res = await fetch(`/api/tables/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) throw new Error(`PATCH ${res.status}`);
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      if (pathname === `/tables/${id}`) router.refresh();
+    } catch { toast("Couldn't rename sheet"); }
+  }, [promptDialog, bumpRowVersion, pathname, router, toast]);
+
+  const deleteSheet = useCallback(async (id: string, name: string) => {
+    const label = name || "Untitled spreadsheet";
+    if (!(await confirm({ title: "Delete sheet", description: `Delete "${label}"? It moves to Trash.`, destructive: true, confirmLabel: "Delete" }))) return;
+    try {
+      const res = await fetch(`/api/tables/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`DELETE ${res.status}`);
+      const remaining = (sheets ?? []).filter((s) => s.id !== id);
+      setSheets(remaining);
+      notifyTablesChanged();
+      bumpRowVersion("tables");
+      // Deleting the OPEN sheet: land on the next one, or the overview.
+      if (pathname === `/tables/${id}`) router.push(remaining[0] ? `/tables/${remaining[0].id}` : "/tables");
+    } catch { toast("Couldn't delete sheet"); }
+  }, [confirm, sheets, bumpRowVersion, pathname, router, toast]);
+
   const createSheetBusyRef = useRef(false);
   const createSheet = useCallback(async () => {
     // Promptless create means a double-click would fire two POSTs and mint
@@ -135,6 +193,7 @@ export function TablesSidebar() {
                   className={`flex items-center gap-2 h-7 px-2 rounded-md text-[14px] ${
                     active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
                   }`}
+                  onContextMenu={(e) => { e.preventDefault(); setRowMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
                 >
                   <Table2 className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
                   <span className="truncate flex-1">{s.name || "Untitled"}</span>
@@ -144,6 +203,15 @@ export function TablesSidebar() {
           })}
         </ul>
       )}
+
+      {rowMenu ? (
+        <MorePortal anchorRef={rowMenuAnchorRef} panelRef={rowMenuPanelRef} width={180} open placement="below" point={{ x: rowMenu.x, y: rowMenu.y }}>
+          <MenuList className="min-w-[180px]">
+            <MenuItem icon={Pencil} label="Rename" onClick={() => { const m = rowMenu; setRowMenu(null); void renameSheet(m.id, m.name); }} />
+            <MenuItem icon={Trash2} label="Delete sheet" destructive onClick={() => { const m = rowMenu; setRowMenu(null); void deleteSheet(m.id, m.name); }} />
+          </MenuList>
+        </MorePortal>
+      ) : null}
 
       {/* Secondary escape hatch back to the card overview. */}
       <div className="mt-3 border-t border-zinc-100 pt-2">
