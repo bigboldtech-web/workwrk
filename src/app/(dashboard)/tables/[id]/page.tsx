@@ -37,6 +37,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
   TextAlignStart, TextAlignCenter, TextAlignEnd,
   ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
+  Pin, PinOff,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -85,8 +86,33 @@ type Column = {
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
 type ViewType = "grid" | "kanban" | "calendar" | "gallery";
-type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string } } };
+/** Freeze panes (Sheets' View → Freeze): display-index COUNTS of leading
+ *  rows/columns pinned while the rest scrolls. Display-only — the engine
+ *  never sees it, and it makes no undo entry (Sheets doesn't undo a freeze
+ *  either; the menu's Unfreeze is the way back). */
+type SheetFreeze = { rows?: number; cols?: number };
+type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; freeze?: SheetFreeze } };
 type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
+
+/** A freeze is only meaningful while at least ONE row and ONE column can
+ *  still scroll — a sheet that is entirely frozen band is a sheet that
+ *  cannot be scrolled at all. So the saved counts clamp to rowCount-1 /
+ *  colCount-1 against whatever exists NOW (rows deleted since the freeze
+ *  was saved, a filter hiding most rows, a legacy view JSON with junk in
+ *  the slot). Drops to null when nothing survives, so callers can treat
+ *  "no freeze" as one falsy shape. */
+function clampFreeze(f: SheetFreeze | null | undefined, rowCount: number, colCount: number): SheetFreeze | null {
+  if (!f || typeof f !== "object") return null;
+  const clampOne = (n: unknown, max: number) =>
+    typeof n === "number" && Number.isFinite(n) ? Math.min(Math.max(0, Math.floor(n)), Math.max(0, max)) : 0;
+  const rows = clampOne(f.rows, rowCount - 1);
+  const cols = clampOne(f.cols, colCount - 1);
+  if (rows <= 0 && cols <= 0) return null;
+  const out: SheetFreeze = {};
+  if (rows > 0) out.rows = rows;
+  if (cols > 0) out.cols = cols;
+  return out;
+}
 type ApiRow = { id: string; values: Record<string, unknown>; position: number };
 
 type OrgUser = { id: string; firstName?: string | null; lastName?: string | null; avatar?: string | null };
@@ -450,6 +476,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const viewsRef = useRef<SavedView[]>([]);
   const [filterCol, setFilterCol] = useState<string>("");
   const [filterValue, setFilterValue] = useState<string>("");
+  // Freeze panes, as PERSISTED (the render-time clamp against the live
+  // display is gridFreeze below). Null = nothing frozen.
+  const [freeze, setFreeze] = useState<SheetFreeze | null>(null);
   /* Live selection from the kernel: ORDERED display rowIds plus the
    * inclusive column-index span (contract shape), null when selection
    * clears. Feeds the Sheets-style stats cluster in the bottom tab bar. */
@@ -668,6 +697,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         ? savedFilter : null;
       setFilterCol(liveFilter?.colId ?? "");
       setFilterValue(liveFilter?.value ?? "");
+      // Freeze restores from the same first-view config, clamped against the
+      // rows/columns that exist NOW (rowsRef is already the full table: both
+      // stream paths above commit synchronously before this line) — a freeze
+      // saved on a bigger sheet must not freeze everything that's left.
+      setFreeze(clampFreeze(savedViews[0]?.config?.freeze, (rowsRef.current ?? []).length, t.columns.length));
       savedColumnsRef.current = t.columns;
     } catch (e) {
       // A stale stream that failed (or was deliberately aborted by the
@@ -1220,6 +1254,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const filter = colId && value ? { colId, value } : undefined;
     const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
     const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, filter } } : v));
+    viewsRef.current = next;
+    void patchTable({ views: next });
+  };
+
+  /** Freeze rides the same first-view config JSON (persistSort is the
+   *  template): written eagerly, `undefined` drops the key so an unfreeze
+   *  reaches the server as an absent slot. No undo entry on purpose —
+   *  Sheets doesn't undo freezes either, and a freeze touches no data.
+   *  A null/empty freeze and an all-zero one both persist as absent. */
+  const persistFreeze = (patch: Partial<SheetFreeze>) => {
+    const merged: SheetFreeze = { ...(freeze ?? {}), ...patch };
+    const nextFreeze = merged.rows || merged.cols
+      ? { ...(merged.rows ? { rows: merged.rows } : {}), ...(merged.cols ? { cols: merged.cols } : {}) }
+      : null;
+    setFreeze(nextFreeze);
+    const cur: SavedView[] = viewsRef.current.length ? viewsRef.current : [{ id: "default", name: "Grid", type: "grid" }];
+    const next = cur.map((v, i) => (i === 0 ? { ...v, config: { ...v.config, freeze: nextFreeze ?? undefined } } : v));
     viewsRef.current = next;
     void patchTable({ views: next });
   };
@@ -2816,6 +2867,31 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       return r && col ? cellText(col, r) : "";
     }));
 
+  /** The kernel's Ctrl/Cmd+Arrow data-edge jump asks "is this cell empty?"
+   *  and the answer comes from the MIRROR, not the DOM: stored
+   *  null/undefined/"" (or an empty list) is empty; a formula cell — a
+   *  per-cell "=…" in any column, or any cell of a formula column — is
+   *  NON-empty even when it evaluates to "", because Sheets stops on a
+   *  formula (the cell has content). Numbers and booleans are content
+   *  (an unchecked checkbox is FALSE, not blank). Computed relational
+   *  columns answer with the same text the clipboard reads, so what copies
+   *  as "" also jumps as empty. */
+  // Cmd+Arrow across a long column calls this per cell: O(1) column lookup.
+  // Plain Map, not useMemo — this sits after the component's early returns
+  // where hooks are illegal; a few dozen columns per render is nothing.
+  const colByIdForEmpty = new Map(table.columns.map((c) => [c.id, c]));
+  const isCellEmpty = (rowId: string, colId: string): boolean => {
+    const r = rowById.get(rowId);
+    if (!r) return true;
+    const v = r.values[colId];
+    if (isFormulaCell(v)) return false;
+    const c = colByIdForEmpty.get(colId);
+    if (c?.type === "formula") return false;
+    if (c && (c.type === "lookup" || c.type === "rollup")) return cellText(c, r) === "";
+    if (Array.isArray(v)) return v.length === 0;
+    return v == null || v === "";
+  };
+
   /** Write a matrix anchored at topLeft, walking DOWN the current display
    *  order (sortedRows) — the grid may be sorted or filtered, and Phase 1
    *  keys everything by rowId for exactly this reason.
@@ -3196,6 +3272,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const rowMenuSpan = rowMenu && gridSelection && gridSelection.rowIds.length > 1 && gridSelection.rowIds.includes(rowMenu.rowId)
     ? gridSelection.rowIds
     : null;
+  // What the grid actually freezes: the persisted counts re-clamped against
+  // the LIVE display (a filter can shrink the row list below the saved
+  // freeze; the persisted value survives so clearing the filter restores
+  // it). Display-index counts, so a sorted/filtered sheet freezes its first
+  // N DISPLAYED rows, exactly like Sheets freezes by position.
+  const gridFreeze = clampFreeze(freeze, sortedRows.length, table.columns.length);
+  // "Freeze up to row N": N is the clicked row's DISPLAY number; offered
+  // only while at least one row would remain scrollable, matching the
+  // kernel's own clamp so the menu never promises a freeze it can't make.
+  const rowMenuDisplayIdx = rowMenu ? sortedRows.findIndex((r) => r.id === rowMenu.rowId) : -1;
+  const rowMenuCanFreeze = rowMenuDisplayIdx >= 0 && rowMenuDisplayIdx + 1 <= sortedRows.length - 1;
   const FMT_STREAM_TITLE = "Rows are still loading — formatting is available once they finish";
   let barCell: FormulaBarCell | null = null;
   if (activeCell && activeColDef && activeCellRow) {
@@ -3560,6 +3647,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             onFormatKey={toggleStyleFlag}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
             onHeaderContextMenu={(colId, x, y) => setHeaderMenu({ colId, x, y })}
+            // Freeze panes are display-only: the kernel pins the first N
+            // display rows/columns; nothing here reaches the engine.
+            freeze={gridFreeze ?? undefined}
+            isCellEmpty={isCellEmpty}
             // Row moving exists ONLY while display order IS storage order:
             // under a sort/filter/search the gutter's display index names a
             // different storage slot, and mid-stream the tail hasn't even
@@ -3646,6 +3737,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
               title={rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined}
               onClick={() => { setRowMenu(null); insertRowNear(rowMenu.rowId, "below"); }}
             />
+            {/* Sheets' freeze, from the row menu (we have no View menubar).
+                N is the clicked row's display number; hidden, not disabled,
+                when it would leave nothing scrollable. Unfreeze appears only
+                while rows are frozen. Neither touches data or undo. */}
+            {rowMenuCanFreeze ? (
+              <MenuItem
+                icon={Pin}
+                label={`Freeze up to row ${rowMenuDisplayIdx + 1}`}
+                onClick={() => { setRowMenu(null); persistFreeze({ rows: rowMenuDisplayIdx + 1 }); }}
+              />
+            ) : null}
+            {freeze?.rows ? (
+              <MenuItem
+                icon={PinOff}
+                label="Unfreeze rows"
+                onClick={() => { setRowMenu(null); persistFreeze({ rows: undefined }); }}
+              />
+            ) : null}
             {rowMenuSpan ? (
               // Sheets' "Clear rows 2-5": the whole span, one undo entry.
               <MenuItem
@@ -3687,7 +3796,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         // whose every action would no-op or throw.
         const hc = table.columns.find((c) => c.id === headerMenu.colId);
         if (!hc) return null;
-        const letter = columnLetter(table.columns.findIndex((c) => c.id === headerMenu.colId));
+        const colIdx = table.columns.findIndex((c) => c.id === headerMenu.colId);
+        const letter = columnLetter(colIdx);
+        // Same rule as rows: a freeze must leave at least one column scrolling.
+        const canFreezeCol = colIdx + 1 <= table.columns.length - 1;
         return (
           <MorePortal
             anchorRef={headerMenuAnchorRef}
@@ -3731,6 +3843,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 label="Insert 1 column right"
                 onClick={() => { setHeaderMenu(null); insertColumnNear(hc.id, "right"); }}
               />
+              {/* Freeze columns, the header-menu twin of the row menu's
+                  freeze: display-only, no undo entry, hidden when it would
+                  pin every column. */}
+              {canFreezeCol ? (
+                <MenuItem
+                  icon={Pin}
+                  label={`Freeze up to column ${letter}`}
+                  onClick={() => { setHeaderMenu(null); persistFreeze({ cols: colIdx + 1 }); }}
+                />
+              ) : null}
+              {freeze?.cols ? (
+                <MenuItem
+                  icon={PinOff}
+                  label="Unfreeze columns"
+                  onClick={() => { setHeaderMenu(null); persistFreeze({ cols: undefined }); }}
+                />
+              ) : null}
               <MenuItem
                 icon={Eraser}
                 label={`Clear column ${letter}`}
