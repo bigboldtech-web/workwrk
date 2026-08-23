@@ -4,12 +4,17 @@
  *
  * Chrome, top to bottom (the Sheets layout the user asked for verbatim):
  * an inline-editable title row, ONE dense toolbar (undo/redo, print, zoom,
- * currency/percent/decimals, the "123" number-format menu, filter toggle,
- * Σ, and a right-aligned File menu carrying CSV import/export), the fx
- * bar, the grid filling the rest of the viewport, and a bottom bar of
- * sheet tabs with a promptless "+". Every toolbar control is real — no
- * dead buttons (per-cell bold/italic/color does not exist yet, so those
- * controls are deliberately absent).
+ * currency/percent/decimals, the "123" number-format menu, B/I/U/S, text
+ * and fill colour, alignment, filter toggle, Σ, and a right-aligned File
+ * menu carrying CSV import/export), the fx bar, the grid filling the rest
+ * of the viewport, and a bottom bar of sheet tabs with a promptless "+".
+ * Every toolbar control is real — no dead buttons.
+ *
+ * Per-cell formatting (bold/italic/underline/strike/colour/fill/align)
+ * rides a RESERVED key on each row's values Json, values["$fmt"] (see
+ * lib/sheet-cell-style): no schema change, invisible to every
+ * column-driven reader, and deliberately never handed to the formula
+ * engine host — styles don't recalc.
  *
  * Columns are anonymous letters (A, B, C…) — nothing else in the header,
  * like Excel. "+" appends a generic text column instantly; number format
@@ -29,6 +34,9 @@ import {
   Globe, Lock, Sigma, Star, Link2, Check,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown,
   ArrowDownAZ, ArrowUpZA, X, Pencil,
+  Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
+  TextAlignStart, TextAlignCenter, TextAlignEnd,
+  ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -41,6 +49,7 @@ import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
 import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
+import { CELL_STYLE_KEY, isReservedKey, readCellStyle, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -120,6 +129,47 @@ const FORMATTABLE_TYPES = new Set<ColType>(["number", "currency", "percent", "da
 // The red the grid already uses for formula errors — reused for
 // negative-styled numbers so "red negatives" match the existing token.
 const NEGATIVE_RED: React.CSSProperties = { color: "#dc2626" };
+
+/* Toolbar colour swatches (Sheets' compact grid, reduced to the brand
+ * YBRG + neutrals). Hex literals on purpose: a persisted style must look
+ * the same in every theme and every client, so it can never reference a
+ * CSS variable. Text swatches are saturated (legible on white); fill
+ * swatches are tints (black text stays readable on top of them). */
+const TEXT_SWATCHES: { hex: string; name: string }[] = [
+  { hex: "#000000", name: "Black" },
+  { hex: "#5F6368", name: "Dark grey" },
+  { hex: "#9AA0A6", name: "Grey" },
+  { hex: "#FFFFFF", name: "White" },
+  { hex: "#E2445C", name: "Red" },
+  { hex: "#FF8A00", name: "Orange" },
+  { hex: "#B58A00", name: "Dark yellow" },
+  { hex: "#00A65B", name: "Green" },
+  { hex: "#0073EA", name: "Blue" },
+  { hex: "#0B3D91", name: "Navy" },
+];
+const FILL_SWATCHES: { hex: string; name: string }[] = [
+  { hex: "#FFFFFF", name: "White" },
+  { hex: "#F1F3F4", name: "Light grey" },
+  { hex: "#D9DCE0", name: "Grey" },
+  { hex: "#5F6368", name: "Dark grey" },
+  { hex: "#FBD9DE", name: "Light red" },
+  { hex: "#FFE4C2", name: "Light orange" },
+  { hex: "#FFF2B3", name: "Light yellow" },
+  { hex: "#CCF4E3", name: "Light green" },
+  { hex: "#D6E8FF", name: "Light blue" },
+  { hex: "#FFCB00", name: "Yellow" },
+];
+
+/** Labels for the toggleable text flags, shared by the toolbar pills, the
+ *  kernel's Cmd/Ctrl+B/I/U shortcut and the undo-stack labels. */
+const STYLE_FLAG_NAMES: Record<"b" | "i" | "u" | "s", string> = { b: "bold", i: "italic", u: "underline", s: "strikethrough" };
+
+/** Two stored "$fmt" maps hold the same styles. Key order is stable (the
+ *  sanitiser rebuilds entries in one fixed order), so a JSON compare is an
+ *  honest equality — and a spurious mismatch only costs a no-op write. */
+function sameStyleMap(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
 
 /** Fold the engine host's column-formula rewrites into a columns array —
  *  a structure change can retarget a COLUMN formula too ("=SUM(B1:B5)" after
@@ -666,7 +716,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const host = engineHostRef.current;
     if (!host || writes.length === 0) return;
     const liveRows = new Set((rowsRef.current ?? []).map((r) => r.id));
-    const accepted = writes.filter((w) => liveRows.has(w.rowId) && host.columnLetterOf(w.colId) !== null);
+    // The reserved "$fmt" styles key rides row.values but is NOT a column:
+    // it must never reach the host (its column map would drop it anyway,
+    // but a style-only batch must also not cost a recalc pass or a bump).
+    const accepted = writes.filter((w) => !isReservedKey(w.colId) && liveRows.has(w.rowId) && host.columnLetterOf(w.colId) !== null);
     if (accepted.length === 0) return;
     try {
       host.setCells(accepted);
@@ -1064,7 +1117,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /* setColumnFormat / setColumnRules died with the per-column "…" popover
    * (Sheets parity): the toolbar's 123/$/%/decimals cluster is the only
    * number-format editor now, and highlight RULES lost their editor while
-   * existing rules keep painting (cellBg below reads col.rules unchanged). */
+   * existing rules keep painting (cellStyleFor below reads col.rules unchanged). */
 
   /** Apply per-column before/after patches as ONE optimistic columns write
    *  and ONE undo command — the multi-column sibling of pushColumnPatch, for
@@ -1169,19 +1222,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const at = cols.length - 1;
       pushUndo({
         label: `add column ${columnLetter(at)}`,
-        undo: async () => {
-          // Inverse of an append: delete it, letting the live host produce
-          // whatever rewrites refs into/past it now need.
-          const curT = tableRef.current;
-          if (!curT) throw new Error("table gone");
-          if (!curT.columns.some((c) => c.id === def.id)) return;
-          let res: StructureResult | null = null;
-          try { res = engineHostRef.current?.columnDeleted(def.id) ?? null; } catch { res = null; }
-          if (res) bumpEngine();
-          const next = applyColumnRewrites(curT.columns.filter((c) => c.id !== def.id), res?.rewritten.columns ?? []);
-          await saveColumnsStrict(next, { hostAlreadyCurrent: res !== null });
-          if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
-        },
+        // Inverse of an append: delete it, letting the live host produce
+        // whatever rewrites refs into/past it now need.
+        undo: () => removeColumnStrict(def.id),
         redo: async () => {
           const curT = tableRef.current;
           if (!curT) throw new Error("table gone");
@@ -1192,6 +1235,74 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         },
       });
     }
+  }
+
+  /** Delete a column through the live host (refs into it become #REF!,
+   *  refs past it shift) and persist — the strict inverse of an append,
+   *  shared by the add-column and insert-column undo bodies. A column
+   *  already gone is a no-op, never an error. */
+  async function removeColumnStrict(colId: string) {
+    const curT = tableRef.current;
+    if (!curT) throw new Error("table gone");
+    if (!curT.columns.some((c) => c.id === colId)) return;
+    let res: StructureResult | null = null;
+    try { res = engineHostRef.current?.columnDeleted(colId) ?? null; } catch { res = null; }
+    if (res) bumpEngine();
+    const next = applyColumnRewrites(curT.columns.filter((c) => c.id !== colId), res?.rewritten.columns ?? []);
+    await saveColumnsStrict(next, { hostAlreadyCurrent: res !== null });
+    if (res && res.rewritten.cells.length > 0) await writeValuesBatchStrict(rewritesToUpdates(res.rewritten.cells));
+  }
+
+  /** Header-menu "Insert 1 column left/right" (Sheets). Composed from the
+   *  existing primitives, no new server code: append a blank text column
+   *  the way "+" does, then performMoveStrict it beside the anchor — the
+   *  move's host pass shifts every ref at/right of the slot by one, which
+   *  is exactly what a Sheets insert does to "=C1". ONE undo command:
+   *  undo deletes the column (removeColumnStrict), redo re-appends the
+   *  same def and re-targets against the anchor column as it sits then. */
+  function insertColumnNear(anchorColId: string, where: "left" | "right") {
+    const cur = tableRef.current ?? table;
+    if (!cur) return;
+    const def: Column = { id: newId(), type: "short_text", label: "" };
+    const targetIndex = () => {
+      const cols = tableRef.current?.columns ?? [];
+      const idx = cols.findIndex((c) => c.id === anchorColId);
+      if (idx < 0) return Math.max(0, cols.length - 1);
+      return where === "left" ? idx : idx + 1;
+    };
+    /** Append `def` at the end (the addColumn discipline: eager tableRef
+     *  bump, swap the host, persist — throwing, since what follows must
+     *  not move a column the server never got). */
+    const appendStrict = async () => {
+      const curT = tableRef.current;
+      if (!curT) throw new Error("table gone");
+      if (curT.columns.some((c) => c.id === def.id)) return;
+      const cols = [...curT.columns, { ...def }];
+      tableRef.current = { ...curT, columns: cols };
+      setTable((prev) => (prev ? { ...prev, columns: cols } : prev));
+      rebuildEngine(cols, rowsRef.current ?? []);
+      if (!(await persistColumns(cols))) throw new Error("columns PATCH failed");
+    };
+    void (async () => {
+      try {
+        const target = targetIndex();
+        await appendStrict();
+        // Inserting right of the last column is the no-op performMoveStrict
+        // already short-circuits.
+        await performMoveStrict(def.id, target);
+        pushUndo({
+          label: `insert column ${where}`,
+          undo: () => removeColumnStrict(def.id),
+          redo: async () => {
+            await appendStrict();
+            await performMoveStrict(def.id, targetIndex());
+          },
+        });
+      } catch {
+        toast("Couldn't insert column — reloading");
+        void load();
+      }
+    })();
   }
 
   /** The blank-sheet seed for a table that has zero columns (legacy, or a
@@ -1530,10 +1641,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const localRow = (rowsRef.current ?? []).find((r) => r.id === rowId);
     const localValues = localRow?.values ?? {};
     const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+    // Key-driven over the server row, so the reserved "$fmt" styles key
+    // (not a column) is skipped explicitly: style maps are never guarded,
+    // so they can never be the conflict, and they must not become a host
+    // write.
     const colIds = new Set([
       ...conflictCols,
       ...Object.keys(current).filter((k) => !hasOwn(localValues, k)),
-    ]);
+    ].filter((k) => !isReservedKey(k)));
     const writes = [...colIds].map((colId) => ({
       colId,
       rowId,
@@ -1698,6 +1813,51 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       });
       noteRowsDeletedElsewhere(missing);
     } catch { toast("Couldn't clear cells"); void load(); }
+  }
+
+  /** Per-cell formatting write (the B/I/U/S, colour, fill and align
+   *  toolbar): apply one style patch to every cell of a rectangle.
+   *
+   *  Each touched row is a READ-MODIFY-WRITE of its whole "$fmt" map —
+   *  the server merge is shallow, so the map is the unit of persistence,
+   *  never a single cell's entry. The write is unconditional (no expect:
+   *  a style is the user's explicit intent over the range, and a per-row
+   *  409 mid-gesture would shred it), undoable as ONE command across all
+   *  N rows (before = each row's old map, after = its new map), and rides
+   *  writeValuesBatchStrict so the mirror repaints at once — the engine
+   *  host never sees it (driveHostWrites filters the reserved key; styles
+   *  don't recalc, so no bump is needed). A fully-cleared map writes null
+   *  rather than dropping the key: the shallow merge can't delete, and
+   *  every reader treats null as "no styles". */
+  async function formatCells(
+    targets: { rowIds: string[]; colIds: string[] },
+    label: string,
+    patch: Partial<Record<keyof CellStyle, unknown>>,
+  ) {
+    if (!tableId) return;
+    const byId = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
+    const befores: { id: string; values: Record<string, unknown> }[] = [];
+    const afters: { id: string; values: Record<string, unknown> }[] = [];
+    for (const rowId of targets.rowIds) {
+      const row = byId.get(rowId);
+      if (!row) continue; // deleted since the selection settled — skip, never invent a row
+      let values = row.values;
+      for (const colId of targets.colIds) values = withCellStyle(values, colId, patch);
+      const oldMap = row.values[CELL_STYLE_KEY] ?? null;
+      const newMap = values[CELL_STYLE_KEY] ?? null;
+      if (sameStyleMap(oldMap, newMap)) continue; // already styled this way — no write, no history
+      befores.push({ id: rowId, values: { [CELL_STYLE_KEY]: oldMap } });
+      afters.push({ id: rowId, values: { [CELL_STYLE_KEY]: newMap } });
+    }
+    if (afters.length === 0) return;
+    try {
+      await writeValuesBatchStrict(afters);
+      pushUndo({
+        label,
+        undo: () => writeValuesBatchStrict(befores),
+        redo: () => writeValuesBatchStrict(afters),
+      });
+    } catch { toast("Couldn't apply formatting"); void load(); }
   }
 
   async function bulkDeleteRows(ids: string[]) {
@@ -1993,6 +2153,90 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         });
       } catch { toast("Couldn't move row — reloading"); void load(); }
     })();
+  }
+
+  /** Row-menu "Insert 1 row above/below" (Sheets). No new server code:
+   *  append a blank row through the existing create path (the server
+   *  allocates its position), then move it into place through
+   *  performRowMoveStrict — the SAME path the gutter drag uses, so refs
+   *  at/below the slot shift by one exactly like a Sheets insert. ONE
+   *  undo command: undo deletes that row (strict), redo re-inserts and
+   *  re-targets against the anchor row as it sits THEN (ids, not indices,
+   *  survive intervening edits; a vanished anchor lands the row at the
+   *  end rather than guessing). Gated like row moves: a storage index is
+   *  only a display index while nothing reorders the display. */
+  function insertRowNear(anchorRowId: string, where: "above" | "below") {
+    if (sortState || filterCol || search.trim() || streamProgress) {
+      toast("Clear the sort, filter and search to insert rows");
+      return;
+    }
+    const targetIndex = () => {
+      const cur = rowsRef.current ?? [];
+      const idx = cur.findIndex((r) => r.id === anchorRowId);
+      if (idx < 0) return Math.max(0, cur.length - 1);
+      return where === "above" ? idx : idx + 1;
+    };
+    void (async () => {
+      let curId: string | null = null;
+      try {
+        const target = targetIndex();
+        const created = await insertRowsBatchStrict([{ values: {} }]);
+        curId = created[0]?.id ?? null;
+        if (!curId) throw new Error("no row created");
+        // The append sits at the end; moving to the last index is the
+        // no-op performRowMoveStrict already short-circuits ("below" the
+        // last row).
+        await performRowMoveStrict(curId, target);
+        pushUndo({
+          label: `insert row ${where}`,
+          undo: async () => { if (curId) await deleteRowsBatchStrict([curId]); },
+          redo: async () => {
+            const again = await insertRowsBatchStrict([{ values: {} }]);
+            curId = again[0]?.id ?? null;
+            if (!curId) throw new Error("no row created");
+            await performRowMoveStrict(curId, targetIndex());
+          },
+        });
+      } catch {
+        // A row may have been appended but not moved: the reload
+        // reconciles (it renders at the end, honestly), and nothing
+        // half-done enters history.
+        toast("Couldn't insert row — reloading");
+        void load();
+      }
+    })();
+  }
+
+  /** Row-menu "Clear row(s)": null into every editable cell of the row(s)
+   *  through the existing clear path (undoable, setCells so dependents
+   *  recompute). Computed columns are skipped exactly as the kernel's
+   *  Delete key skips them. Formatting is left alone — Sheets' "Clear
+   *  row" clears contents, not styles. */
+  function clearRows(rowIds: string[]) {
+    const cur = tableRef.current ?? table;
+    if (!cur) return;
+    const editable = cur.columns.filter((c) => c.type !== "formula" && c.type !== "lookup" && c.type !== "rollup");
+    const cells = rowIds.flatMap((rowId) => editable.map((c) => ({ rowId, colId: c.id })));
+    if (cells.length === 0) return;
+    void clearCells(cells);
+  }
+
+  /** Header-menu "Clear column": the column-shaped twin of clearRow. A
+   *  computed column has nothing to clear (its cells are derived). */
+  function clearColumn(colId: string) {
+    // A column spans every row; mid-stream the tail hasn't arrived, and a
+    // clear of the loaded half would be a silently partial clear.
+    if (streamProgress) { toast("Rows are still loading, try again in a moment"); return; }
+    const cur = tableRef.current ?? table;
+    const col = cur?.columns.find((c) => c.id === colId);
+    if (!col) return;
+    if (col.type === "formula" || col.type === "lookup" || col.type === "rollup") {
+      toast("This column is computed — edit its formula or relation instead");
+      return;
+    }
+    const cells = (rowsRef.current ?? []).map((r) => ({ rowId: r.id, colId }));
+    if (cells.length === 0) return;
+    void clearCells(cells);
   }
 
   async function importCsv(file: File) {
@@ -2312,6 +2556,54 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     );
   };
 
+  /** The cells a per-cell format action targets: the kernel's settled
+   *  range (ORDERED display rowIds × the inclusive column span, via
+   *  onSelectionChange), else the active cell — the kernel reports null
+   *  for a single-cell selection, so the active cell IS that case. */
+  const formatTargets = (): { rowIds: string[]; colIds: string[] } | null => {
+    if (gridSelection && gridSelection.rowIds.length > 0) {
+      const lo = Math.max(0, Math.min(gridSelection.c1, gridSelection.c2));
+      const hi = Math.min(table.columns.length - 1, Math.max(gridSelection.c1, gridSelection.c2));
+      const colIds = table.columns.slice(lo, hi + 1).map((c) => c.id);
+      if (colIds.length > 0) return { rowIds: gridSelection.rowIds, colIds };
+    }
+    if (activeCell) return { rowIds: [activeCell.rowId], colIds: [activeCell.colId] };
+    return null;
+  };
+
+  /** Apply one style patch to the selection (colour, fill, align — the
+   *  "set" actions). Mid-stream the toolbar pills are disabled, but the
+   *  keyboard path lands here too, so the gate is repeated: a style write
+   *  is a read-modify-write of rows the stream may not have delivered. */
+  const formatSelection = (label: string, patch: Partial<Record<keyof CellStyle, unknown>>) => {
+    if (streamProgress) { toast("Rows are still loading, try again in a moment"); return; }
+    const targets = formatTargets();
+    if (!targets) { toast("Select a cell first"); return; }
+    void formatCells(targets, label, patch);
+  };
+
+  /** B / I / U / S with Sheets' toggle rule: when EVERY selected cell
+   *  already carries the flag it comes off all of them, otherwise it goes
+   *  on all of them (a mixed range becomes uniformly styled, never
+   *  inverted cell by cell). */
+  const toggleStyleFlag = (flag: "b" | "i" | "u" | "s") => {
+    if (streamProgress) { toast("Rows are still loading, try again in a moment"); return; }
+    const targets = formatTargets();
+    if (!targets) { toast("Select a cell first"); return; }
+    // Judge against the sync mirror (what formatCells writes from), not
+    // render-scope state: two toggles in one tick must see each other.
+    const live = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
+    let every = true;
+    outer: for (const rowId of targets.rowIds) {
+      const row = live.get(rowId);
+      for (const colId of targets.colIds) {
+        if (!readCellStyle(row?.values, colId)?.[flag]) { every = false; break outer; }
+      }
+    }
+    const name = STYLE_FLAG_NAMES[flag];
+    void formatCells(targets, every ? `remove ${name}` : name, { [flag]: every ? undefined : true });
+  };
+
   /** Σ button: open the active cell's editor seeded with "=SUM(" through
    *  the kernel's own type-to-replace path — a real "=" keydown dispatched
    *  at the grid (the exact mechanism typing uses; React's root listener
@@ -2406,23 +2698,34 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }
   };
 
-  /** Conditional-formatting background (Phase 4). Rules read the RAW value
-   *  (computed for formula cells) — formatting never feeds back into rules.
-   *  The winning colour paints at ~18% alpha (hex "2E"), the same tint depth
-   *  as the dept-chip pattern, so black text stays readable on any swatch. */
-  const cellBg = (rowId: string, colId: string): React.CSSProperties | undefined => {
-    const c = table.columns.find((x) => x.id === colId);
-    if (!c?.rules || c.rules.length === 0) return undefined;
+  /** Inline style for one cell: the cell's own "$fmt" styles (bold /
+   *  italic / underline / strike / colour / fill / align) with the
+   *  conditional-formatting rule background (Phase 4) layered on top.
+   *  Precedence is Sheets': a matching RULE background beats the cell's
+   *  manual fill, text styles always apply. Rules read the RAW value
+   *  (computed for formula cells) — formatting never feeds back into
+   *  rules. The winning rule colour paints at ~18% alpha (hex "2E"), the
+   *  same tint depth as the dept-chip pattern, so black text stays
+   *  readable on any swatch. Both fills go out as backgroundColor (never
+   *  the `background` shorthand): that is the one property the kernel
+   *  drops for the ACTIVE cell, whose white ground keeps the editor and
+   *  outline legible while its text styles still show. */
+  const cellStyleFor = (rowId: string, colId: string): React.CSSProperties | undefined => {
     const r = rowById.get(rowId);
     if (!r) return undefined;
-    const v = r.values[c.id];
-    // Streaming honesty gate: a rule must not paint from a computed value
-    // we refuse to display (the host is stale until the completion rebuild).
-    if (streamProgress && (c.type === "formula" || isFormulaCell(v))) return undefined;
-    const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
-    const bg = matchRule(raw, c.rules);
-    if (!bg) return undefined;
-    return { background: /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg };
+    const css: React.CSSProperties = styleToCss(readCellStyle(r.values, colId));
+    const c = table.columns.find((x) => x.id === colId);
+    if (c?.rules && c.rules.length > 0) {
+      const v = r.values[c.id];
+      // Streaming honesty gate: a rule must not paint from a computed value
+      // we refuse to display (the host is stale until the completion rebuild).
+      if (!(streamProgress && (c.type === "formula" || isFormulaCell(v)))) {
+        const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
+        const bg = matchRule(raw, c.rules);
+        if (bg) css.backgroundColor = /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg;
+      }
+    }
+    return Object.keys(css).length > 0 ? css : undefined;
   };
 
   /* ── Clipboard + fill data half (Tables Phase 2) ──────────────
@@ -2691,7 +2994,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  format/highlight-rules popover that used to open here is gone
    *  entirely — the toolbar's 123/$/%/decimals cluster is the one
    *  number-format surface, and existing highlight rules KEEP PAINTING
-   *  through cellBg; only their editor died. */
+   *  through cellStyleFor; only their editor died. */
   const kernelHeader = (colId: string) => {
     const c = table.columns.find((x) => x.id === colId);
     if (!c) return null;
@@ -2836,6 +3139,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // ── Formula bar plumbing (Tables Phase 3) ───────────────────────
   const activeColDef = activeCell ? table.columns.find((c) => c.id === activeCell.colId) : undefined;
   const activeCellRow = activeCell ? rowById.get(activeCell.rowId) : undefined;
+  // The toolbar's B/I/U/S/colour/align pills reflect the ACTIVE cell's
+  // stored style (Sheets lights the pill when the cursor sits on bold).
+  const activeStyle = activeCell ? readCellStyle(activeCellRow?.values, activeCell.colId) : undefined;
+  const fmtDisabled = streamProgress !== null;
+  // One predicate for the gutter-drag gate AND the row-insert menu items.
+  const rowInsertBlocked = !!sortState || !!filterCol || !!search.trim() || streamProgress !== null;
+  // Right-click INSIDE a multi-row selection acts on the whole span
+  // (Sheets): the row menu's delete and clear both read this.
+  const rowMenuSpan = rowMenu && gridSelection && gridSelection.rowIds.length > 1 && gridSelection.rowIds.includes(rowMenu.rowId)
+    ? gridSelection.rowIds
+    : null;
+  const FMT_STREAM_TITLE = "Rows are still loading — formatting is available once they finish";
   let barCell: FormulaBarCell | null = null;
   if (activeCell && activeColDef && activeCellRow) {
     const colIndex = table.columns.findIndex((c) => c.id === activeCell.colId);
@@ -2919,8 +3234,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       </header>
 
       {/* ── The one dense toolbar. Honesty rule: every control here works
-          today — no font/bold/color buttons, because per-cell styling
-          does not exist yet on this surface. ── */}
+          today — each pill is traced to a handler, nothing is decorative. ── */}
       <div className="shx__toolbar shx__np" role="toolbar" aria-label="Sheet toolbar">
         <button
           type="button"
@@ -2963,6 +3277,139 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             ))}
           </div>
         </details>
+        <span className="shx__tb-sep" aria-hidden />
+        {/* Per-cell text styles (Sheets order: B I U S, colours, align).
+            The toggles light up from the ACTIVE cell's stored style, like
+            Sheets; each action is one undo entry across the whole range.
+            Mid-stream they sit disabled: a style write is a read-modify-
+            write of rows the stream may not have delivered yet. */}
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.b ? "is-on" : ""}`}
+          onClick={() => toggleStyleFlag("b")}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Bold (⌘B)"}
+          aria-label="Bold"
+          aria-pressed={!!activeStyle?.b}
+        ><Bold /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.i ? "is-on" : ""}`}
+          onClick={() => toggleStyleFlag("i")}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Italic (⌘I)"}
+          aria-label="Italic"
+          aria-pressed={!!activeStyle?.i}
+        ><Italic /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.u ? "is-on" : ""}`}
+          onClick={() => toggleStyleFlag("u")}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Underline (⌘U)"}
+          aria-label="Underline"
+          aria-pressed={!!activeStyle?.u}
+        ><Underline /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.s ? "is-on" : ""}`}
+          onClick={() => toggleStyleFlag("s")}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Strikethrough"}
+          aria-label="Strikethrough"
+          aria-pressed={!!activeStyle?.s}
+        ><Strikethrough /></button>
+        {/* Colour pills open a compact swatch grid (not a native colour
+            input — Sheets' palette is a grid of named chips). The bar
+            under each icon shows the active cell's current colour. */}
+        <details className="shx__dd">
+          <summary
+            className={`shx__tb-btn shx__tb-color ${fmtDisabled ? "is-disabled" : ""}`}
+            title={fmtDisabled ? FMT_STREAM_TITLE : "Text color"}
+            aria-label="Text color"
+            aria-disabled={fmtDisabled || undefined}
+            onClick={(e) => { if (fmtDisabled) e.preventDefault(); }}
+          >
+            <Baseline />
+            <span className="shx__tb-colorbar" style={{ background: activeStyle?.c ?? "transparent" }} aria-hidden />
+          </summary>
+          <div className="shx__dd-menu shx__dd-menu--swatches" role="group" aria-label="Text colors">
+            <div className="shx__swatches">
+              {TEXT_SWATCHES.map((sw) => (
+                <button
+                  key={sw.hex}
+                  type="button"
+                  className={`shx__swatch ${activeStyle?.c?.toUpperCase() === sw.hex ? "is-on" : ""}`}
+                  style={{ background: sw.hex }}
+                  title={sw.name}
+                  aria-label={`Text color ${sw.name}`}
+                  onClick={(e) => { formatSelection(`text color ${sw.name.toLowerCase()}`, { c: sw.hex }); closeDetails(e); }}
+                />
+              ))}
+            </div>
+            <button type="button" className="shx__swatch-reset" onClick={(e) => { formatSelection("reset text color", { c: undefined }); closeDetails(e); }}>
+              <X /> Reset
+            </button>
+          </div>
+        </details>
+        <details className="shx__dd">
+          <summary
+            className={`shx__tb-btn shx__tb-color ${fmtDisabled ? "is-disabled" : ""}`}
+            title={fmtDisabled ? FMT_STREAM_TITLE : "Fill color"}
+            aria-label="Fill color"
+            aria-disabled={fmtDisabled || undefined}
+            onClick={(e) => { if (fmtDisabled) e.preventDefault(); }}
+          >
+            <PaintBucket />
+            <span className="shx__tb-colorbar" style={{ background: activeStyle?.bg ?? "transparent" }} aria-hidden />
+          </summary>
+          <div className="shx__dd-menu shx__dd-menu--swatches" role="group" aria-label="Fill colors">
+            <div className="shx__swatches">
+              {FILL_SWATCHES.map((sw) => (
+                <button
+                  key={sw.hex}
+                  type="button"
+                  className={`shx__swatch ${activeStyle?.bg?.toUpperCase() === sw.hex ? "is-on" : ""}`}
+                  style={{ background: sw.hex }}
+                  title={sw.name}
+                  aria-label={`Fill color ${sw.name}`}
+                  onClick={(e) => { formatSelection(`fill ${sw.name.toLowerCase()}`, { bg: sw.hex }); closeDetails(e); }}
+                />
+              ))}
+            </div>
+            <button type="button" className="shx__swatch-reset" onClick={(e) => { formatSelection("reset fill", { bg: undefined }); closeDetails(e); }}>
+              <X /> Reset
+            </button>
+          </div>
+        </details>
+        <span className="shx__tb-sep" aria-hidden />
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.a === "l" ? "is-on" : ""}`}
+          onClick={() => formatSelection("align left", { a: "l" })}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Align left"}
+          aria-label="Align left"
+          aria-pressed={activeStyle?.a === "l"}
+        ><TextAlignStart /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.a === "c" ? "is-on" : ""}`}
+          onClick={() => formatSelection("align center", { a: "c" })}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Align center"}
+          aria-label="Align center"
+          aria-pressed={activeStyle?.a === "c"}
+        ><TextAlignCenter /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeStyle?.a === "r" ? "is-on" : ""}`}
+          onClick={() => formatSelection("align right", { a: "r" })}
+          disabled={fmtDisabled}
+          title={fmtDisabled ? FMT_STREAM_TITLE : "Align right"}
+          aria-label="Align right"
+          aria-pressed={activeStyle?.a === "r"}
+        ><TextAlignEnd /></button>
         <span className="shx__tb-sep" aria-hidden />
         <button
           type="button"
@@ -3063,16 +3510,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             applyMatrix={applyMatrix}
             onUndo={() => void runUndo()}
             onRedo={() => void runRedo()}
-            cellStyle={cellBg}
+            cellStyle={cellStyleFor}
+            onFormatKey={toggleStyleFlag}
             onRowContextMenu={(rowId, x, y) => setRowMenu({ rowId, x, y })}
             onHeaderContextMenu={(colId, x, y) => setHeaderMenu({ colId, x, y })}
             // Row moving exists ONLY while display order IS storage order:
             // under a sort/filter/search the gutter's display index names a
             // different storage slot, and mid-stream the tail hasn't even
             // arrived. Omitting the prop keeps the gutter click-select only.
-            onRowMove={!sortState && !filterCol && !search.trim() && !streamProgress
-              ? moveRowByDrag
-              : undefined}
+            onRowMove={rowInsertBlocked ? undefined : moveRowByDrag}
             onGrowRows={growRows}
             onSelectionChange={(sel) => setGridSelection(sel)}
             renderHeader={kernelHeader}
@@ -3135,15 +3581,47 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
               label="Open row"
               onClick={() => { setActiveRowId(rowMenu.rowId); setRowMenu(null); }}
             />
-            {gridSelection && gridSelection.rowIds.length > 1 && gridSelection.rowIds.includes(rowMenu.rowId) ? (
-              // Right-click INSIDE a multi-row selection acts on the whole
-              // span (Sheets), through the same confirmed+undoable bulk
+            {/* Sheets' inserts. Gated exactly like the gutter drag: a
+                storage slot is only a display slot while nothing reorders
+                the display (sort/filter/search) and the whole table is
+                resident (stream). Disabled, not hidden — the user learns
+                why from the title. */}
+            <MenuItem
+              icon={ArrowUpFromLine}
+              label="Insert 1 row above"
+              disabled={rowInsertBlocked}
+              title={rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined}
+              onClick={() => { setRowMenu(null); insertRowNear(rowMenu.rowId, "above"); }}
+            />
+            <MenuItem
+              icon={ArrowDownToLine}
+              label="Insert 1 row below"
+              disabled={rowInsertBlocked}
+              title={rowInsertBlocked ? "Clear the sort, filter and search to insert rows" : undefined}
+              onClick={() => { setRowMenu(null); insertRowNear(rowMenu.rowId, "below"); }}
+            />
+            {rowMenuSpan ? (
+              // Sheets' "Clear rows 2-5": the whole span, one undo entry.
+              <MenuItem
+                icon={Eraser}
+                label={`Clear ${rowMenuSpan.length} rows`}
+                onClick={() => { setRowMenu(null); clearRows(rowMenuSpan); }}
+              />
+            ) : (
+              <MenuItem
+                icon={Eraser}
+                label="Clear row"
+                onClick={() => { setRowMenu(null); clearRows([rowMenu.rowId]); }}
+              />
+            )}
+            {rowMenuSpan ? (
+              // The whole span, through the same confirmed+undoable bulk
               // path the old checkbox pill used.
               <MenuItem
                 icon={Trash2}
-                label={`Delete ${gridSelection.rowIds.length} rows`}
+                label={`Delete ${rowMenuSpan.length} rows`}
                 destructive
-                onClick={() => { setRowMenu(null); void bulkDeleteRows(gridSelection.rowIds); }}
+                onClick={() => { setRowMenu(null); void bulkDeleteRows(rowMenuSpan); }}
               />
             ) : (
               <MenuItem
@@ -3194,6 +3672,24 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                   onClick={() => { setHeaderMenu(null); persistSort(null); }}
                 />
               ) : null}
+              {/* Sheets' column inserts + clear. Column order is never
+                  display-reordered (no column sort exists), so these need
+                  no gate; the clear of a computed column toasts instead. */}
+              <MenuItem
+                icon={ArrowLeftToLine}
+                label="Insert 1 column left"
+                onClick={() => { setHeaderMenu(null); insertColumnNear(hc.id, "left"); }}
+              />
+              <MenuItem
+                icon={ArrowRightToLine}
+                label="Insert 1 column right"
+                onClick={() => { setHeaderMenu(null); insertColumnNear(hc.id, "right"); }}
+              />
+              <MenuItem
+                icon={Eraser}
+                label={`Clear column ${letter}`}
+                onClick={() => { setHeaderMenu(null); clearColumn(hc.id); }}
+              />
               {hc.type === "formula" ? (
                 <MenuItem
                   icon={Sigma}

@@ -58,6 +58,14 @@ const ROW_DRAG_THRESHOLD_PX = 4;
  * a character. */
 const EDITABLE_SEL = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
 
+/** The active cell's page style minus its fill; see the gridcell `style`. */
+function withoutBackground(style: React.CSSProperties | undefined): React.CSSProperties | undefined {
+  if (!style || style.backgroundColor === undefined) return style;
+  const rest = { ...style };
+  delete rest.backgroundColor;
+  return rest;
+}
+
 /* Keys that activate the grid when nothing is selected yet. Tab is
  * deliberately excluded: it stays the keyboard user's way OUT of the grid. */
 const SEED_KEYS = new Set(["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "PageDown", "PageUp", "Home", "End"]);
@@ -151,8 +159,14 @@ export type SheetGridProps = {
    *  forwards the keystroke — the page owns the command stack. */
   onUndo?: () => void;
   onRedo?: () => void;
-  /** Extra inline style for a cell (conditional-formatting background).
-   *  Page-owned semantics; the grid just paints what it is told. */
+  /** Cmd/Ctrl+B / I / U while NOT editing (per-cell formatting). The grid
+   *  only forwards the keystroke — the page owns the selection-to-style
+   *  write. An open editor keeps the browser's own shortcuts. */
+  onFormatKey?: (key: "b" | "i" | "u") => void;
+  /** Extra inline style for a cell (per-cell formatting + conditional-
+   *  formatting background). Page-owned semantics; the grid just paints
+   *  what it is told, except that the ACTIVE cell drops backgroundColor
+   *  so its white ground keeps the editor and outline legible. */
   cellStyle?: (rowId: string, colId: string) => React.CSSProperties | undefined;
   /** Selection readout (Tables Phase 5b stats). Called with the range's
    *  rowIds in CURRENT display order plus the inclusive column-index span
@@ -176,7 +190,7 @@ export function SheetGrid({
   columns, rowIds, renderDisplay, renderEditor, onClearCells,
   onRowContextMenu, onHeaderContextMenu, onRowMove, onGrowRows, renderHeader,
   headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
-  onRedo, cellStyle, onSelectionChange,
+  onRedo, onFormatKey, cellStyle, onSelectionChange,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -816,6 +830,17 @@ export function SheetGrid({
         // once the grid owns them.
         case "d": e.preventDefault(); void fillFromEdge("down"); return;
         case "r": e.preventDefault(); void fillFromEdge("right"); return;
+        // Bold / italic / underline (Sheets). Prevented so Cmd+B/I/U never
+        // reach the browser's own bookmark/page-info handling; the page
+        // decides what "the selection" means and writes the style.
+        case "b":
+        case "i":
+        case "u": {
+          if (!onFormatKey) return;
+          e.preventDefault();
+          onFormatKey(e.key.toLowerCase() as "b" | "i" | "u");
+          return;
+        }
       }
     }
 
@@ -1072,14 +1097,16 @@ export function SheetGrid({
                         className={`flex items-center overflow-hidden border-r border-zinc-100 px-2 text-[13px] leading-tight ${
                           isActive ? "outline outline-2 -outline-offset-1 outline-[#0073EA] bg-white" : selected ? "bg-[#0073EA]/8" : ""
                         }`}
-                        // Conditional-formatting background sits under
-                        // everything but the ACTIVE cell, whose white ground
-                        // keeps the editor and outline legible (inline style
-                        // would beat the bg-white class).
+                        // Page-owned cell style (text styles + fill +
+                        // conditional-formatting background). The ACTIVE
+                        // cell keeps its text styles but drops the
+                        // background: its white ground keeps the editor and
+                        // outline legible (inline style would beat the
+                        // bg-white class).
                         style={{
                           width: col.width ?? COL_W,
                           minWidth: col.width ?? COL_W,
-                          ...(isActive ? undefined : cellStyle?.(rowId, col.id)),
+                          ...(isActive ? withoutBackground(cellStyle?.(rowId, col.id)) : cellStyle?.(rowId, col.id)),
                         }}
                         onMouseDown={(e) => {
                           if (isEditing) return;
