@@ -52,7 +52,7 @@ import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type C
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
-import { autoTypeEntry, isOpenColumnType } from "@/lib/sheet-entry";
+import { autoTypeEntry, autoTypeEntryRich, isOpenColumnType } from "@/lib/sheet-entry";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
@@ -152,6 +152,116 @@ const BATCH_MAX_OPS = 500;
 // Rating keeps its stars, text stays text — formatting is opt-in per the
 // Phase 4 scope (column-level only; per-cell formats deferred).
 const FORMATTABLE_TYPES = new Set<ColType>(["number", "currency", "percent", "date"]);
+
+/* ── Per-cell number format for OPEN columns ──────────────────────
+ * Two formatting worlds coexist on purpose:
+ *   OPEN columns (short_text, what every new sheet is born with) format
+ *   per CELL, like Sheets: the $ / % / .0 / .00 / 123 toolbar writes
+ *   `nf` / `dp` into the cell's "$fmt" style, and the column's type never
+ *   moves, so the cell next door still takes text.
+ *   LEGACY typed columns (number / currency / percent / date / checkbox)
+ *   keep their COLUMN-level col.type + col.format: the type IS the
+ *   editor there (a number input), so "format" and "type" are one choice.
+ * The helpers below are the open-world half; they are pure so the display,
+ * the editor's edit-form and the commit all agree on one reading. */
+
+type OpenNumberFormat = NonNullable<CellStyle["nf"]>;
+
+/** A withCellStyle patch: set keys to values, or to undefined to remove. */
+type StylePatch = Partial<Record<keyof CellStyle, unknown>>;
+
+/** The cell's nf/dp as a ColumnFormat for the existing formatter (no new
+ *  formatter: one Intl path renders a column's $1,234.50 and a cell's).
+ *  `thousands` is on because Sheets' $ and 123→Number formats group;
+ *  `decimals` undefined means "show the stored digits faithfully" (what a
+ *  typed "12.5%" shows until the user steps .0/.00). */
+function openCellFormat(style: CellStyle | undefined): ColumnFormat | undefined {
+  if (!style?.nf) return undefined;
+  return { style: style.nf, decimals: style.dp, thousands: true, currency: "USD" };
+}
+
+/** Display text of a value in an OPEN column. Only a finite NUMBER with an
+ *  nf goes through the formatter; text ignores any nf the cell carries
+ *  (Sheets: a format on a text cell is invisible), and a number with no nf
+ *  renders String(n): "1000", not "1,000", until the user asks. Percent
+ *  cells store the fraction (0.05 for "5%", what Sheets stores and what
+ *  SUM/AVERAGE must read), but the formatter's percent style renders the
+ *  stored number as-is because legacy percent COLUMNS store 12 for "12%",
+ *  so the ×100 happens here. The float noise of ×100 (7.000000000000001)
+ *  never shows: the formatter rounds to at most 10 fraction digits. */
+function formatOpenCell(v: unknown, style: CellStyle | undefined): string {
+  if (v == null || v === "") return "";
+  if (typeof v !== "number" || !Number.isFinite(v)) return String(v);
+  const nf = style?.nf;
+  const format = openCellFormat(style);
+  if (!nf || !format) return String(v);
+  return formatCellValue(nf === "percent" ? v * 100 : v, nf, format);
+}
+
+/** Percent amount of a stored fraction as the user would type it: 0.07 is
+ *  "7", not "7.000000000000001". toPrecision(15) (DBL_DIG, the same 15
+ *  significant digits sheet-entry trusts) drops the ×100 noise without
+ *  rounding away anything a double genuinely holds. */
+function percentAmount(v: number): number {
+  return Number((v * 100).toPrecision(15));
+}
+
+/** What the editor opens WITH for a cell in an OPEN column, Sheets'
+ *  edit-form: an nf-percent cell edits as "5%" (dp-aware by PADDING only,
+ *  "5.0%" at dp 1, never rounding, so an untouched Enter re-parses to the
+ *  exact stored value), an nf-currency cell edits as the bare "5" (Sheets
+ *  shows the raw number, the $ is format), anything else as today. */
+function openCellEditText(v: unknown, style: CellStyle | undefined): string {
+  if (v == null) return "";
+  if (typeof v !== "number" || !Number.isFinite(v) || style?.nf !== "percent") return String(v);
+  let s = String(percentAmount(v));
+  // Exponent forms ("1e-7") cannot be padded and would not re-parse as a
+  // number anyway; leave them as they are rather than corrupt them.
+  if (style.dp !== undefined && !/e/i.test(s)) {
+    const dot = s.indexOf(".");
+    const have = dot < 0 ? 0 : s.length - dot - 1;
+    if (have < style.dp) s = `${dot < 0 ? `${s}.` : s}${"0".repeat(style.dp - have)}`;
+  }
+  return `${s}%`;
+}
+
+/** Where the .0 / .00 steppers start when a cell has no dp yet: the
+ *  digits the nf's default display shows (matches adjustDecimals for
+ *  columns, so a column and a cell step identically). */
+function defaultDp(nf: OpenNumberFormat): number {
+  return nf === "percent" ? 0 : 2;
+}
+
+/** The dp a TYPED symbol entry seeds. "$5" shows as $5.00 in Sheets;
+ *  "5%" shows as 5% but "12.5%" as 12.50% (Sheets' automatic percent
+ *  picks 0.00% once there are fraction digits). */
+function typedEntryDp(nf: OpenNumberFormat, value: number): number {
+  if (nf === "percent") return Number.isInteger(percentAmount(value)) ? 0 : 2;
+  return 2;
+}
+
+/** Resolve a plain-editor commit on an OPEN cell that may already carry an
+ *  nf. The rule is Sheets': a typed symbol ("5%", "$5") SETS the cell's
+ *  format (switching nf resets dp to that nf's typed default); a bare
+ *  number or text KEEPS whatever format the cell has. `fmt` is null when
+ *  the style needs no write, so the unchanged-check and the commit can
+ *  both ask one question. */
+function resolveOpenEntry(
+  text: string,
+  stored: CellStyle | undefined,
+): { value: number | string; fmt: { nf: OpenNumberFormat; dp: number } | null } {
+  const rich = autoTypeEntryRich(text);
+  if (rich.nf && rich.nf !== stored?.nf && typeof rich.value === "number") {
+    return { value: rich.value, fmt: { nf: rich.nf, dp: typedEntryDp(rich.nf, rich.value) } };
+  }
+  // Sheets: a BARE number typed into a percent-formatted cell is read as a
+  // percent (7 -> 7%, stored 0.07). Only the bare form: "7%" already
+  // carries its own scale, and text is text.
+  if (!rich.nf && stored?.nf === "percent" && typeof rich.value === "number") {
+    return { value: Number((rich.value / 100).toFixed(12)), fmt: null };
+  }
+  return { value: rich.value, fmt: null };
+}
 
 // The red the grid already uses for formula errors — reused for
 // negative-styled numbers so "red negatives" match the existing token.
@@ -383,9 +493,11 @@ function coercePaste(col: Column, raw: string): PasteCoercion {
       // lands as the number 5 so SUM over it works); every other text type
       // stores the text verbatim. autoTypeEntry hands back the ORIGINAL
       // untrimmed string when it isn't a number, which is what this branch
-      // has always stored. This one branch is the chokepoint for paste,
-      // the fill handle (the grid sends its series here as text) and the
-      // formula bar's literal commit (commitCellText).
+      // has always stored. This one branch is the chokepoint for paste and
+      // the fill handle (the grid sends its series here as text): PLAIN
+      // grammar on purpose, a pasted "5%" has no cell format to attach to.
+      // The editors (grid cell, formula bar, row modal) take the RICH
+      // grammar instead, see openEntryValues.
       return { kind: "write", value: isOpenColumnType(col.type) ? autoTypeEntry(raw) : raw };
   }
 }
@@ -1206,13 +1318,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
   }
 
-  /** The "123" menu's one action (Sheets' Format → Number → Currency mental
-   *  model, replacing the rejected Type submenu): a kind sets col.type AND a
-   *  starter col.format together, in a single write so a single undo
-   *  restores both. The kind→patch mapping is shared with the column "…"
-   *  popover via lib/sheet-format-actions, so the two menus cannot drift.
-   *  Legacy/relational columns are skipped — the popover shows them a
-   *  read-only line instead. */
+  /** The "123" menu's COLUMN-level action (Sheets' Format → Number →
+   *  Currency mental model, replacing the rejected Type submenu): a kind
+   *  sets col.type AND a starter col.format together, in a single write so
+   *  a single undo restores both. The kind→patch mapping is shared with the
+   *  column "…" popover via lib/sheet-format-actions, so the two menus
+   *  cannot drift. Legacy/relational columns are skipped — the popover
+   *  shows them a read-only line instead. The toolbar reaches this only for
+   *  the editor-changing kinds (Date / Checkbox); its number kinds route
+   *  per cell on open columns, see routeNumberFormat. */
   function applyNumberFormat(colIds: string[], kind: NumberFormatKind) {
     const cur = tableRef.current ?? table;
     if (!cur) return;
@@ -1778,9 +1892,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // one cell from THIS client can never self-conflict. Its
       // null-for-absent normalization matches the server's compare
       // (absence and null are the same empty cell, never a conflict).
+      // The reserved "$fmt" styles key never enters `expect`: a rich
+      // editor commit ("5%") writes the cell's value AND the row's style
+      // map in this one PATCH, but styles are a read-modify-write the
+      // user's edit did not vouch for (formatCells writes them unguarded
+      // for the same reason), and absorbConflictRow skips the key on the
+      // way back, so a guarded style would be a conflict nobody can see.
+      const expect = opts?.guard
+        ? Object.fromEntries(Object.entries(before).filter(([k]) => !isReservedKey(k)))
+        : undefined;
       const res = await writeQueueRef.current.run(() => fetch(`/api/tables/${tableId}/rows`, {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: rowId, values, ...(opts?.guard ? { expect: before } : {}) }),
+        body: JSON.stringify({ id: rowId, values, ...(expect ? { expect } : {}) }),
       }));
       // 409 = the guard refused the write: NOTHING landed on the server.
       // Server truth replaces the optimistic value — the user's rejected
@@ -1797,8 +1920,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const conflictCols: string[] = Array.isArray(payload?.conflictCols)
           ? (payload.conflictCols as unknown[]).filter((c): c is string => typeof c === "string")
           : Object.keys(values); // body lacks the list: the vouched-for cells are the conflict set
-        if (current) absorbConflictRow(rowId, current, conflictCols);
-        else void load(); // conflict body unreadable — reload is the reconcile
+        if (current) {
+          absorbConflictRow(rowId, current, conflictCols);
+          // A rich commit ("5%") carried the row's style map in the same
+          // refused PATCH; the optimistic nf must fall back to the server's
+          // map with the value, or the cell would show a format the server
+          // never stored. absorbConflictRow skips the key on purpose (it is
+          // not a host write), so the mirror takes it here.
+          if (CELL_STYLE_KEY in values) {
+            const serverMap = Object.prototype.hasOwnProperty.call(current, CELL_STYLE_KEY) ? current[CELL_STYLE_KEY] : null;
+            commitRows((prev) => prev ? prev.map((r) => r.id === rowId ? { ...r, values: { ...r.values, [CELL_STYLE_KEY]: serverMap ?? null } } : r) : prev);
+          }
+        } else void load(); // conflict body unreadable — reload is the reconcile
         toast("Cell updated by someone else — showing the latest value");
         return;
       }
@@ -1901,11 +2034,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  host never sees it (driveHostWrites filters the reserved key; styles
    *  don't recalc, so no bump is needed). A fully-cleared map writes null
    *  rather than dropping the key: the shallow merge can't delete, and
-   *  every reader treats null as "no styles". */
+   *  every reader treats null as "no styles".
+   *
+   *  `patch` is one style patch for every cell, or a function deciding per
+   *  cell (the decimal steppers: each cell steps from ITS OWN dp); a null
+   *  answer leaves that cell's style untouched. */
   async function formatCells(
     targets: { rowIds: string[]; colIds: string[] },
     label: string,
-    patch: Partial<Record<keyof CellStyle, unknown>>,
+    patch: StylePatch | ((row: ApiRow, colId: string) => StylePatch | null),
   ) {
     if (!tableId) return;
     const byId = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
@@ -1915,7 +2052,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const row = byId.get(rowId);
       if (!row) continue; // deleted since the selection settled — skip, never invent a row
       let values = row.values;
-      for (const colId of targets.colIds) values = withCellStyle(values, colId, patch);
+      for (const colId of targets.colIds) {
+        const cellPatch = typeof patch === "function" ? patch(row, colId) : patch;
+        if (cellPatch) values = withCellStyle(values, colId, cellPatch);
+      }
       const oldMap = row.values[CELL_STYLE_KEY] ?? null;
       const newMap = values[CELL_STYLE_KEY] ?? null;
       if (sameStyleMap(oldMap, newMap)) continue; // already styled this way — no write, no history
@@ -2360,6 +2500,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           }
           if (v === undefined || v === null) return "";
           if (formatted && FORMATTABLE_TYPES.has(c.type) && !Array.isArray(v)) return formatCellValue(v, c.type, c.format);
+          // An open cell's own nf/dp is what the user sees, so the
+          // formatted export honours it the way it honours a column's.
+          if (formatted && isOpenColumnType(c.type)) return formatOpenCell(v, readCellStyle(r.values, c.id));
           return Array.isArray(v) ? v.join("; ") : String(v);
         })();
         return csvEscape(str);
@@ -2603,30 +2746,110 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return [...ids];
   };
 
-  /** Toolbar currency/percent/123 choices: apply the kind to every column
-   *  the selection touches. Formatting is COLUMN-level in v1 (ColumnFormat
-   *  rides the columns Json); per-cell format is the known next step. */
-  const applyKindToSelection = (kind: NumberFormatKind) => {
-    const eligible = selectionColumnIds().filter((id) => {
-      const c = table.columns.find((x) => x.id === id);
-      return !!c && kindForColType(c.type) !== undefined;
-    });
-    if (eligible.length === 0) { toast("Select a cell first"); return; }
-    applyNumberFormat(eligible, kind);
+  /** THE TOOLBAR SPLIT. Every number-format action ($ / % / .0 / .00 /
+   *  123) lands here first and is routed into one of two worlds:
+   *
+   *    OPEN columns (short_text): PER-CELL, like Sheets. The patch goes
+   *    into each selected cell's "$fmt" style (nf / dp) through
+   *    formatCells, one undo command across the whole range. The column
+   *    is never retyped, so pressing $ on ONE cell formats ONE cell and
+   *    the rest of the column still takes text. The exceptions are the
+   *    123 menu's Date and Checkbox: those are not number formats but
+   *    EDITORS (a date picker, a tick box), and a cell can't carry an
+   *    editor, so they stay column-level and retype the open column.
+   *    That is the point of choosing them.
+   *
+   *    LEGACY typed columns (number / currency / percent / date /
+   *    checkbox): COLUMN-level, exactly as before. Their type IS their
+   *    editor and their col.format is their rendering; a per-cell nf
+   *    there would fight the column's own format for the same digits.
+   *
+   *  A selection spanning both worlds applies both halves; each half is
+   *  its own undo command (they persist through different routes). */
+  const routeNumberFormat = (
+    label: string,
+    cellPatch: (row: ApiRow, col: Column) => StylePatch | null,
+    columnPatch: (col: Column) => { before: Partial<Column>; after: Partial<Column> } | null,
+  ): boolean => {
+    const targets = formatTargets();
+    if (!targets) return false;
+    const cols = targets.colIds.map((id) => table.columns.find((c) => c.id === id)).filter((c): c is Column => !!c);
+    const openCols = cols.filter((c) => isOpenColumnType(c.type));
+    const legacyPatches = cols
+      .filter((c) => !isOpenColumnType(c.type))
+      .flatMap((c) => { const p = columnPatch(c); return p ? [{ colId: c.id, ...p }] : []; });
+    if (openCols.length === 0 && legacyPatches.length === 0) return false;
+    if (openCols.length > 0) {
+      // Same gate as the style pills: a per-cell write is a read-modify-
+      // write of rows the stream may not have delivered yet. The legacy
+      // half below is a columns write and needs no rows, so it proceeds.
+      if (streamProgress) toast("Rows are still loading, try again in a moment");
+      else {
+        const byId = new Map(openCols.map((c) => [c.id, c]));
+        void formatCells(
+          { rowIds: targets.rowIds, colIds: openCols.map((c) => c.id) },
+          label,
+          (row, colId) => cellPatch(row, byId.get(colId)!),
+        );
+      }
+    }
+    if (legacyPatches.length > 0) applyColumnPatches(legacyPatches, label);
+    return true;
   };
 
-  /** Toolbar decimal steppers (same column-level v1 scope): only columns
-   *  that RENDER numerically can meaningfully step decimals. */
-  const stepColumnDecimals = (delta: 1 | -1) => {
-    const targets = selectionColumnIds()
-      .map((id) => table.columns.find((c) => c.id === id))
-      .filter((c): c is Column =>
-        !!c && (c.type === "number" || c.type === "currency" || c.type === "percent" || c.format?.style !== undefined));
-    if (targets.length === 0) { toast("Select cells in a numeric column first"); return; }
-    applyColumnPatches(
-      targets.map((c) => ({ colId: c.id, before: { format: c.format }, after: { format: adjustDecimals(c.format, c.type, delta) } })),
-      delta > 0 ? "increase decimals" : "decrease decimals",
+  /** Toolbar $ / % and the 123 menu: the kind as a per-cell nf/dp on open
+   *  cells (plain removes both), the kind as col.type + col.format on
+   *  legacy columns. Date / Checkbox retype EVERY selected column, open
+   *  ones included (see routeNumberFormat). */
+  const applyKindToSelection = (kind: NumberFormatKind) => {
+    if (kind === "date" || kind === "checkbox") {
+      const eligible = selectionColumnIds().filter((id) => {
+        const c = table.columns.find((x) => x.id === id);
+        return !!c && kindForColType(c.type) !== undefined;
+      });
+      if (eligible.length === 0) { toast("Select a cell first"); return; }
+      applyNumberFormat(eligible, kind);
+      return;
+    }
+    const cell: StylePatch = kind === "plain"
+      ? { nf: undefined, dp: undefined }
+      : { nf: kind, dp: defaultDp(kind) };
+    const patch = formatPatchFor(kind);
+    const ok = routeNumberFormat(
+      `format as ${kind}`,
+      () => cell,
+      (c) => kindForColType(c.type) === undefined
+        ? null // legacy/relational types the menu doesn't offer: the popover shows them read-only
+        : { before: { type: c.type, format: c.format }, after: { type: patch.type as ColType, format: patch.format } },
     );
+    if (!ok) toast("Select a cell first");
+  };
+
+  /** Toolbar decimal steppers. Open cells step their OWN dp (a cell with
+   *  an nf from its nf's default, a bare number becomes an nf-number so
+   *  the digits have a format to live in; text and blanks are skipped,
+   *  there are no digits to step). Legacy columns step col.format as
+   *  before, and only when they render numerically. */
+  const stepColumnDecimals = (delta: 1 | -1) => {
+    const ok = routeNumberFormat(
+      delta > 0 ? "increase decimals" : "decrease decimals",
+      (row, col) => {
+        const style = readCellStyle(row.values, col.id);
+        const v = row.values[col.id];
+        const nf = style?.nf ?? (typeof v === "number" ? "number" : undefined);
+        if (!nf) return null;
+        // A bare number (no nf yet) steps from the decimals it SHOWS —
+        // String(5) has 0, String(2.5) has 1 — not from the nf default of
+        // 2, or "decrease" on a plain 5 would add a decimal (5.0).
+        const shown = typeof v === "number" ? (String(v).split(".")[1]?.length ?? 0) : 0;
+        const start = style?.dp ?? (style?.nf ? defaultDp(nf) : shown);
+        return { nf, dp: Math.min(10, Math.max(0, start + delta)) };
+      },
+      (c) => c.type === "number" || c.type === "currency" || c.type === "percent" || c.format?.style !== undefined
+        ? { before: { format: c.format }, after: { format: adjustDecimals(c.format, c.type, delta) } }
+        : null,
+    );
+    if (!ok) toast("Select cells in a numeric column first");
   };
 
   /** The cells a per-cell format action targets: the kernel's settled
@@ -2735,6 +2958,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           return formatCellValue(computed, "date", c.format);
         }
       }
+      // An OPEN column's per-cell formula honours the cell's own $/% format
+      // (Sheets formats formula results): route the computed number through
+      // the same open-cell formatter literals use.
+      if (isOpenColumnType(c.type)) {
+        const cellFmt = readCellStyle(r.values, c.id);
+        if (cellFmt?.nf) {
+          const computed = engineHost.value(c.id, r.id);
+          if (typeof computed === "number") return <span>{formatOpenCell(computed, cellFmt)}</span>;
+        }
+      }
       return <span>{fv}</span>;
     }
     switch (c.type) {
@@ -2768,11 +3001,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
       case "attachment": { const arr = Array.isArray(v) ? v : []; return arr.length ? `📎 ${arr.length}` : null; }
       // short_text (an open column can hold a real number since entry-time
-      // typing), long_text, url, email. A number renders as plain String(n):
-      // Sheets shows "1000", not "1,000", until the user asks for a format,
-      // and the open column has no format to ask. Right-alignment for that
-      // number is cellStyleFor's job.
-      default: return v == null || v === "" ? null : String(v);
+      // typing), long_text, url, email. In an OPEN column a number renders
+      // through the cell's own nf/dp ("$5.00", "5%") when the user asked
+      // for one, else as plain String(n): Sheets shows "1000", not
+      // "1,000", until asked. Right-alignment for that number is
+      // cellStyleFor's job.
+      default: {
+        if (v == null || v === "") return null;
+        return isOpenColumnType(c.type) ? formatOpenCell(v, readCellStyle(r.values, c.id)) : String(v);
+      }
     }
   };
 
@@ -2821,7 +3058,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    *  renders "$12" / "20%" / "★★★" for humans and none of those survive a
    *  round trip back through paste. This is the stored value spelled the
    *  way the editors read and write it — bare numbers, ISO dates, and
-   *  TRUE/FALSE for a checkbox (the token coercePaste takes back). */
+   *  TRUE/FALSE for a checkbox (the token coercePaste takes back).
+   *
+   *  An open cell's per-cell nf/dp is NOT applied here either, for the same
+   *  reason: this text feeds paste, the fill handle's series and the
+   *  formula bar, all of which re-enter through the PLAIN autoTypeEntry
+   *  grammar (a pasted TSV carries no format), so "5%" / "$5.00" here would
+   *  come back as TEXT: a fill-down from one currency cell would plant
+   *  text cells that SUM reads as #VALUE!. The raw 0.05 / 5 round-trips as
+   *  the number it is. The formatted text lives in displayCell and the
+   *  formatted CSV export. */
   const cellText = (col: Column, r: ApiRow): string => {
     const v = r.values[col.id];
     // A computed cell copies its DISPLAY value. Copying the SOURCE would be
@@ -3164,8 +3410,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
       return;
     }
-    // A literal replacing a formula (or typed in the bar) is coerced with the
-    // same rules as paste, so the stored shape matches the column type.
+    // A literal typed into an OPEN cell (formula bar, or replacing a formula
+    // from the grid editor) is an EDITOR entry, not a paste: it takes the
+    // rich grammar, so "5%" in the bar formats the cell exactly as "5%" in
+    // the cell would. (The bar shows the stored 0.05, see cellText; a bare
+    // re-entry keeps the cell's format.)
+    if (isOpenColumnType(col.type)) {
+      void patchRow(rowId, openEntryValues(rowId, colId, raw), { guard: true });
+      return;
+    }
+    // Every other literal is coerced with the same rules as paste, so the
+    // stored shape matches the column type.
     const res = coercePaste(col, raw);
     if (res.kind === "skip") {
       toast("That value doesn't fit this column — nothing saved");
@@ -3190,14 +3445,39 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // engine deliberately reads numeric TEXT as a number in numeric-typed
     // columns only. Every other type stores what its editor produced.
     const col = table.columns.find((c) => c.id === colId);
-    const typed = col && isOpenColumnType(col.type) && typeof v === "string" ? autoTypeEntry(v) : v;
+    if (col && isOpenColumnType(col.type) && typeof v === "string") {
+      // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
+      void patchRow(rowId, openEntryValues(rowId, colId, v), { guard: true });
+      return;
+    }
     // Legacy note: a cell that still holds the STRING "5" (typed before this
     // rule existed) re-committed untouched becomes the number 5. That is a
     // real write on purpose (it upgrades the text to the number the user
     // always meant) and it cannot false-409: patchRow builds `expect` from
     // the STORED value ("5"), which is exactly what the server still holds.
     // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
-    void patchRow(rowId, { [colId]: typed }, { guard: true });
+    void patchRow(rowId, { [colId]: v }, { guard: true });
+  };
+
+  /** The row patch for a plain-editor commit on an OPEN cell: the typed
+   *  value, plus the row's whole "$fmt" map when the entry carried a
+   *  symbol that changes the cell's nf ("5%", "$5"). Both ride ONE row
+   *  write so the server, the conflict guard and undo each see one atomic
+   *  change (undo restores value AND format together). Reads the sync
+   *  mirror, not render-scope state: the map is a read-modify-write and
+   *  must start from the row as it is NOW. */
+  const openEntryValues = (rowId: string, colId: string, text: string): Record<string, unknown> => {
+    const row = (rowsRef.current ?? []).find((r) => r.id === rowId);
+    const entry = resolveOpenEntry(text, readCellStyle(row?.values, colId));
+    // A cleared entry stores null, the empty cell every reader and the
+    // paste path already agree on, not an empty string.
+    const values: Record<string, unknown> = { [colId]: entry.value === "" ? null : entry.value };
+    if (entry.fmt && row) {
+      // null, never a dropped key, when the map empties: the server merge
+      // is shallow and cannot delete (formatCells' rule).
+      values[CELL_STYLE_KEY] = withCellStyle(row.values, colId, entry.fmt)[CELL_STYLE_KEY] ?? null;
+    }
+    return values;
   };
 
   const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
@@ -3253,7 +3533,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     ) : c.type === "person" ? (
       <PersonCell value={r.values[c.id]} users={orgUsers} onChange={(v) => void patchRow(r.id, { [c.id]: v })} />
     ) : (
-      <CellEditor column={c} value={r.values[c.id]} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
+      <CellEditor column={c} value={r.values[c.id]} cellStyle={readCellStyle(r.values, c.id)} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
     );
     return <SheetEditorHost seed={opts.seed} commit={opts.commit}>{inner}</SheetEditorHost>;
   };
@@ -3264,6 +3544,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // The toolbar's B/I/U/S/colour/align pills reflect the ACTIVE cell's
   // stored style (Sheets lights the pill when the cursor sits on bold).
   const activeStyle = activeCell ? readCellStyle(activeCellRow?.values, activeCell.colId) : undefined;
+  // The $ / % pills, the 123 menu's check and the stepper tooltips read
+  // the ACTIVE cell's number format the way the toolbar would write it:
+  // the cell's own nf/dp on an open column (a bare open cell is "plain"),
+  // the column's type/format on a legacy typed column.
+  const activeOpen = !!activeColDef && isOpenColumnType(activeColDef.type);
+  const activeKind: NumberFormatKind | undefined = !activeColDef
+    ? undefined
+    : activeOpen
+      ? (activeStyle?.nf ?? "plain")
+      : (activeColDef.format?.style ?? kindForColType(activeColDef.type));
+  const activeDp: number | undefined = activeOpen
+    ? (activeStyle?.nf ? (activeStyle.dp ?? defaultDp(activeStyle.nf)) : undefined)
+    : activeKind === "number" || activeKind === "currency" || activeKind === "percent"
+      ? (activeColDef?.format?.decimals ?? (activeKind === "percent" ? 0 : 2))
+      : undefined;
+  const stepTitle = (base: string, delta: 1 | -1) =>
+    activeDp === undefined ? base : `${base} (${activeDp} → ${Math.min(10, Math.max(0, activeDp + delta))})`;
   const fmtDisabled = streamProgress !== null;
   // One predicate for the gutter-drag gate AND the row-insert menu items.
   const rowInsertBlocked = !!sortState || !!filterCol || !!search.trim() || streamProgress !== null;
@@ -3396,18 +3693,47 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           {ZOOM_LEVELS.map((z) => <option key={z} value={z}>{z}%</option>)}
         </select>
         <span className="shx__tb-sep" aria-hidden />
-        <button type="button" className="shx__tb-btn" onClick={() => applyKindToSelection("currency")} title="Format as currency" aria-label="Format as currency"><DollarSign /></button>
-        <button type="button" className="shx__tb-btn" onClick={() => applyKindToSelection("percent")} title="Format as percent" aria-label="Format as percent"><Percent /></button>
-        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(-1)} title="Decrease decimal places" aria-label="Decrease decimal places">.0</button>
-        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(1)} title="Increase decimal places" aria-label="Increase decimal places">.00</button>
+        {/* Number format (per cell on open columns, per column on legacy
+            typed ones, see routeNumberFormat). The $ / % pills light from
+            the active cell's format like the B/I/U pills do from its style. */}
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeKind === "currency" ? "is-on" : ""}`}
+          onClick={() => applyKindToSelection("currency")}
+          title="Format as currency"
+          aria-label="Format as currency"
+          aria-pressed={activeKind === "currency"}
+        ><DollarSign /></button>
+        <button
+          type="button"
+          className={`shx__tb-btn ${activeKind === "percent" ? "is-on" : ""}`}
+          onClick={() => applyKindToSelection("percent")}
+          title="Format as percent"
+          aria-label="Format as percent"
+          aria-pressed={activeKind === "percent"}
+        ><Percent /></button>
+        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(-1)} title={stepTitle("Decrease decimal places", -1)} aria-label="Decrease decimal places">.0</button>
+        <button type="button" className="shx__tb-btn shx__tb-text" onClick={() => stepColumnDecimals(1)} title={stepTitle("Increase decimal places", 1)} aria-label="Increase decimal places">.00</button>
         <details className="shx__dd">
           <summary className="shx__tb-btn shx__tb-text" title="Number format" aria-label="Number format">123<ChevronDown /></summary>
-          <div className="shx__dd-menu">
-            {NUMBER_FORMAT_CHOICES.map((t) => (
-              <button key={t.kind} type="button" onClick={(e) => { applyKindToSelection(t.kind); closeDetails(e); }}>
-                {t.label}
-              </button>
-            ))}
+          <div className="shx__dd-menu" role="menu">
+            {NUMBER_FORMAT_CHOICES.map((t) => {
+              const current = activeKind === t.kind;
+              return (
+                <button
+                  key={t.kind}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={current}
+                  onClick={(e) => { applyKindToSelection(t.kind); closeDetails(e); }}
+                >
+                  {/* The check marks the active cell's current kind; the
+                      empty slot keeps the labels aligned below it. */}
+                  {current ? <Check aria-hidden /> : <span aria-hidden style={{ width: 13, flex: "0 0 auto" }} />}
+                  {t.label}
+                </button>
+              );
+            })}
           </div>
         </details>
         <span className="shx__tb-sep" aria-hidden />
@@ -3897,10 +4223,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onClose={() => setActiveRowId(null)}
           onChange={(values) => {
             // "=…" typed into a modal field becomes a stored formula through
-            // the same path as the grid; everything else stays a literal.
+            // the same path as the grid; an OPEN cell's text types on entry
+            // (value + nf, the grid editor's rule, so the modal's "5%" is
+            // the same 0.05-percent the grid would store); everything else
+            // stays a literal. Unguarded, as every drawer write is.
             const literals: Record<string, unknown> = {};
             for (const [k, v] of Object.entries(values)) {
+              const col = table.columns.find((c) => c.id === k);
               if (typeof v === "string" && v.trimStart().startsWith("=")) commitCellText(activeRow.id, k, v);
+              else if (col && isOpenColumnType(col.type) && typeof v === "string") Object.assign(literals, openEntryValues(activeRow.id, k, v));
               else literals[k] = v;
             }
             if (Object.keys(literals).length > 0) void patchRow(activeRow.id, literals);
@@ -4121,7 +4452,7 @@ function RowDetailModal({ table, row, onClose, onChange, formulaDisplay, onDelet
                 // the formula edits in the grid or the formula bar.
                 <FormulaCell value={formulaDisplay?.(c.id) ?? ""} />
               ) : (
-                <CellEditor column={c} value={row.values[c.id]} onChange={(v) => onChange({ [c.id]: v })} />
+                <CellEditor column={c} value={row.values[c.id]} cellStyle={readCellStyle(row.values, c.id)} onChange={(v) => onChange({ [c.id]: v })} />
               )}
             </div>
           ))}
@@ -4324,7 +4655,14 @@ function SheetFormulaEditor({ initial, baseline, onCommit }: {
   );
 }
 
-function CellEditor({ column, value, onChange }: { column: Column; value: unknown; onChange: (v: unknown) => void }) {
+function CellEditor({ column, value, cellStyle, onChange }: {
+  column: Column;
+  value: unknown;
+  /** The cell's stored "$fmt" style: an OPEN cell's nf/dp decides the
+   *  edit-form it opens with and what counts as an unchanged commit. */
+  cellStyle?: CellStyle;
+  onChange: (v: unknown) => void;
+}) {
   const t = column.type;
   // Escape cancels: the host raises this before blurring, so a blur that is
   // really a cancel must leave the stored value alone.
@@ -4334,16 +4672,24 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
     // it for defaultValue, so a bare `text !== value` would read "5" vs 5
     // as an edit and push a no-op write (plus a no-op undo entry) on every
     // untouched blur. Compare what the commit would STORE instead: the
-    // typed value for an open column (so "5", " 5" and "5.0" over a stored
-    // 5 are all no-ops), the text itself elsewhere. What does pass: "5"
-    // over a legacy STRING "5" (5 !== "5"), a deliberate upgrade write,
-    // see commitEditorValue.
-    const unchanged = (text: string) =>
-      isOpenColumnType(t) ? autoTypeEntry(text) === (value ?? "") : text === String(value ?? "");
+    // RICH parse for an open column (value AND the nf it resolves to, so
+    // "5", " 5" and "5.0" over a stored 5, and "5%" / "5.0%" over a stored
+    // 0.05-percent, are all no-ops), the text itself elsewhere. What does
+    // pass: "5" over a legacy STRING "5" (5 !== "5"), a deliberate upgrade
+    // write, see commitEditorValue.
+    const open = isOpenColumnType(t);
+    const unchanged = (text: string) => {
+      if (!open) return text === String(value ?? "");
+      const entry = resolveOpenEntry(text, cellStyle);
+      return entry.fmt === null && entry.value === (value ?? "");
+    };
+    // Open cells edit in Sheets' form: "5%" for an nf-percent cell, the
+    // bare number for currency (the $ is format, not content).
+    const initial = open ? openCellEditText(value, cellStyle) : ((value as string | number) ?? "");
     return (
       <input
         type={t === "short_text" ? "text" : t}
-        defaultValue={(value as string | number) ?? ""}
+        defaultValue={initial}
         onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
         className="dtbl__input"
       />

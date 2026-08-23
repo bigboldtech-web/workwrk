@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoTypeEntry, autoTypeForColumn, isOpenColumnType } from "./sheet-entry";
+import { autoTypeEntry, autoTypeEntryRich, autoTypeForColumn, isOpenColumnType } from "./sheet-entry";
 
 describe("autoTypeEntry: plain numbers", () => {
   it("integers and decimals become numbers", () => {
@@ -73,7 +73,7 @@ describe("autoTypeEntry: what stays text", () => {
     expect(autoTypeEntry("+1 555 0100")).toBe("+1 555 0100");
   });
 
-  it("percent, currency and unit suffixes stay text until a cell format exists", () => {
+  it("percent, currency and unit suffixes stay text here (paste/fill/import carry no cell format; the editor uses autoTypeEntryRich)", () => {
     expect(autoTypeEntry("5%")).toBe("5%");
     expect(autoTypeEntry("$5")).toBe("$5");
     expect(autoTypeEntry("5 USD")).toBe("5 USD");
@@ -174,6 +174,173 @@ describe("autoTypeEntry: return-type honesty", () => {
     for (const s of ["5", "-5", "0.5", "12,345.67", "999999999999999", "-0"]) {
       const v = autoTypeEntry(s);
       expect(JSON.parse(JSON.stringify(v))).toBe(v);
+    }
+  });
+});
+
+describe("autoTypeEntryRich: percent entry", () => {
+  it("divides by 100 and reports nf percent", () => {
+    expect(autoTypeEntryRich("5%")).toStrictEqual({ value: 0.05, nf: "percent" });
+    expect(autoTypeEntryRich("12.5%")).toStrictEqual({ value: 0.125, nf: "percent" });
+    expect(autoTypeEntryRich("-3%")).toStrictEqual({ value: -0.03, nf: "percent" });
+    expect(autoTypeEntryRich("100%")).toStrictEqual({ value: 1, nf: "percent" });
+    expect(autoTypeEntryRich("0%")).toStrictEqual({ value: 0, nf: "percent" });
+    expect(autoTypeEntryRich(".5%")).toStrictEqual({ value: 0.005, nf: "percent" });
+    expect(autoTypeEntryRich("1,000%")).toStrictEqual({ value: 10, nf: "percent" });
+  });
+
+  it("kills the float noise of the /100 (33.3% is 0.333, not 0.33299999999999996)", () => {
+    // The noise is real in a double; the rounding must remove exactly it.
+    expect(33.3 / 100).not.toBe(0.333);
+    expect(8.2 / 100).not.toBe(0.082);
+    expect(1.1 / 100).not.toBe(0.011);
+    expect(autoTypeEntryRich("33.3%")).toStrictEqual({ value: 0.333, nf: "percent" });
+    expect(autoTypeEntryRich("8.2%")).toStrictEqual({ value: 0.082, nf: "percent" });
+    expect(autoTypeEntryRich("1.1%")).toStrictEqual({ value: 0.011, nf: "percent" });
+    expect(autoTypeEntryRich("0.7%")).toStrictEqual({ value: 0.007, nf: "percent" });
+    expect(autoTypeEntryRich("9.95%")).toStrictEqual({ value: 0.0995, nf: "percent" });
+    expect(autoTypeEntryRich("1.005%")).toStrictEqual({ value: 0.01005, nf: "percent" });
+    expect(autoTypeEntryRich("7%")).toStrictEqual({ value: 0.07, nf: "percent" });
+    // Sweep: every one- or two-decimal percentage up to 1000% renders
+    // with at most (input decimals + 2) fraction digits, never a 17-digit tail.
+    for (let i = 0; i < 1000; i++) {
+      for (const f of ["", ".1", ".3", ".7", ".9", ".15", ".35", ".85"]) {
+        const s = `${i}${f}`;
+        const r = autoTypeEntryRich(`${s}%`);
+        expect(r.nf).toBe("percent");
+        const frac = String(r.value).split(".")[1] ?? "";
+        expect(frac.length).toBeLessThanOrEqual(f.length ? f.length - 1 + 2 : 2);
+      }
+    }
+  });
+
+  it("accepts a space before the sign, as Sheets does; the surrounding whitespace too", () => {
+    expect(autoTypeEntryRich("5 %")).toStrictEqual({ value: 0.05, nf: "percent" });
+    expect(autoTypeEntryRich("  5%  ")).toStrictEqual({ value: 0.05, nf: "percent" });
+    expect(autoTypeEntryRich(" -2.5 % ")).toStrictEqual({ value: -0.025, nf: "percent" });
+  });
+
+  it("a sign in the wrong place, a double sign or a bare sign is text", () => {
+    expect(autoTypeEntryRich("%5")).toStrictEqual({ value: "%5" });
+    expect(autoTypeEntryRich("5%%")).toStrictEqual({ value: "5%%" });
+    expect(autoTypeEntryRich("%")).toStrictEqual({ value: "%" });
+    expect(autoTypeEntryRich(" %")).toStrictEqual({ value: " %" });
+    expect(autoTypeEntryRich("5%5")).toStrictEqual({ value: "5%5" });
+    expect(autoTypeEntryRich("$5%")).toStrictEqual({ value: "$5%" });
+  });
+
+  it("the numeric part obeys the full grammar (leading zeros, 15 digits, plus, exponent)", () => {
+    expect(autoTypeEntryRich("007%")).toStrictEqual({ value: "007%" });
+    expect(autoTypeEntryRich("+5%")).toStrictEqual({ value: "+5%" });
+    expect(autoTypeEntryRich("1e3%")).toStrictEqual({ value: "1e3%" });
+    expect(autoTypeEntryRich("1,00%")).toStrictEqual({ value: "1,00%" });
+    expect(autoTypeEntryRich("1234567890123456%")).toStrictEqual({ value: "1234567890123456%" });
+    expect(autoTypeEntryRich("abc%")).toStrictEqual({ value: "abc%" });
+  });
+
+  it("-0% collapses to 0 (no negative zero reaches storage)", () => {
+    const r = autoTypeEntryRich("-0%");
+    expect(Object.is(r.value, 0)).toBe(true);
+    expect(r.nf).toBe("percent");
+  });
+});
+
+describe("autoTypeEntryRich: currency entry", () => {
+  it("strips the symbol and reports nf currency", () => {
+    expect(autoTypeEntryRich("$5")).toStrictEqual({ value: 5, nf: "currency" });
+    expect(autoTypeEntryRich("$1,234.50")).toStrictEqual({ value: 1234.5, nf: "currency" });
+    expect(autoTypeEntryRich("$0.99")).toStrictEqual({ value: 0.99, nf: "currency" });
+    expect(autoTypeEntryRich("$0")).toStrictEqual({ value: 0, nf: "currency" });
+    expect(autoTypeEntryRich("$.5")).toStrictEqual({ value: 0.5, nf: "currency" });
+    expect(autoTypeEntryRich("$5.")).toStrictEqual({ value: 5, nf: "currency" });
+  });
+
+  it("the minus goes before the symbol only", () => {
+    expect(autoTypeEntryRich("-$5")).toStrictEqual({ value: -5, nf: "currency" });
+    expect(autoTypeEntryRich("-$1,234.50")).toStrictEqual({ value: -1234.5, nf: "currency" });
+    expect(autoTypeEntryRich("$-5")).toStrictEqual({ value: "$-5" });
+    expect(autoTypeEntryRich("-$-5")).toStrictEqual({ value: "-$-5" });
+    expect(autoTypeEntryRich("--$5")).toStrictEqual({ value: "--$5" });
+    expect(autoTypeEntryRich("- $5")).toStrictEqual({ value: "- $5" });
+    expect(autoTypeEntryRich("+$5")).toStrictEqual({ value: "+$5" });
+  });
+
+  it("a bare symbol, a gap after it, or a trailing symbol is text", () => {
+    expect(autoTypeEntryRich("$")).toStrictEqual({ value: "$" });
+    expect(autoTypeEntryRich("-$")).toStrictEqual({ value: "-$" });
+    expect(autoTypeEntryRich("$ 5")).toStrictEqual({ value: "$ 5" });
+    expect(autoTypeEntryRich("5$")).toStrictEqual({ value: "5$" });
+    expect(autoTypeEntryRich("$$5")).toStrictEqual({ value: "$$5" });
+    expect(autoTypeEntryRich("$5 USD")).toStrictEqual({ value: "$5 USD" });
+    expect(autoTypeEntryRich("$abc")).toStrictEqual({ value: "$abc" });
+    expect(autoTypeEntryRich("US$5")).toStrictEqual({ value: "US$5" });
+    expect(autoTypeEntryRich("€5")).toStrictEqual({ value: "€5" });
+  });
+
+  it("surrounding whitespace is ignored", () => {
+    expect(autoTypeEntryRich("  $5  ")).toStrictEqual({ value: 5, nf: "currency" });
+    expect(autoTypeEntryRich("\t-$5\n")).toStrictEqual({ value: -5, nf: "currency" });
+  });
+
+  it("the numeric part obeys the full grammar (leading zeros, 15 digits, exponent, grouping)", () => {
+    expect(autoTypeEntryRich("$007")).toStrictEqual({ value: "$007" });
+    expect(autoTypeEntryRich("$00.5")).toStrictEqual({ value: "$00.5" });
+    expect(autoTypeEntryRich("$1234567890123456")).toStrictEqual({ value: "$1234567890123456" });
+    expect(autoTypeEntryRich("$999999999999999")).toStrictEqual({ value: 999999999999999, nf: "currency" });
+    expect(autoTypeEntryRich("$1e3")).toStrictEqual({ value: "$1e3" });
+    expect(autoTypeEntryRich("$1,00")).toStrictEqual({ value: "$1,00" });
+    expect(autoTypeEntryRich("$1.2.3")).toStrictEqual({ value: "$1.2.3" });
+  });
+
+  it("-$0 collapses to 0", () => {
+    const r = autoTypeEntryRich("-$0");
+    expect(Object.is(r.value, 0)).toBe(true);
+    expect(r.nf).toBe("currency");
+  });
+});
+
+describe("autoTypeEntryRich: everything else is autoTypeEntry with NO nf", () => {
+  it("plain numbers come back without an nf key at all", () => {
+    for (const s of ["5", "-5", "0.5", ".5", "5.", "12,345.67", "  42  ", "0", "-0", "999999999999999"]) {
+      const r = autoTypeEntryRich(s);
+      expect(r).toStrictEqual({ value: autoTypeEntry(s) });
+      expect("nf" in r).toBe(false);
+      expect(typeof r.value).toBe("number");
+    }
+  });
+
+  it("text comes back as the original string, whitespace intact, without nf", () => {
+    for (const s of ["abc", "  abc  ", "007", "+5", "1e3", "5 USD", "=A1+1", "2024-01-05", "NaN", "   ", "12abc"]) {
+      const r = autoTypeEntryRich(s);
+      expect(r).toStrictEqual({ value: s });
+      expect("nf" in r).toBe(false);
+    }
+  });
+
+  it("empty string is the empty cell", () => {
+    expect(autoTypeEntryRich("")).toStrictEqual({ value: "" });
+  });
+
+  it("never returns NaN, an infinite number or a negative zero", () => {
+    for (const s of ["NaN%", "Infinity%", "$Infinity", "$NaN", "1e400%", "$1e400", "-0%", "-$0", "-0.0%"]) {
+      const v = autoTypeEntryRich(s).value;
+      if (typeof v === "number") {
+        expect(Number.isFinite(v)).toBe(true);
+        expect(Object.is(v, -0)).toBe(false);
+      }
+    }
+  });
+
+  it("a rich value round-trips through JSON unchanged (what the API stores)", () => {
+    for (const s of ["5%", "-3%", "$1,234.50", "-$5", "7%"]) {
+      const v = autoTypeEntryRich(s).value;
+      expect(JSON.parse(JSON.stringify(v))).toBe(v);
+    }
+  });
+
+  it("agrees with autoTypeEntry on every input that has no symbol", () => {
+    for (const s of ["5", "abc", "", "007", "1,000", "-.5", "1e3", " 5 ", "5-"]) {
+      expect(autoTypeEntryRich(s).value).toBe(autoTypeEntry(s));
     }
   });
 });

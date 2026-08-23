@@ -1,6 +1,7 @@
 /**
- * Tables: per-cell text/fill formatting (Sheets' B / I / U / S / colour /
- * fill / alignment toolbar).
+ * Tables: per-cell formatting (Sheets' B / I / U / S / colour / fill /
+ * alignment toolbar, plus the $ / % / .0 / .00 / 123 number format for
+ * cells in OPEN columns).
  *
  * Pure module, no React, no fetch.
  *
@@ -35,6 +36,17 @@ export type CellStyle = {
   bg?: string;
   /** Horizontal alignment: left / center / right. */
   a?: "l" | "c" | "r";
+  /**
+   * Per-CELL number format, the $ / % / 123 toolbar on an OPEN column.
+   * Legacy typed columns (number/currency/percent) keep their COLUMN-level
+   * `col.format`; this exists because on an open sheet pressing $ must
+   * format the selected cells, not retype the whole column. Names match
+   * `ColumnFormat.style` so the page can hand them straight to the
+   * sheet-format formatter. Not CSS: styleToCss ignores it.
+   */
+  nf?: "number" | "currency" | "percent";
+  /** Decimal places for `nf`, 0..10 (same clamp as ColumnFormat.decimals). */
+  dp?: number;
 };
 
 /** Keys of `row.values` that are NOT column ids. Key-driven readers must
@@ -56,6 +68,10 @@ function readStyleMap(values: Record<string, unknown> | undefined): Record<strin
 }
 
 const ALIGNS = new Set(["l", "c", "r"]);
+const NUMBER_FORMATS = new Set(["number", "currency", "percent"]);
+/** Same ceiling as sheet-format's clampDecimals so a cell can never ask
+ *  Intl for more fraction digits than a column can. */
+const MAX_DP = 10;
 
 /** Normalise one stored entry into a CellStyle, dropping any key whose
  *  value is not the shape the contract allows (a persisted `b: false` or
@@ -71,6 +87,13 @@ function sanitize(raw: unknown): CellStyle | undefined {
   if (typeof raw.c === "string" && raw.c) out.c = raw.c;
   if (typeof raw.bg === "string" && raw.bg) out.bg = raw.bg;
   if (typeof raw.a === "string" && ALIGNS.has(raw.a)) out.a = raw.a as CellStyle["a"];
+  if (typeof raw.nf === "string" && NUMBER_FORMATS.has(raw.nf)) out.nf = raw.nf as CellStyle["nf"];
+  // dp is clamped rather than dropped: a persisted 99 still means "many
+  // decimals", and a non-number ("2", null) carries no intent at all.
+  // 0 is a real value (no decimals), so the check is on type, not truthiness.
+  if (typeof raw.dp === "number" && Number.isFinite(raw.dp)) {
+    out.dp = Math.min(MAX_DP, Math.max(0, Math.floor(raw.dp)));
+  }
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -89,7 +112,8 @@ export function readCellStyle(
  * - A key in `patch` whose value is `undefined`, `null`, `false` or `""`
  *   REMOVES that flag (so `{ b: undefined }` is "un-bold"); any other value
  *   goes through the same sanitiser as persisted data, so garbage can't be
- *   written either.
+ *   written either. `0` is NOT a removal value: `{ dp: 0 }` sets zero
+ *   decimals, which is a format, not its absence.
  * - `patch === null`, or a merge whose result is empty, removes the
  *   column's entry entirely.
  * - When the map ends up empty the `$fmt` key itself is dropped, so a row
@@ -135,7 +159,9 @@ export function withCellStyle(
 
 /** Plain CSS-property object for a style. React-free on purpose (the kernel
  *  spreads it into `style`, tests assert on it directly). `{}` for an
- *  unstyled cell so callers can spread unconditionally. */
+ *  unstyled cell so callers can spread unconditionally. `nf` / `dp` are
+ *  deliberately absent: they shape the TEXT (via the formatter), not the
+ *  box. */
 export function styleToCss(style: CellStyle | undefined): {
   fontWeight?: number;
   fontStyle?: "italic";

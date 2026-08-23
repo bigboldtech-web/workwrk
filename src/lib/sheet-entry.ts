@@ -28,9 +28,12 @@
 //     numbers, the zero there is the value, not padding.
 //   * More than 15 significant digits stays text: a double cannot hold a
 //     16-digit phone number or card/ID number without rounding the tail.
-//   * "5%", "$5", "5 USD" stay TEXT. There is no per-cell number format yet,
-//     so there is no way to render the % or the currency honestly after the
-//     conversion; the day a cell format exists these can convert.
+//   * "5%", "$5", "5 USD" stay TEXT in autoTypeEntry. It serves paste, fill
+//     and CSV import, and a pasted TSV carries no cell format to attach the
+//     % or $ to, so converting there would drop the symbol silently. The
+//     plain editor commit uses autoTypeEntryRich instead (below), which
+//     converts "5%" / "$5" AND reports the per-cell number format (nf) the
+//     page stores in the cell's style so the symbol renders back honestly.
 //   * Everything that is not a number comes back as the ORIGINAL string,
 //     untrimmed, so a non-numeric commit stores exactly what was typed.
 
@@ -77,6 +80,60 @@ export function autoTypeEntry(text: string): number | string {
   // come back as 0 and the conflict guard's expect/stored comparison would
   // have to special-case it. Collapse it before it ever reaches storage.
   return n === 0 ? 0 : n;
+}
+
+/** What the editor commit gets: the typed value plus, when the user typed
+ *  the symbol themselves, the per-cell number format it implies. `nf` is
+ *  ABSENT (not undefined) for a plain number or text so callers can
+ *  compare against the stored style with a simple `===`. */
+export type RichEntry = { value: number | string; nf?: "percent" | "currency" };
+
+/** Fraction digits kept after the /100 of a percent entry. 7/100 is
+ *  0.07000000000000001 in a double; rounding to 12 places kills that
+ *  noise while keeping every percentage anyone would type exactly. */
+const PERCENT_ROUND_PLACES = 12;
+
+/**
+ * The editor-commit grammar: everything autoTypeEntry accepts, plus
+ *   * "<number>%"  -> { value: number / 100, nf: "percent" }  ("5%" is 0.05,
+ *     what Sheets stores; "5 %" with a space before the sign is accepted
+ *     too, Sheets takes it). "%5" and "5%%" are text.
+ *   * "$<number>" / "-$<number>" -> { value, nf: "currency" }. The minus
+ *     goes BEFORE the symbol as people write it; "$-5", "$ 5", "5$" and a
+ *     bare "$" are text. The number after the symbol is unsigned and obeys
+ *     the full grammar, so "$007" and a 16-digit "$1234567890123456" stay
+ *     text for the same reasons "007" and the 16-digit figure do.
+ * Anything else is exactly autoTypeEntry's answer with no nf, so a plain
+ * "5" typed into a cell never invents a format and a cell that already has
+ * one keeps it (Sheets keeps cell formatting on a bare-number entry).
+ */
+export function autoTypeEntryRich(text: string): RichEntry {
+  const trimmed = text.trim();
+
+  if (trimmed.endsWith("%")) {
+    // autoTypeEntry trims, so the whitespace of "5 %" is absorbed there;
+    // "5%%" leaves "5%" as the body, which it rejects, as does "%".
+    const body = autoTypeEntry(trimmed.slice(0, -1));
+    if (typeof body !== "number") return { value: text };
+    const pct = Number((body / 100).toFixed(PERCENT_ROUND_PLACES));
+    // toFixed of a tiny negative yields "-0.000…" which parses to -0.
+    return { value: pct === 0 ? 0 : pct, nf: "percent" };
+  }
+
+  const currency = /^(-)?\$(.*)$/.exec(trimmed);
+  if (currency) {
+    const [, sign, rest] = currency;
+    // The body must start with a digit or the decimal point: a leading
+    // space ("$ 5") or a second sign ("$-5") is not how a currency amount
+    // is written, and autoTypeEntry would otherwise accept both.
+    if (!/^[\d.]/.test(rest)) return { value: text };
+    const body = autoTypeEntry(rest);
+    if (typeof body !== "number") return { value: text };
+    const n = sign ? -body : body;
+    return { value: n === 0 ? 0 : n, nf: "currency" };
+  }
+
+  return { value: autoTypeEntry(text) };
 }
 
 /**

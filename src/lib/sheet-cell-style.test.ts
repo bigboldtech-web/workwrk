@@ -55,6 +55,46 @@ describe("readCellStyle", () => {
   });
 });
 
+describe("readCellStyle: number format (nf / dp)", () => {
+  it("reads a stored nf and dp", () => {
+    expect(readCellStyle({ $fmt: { a: { nf: "currency", dp: 2 } } }, "a")).toEqual({ nf: "currency", dp: 2 });
+    expect(readCellStyle({ $fmt: { a: { nf: "percent", dp: 0 } } }, "a")).toEqual({ nf: "percent", dp: 0 });
+    expect(readCellStyle({ $fmt: { a: { nf: "number" } } }, "a")).toEqual({ nf: "number" });
+  });
+
+  it("drops an unknown nf", () => {
+    expect(readCellStyle({ $fmt: { a: { nf: "bogus", dp: 2 } } }, "a")).toEqual({ dp: 2 });
+    expect(readCellStyle({ $fmt: { a: { nf: "CURRENCY" } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { nf: "" } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { nf: 1 } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { nf: null } } }, "a")).toBeUndefined();
+    // "date" / "checkbox" are column-level choices, never a cell nf.
+    expect(readCellStyle({ $fmt: { a: { nf: "date" } } }, "a")).toBeUndefined();
+  });
+
+  it("rejects a non-number dp, floors a fraction, clamps to 0..10", () => {
+    expect(readCellStyle({ $fmt: { a: { dp: "2" } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { dp: null } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { dp: true } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { dp: NaN } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { dp: Infinity } } }, "a")).toBeUndefined();
+    expect(readCellStyle({ $fmt: { a: { dp: 2.7 } } }, "a")).toEqual({ dp: 2 });
+    expect(readCellStyle({ $fmt: { a: { dp: -1 } } }, "a")).toEqual({ dp: 0 });
+    expect(readCellStyle({ $fmt: { a: { dp: 99 } } }, "a")).toEqual({ dp: 10 });
+    expect(readCellStyle({ $fmt: { a: { dp: 10 } } }, "a")).toEqual({ dp: 10 });
+    expect(readCellStyle({ $fmt: { a: { dp: 0 } } }, "a")).toEqual({ dp: 0 });
+  });
+
+  it("keeps nf/dp alongside the text flags", () => {
+    expect(readCellStyle({ $fmt: { a: { b: true, nf: "percent", dp: 1, a: "r" } } }, "a")).toEqual({
+      b: true,
+      a: "r",
+      nf: "percent",
+      dp: 1,
+    });
+  });
+});
+
 describe("withCellStyle", () => {
   it("round-trips a style through read", () => {
     const values = { a: "x", b: 2 };
@@ -143,6 +183,66 @@ describe("withCellStyle", () => {
     expect(withCellStyle({ x: 1 }, "a", { b: "yes" })).toEqual({ x: 1 });
   });
 
+  it("sets nf + dp on a cell and leaves the rest of the row alone", () => {
+    const values = { a: 5, b: "x" };
+    const next = withCellStyle(values, "a", { nf: "currency", dp: 2 });
+    expect(next).toEqual({ a: 5, b: "x", $fmt: { a: { nf: "currency", dp: 2 } } });
+    expect(next.a).toBe(5); // the stored number is untouched: the engine still sees 5
+  });
+
+  it("merges nf/dp into an existing text style", () => {
+    const base = withCellStyle({}, "a", { b: true, c: "#f00" });
+    expect(readCellStyle(withCellStyle(base, "a", { nf: "percent", dp: 0 }), "a")).toEqual({
+      b: true,
+      c: "#f00",
+      nf: "percent",
+      dp: 0,
+    });
+  });
+
+  it("dp: 0 is a value, not a removal", () => {
+    const base = withCellStyle({}, "a", { nf: "currency", dp: 2 });
+    expect(readCellStyle(withCellStyle(base, "a", { dp: 0 }), "a")).toEqual({ nf: "currency", dp: 0 });
+  });
+
+  it("adjusts dp on its own (the .0 / .00 buttons) without touching nf", () => {
+    const base = withCellStyle({}, "a", { nf: "number", dp: 2 });
+    expect(readCellStyle(withCellStyle(base, "a", { dp: 3 }), "a")).toEqual({ nf: "number", dp: 3 });
+    expect(readCellStyle(withCellStyle(base, "a", { dp: 1 }), "a")).toEqual({ nf: "number", dp: 1 });
+  });
+
+  it("switches nf in place ($ then %)", () => {
+    const base = withCellStyle({}, "a", { nf: "currency", dp: 2 });
+    expect(readCellStyle(withCellStyle(base, "a", { nf: "percent", dp: 0 }), "a")).toEqual({ nf: "percent", dp: 0 });
+  });
+
+  it("clears nf and dp (Plain text) with the usual removal values", () => {
+    const base = withCellStyle({}, "a", { b: true, nf: "currency", dp: 2 });
+    expect(readCellStyle(withCellStyle(base, "a", { nf: undefined, dp: undefined }), "a")).toEqual({ b: true });
+    expect(readCellStyle(withCellStyle(base, "a", { nf: null, dp: null }), "a")).toEqual({ b: true });
+    expect(readCellStyle(withCellStyle(base, "a", { nf: "", dp: false }), "a")).toEqual({ b: true });
+  });
+
+  it("drops the entry and the $fmt key when Plain text clears the only formatting", () => {
+    const base = withCellStyle({ x: 1 }, "a", { nf: "percent", dp: 0 });
+    expect(withCellStyle(base, "a", { nf: undefined, dp: undefined })).toEqual({ x: 1 });
+  });
+
+  it("sanitises nf/dp in the patch: bogus nf dropped, dp clamped / floored / rejected", () => {
+    expect(withCellStyle({}, "a", { nf: "bogus", dp: 2 })).toEqual({ $fmt: { a: { dp: 2 } } });
+    expect(withCellStyle({}, "a", { nf: "currency", dp: "2" })).toEqual({ $fmt: { a: { nf: "currency" } } });
+    expect(withCellStyle({}, "a", { nf: "currency", dp: 2.7 })).toEqual({ $fmt: { a: { nf: "currency", dp: 2 } } });
+    expect(withCellStyle({}, "a", { nf: "currency", dp: -1 })).toEqual({ $fmt: { a: { nf: "currency", dp: 0 } } });
+    expect(withCellStyle({}, "a", { nf: "currency", dp: 99 })).toEqual({ $fmt: { a: { nf: "currency", dp: 10 } } });
+    // A patch that is entirely garbage leaves the row unstyled.
+    expect(withCellStyle({ x: 1 }, "a", { nf: "money", dp: "many" })).toEqual({ x: 1 });
+  });
+
+  it("re-sanitises a persisted out-of-range dp when another key is patched", () => {
+    const next = withCellStyle({ $fmt: { a: { nf: "number", dp: 42 } } }, "a", { b: true });
+    expect(next).toEqual({ $fmt: { a: { b: true, nf: "number", dp: 10 } } });
+  });
+
   it("refuses to style the reserved key as a column", () => {
     const values = { x: 1 };
     expect(withCellStyle(values, "$fmt", { b: true })).toEqual({ x: 1 });
@@ -172,6 +272,11 @@ describe("styleToCss", () => {
     expect(styleToCss({ a: "l" })).toEqual({ textAlign: "left" });
     expect(styleToCss({ a: "c" })).toEqual({ textAlign: "center" });
     expect(styleToCss({ a: "r" })).toEqual({ textAlign: "right" });
+  });
+
+  it("ignores nf / dp: number format is text, not CSS", () => {
+    expect(styleToCss({ nf: "currency", dp: 2 })).toEqual({});
+    expect(styleToCss({ b: true, nf: "percent", dp: 0 })).toEqual({ fontWeight: 600 });
   });
 
   it("combines underline + strikethrough into one declaration", () => {
