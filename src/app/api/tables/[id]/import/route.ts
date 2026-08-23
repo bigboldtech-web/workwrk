@@ -4,6 +4,14 @@
 // label match, auto-create any new headers as short_text columns,
 // then bulk-create one row per CSV row.
 //
+// Cell typing: a CSV is all text. Cells landing in an OPEN column
+// (short_text, the type every new column is born with) go through the same
+// entry-time typing as the editor, so "5" imports as the number 5 and
+// =SUM over the column works straight away. Every other column type keeps
+// storing the raw text: numeric-typed columns are read as numbers by the
+// engine anyway (sheet-engine-host literalAt), and long_text/email/url/...
+// are text by definition.
+//
 // Phase 36 — visibility-gated. Same pattern as /api/tables/[id]/rows:
 // the table is only writable if the viewer can read its parent Space
 // (org-wide tables stay open to all org members). Phase 22b/32b
@@ -16,6 +24,7 @@ import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
+import { autoTypeForColumn } from "@/lib/sheet-entry";
 
 type Column = { id: string; type: string; label: string; options?: string[] };
 
@@ -92,12 +101,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   });
   const startPos = (max?.position ?? 0) + 1;
 
-  // Build the row payloads and createMany.
+  // Build the row payloads and createMany. Column type lookup is by id
+  // because the same header can map to a pre-existing typed column.
+  const typeByColId = new Map(columns.map((c) => [c.id, c.type]));
   const data = dataRows.map((row, i) => {
     const values: Record<string, unknown> = {};
     row.forEach((cell, idx) => {
       const colId = headerToColId[idx];
-      if (colId && cell !== "") values[colId] = cell;
+      if (colId && cell !== "") values[colId] = autoTypeForColumn(typeByColId.get(colId) ?? "", cell);
     });
     return {
       organizationId: orgId,

@@ -51,6 +51,7 @@ import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type C
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
+import { autoTypeEntry, isOpenColumnType } from "@/lib/sheet-entry";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
@@ -205,14 +206,27 @@ const NUMERIC_SORT_TYPES = new Set<ColType>(["number", "currency", "percent", "r
  *  collator on purpose: the date editor writes ISO "YYYY-MM-DD", which is
  *  fixed-width and so already chronological as text, and numeric collation
  *  also orders the un-padded dates a CSV import can leave behind — both
- *  without Date()'s timezone shifts and NaN cliffs. */
+ *  without Date()'s timezone shifts and NaN cliffs.
+ *
+ *  Stored NUMBERS compare as numbers in ANY column: an open (short_text)
+ *  column holds real numbers since entry-time typing (lib/sheet-entry),
+ *  and formula/rollup cells are typed by their result, not their column.
+ *  A number sorts before a string (Sheets' ascending order: numbers, then
+ *  text); blanks keep the collator's placement so an empty cell lands
+ *  where it always has. */
 function compareCells(type: ColType, va: unknown, vb: unknown): number {
-  // formula/rollup are typed by their result, not by the column.
-  if (NUMERIC_SORT_TYPES.has(type) || (typeof va === "number" && typeof vb === "number")) {
-    const na = typeof va === "number" ? va : parseFloat(String(va));
-    const nb = typeof vb === "number" ? vb : parseFloat(String(vb));
+  const aNum = typeof va === "number";
+  const bNum = typeof vb === "number";
+  if (NUMERIC_SORT_TYPES.has(type) || (aNum && bNum)) {
+    const na = aNum ? va : parseFloat(String(va));
+    const nb = bNum ? vb : parseFloat(String(vb));
     if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
   }
+  // Mixed number/text in a non-numeric column: the number wins the top.
+  // Only a non-empty STRING is "text" here; null/"" fall through to the
+  // collator, which already sorts them first, exactly as before.
+  if (aNum && typeof vb === "string" && vb !== "") return -1;
+  if (bNum && typeof va === "string" && va !== "") return 1;
   return String(va ?? "").localeCompare(String(vb ?? ""), undefined, { numeric: true, sensitivity: "base" });
 }
 
@@ -338,7 +352,15 @@ function coercePaste(col: Column, raw: string): PasteCoercion {
       return { kind: "write", value: chosen.length ? chosen : null };
     }
     default: // short_text, long_text, url, email
-      return { kind: "write", value: text === "" ? null : raw };
+      if (text === "") return { kind: "write", value: null };
+      // An OPEN column types on entry, Sheets' rule ("5" pasted from Excel
+      // lands as the number 5 so SUM over it works); every other text type
+      // stores the text verbatim. autoTypeEntry hands back the ORIGINAL
+      // untrimmed string when it isn't a number, which is what this branch
+      // has always stored. This one branch is the chokepoint for paste,
+      // the fill handle (the grid sends its series here as text) and the
+      // formula bar's literal commit (commitCellText).
+      return { kind: "write", value: isOpenColumnType(col.type) ? autoTypeEntry(raw) : raw };
   }
 }
 
@@ -2694,6 +2716,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         return arr.length ? arr.map((id) => rowTitle(lt?.rows.find((x) => x.id === id), lt?.titleColId ?? "")).join(", ") : null;
       }
       case "attachment": { const arr = Array.isArray(v) ? v : []; return arr.length ? `📎 ${arr.length}` : null; }
+      // short_text (an open column can hold a real number since entry-time
+      // typing), long_text, url, email. A number renders as plain String(n):
+      // Sheets shows "1000", not "1,000", until the user asks for a format,
+      // and the open column has no format to ask. Right-alignment for that
+      // number is cellStyleFor's job.
       default: return v == null || v === "" ? null : String(v);
     }
   };
@@ -2713,8 +2740,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const cellStyleFor = (rowId: string, colId: string): React.CSSProperties | undefined => {
     const r = rowById.get(rowId);
     if (!r) return undefined;
-    const css: React.CSSProperties = styleToCss(readCellStyle(r.values, colId));
+    const style = readCellStyle(r.values, colId);
+    const css: React.CSSProperties = styleToCss(style);
     const c = table.columns.find((x) => x.id === colId);
+    // A number in an OPEN column right-aligns, like Sheets: that is how the
+    // user can SEE that entry-time typing took their "5" as a number (a
+    // left-aligned "5" is text). Only the default alignment does this: an
+    // explicit align style ("a") from the toolbar always wins, because the
+    // user chose it.
+    if (c && isOpenColumnType(c.type) && !style?.a && typeof r.values[colId] === "number") css.textAlign = "right";
     if (c?.rules && c.rules.length > 0) {
       const v = r.values[c.id];
       // Streaming honesty gate: a rule must not paint from a computed value
@@ -3074,8 +3108,20 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       commitCellText(rowId, colId, v);
       return;
     }
+    // Entry-time typing (lib/sheet-entry): in an OPEN column the plain
+    // editor's "5" is stored as the number 5: Sheets' rule, and the only
+    // way SUM(A1:A3) over a fresh sheet can ever be non-zero, because the
+    // engine deliberately reads numeric TEXT as a number in numeric-typed
+    // columns only. Every other type stores what its editor produced.
+    const col = table.columns.find((c) => c.id === colId);
+    const typed = col && isOpenColumnType(col.type) && typeof v === "string" ? autoTypeEntry(v) : v;
+    // Legacy note: a cell that still holds the STRING "5" (typed before this
+    // rule existed) re-committed untouched becomes the number 5. That is a
+    // real write on purpose (it upgrades the text to the number the user
+    // always meant) and it cannot false-409: patchRow builds `expect` from
+    // the STORED value ("5"), which is exactly what the server still holds.
     // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
-    void patchRow(rowId, { [colId]: v }, { guard: true });
+    void patchRow(rowId, { [colId]: typed }, { guard: true });
   };
 
   const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
@@ -4155,11 +4201,21 @@ function CellEditor({ column, value, onChange }: { column: Column; value: unknow
   // really a cancel must leave the stored value alone.
   const cancelled = useContext(CellEditCancel);
   if (t === "short_text" || t === "email" || t === "url") {
+    // An open (short_text) column can hold a real NUMBER; React stringifies
+    // it for defaultValue, so a bare `text !== value` would read "5" vs 5
+    // as an edit and push a no-op write (plus a no-op undo entry) on every
+    // untouched blur. Compare what the commit would STORE instead: the
+    // typed value for an open column (so "5", " 5" and "5.0" over a stored
+    // 5 are all no-ops), the text itself elsewhere. What does pass: "5"
+    // over a legacy STRING "5" (5 !== "5"), a deliberate upgrade write,
+    // see commitEditorValue.
+    const unchanged = (text: string) =>
+      isOpenColumnType(t) ? autoTypeEntry(text) === (value ?? "") : text === String(value ?? "");
     return (
       <input
         type={t === "short_text" ? "text" : t}
-        defaultValue={(value as string) ?? ""}
-        onBlur={(e) => { if (cancelled?.current) return; if (e.target.value !== (value ?? "")) onChange(e.target.value); }}
+        defaultValue={(value as string | number) ?? ""}
+        onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
         className="dtbl__input"
       />
     );
