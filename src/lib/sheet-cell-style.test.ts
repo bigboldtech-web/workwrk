@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   CELL_STYLE_KEY,
+  ROW_HEIGHT_KEY,
   isReservedKey,
   readCellStyle,
   styleToCss,
@@ -10,13 +11,36 @@ import {
 } from "./sheet-cell-style";
 
 describe("isReservedKey", () => {
-  it("recognises only the $fmt key", () => {
+  it("recognises exactly the $fmt and $rh keys", () => {
     expect(CELL_STYLE_KEY).toBe("$fmt");
+    expect(ROW_HEIGHT_KEY).toBe("$rh");
     expect(isReservedKey("$fmt")).toBe(true);
+    expect(isReservedKey("$rh")).toBe(true);
     expect(isReservedKey("fmt")).toBe(false);
+    expect(isReservedKey("rh")).toBe(false);
     expect(isReservedKey("$")).toBe(false);
+    expect(isReservedKey("$rhx")).toBe(false);
     expect(isReservedKey("clx1abc")).toBe(false);
     expect(isReservedKey("")).toBe(false);
+  });
+});
+
+describe("$rh is not a style map", () => {
+  it("readCellStyle never reads it as a column, even when it holds junk", () => {
+    // A stored $rh is a plain number; asking for "column $rh" must be
+    // undefined regardless of what the key holds.
+    expect(readCellStyle({ [ROW_HEIGHT_KEY]: 64 }, ROW_HEIGHT_KEY)).toBeUndefined();
+    expect(readCellStyle({ [CELL_STYLE_KEY]: { [ROW_HEIGHT_KEY]: { b: true } } }, ROW_HEIGHT_KEY)).toBeUndefined();
+  });
+
+  it("withCellStyle refuses to style it and leaves the stored height alone", () => {
+    const values = { a: "x", [ROW_HEIGHT_KEY]: 64 };
+    const out = withCellStyle(values, ROW_HEIGHT_KEY, { b: true });
+    expect(out).toEqual(values);   // no $fmt entry appeared
+    expect(out).not.toBe(values);  // still copy-on-write
+    // Styling a REAL column doesn't disturb the sibling height key.
+    const out2 = withCellStyle(values, "a", { b: true });
+    expect(out2[ROW_HEIGHT_KEY]).toBe(64);
   });
 });
 

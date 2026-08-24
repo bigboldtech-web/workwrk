@@ -45,12 +45,28 @@
  * the selection model, the engine or the data changes — a frozen row is
  * still display row r, a frozen cell still cell (rowId, colId). The layout
  * math is written down at the band/virtual-window code below.
+ *
+ * Row heights (Sheets' row resize): per-row custom heights arrive through
+ * `rowHeight` and every vertical computation routes through ONE RowGeometry
+ * (sheet-row-geometry.ts) — O(1) closed-form and formula-identical to the
+ * old constant-height kernel when no custom height exists, prefix sums +
+ * binary search when one does. The gutter grows a boundary hit-zone per row
+ * (drag = guide line, release = onRowResize, double-click = reset); column
+ * resize stays page-owned, the kernel only draws its guide line
+ * (colResizeGuideId).
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fillSeries, parseClipboard, toHTMLTable, toTSV, type Matrix } from "@/lib/sheet-clipboard";
+import { buildRowGeometry, clampRowHeight } from "@/lib/sheet-row-geometry";
 
 export const SHEET_ROW_H = 33;
+
+/* Height of the row-resize hit-zone: a strip along the BOTTOM edge of each
+ * gutter number (Sheets' between-two-numbers boundary). Kept fully inside
+ * the upper row's gutter cell so it can never overlap the next row's
+ * number body — see the disjointness note at the zone itself. */
+const ROW_RESIZE_ZONE_PX = 4;
 const OVERSCAN = 8;
 const GUTTER_W = 48; // row-number gutter, frozen (Sheets-sized: fits 4 digits)
 const COL_W = 180;   // default column width
@@ -227,6 +243,32 @@ export type SheetGridProps = {
    *  cell counts as data and Cmd/Ctrl+Arrow jumps straight to the sheet
    *  edge, which is what Sheets does on a solid block anyway. */
   isCellEmpty?: (rowId: string, colId: string) => boolean;
+  /** Per-row custom height in px (Sheets' row resize), answered from the
+   *  page's mirror (row.values["$rh"]); undefined = the default
+   *  SHEET_ROW_H. Sampled ONCE per geometry build, never per scroll frame
+   *  — see the geometry memo for the complexity story. Absent (or all-
+   *  default) the kernel's vertical math is formula-identical to the
+   *  constant-height kernel. */
+  rowHeight?: (rowId: string) => number | undefined;
+  /** Bump this whenever any row's stored height changes. It is the
+   *  geometry's identity for `rowHeight` (the function itself is
+   *  deliberately NOT a dependency, so a page passing an inline arrow
+   *  costs nothing per render). */
+  rowHeightsVersion?: number;
+  /** A gutter row-boundary drag ended: persist `height` px (already
+   *  clamped 16..400) on the row. A double-click on the boundary fires
+   *  with SHEET_ROW_H, meaning "reset to default". Omit it and the gutter
+   *  renders no resize zones at all — rendering is byte-identical to the
+   *  pre-resize kernel. */
+  onRowResize?: (rowId: string, height: number) => void;
+  /** Column-resize guide line (the column GESTURE stays page-owned): while
+   *  the page is dragging a width it passes the resizing column's id and
+   *  the kernel draws a full-height 2px guide at that column's LIVE right
+   *  edge — the page's optimistic width updates flow through the `columns`
+   *  prop every mousemove, so the line tracks the pointer with zero extra
+   *  math and is immune to zoom and scroll by construction. null/absent
+   *  renders nothing. */
+  colResizeGuideId?: string | null;
 };
 
 type Cell = { rowId: string; c: number };
@@ -236,6 +278,7 @@ export function SheetGrid({
   onRowContextMenu, onHeaderContextMenu, onRowMove, onGrowRows, renderHeader,
   headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
   onRedo, onFormatKey, cellStyle, onSelectionChange, freeze, isCellEmpty,
+  rowHeight, rowHeightsVersion, onRowResize, colResizeGuideId,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -257,6 +300,21 @@ export function SheetGrid({
   /* Armed on gutter pointerdown; becomes a real drag only after the pointer
    * crosses ROW_DRAG_THRESHOLD_PX, so a plain click stays a click. */
   const pendingRowDragRef = useRef<{ pointerId: number; rowId: string; startY: number } | null>(null);
+  /* Gutter row-BOUNDARY drag (Sheets row resize). Same state-for-render +
+   * commit-once-ref pairing as rowDrag: the guide line renders from state,
+   * the ref is the token that guarantees pointerup and lostpointercapture
+   * (which can both fire for one release) commit at most once. `h` is the
+   * live clamped height the guide previews; nothing is applied until
+   * release (Sheets shows only the line while dragging). `zoom` is the CSS
+   * zoom captured at pointerdown — it cannot change mid-drag, and clientY
+   * deltas are visual px while heights are layout px. */
+  /* No row INDEX in here on purpose: rows can reorder under a captured
+   * drag (an instant-commit editor elsewhere, a concurrent sort), so the
+   * guide resolves rowId → live index at render and the commit carries
+   * the rowId — the same id-not-index discipline as the selection model. */
+  type RowResizeState = { rowId: string; pointerId: number; startY: number; startH: number; h: number; zoom: number };
+  const [rowResize, setRowResize] = useState<RowResizeState | null>(null);
+  const rowResizeRef = useRef<RowResizeState | null>(null);
   const [applying, setApplying] = useState(false);
   const applyingRef = useRef(false);
 
@@ -271,6 +329,38 @@ export function SheetGrid({
   // whole sheet and make the scroller pointless (Sheets refuses it too).
   const fr = Math.max(0, Math.min(Math.floor(Number(freeze?.rows) || 0), rowCount - 1));
   const fc = Math.max(0, Math.min(Math.floor(Number(freeze?.cols) || 0), colCount - 1));
+
+  /* ── row geometry (variable heights) ────────────────────────── */
+  /* ONE geometry object answers every vertical question: row tops, row
+   * heights, total body height, pointer→row, pointer→gap, the virtual
+   * window and the freeze-band height all route through it, so the
+   * constant SHEET_ROW_H appears below only as (a) the header height and
+   * (b) the PageUp/Down page-step estimate — both deliberate.
+   *
+   * Complexity (the 50k perf contract): with no `rowHeight` prop, or when
+   * every answer is undefined/default, buildRowGeometry allocates NOTHING
+   * and every query is the same O(1) closed-form arithmetic as the old
+   * constant-height kernel (rowTop = r*H, rowAtY = floor(y/H), rowEndAtY =
+   * ceil(y/H), gapAtY = round(y/H)) — the fast-path proof lives with the
+   * formulas in sheet-row-geometry.ts. Only when at least one custom
+   * height exists does it build a prefix-sum array: O(n) once per
+   * [rowIds, rowHeightsVersion] change (a DATA event, never a scroll
+   * event), then O(log n) binary search per pointer/scroll query.
+   *
+   * `rowHeight` itself is deliberately NOT a dependency: pages pass inline
+   * arrows, and re-deriving 50k heights per parent render would defeat the
+   * memo. rowHeightsVersion is the function's identity — the page bumps it
+   * whenever any stored height changes (same contract as a reducer's
+   * version counter). */
+  const geom = useMemo(
+    () => buildRowGeometry(rowCount, SHEET_ROW_H, rowHeight ? (i) => rowHeight(rowIds[i]) : undefined),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rowHeight is snapshotted by design; rowHeightsVersion is its identity (see above)
+    [rowIds, rowCount, rowHeightsVersion],
+  );
+  /* Height of the frozen band = sum of the frozen rows' heights. rowTop is
+   * defined through index rowCount, so fr = 0 gives 0 and the whole freeze
+   * math below degrades to the unfrozen formulas exactly as before. */
+  const bandH = geom.rowTop(fr);
 
   /** rowId → current index. The only bridge between id-keyed state and the
    *  index geometry virtualization needs; re-derived whenever rows reorder. */
@@ -293,20 +383,26 @@ export function SheetGrid({
   }, []);
 
   /* Layout with a frozen band (fr > 0), in scroll-space px from the top of
-   * the grid div:
+   * the grid div (ROW_H = the header's height; row heights come from geom):
    *   header        [0, ROW_H)                      sticky top 0
-   *   frozen band   [ROW_H, (1 + fr) * ROW_H)       sticky top ROW_H
-   *   body box      [(1 + fr) * ROW_H, (1 + rowCount) * ROW_H)
-   * Body row r (r >= fr) sits at (r - fr) * ROW_H inside the body box, so
-   * its scroll-space top is still (r + 1) * ROW_H — the same place it had
-   * with no freeze. What changes is what the viewport SHOWS: the band is
-   * pinned at header-bottom whatever scrollTop is, so the first fr rows'
-   * worth of body content under it is always covered. The virtual window
-   * therefore starts fr rows later for the same scrollTop (and never
-   * before fr — rows below fr live in the band and are always mounted).
-   * With fr = 0 both lines reduce to the pre-freeze formulas. */
-  const first = Math.max(fr, Math.floor(viewport.top / SHEET_ROW_H) + fr - OVERSCAN);
-  const last = Math.min(rowCount, Math.ceil((viewport.top + viewport.height) / SHEET_ROW_H) + OVERSCAN);
+   *   frozen band   [ROW_H, ROW_H + bandH)          sticky top ROW_H
+   *   body box      [ROW_H + bandH, ROW_H + geom.totalHeight)
+   * Body row r (r >= fr) sits at geom.rowTop(r) - bandH inside the body
+   * box, so its scroll-space top is still ROW_H + geom.rowTop(r) — the
+   * same place it had with no freeze. What changes is what the viewport
+   * SHOWS: the band is pinned at header-bottom whatever scrollTop is, so
+   * the first bandH px of body content under it is always covered. The
+   * virtual window therefore starts bandH px later for the same scrollTop
+   * (and never before row fr — rows below fr live in the band and are
+   * always mounted). With fr = 0 both lines reduce to the pre-freeze
+   * formulas.
+   *
+   * Fast-path proof (all heights default): rowAtY(top + fr*H) =
+   * floor(top/H) + fr and rowEndAtY(top + height) = ceil((top + height)/H)
+   * — exactly the constant-height window this grid always mounted, so a
+   * sheet with no custom heights renders byte-identical rows. */
+  const first = Math.max(fr, geom.rowAtY(viewport.top + bandH) - OVERSCAN);
+  const last = Math.min(rowCount, geom.rowEndAtY(viewport.top + viewport.height) + OVERSCAN);
 
   /* ── geometry ───────────────────────────────────────────────── */
   // Columns aren't virtualized, but horizontal scrolling still needs their
@@ -384,13 +480,16 @@ export function SheetGrid({
     // A frozen row is pinned on screen: scrolling can neither hide nor
     // reveal it, so only a body row has a vertical requirement.
     if (r >= fr) {
-      const top = r * SHEET_ROW_H;
-      const bottom = top + SHEET_ROW_H;
+      const top = geom.rowTop(r);
+      const bottom = top + geom.rowHeight(r);
       // The sticky header covers the first ROW_H of the viewport and the
-      // frozen band the next fr * ROW_H: a body row is only visible once it
-      // clears both, i.e. when its body-local top minus the band height is
-      // at or past scrollTop (fr = 0 gives the original header-only test).
-      if (top - fr * SHEET_ROW_H < el.scrollTop) el.scrollTop = top - fr * SHEET_ROW_H;
+      // frozen band the next bandH px: a body row is only visible once it
+      // clears both, i.e. when its top minus the band height is at or past
+      // scrollTop (fr = 0 gives the original header-only test; all-default
+      // heights give top = r * ROW_H, bottom = (r + 1) * ROW_H — the exact
+      // pre-variable-heights formulas). The ROW_H in the bottom test is
+      // the HEADER's height, not a row's.
+      if (top - bandH < el.scrollTop) el.scrollTop = top - bandH;
       else if (bottom > el.scrollTop + el.clientHeight - SHEET_ROW_H) el.scrollTop = bottom - el.clientHeight + SHEET_ROW_H;
     }
     if (c < fc) return; // a frozen column is likewise always on screen
@@ -404,7 +503,7 @@ export function SheetGrid({
     const inset = colOffsets[fc] ?? GUTTER_W;
     if (left - inset < el.scrollLeft) el.scrollLeft = Math.max(0, left - inset);
     else if (right > el.scrollLeft + el.clientWidth) el.scrollLeft = right - el.clientWidth;
-  }, [colOffsets, fr, fc]);
+  }, [colOffsets, fr, fc, geom, bandH]);
 
   const activeRef = useRef<Cell | null>(null);
   useEffect(() => { activeRef.current = active; }, [active]);
@@ -741,47 +840,57 @@ export function SheetGrid({
     await runApply({ rowId, c: dstC }, src.map((row) => Array.from({ length: width }, () => row[0] ?? "")));
   }, [range, readRect, rowIds, runApply]);
 
-  /** A pointer's y in BODY-ROW units: the value whose floor is the display
-   *  row under the pointer and whose round is the nearest insertion gap.
-   *  Shared by the fill handle and the gutter row drag.
+  /** The scroller's effective CSS zoom: clientX/Y are visual px — scaled
+   *  when an ancestor applies CSS zoom (the page's zoom control) — while
+   *  scrollTop / row heights / column widths are unscaled layout px.
+   *  Every pointer gesture divides by this before mixing the two, or a
+   *  drag at 75%/150% lands on rows the user never touched. */
+  const cssZoomOf = (el: HTMLElement) => {
+    const z = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom
+      ?? (el.offsetWidth > 0 ? el.getBoundingClientRect().width / el.offsetWidth : 1);
+    return z || 1;
+  };
+
+  /** A pointer's y in BODY-SPACE px — the coordinate geom.rowAtY answers
+   *  in (0 = the top of row 0): geom.rowAtY of it is the display row under
+   *  the pointer, geom.gapAtY the nearest insertion gap. Shared by the
+   *  fill handle and the gutter row drag. Pre-variable-heights this
+   *  returned row UNITS (y / ROW_H); dividing by the constant moved into
+   *  the geometry's uniform formulas, so floor/round of the old value and
+   *  rowAtY/gapAtY of this one are the same integers.
    *
    *  The header sits in normal flow at the top of the scrolled content, so
-   *  body row r starts at scroll-space (r + 1) * ROW_H: subtract the header
-   *  and add scrollTop. With a frozen band the first fr rows are NOT in
-   *  scroll space — the band is pinned at viewport y ROW_H..(1 + fr) * ROW_H
-   *  whatever scrollTop is, so a pointer inside it is over frozen row
-   *  (vy - ROW_H) / ROW_H and scrollTop must not be added. Below the band
-   *  the scroll-space formula still holds unchanged (body rows never moved,
-   *  the band merely covers the first fr rows' worth of them). At
+   *  body row r starts at scroll-space ROW_H + rowTop(r): subtract the
+   *  header and add scrollTop. With a frozen band the first fr rows are
+   *  NOT in scroll space — the band is pinned at viewport y
+   *  ROW_H..ROW_H + bandH whatever scrollTop is, so a pointer inside it is
+   *  over band-local px (vy - ROW_H) — which IS body-space px, band rows
+   *  sit at rowTop 0..bandH — and scrollTop must not be added. Below the
+   *  band the scroll-space formula still holds unchanged (body rows never
+   *  moved, the band merely covers the first bandH px of them). At
    *  scrollTop 0 both formulas agree at the boundary, so the function is
    *  continuous across it. */
   const bodyYFromClientY = useCallback((clientY: number) => {
     const el = scrollRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    // clientY is visual px — scaled when an ancestor applies CSS zoom (the
-    // page's zoom control) — while scrollTop/ROW_H are unscaled layout px.
-    // Normalize the client-space offset before mixing the two, or a fill
-    // drag at 75%/150% writes into rows the user never touched.
-    const cssZoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom
-      ?? (el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1);
-    const vy = (clientY - rect.top) / (cssZoom || 1) - el.clientTop;
+    const vy = (clientY - rect.top) / cssZoomOf(el) - el.clientTop;
     // Above the header (the pointer drifted out of the scroller) the band
     // formula would snap to frozen row 0 — a fill drag that wandered up
     // would then paint every row from the top. Fall through to the scroll-
     // space formula instead, which resolves to about the top visible body
     // row, exactly what the unfrozen grid does there.
-    if (fr > 0 && vy >= SHEET_ROW_H && vy < (1 + fr) * SHEET_ROW_H) return (vy - SHEET_ROW_H) / SHEET_ROW_H;
-    return (vy + el.scrollTop - SHEET_ROW_H) / SHEET_ROW_H;
-  }, [fr]);
+    if (fr > 0 && vy >= SHEET_ROW_H && vy < SHEET_ROW_H + bandH) return vy - SHEET_ROW_H;
+    return vy + el.scrollTop - SHEET_ROW_H;
+  }, [fr, bandH]);
 
   /** Which DISPLAY row a pointer is over, 0..rowCount-1. */
   const rowFromClientY = useCallback((clientY: number) => {
     if (rowCount === 0) return null;
     const y = bodyYFromClientY(clientY);
     if (y == null) return null;
-    return Math.max(0, Math.min(rowCount - 1, Math.floor(y)));
-  }, [rowCount, bodyYFromClientY]);
+    return geom.rowAtY(y);
+  }, [rowCount, bodyYFromClientY, geom]);
 
   const commitFill = useCallback(async (base: Rect, to: number) => {
     const down = to > base.r2;
@@ -839,15 +948,16 @@ export function SheetGrid({
 
   /** Which INSERTION GAP a pointer is nearest — 0..rowCount inclusive, where
    *  gap g is the boundary above display row g. Same zoom-normalized math as
-   *  rowFromClientY, but rounded instead of floored: the top half of a row
-   *  snaps to the gap above it, the bottom half to the gap below, which is
-   *  how the Sheets drop line behaves. */
+   *  rowFromClientY, but snapped to the nearest boundary instead of floored:
+   *  the top half of a row snaps to the gap above it, the bottom half to the
+   *  gap below, which is how the Sheets drop line behaves (gapAtY reduces to
+   *  the old Math.round(y / ROW_H) when heights are uniform). */
   const gapFromClientY = useCallback((clientY: number) => {
     if (rowCount === 0) return null;
     const y = bodyYFromClientY(clientY);
     if (y == null) return null;
-    return Math.max(0, Math.min(rowCount, Math.round(y)));
-  }, [rowCount, bodyYFromClientY]);
+    return geom.gapAtY(y);
+  }, [rowCount, bodyYFromClientY, geom]);
 
   /** End of a row drag. Same dual-exit story as endFillDrag (pointerup and
    *  lostpointercapture race), but a move is NOT idempotent the way the
@@ -890,6 +1000,48 @@ export function SheetGrid({
   // the ref must not linger to hijack a later gesture.
   useEffect(() => {
     if (rowDrag && !rowIndex.has(rowDrag.rowId)) endRowDrag(false);
+  });
+
+  /* ── gutter row resize (Sheets row-boundary drag) ───────────── */
+
+  /** End of a boundary drag. Same dual-exit story as endRowDrag (pointerup
+   *  and lostpointercapture race) and the same ref-as-commit-token: a
+   *  resize write is not idempotent through undo (two identical commits
+   *  would push two undo entries), so whoever nulls the ref commits and
+   *  everyone after sees null. A release whose height never actually
+   *  changed (a plain click on the boundary, or a drag returned to its
+   *  start) fires nothing — Sheets treats that as a no-op too, and firing
+   *  would litter the page's undo stack with zero-delta writes. */
+  const endRowResize = (commit: boolean) => {
+    const st = rowResizeRef.current;
+    if (!st) return;
+    rowResizeRef.current = null;
+    setRowResize(null);
+    if (!commit || !onRowResize) return;
+    const h = Math.round(st.h);
+    if (h === Math.round(st.startH)) return;
+    onRowResize(st.rowId, h);
+  };
+
+  // Escape abandons a boundary drag without resizing — window-level and
+  // capture-phase for the same reason as the row-drag Escape above: the
+  // pointer capture sits on the boundary zone and focus can be anywhere.
+  useEffect(() => {
+    if (!rowResize) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation(); // the grid's Escape would also collapse the selection
+      rowResizeRef.current = null;
+      setRowResize(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [rowResize]);
+
+  // The resized row can vanish mid-drag exactly like a dragged row; the
+  // guide must not linger over a row that no longer exists.
+  useEffect(() => {
+    if (rowResize && !rowIndex.has(rowResize.rowId)) endRowResize(false);
   });
 
   // A row can vanish under an open editor (deleted, or filtered out by a
@@ -1001,6 +1153,10 @@ export function SheetGrid({
       case "ArrowUp": e.preventDefault(); step(-1, 0, extend); return;
       case "ArrowRight": e.preventDefault(); step(0, 1, extend); return;
       case "ArrowLeft": e.preventDefault(); step(0, -1, extend); return;
+      // PageUp/Down step by viewport ÷ the DEFAULT row height — an
+      // estimate, kept deliberately even with custom row heights (contract:
+      // a page-jump is coarse navigation; an exact variable-height page
+      // count would cost a scan and land somewhere equally arbitrary).
       case "PageDown": e.preventDefault(); move(Math.max(1, Math.floor(viewport.height / SHEET_ROW_H) - 2), 0, extend); return;
       case "PageUp": e.preventDefault(); move(-Math.max(1, Math.floor(viewport.height / SHEET_ROW_H) - 2), 0, extend); return;
       case "Home": e.preventDefault(); setAnchor(extend ? (anchor ?? active) : null); setActive({ rowId: active.rowId, c: 0 }); scrollCellIntoView(activeR, 0); return;
@@ -1134,8 +1290,12 @@ export function SheetGrid({
         pieces.push({
           key: `${rs.band ? "b" : "y"}${cs.stuck ? "s" : "f"}`,
           band: rs.band,
-          top: (rs.band ? rs.a : rs.a - fr) * SHEET_ROW_H,
-          height: (rs.b - rs.a + 1) * SHEET_ROW_H,
+          // Band rows sit at body-space rowTop directly (the band holds
+          // rows 0..fr-1 from its own top); body-box rows shift up by the
+          // band height. rowTop(rs.b + 1) - rowTop(rs.a) is the span's
+          // height whatever the rows measure (uniform: (b - a + 1) * H).
+          top: rs.band ? geom.rowTop(rs.a) : geom.rowTop(rs.a) - bandH,
+          height: geom.rowTop(rs.b + 1) - geom.rowTop(rs.a),
           left: left + (cs.stuck ? viewport.left : 0),
           width: Math.max(0, right - left),
           stuck: cs.stuck,
@@ -1179,7 +1339,9 @@ export function SheetGrid({
         title="Drag to fill"
         className={`absolute ${stuck ? "z-[16]" : "z-10"} flex items-center justify-center`}
         style={{
-          top: ((band ? fillAnchor.r : fillAnchor.r - fr) + 1) * SHEET_ROW_H - 7,
+          // The anchor row's BOTTOM edge: rowTop(r + 1), band-local or
+          // body-local (uniform: (r + 1) * ROW_H, as before).
+          top: (band ? geom.rowTop(fillAnchor.r + 1) : geom.rowTop(fillAnchor.r + 1) - bandH) - 7,
           left: (colOffsets[fillAnchor.c + 1] ?? GUTTER_W) - 7 + (stuck ? viewport.left : 0),
           width: 14,
           height: 14,
@@ -1221,10 +1383,55 @@ export function SheetGrid({
       <div
         aria-hidden
         className="pointer-events-none absolute left-0 right-0 z-30 bg-[#0073EA]"
-        style={{ top: (band ? rowDrag.gap : rowDrag.gap - fr) * SHEET_ROW_H - 1, height: 2 }}
+        // Gap g's y is rowTop(g) — defined through g = rowCount (the gap
+        // below the last row = totalHeight), band-local or body-local.
+        style={{ top: (band ? geom.rowTop(rowDrag.gap) : geom.rowTop(rowDrag.gap) - bandH) - 1, height: 2 }}
       />
     );
   };
+
+  /** Row-resize guide (Sheets look): a full-width 2px brand-blue line at
+   *  the dragged boundary's LIVE position, rowTop(r) + the clamped drag
+   *  height. Split across the freeze line like the drop indicator: a
+   *  frozen row's boundary is pinned with the band, a body row's scrolls
+   *  with the body. Scroll-space positioning makes it zoom-aware for free
+   *  (the whole grid subtree scales together). z-30 for the same reason
+   *  as the drop line: it must ride above sticky gutter (z-10) and frozen
+   *  cells (z-[15]). */
+  const renderRowResizeGuide = (band: boolean) => {
+    if (!rowResize) return null;
+    const rr = rowIndex.get(rowResize.rowId);
+    if (rr == null || (rr < fr) !== band) return null;
+    const y = geom.rowTop(rr) + rowResize.h;
+    return (
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-0 right-0 z-30 bg-[#0073EA]"
+        style={{ top: (band ? y : y - bandH) - 1, height: 2 }}
+      />
+    );
+  };
+
+  /** Column-resize guide: the vertical twin, at the resizing column's LIVE
+   *  right edge (the page's optimistic width updates arrive through the
+   *  `columns` prop every mousemove, so colOffsets already track the
+   *  pointer). One line spanning the grid's full height, absolutely
+   *  positioned in scroll space; a frozen column's edge rides scrollLeft
+   *  the same way the frozen overlays do. z-40: unlike the row overlays it
+   *  must also cross the sticky header (z-20). */
+  const colGuideIndex = colResizeGuideId != null ? columns.findIndex((c) => c.id === colResizeGuideId) : -1;
+  const colResizeGuide = colGuideIndex >= 0 ? (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute z-40 bg-[#0073EA]"
+      style={{
+        top: 0,
+        bottom: 0,
+        left: (colOffsets[colGuideIndex + 1] ?? GUTTER_W) - 1 + (colGuideIndex < fc ? viewport.left : 0),
+        width: 2,
+      }}
+    />
+  ) : null;
 
   /* Background of a frozen cell. Sticky cells slide over scrolling ones, so
    * they must be opaque: the page's own fill wins (it already beats the
@@ -1245,7 +1452,7 @@ export function SheetGrid({
       role="row"
       aria-rowindex={r + 1}
       className="absolute left-0 right-0 flex border-b border-zinc-50"
-      style={{ top, height: SHEET_ROW_H }}
+      style={{ top, height: geom.rowHeight(r) }}
       onContextMenu={(e) => {
         if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
         if (!onRowContextMenu) return;
@@ -1313,6 +1520,66 @@ export function SheetGrid({
         onLostPointerCapture={() => endRowDrag(true)}
       >
         {r + 1}
+        {/* Row-resize boundary zone (Sheets: the seam between two row
+          * numbers). A ROW_RESIZE_ZONE_PX strip along the number's BOTTOM
+          * edge, fully INSIDE this gutter cell — so it is disjoint from
+          * the drag-to-move surface by construction: move arms from the
+          * gutter cell's own pointerdown, and this child's pointerdown
+          * stops propagation, so a press in the strip can never arm a
+          * move and a press outside it never starts a resize. z above the
+          * number, cursor row-resize, no live height change while
+          * dragging (the guide line previews; release applies). */}
+        {onRowResize && (
+          <div
+            aria-hidden
+            title="Drag to resize row · double-click to reset"
+            className="absolute inset-x-0 bottom-0"
+            style={{ height: ROW_RESIZE_ZONE_PX, cursor: "row-resize", touchAction: "none" }}
+            onPointerDown={(e) => {
+              if (e.button !== 0) return; // right-click stays the context menu
+              e.preventDefault();
+              e.stopPropagation(); // never reach the gutter's move-arm handler
+              // Same as the gutter/cell pointerdown: stealing focus from an
+              // open editor blurs it, and blur is how editors commit.
+              gridRef.current?.focus();
+              // Same stale-capture self-heal as the row drag: a scroll can
+              // unmount a captured zone and strand the ref.
+              if (rowResizeRef.current) endRowResize(false);
+              const el = scrollRef.current;
+              const st = {
+                rowId, pointerId: e.pointerId,
+                startY: e.clientY,
+                startH: geom.rowHeight(r), h: geom.rowHeight(r),
+                zoom: el ? cssZoomOf(el) : 1,
+              };
+              rowResizeRef.current = st;
+              setRowResize(st);
+              (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              const st = rowResizeRef.current;
+              if (!st || st.pointerId !== e.pointerId) return;
+              // Button already up: we missed the pointerup (failed capture,
+              // release outside). Abandon, same rule as the row drag.
+              if (e.buttons === 0) { endRowResize(false); return; }
+              const h = clampRowHeight(st.startH + (e.clientY - st.startY) / st.zoom);
+              if (h === st.h) return;
+              const next = { ...st, h };
+              rowResizeRef.current = next;
+              setRowResize(next);
+            }}
+            onPointerUp={(e) => { releasePointer(e); endRowResize(true); }}
+            onPointerCancel={(e) => { releasePointer(e); endRowResize(false); }}
+            onLostPointerCapture={() => endRowResize(true)}
+            onDoubleClick={(e) => {
+              // Sheets: double-click the boundary resets the row. The two
+              // clicks' own down/up pairs each committed nothing (height
+              // unchanged), so this is the only write of the gesture.
+              e.stopPropagation();
+              onRowResize(rowId, SHEET_ROW_H);
+            }}
+          />
+        )}
       </div>
       {columns.map((col, c) => {
         const isActive = active?.rowId === rowId && active.c === c;
@@ -1446,10 +1713,11 @@ export function SheetGrid({
             * a border, because the last row's own border-b would paint
             * over a band border. */}
           {fr > 0 && (
-            <div className="sticky z-20 bg-white" style={{ top: SHEET_ROW_H, height: fr * SHEET_ROW_H }}>
-              {rowIds.slice(0, fr).map((rowId, r) => renderRow(rowId, r, r * SHEET_ROW_H))}
+            <div className="sticky z-20 bg-white" style={{ top: SHEET_ROW_H, height: bandH }}>
+              {rowIds.slice(0, fr).map((rowId, r) => renderRow(rowId, r, geom.rowTop(r)))}
               <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 z-30 h-px bg-zinc-300" />
               {renderDropIndicator(true)}
+              {renderRowResizeGuide(true)}
               {renderFillPreview(true)}
               {renderFillHandle(true)}
             </div>
@@ -1457,18 +1725,24 @@ export function SheetGrid({
 
           {/* Virtualized body: rows fr..rowCount-1. Its height shrinks by
             * the band's rows, since they are laid out in the band, not
-            * here; body row r sits at (r - fr) * ROW_H. */}
-          <div style={{ height: (rowCount - fr) * SHEET_ROW_H, position: "relative" }}>
+            * here; body row r sits at rowTop(r) - bandH (uniform:
+            * (r - fr) * ROW_H, exactly the pre-variable-heights layout). */}
+          <div style={{ height: geom.totalHeight - bandH, position: "relative" }}>
             {rowCount === 0 ? (
               <div className="flex h-24 items-center justify-center text-[13px] text-zinc-400">No rows yet. Add one below.</div>
             ) : (
-              mounted.map(({ rowId, r }) => renderRow(rowId, r, (r - fr) * SHEET_ROW_H))
+              mounted.map(({ rowId, r }) => renderRow(rowId, r, geom.rowTop(r) - bandH))
             )}
 
             {renderDropIndicator(false)}
+            {renderRowResizeGuide(false)}
             {renderFillPreview(false)}
             {renderFillHandle(false)}
           </div>
+
+          {/* Column-resize guide spans header + band + body, so it lives
+            * on the grid div itself, above all three. */}
+          {colResizeGuide}
         </div>
       </div>
       {footer}

@@ -50,13 +50,13 @@ import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
 import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
-import { CELL_STYLE_KEY, isReservedKey, readCellStyle, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
+import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
 import { autoTypeEntry, autoTypeEntryRich, isOpenColumnType } from "@/lib/sheet-entry";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
-import { SheetGrid, type SheetSort } from "@/components/tables/sheet-grid";
+import { SheetGrid, SHEET_ROW_H, type SheetSort } from "@/components/tables/sheet-grid";
 import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
@@ -152,6 +152,33 @@ const BATCH_MAX_OPS = 500;
 // Rating keeps its stars, text stays text — formatting is opt-in per the
 // Phase 4 scope (column-level only; per-cell formats deferred).
 const FORMATTABLE_TYPES = new Set<ColType>(["number", "currency", "percent", "date"]);
+
+/* ── Per-row height (Sheets' row resize) ──────────────────────────
+ * Storage: NO schema change — a custom height rides the row's values Json
+ * under the RESERVED key "$rh" (lib/sheet-cell-style's ROW_HEIGHT_KEY), a
+ * plain number of layout px. Absent — or null, the deletable spelling,
+ * because the shallow PATCH/batch merge cannot drop keys — means the
+ * default SHEET_ROW_H. The key is invisible to every column-driven reader
+ * (CSV export, stats, search, sort and the row drawer all iterate
+ * table.columns), and isReservedKey keeps it out of the key-driven paths
+ * (engine host writes, conflict absorb, the guard's expect map) exactly
+ * as it keeps "$fmt" out. */
+
+/** Height clamp: below 16px a row is unreadable and its boundary
+ *  un-grabbable; above 400px one stray drag swallows the viewport. Must
+ *  match the kernel's own drag clamp so a persisted height re-reads as
+ *  the height that was previewed. */
+const ROW_HEIGHT_MIN = 16;
+const ROW_HEIGHT_MAX = 400;
+
+/** Stored "$rh" → a usable height. Junk (strings, NaN, null, arrays)
+ *  reads as "no custom height" rather than crashing a 50k-row geometry
+ *  build; out-of-range numbers clamp instead of dropping — like the dp
+ *  clamp, a persisted 1000 still carries the intent "very tall". */
+function readRowHeight(v: unknown): number | undefined {
+  if (typeof v !== "number" || !Number.isFinite(v)) return undefined;
+  return Math.min(ROW_HEIGHT_MAX, Math.max(ROW_HEIGHT_MIN, Math.round(v)));
+}
 
 /* ── Per-cell number format for OPEN columns ──────────────────────
  * Two formatting worlds coexist on purpose:
@@ -649,7 +676,13 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
   // Column drag-reorder + resize.
   const [dragColId, setDragColId] = useState<string | null>(null);
-  const resizeRef = useRef<{ colId: string; startX: number; startW: number } | null>(null);
+  // `moved` gates the release persist: a plain click on the grip (and each
+  // press of a double-click) must not fire a stale-width columns PATCH
+  // that could land AFTER the autofit's and overwrite it.
+  const resizeRef = useRef<{ colId: string; startX: number; startW: number; moved: boolean } | null>(null);
+  // While a header-grip drag is live the kernel draws its full-height
+  // guide at this column's right edge (colResizeGuideId); null = no guide.
+  const [resizingColId, setResizingColId] = useState<string | null>(null);
   // Row right-click menu — open / delete (single or the whole selected
   // span), opened at the cursor via the shared MorePortal.
   const [rowMenu, setRowMenu] = useState<{ rowId: string; x: number; y: number } | null>(null);
@@ -1751,17 +1784,29 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // widths are unscaled layout px. Normalize by the zoom in effect when
     // the drag started (it cannot change mid-drag).
     const z = zoom / 100 || 1;
-    resizeRef.current = { colId, startX: e.clientX, startW: col?.width ?? 160 };
+    resizeRef.current = { colId, startX: e.clientX, startW: col?.width ?? 160, moved: false };
+    // The kernel draws the Sheets drag guide at this column's LIVE right
+    // edge for the whole gesture: the optimistic width writes below flow
+    // through the columns prop every mousemove, so the guide tracks the
+    // pointer with no page-side geometry at all.
+    setResizingColId(colId);
     const onMove = (ev: MouseEvent) => {
       const st = resizeRef.current;
       if (!st) return;
+      st.moved = true;
       setColumnWidthLocal(st.colId, Math.max(80, Math.round(st.startW + (ev.clientX - st.startX) / z)));
     };
     const onUp = () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
+      const moved = resizeRef.current?.moved ?? false;
       resizeRef.current = null;
-      setTable((prev) => { if (prev) void persistColumns(prev.columns); return prev; });
+      setResizingColId(null);
+      // Persist only when the drag actually changed a width — see the
+      // `moved` note on resizeRef. Queued: a dblclick-autofit lands right
+      // after a sub-pixel jiggle's persist, and the queue keeps their
+      // server order equal to their UI order (last write = what you see).
+      if (moved) setTable((prev) => { if (prev) void writeQueueRef.current.run(() => persistColumns(prev.columns)); return prev; });
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -2390,6 +2435,57 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     })();
   }
 
+  /** The kernel's row-resize release — and the boundary double-click,
+   *  which arrives as the DEFAULT height meaning "reset". Persists through
+   *  the normal UNCONDITIONAL row write (a resize is explicit intent over
+   *  the row(s); no expect guard, the paste/fill policy) and lands ONE
+   *  undo command whether it touched one row or the whole selected group:
+   *  Sheets resizes every selected row together when the dragged boundary
+   *  belongs to one of them, and single-row is the fallback. Heights never
+   *  reach the engine host — driveHostWrites drops the reserved key — so
+   *  a resize costs no recalc and no engine bump. */
+  function resizeRowsTo(rowId: string, height: number) {
+    // The default height stores as null, not as the number 33: null and
+    // absent read identically (readRowHeight), the shallow merge cannot
+    // delete keys, and a default-height row costs no bytes forever after.
+    // A drag released exactly at 33px is the same "default" and needs no key.
+    const px = height === SHEET_ROW_H ? null : (readRowHeight(height) ?? null);
+    const sel = gridSelection;
+    const targets = sel && sel.rowIds.length > 1 && sel.rowIds.includes(rowId) ? sel.rowIds : [rowId];
+    // The sync mirror, not render-scope rows: the release handler may
+    // outlive the render that created it by a beat.
+    const live = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
+    // Already at the target height ⇒ no write, no history entry (the
+    // formatCells no-op rule). Junk stored values read as default, so a
+    // reset over junk is ALSO a no-op — readers never saw the junk anyway.
+    const changed = targets.filter((id) => {
+      const row = live.get(id);
+      return !!row && (readRowHeight(row.values[ROW_HEIGHT_KEY]) ?? null) !== px;
+    });
+    if (changed.length === 0) return;
+    if (changed.length === 1) {
+      // Single row: the normal row PATCH. patchRow captures the old "$rh"
+      // (or null) as before and pushes the one "resize row" command.
+      void patchRow(changed[0], { [ROW_HEIGHT_KEY]: px }, { label: "resize row" });
+      return;
+    }
+    // Group resize: ONE batch, ONE undo command across the whole span.
+    // Befores keep each row's raw stored value (junk included) so an undo
+    // restores exactly what was there.
+    const befores = changed.map((id) => ({ id, values: { [ROW_HEIGHT_KEY]: live.get(id)!.values[ROW_HEIGHT_KEY] ?? null } }));
+    const afters = changed.map((id) => ({ id, values: { [ROW_HEIGHT_KEY]: px } }));
+    void (async () => {
+      try {
+        await writeValuesBatchStrict(afters);
+        pushUndo({
+          label: `resize ${changed.length} rows`,
+          undo: () => writeValuesBatchStrict(befores),
+          redo: () => writeValuesBatchStrict(afters),
+        });
+      } catch { toast("Couldn't resize rows"); void load(); }
+    })();
+  }
+
   /** Row-menu "Insert 1 row above/below" (Sheets). No new server code:
    *  append a blank row through the existing create path (the server
    *  allocates its position), then move it into place through
@@ -2595,6 +2691,49 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // refs the formula bar's DOM observer reads between renders.
   const rowById = useMemo(() => new Map((rows ?? []).map((r) => [r.id, r] as const)), [rows]);
 
+  /* ── Per-row heights for the kernel (Sheets' row resize) ─────────
+   * One Map of ONLY the rows carrying a custom "$rh". Rebuilt with a
+   * single-key O(n) scan whenever `rows` changes — the page already runs
+   * several O(n) passes per commit (rowById above, filteredRows below) —
+   * but the RETURNED identity only changes when some height actually
+   * changed, so an ordinary cell edit keeps the previous map and the
+   * version below stays put. That version is the kernel contract's
+   * "heights-version the page bumps": its geometry memo re-samples
+   * rowHeight only on [rowIds, rowHeightsVersion], never per scroll. */
+  const rowHeightsPrevRef = useRef<Map<string, number>>(new Map());
+  const rowHeightsMap = useMemo(() => {
+    const next = new Map<string, number>();
+    for (const r of rows ?? []) {
+      const h = readRowHeight(r.values[ROW_HEIGHT_KEY]);
+      if (h !== undefined) next.set(r.id, h);
+    }
+    const prev = rowHeightsPrevRef.current;
+    if (next.size === prev.size) {
+      let same = true;
+      for (const [id, h] of next) { if (prev.get(id) !== h) { same = false; break; } }
+      if (same) return prev; // no height changed: keep the identity, keep the version
+    }
+    rowHeightsPrevRef.current = next;
+    return next;
+  }, [rows]);
+  // Monotonic change signal derived from the map's identity. A ref bumped
+  // inside useMemo (not state): the kernel must see the new version in the
+  // SAME render that shows the new mirror, and an effect-based bump would
+  // lag a paint. Strict-mode double-invocation only skips numbers, which a
+  // change signal doesn't mind.
+  const rowHeightsVersionRef = useRef(0);
+  const rowHeightsVersion = useMemo(() => {
+    void rowHeightsMap; // the map's identity IS the change being versioned
+    return ++rowHeightsVersionRef.current;
+  }, [rowHeightsMap]);
+  /** Kernel prop. UNDEFINED while every row is default, so the kernel keeps
+   *  its constant-height fast path and renders byte-identically to the
+   *  pre-resize world. */
+  const kernelRowHeight = useMemo(
+    () => (rowHeightsMap.size === 0 ? undefined : (rowId: string) => rowHeightsMap.get(rowId)),
+    [rowHeightsMap],
+  );
+
   const filteredRows = useMemo(() => {
     // The persistent host mutates in place; engineVersion is its change
     // signal (the host's identity only changes on a swap).
@@ -2705,6 +2844,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       ? `Sum: ${fmt(s.sum)} · Avg: ${fmt(s.avg)} · Min: ${fmt(s.min)} · Max: ${fmt(s.max)} · Count: ${s.numeric.toLocaleString()}`
       : `Count: ${s.nonEmpty.toLocaleString()}`;
   }, [gridSelection, engineVersion, streamProgress, table, rowById, engineHost, relationalValue]);
+
+  // Identity-stable row-id list for the kernel: a fresh array per render
+  // would re-run the kernel's geometry/index memos on every keystroke.
+  const sortedRowIds = useMemo(() => sortedRows.map((r) => r.id), [sortedRows]);
 
   // ── Active-cell tracking for the formula bar ────────────────────
   // The sheet kernel owns selection internally (and this wave does not touch
@@ -3366,6 +3509,37 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (notes.length > 0) toast(`Pasted ${written} cell${written === 1 ? "" : "s"} · ${notes.join(" · ")}`);
   };
 
+  /** Double-click on the resize grip: fit the column to its widest MOUNTED
+   *  cell (Sheets' autofit, approximated over the virtual window — the
+   *  unmounted tail cannot be measured without materializing it, and the
+   *  480px cap bounds the error). DOM walk, not canvas measureText: each
+   *  mounted cell's ".truncate" display node is already laid out in that
+   *  cell's OWN font — per-cell bold/italic/size from "$fmt" included —
+   *  so scrollWidth is the browser's own single-line measurement, where a
+   *  canvas would have to re-derive every cell's font string and drift.
+   *  scrollWidth reports local (pre-zoom) px, the same space col.width
+   *  lives in. Persists through the SAME path the drag's release uses
+   *  (persistColumns; deliberately NO undo entry — width drags never made
+   *  one, and autofit matches them). */
+  const autoFitColumn = (colId: string) => {
+    const wrap = gridWrapElRef.current;
+    const idx = table.columns.findIndex((c) => c.id === colId);
+    if (!wrap || idx < 0) return;
+    let widest = 0;
+    // aria-colindex is 1-based over the data columns (the gutter carries
+    // none) — the same mapping the active-cell observer reads back.
+    wrap.querySelectorAll<HTMLElement>(`[role="gridcell"][aria-colindex="${idx + 1}"] > div.truncate`)
+      .forEach((el) => { widest = Math.max(widest, el.scrollWidth); });
+    // + the cell's px-2 padding (16) + right border + a rounding px; then
+    // the contract clamp: 40 keeps the grip grabbable on an empty column,
+    // 480 keeps one long URL from swallowing the viewport.
+    const w = Math.min(480, Math.max(40, widest + 18));
+    setColumnWidthLocal(colId, w);
+    // Functional read-then-persist (the startResize release discipline):
+    // the persist must see the width the line above just installed.
+    setTable((prev) => { if (prev) void persistColumns(prev.columns); return prev; });
+  };
+
   /** Sheets-pure header: the column LETTER, centered, and nothing else —
    *  no label line, no hover icon cluster ("We are building it like
    *  Excel"). The letter doubles as the drag-to-reorder handle; the right
@@ -3396,7 +3570,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         >{columnLetter(colIndex)}</span>
         <span
           onMouseDown={(e) => startResize(e, c.id)}
-          title="Drag to resize"
+          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); autoFitColumn(c.id); }}
+          title="Drag to resize · double-click to fit"
           style={{ position: "absolute", right: -6, top: 0, bottom: 0, width: 8, cursor: "col-resize", zIndex: 1 }}
         />
       </div>
@@ -3986,7 +4161,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           <div ref={attachGridWrap} className="shx__grid" style={{ zoom: zoom / 100 }}>
           <SheetGrid
             columns={table.columns.map((c) => ({ id: c.id, label: c.label, width: c.width }))}
-            rowIds={sortedRows.map((r) => r.id)}
+            rowIds={sortedRowIds}
             renderDisplay={displayCell}
             renderEditor={kernelEditor}
             onClearCells={(cells) => void clearCells(cells)}
@@ -4002,6 +4177,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             // display rows/columns; nothing here reaches the engine.
             freeze={gridFreeze ?? undefined}
             isCellEmpty={isCellEmpty}
+            // Per-row heights (Sheets' row resize), answered from the
+            // mirror's "$rh". UNDEFINED while every row is default so the
+            // kernel keeps its constant-height fast path; the version is
+            // the geometry's re-sample signal — it bumps exactly when some
+            // stored height changed, never on a plain cell edit.
+            rowHeight={kernelRowHeight}
+            rowHeightsVersion={rowHeightsVersion}
+            onRowResize={resizeRowsTo}
+            // While a header-grip width drag is live, the kernel draws the
+            // Sheets guide line at this column's live right edge.
+            colResizeGuideId={resizingColId}
             // Row moving exists ONLY while display order IS storage order:
             // under a sort/filter/search the gutter's display index names a
             // different storage slot, and mid-stream the tail hasn't even

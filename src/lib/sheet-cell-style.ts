@@ -22,6 +22,20 @@
 
 export const CELL_STYLE_KEY = "$fmt";
 
+/**
+ * Reserved sibling of `$fmt`: `values["$rh"]` is the row's custom HEIGHT in
+ * px (a plain number, clamped 16..400 by the writer; absent = the default
+ * SHEET_ROW_H). It is NOT a style map — readCellStyle / withCellStyle never
+ * touch it — but it rides the same reserved-key filter so the engine host,
+ * conflict guard, CSV export, stats and absorb paths all keep skipping it
+ * exactly as they skip `$fmt`.
+ */
+export const ROW_HEIGHT_KEY = "$rh";
+
+/* One set, one predicate: every key-driven reader shares isReservedKey, so
+ * adding a reserved key HERE is the whole change — no caller edits. */
+const RESERVED_KEYS = new Set<string>([CELL_STYLE_KEY, ROW_HEIGHT_KEY]);
+
 /** Flags are `true` or absent (never `false`) so an all-empty style is
  *  detectable by key count and the stored map stays as small as the
  *  formatting the user actually applied. */
@@ -52,7 +66,7 @@ export type CellStyle = {
 /** Keys of `row.values` that are NOT column ids. Key-driven readers must
  *  skip these; column-driven readers never encounter them. */
 export function isReservedKey(k: string): boolean {
-  return k === CELL_STYLE_KEY;
+  return RESERVED_KEYS.has(k);
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
