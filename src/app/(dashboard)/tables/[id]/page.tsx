@@ -3136,10 +3136,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           if (typeof computed === "number") return <span>{formatOpenCell(computed, cellFmt)}</span>;
         }
       }
-      return <span>{fv}</span>;
+      return fv.includes("\n") ? <span style={{ whiteSpace: "pre-wrap" }}>{fv}</span> : <span>{fv}</span>;
     }
     switch (c.type) {
-      case "lookup": case "rollup": { const rv = relationalValue(c, r); return rv == null ? null : String(rv); }
+      case "lookup": case "rollup": {
+        const rv = relationalValue(c, r);
+        if (rv == null) return null;
+        const text = String(rv);
+        // Same pre-wrap rule as stored strings: autofit measures this text.
+        return text.includes("\n") ? <span style={{ whiteSpace: "pre-wrap" }}>{text}</span> : text;
+      }
       case "checkbox": return v ? <Check style={{ width: 14, height: 14, color: "#0073EA" }} /> : null;
       case "rating": { const n = typeof v === "number" ? v : 0; return n ? "★".repeat(n) : null; }
       case "number": case "currency": case "percent": {
@@ -3362,19 +3368,33 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       }
       if (target) {
         if (Object.keys(values).length > 0) {
+          // Paste auto-grow: a multi-line string landing in this row rides
+          // its "$rh" growth in the SAME update — same batch write, same
+          // undo command (befores below key off these values, so the old
+          // height is captured with the old cells). Growth-only, like the
+          // editor commit: a paste never shrinks a taller row.
+          Object.assign(values, growHeightPatch(target.values, Object.values(values)));
           updatesByRow.set(target.id, { ...(updatesByRow.get(target.id) ?? {}), ...values });
         }
       } else {
         // A brand-new row has nothing to clear, so nulls are dropped.
-        inserts.push({ values: Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null)) });
+        const kept = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null));
+        // Appended rows grow from the default height (no prior "$rh" to
+        // respect) so a pasted multi-line block reads whole immediately.
+        inserts.push({ values: { ...kept, ...growHeightPatch(undefined, Object.values(kept)) } });
       }
     }
 
     const updates = [...updatesByRow].map(([id, values]) => ({ id, values }));
+    // A row carrying ONLY the "$rh" rider cannot exist (the rider is added
+    // exactly when a pasted string landed), so this emptiness gate needs no
+    // reserved-key filter — but the CELL count below does: the height rider
+    // is geometry, not a pasted cell, and counting it would lie in the toast.
     const realInserts = inserts.some((i) => Object.keys(i.values).length > 0) ? inserts : [];
+    const countCells = (values: Record<string, unknown>) => Object.keys(values).filter((k) => !isReservedKey(k)).length;
     const written =
-      updates.reduce((n, u) => n + Object.keys(u.values).length, 0) +
-      realInserts.reduce((n, i) => n + Object.keys(i.values).length, 0);
+      updates.reduce((n, u) => n + countCells(u.values), 0) +
+      realInserts.reduce((n, i) => n + countCells(i.values), 0);
 
     // Everything landed on read-only or unmatched cells: say so, write nothing,
     // and don't append blank rows to carry a paste that has no payload.
@@ -3552,6 +3572,77 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     setTable((prev) => { if (prev) void persistColumns(prev.columns); return prev; });
   };
 
+  /** Double-click on a ROW boundary (kernel onRowAutofit): Sheets' row
+   *  autofit — set each target row to EXACTLY the height its content
+   *  needs. Measured from the mirror, not the DOM (autoFitColumn's DOM
+   *  walk exists for fonts; height is pure line arithmetic, and unmounted
+   *  columns still count): per cell the DISPLAYED text's line count —
+   *  breaks come only from explicit "\n", there is no soft wrap. A
+   *  single-line row stores null, i.e. returns to the DEFAULT height:
+   *  that IS Sheets' behavior, and it is why this is a different gesture
+   *  from the commit/paste auto-grow — a double-click is explicit intent
+   *  to FIT, so it shrinks as readily as it grows. Selection-aware like
+   *  resizeRowsTo (every selected row when the boundary belongs to the
+   *  selection, each to ITS OWN content), ONE undo command. */
+  const autofitRows = (rowId: string) => {
+    const sel = gridSelection;
+    const targets = sel && sel.rowIds.length > 1 && sel.rowIds.includes(rowId) ? sel.rowIds : [rowId];
+    // The sync mirror, not render-scope rows: the kernel's dblclick handler
+    // may outlive the render that created it by a beat (resizeRowsTo's rule).
+    const live = new Map((rowsRef.current ?? []).map((r) => [r.id, r]));
+    // undefined = unmeasurable (skip the row); null = default; number = fit.
+    const fitOf = (r: ApiRow): number | null | undefined => {
+      let lines = 1;
+      for (const c of table.columns) {
+        const v = r.values[c.id];
+        if (c.type === "formula" || isFormulaCell(v)) {
+          // Streaming honesty gate (displayCell's rule): mid-stream the
+          // host still holds the pre-stream world, so this row's computed
+          // text cannot be measured — skip the row rather than fit it to
+          // a value the user isn't even shown.
+          if (streamProgress) return undefined;
+          lines = Math.max(lines, lineCountOf(String(engineHost.display(c.id, r.id) ?? "")));
+        } else {
+          // cellText preserves a string value's "\n" and renders every
+          // non-string type on one line — exactly the display's line count.
+          lines = Math.max(lines, lineCountOf(cellText(c, r)));
+        }
+      }
+      return lines <= 1 ? null : fitHeightFor(lines);
+    };
+    // Already at the fit ⇒ no write, no history entry (the formatCells
+    // no-op rule); junk stored heights read as default, so fitting a
+    // single-line row over junk is also a no-op — readers never saw it.
+    const changed: { id: string; px: number | null }[] = [];
+    for (const id of targets) {
+      const row = live.get(id);
+      if (!row) continue;
+      const px = fitOf(row);
+      if (px === undefined) continue;
+      if ((readRowHeight(row.values[ROW_HEIGHT_KEY]) ?? null) !== px) changed.push({ id, px });
+    }
+    if (changed.length === 0) return;
+    if (changed.length === 1) {
+      // Single row: the normal row PATCH captures the old "$rh" as before.
+      void patchRow(changed[0].id, { [ROW_HEIGHT_KEY]: changed[0].px }, { label: "autofit row" });
+      return;
+    }
+    // Group autofit: ONE batch, ONE undo command; befores keep each row's
+    // raw stored value (junk included) so undo restores exactly what was.
+    const befores = changed.map(({ id }) => ({ id, values: { [ROW_HEIGHT_KEY]: live.get(id)!.values[ROW_HEIGHT_KEY] ?? null } }));
+    const afters = changed.map(({ id, px }) => ({ id, values: { [ROW_HEIGHT_KEY]: px } }));
+    void (async () => {
+      try {
+        await writeValuesBatchStrict(afters);
+        pushUndo({
+          label: `autofit ${changed.length} rows`,
+          undo: () => writeValuesBatchStrict(befores),
+          redo: () => writeValuesBatchStrict(afters),
+        });
+      } catch { toast("Couldn't autofit rows"); void load(); }
+    })();
+  };
+
   /** Sheets-pure header: the column LETTER, centered, and nothing else —
    *  no label line, no hover icon cluster ("We are building it like
    *  Excel"). The letter doubles as the drag-to-reorder handle; the right
@@ -3649,14 +3740,35 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Sheets auto-fit: a committed multi-line value grows its row to show
    *  every line (never shrinks — other cells may need the height; manual
    *  taller resizes are respected). 17px per line tracks the display's
-   *  13px/leading-tight; the first line rides the default row. */
-  const autoGrowFor = (rowId: string, v: unknown): Record<string, unknown> => {
-    if (typeof v !== "string" || !v.includes("\n")) return {};
-    const needed = Math.min(400, SHEET_ROW_H + (v.split("\n").length - 1) * 17 + 4);
-    const row = (rowsRef.current ?? []).find((r) => r.id === rowId);
-    const cur = row ? (readRowHeight(row.values) ?? SHEET_ROW_H) : SHEET_ROW_H;
+   *  13px/leading-tight; the first line rides the default row.
+   *
+   *  Split into pure pieces because THREE gestures share the arithmetic and
+   *  must agree on it: the editor commit (below), the paste path's per-row
+   *  growth rider (applyMatrix), and the boundary double-click's autofit
+   *  (autofitRows) — one drifting constant would make a typed row and a
+   *  pasted row disagree about the same content's height. */
+  // Display lines come ONLY from explicit "\n" breaks (there is no soft
+  // wrap), so anything that isn't a string is one line by construction.
+  const lineCountOf = (v: unknown): number =>
+    typeof v === "string" && v.includes("\n") ? v.split("\n").length : 1;
+  const fitHeightFor = (lines: number): number =>
+    Math.min(ROW_HEIGHT_MAX, SHEET_ROW_H + (lines - 1) * 17 + 4);
+  /** Growth-only "$rh" rider for values landing on a row: the max line
+   *  count across the landing cells decides the needed height, and the
+   *  patch is empty unless that BEATS the row's stored height — the guard
+   *  reads the stored "$rh" itself (not the values object: that read was a
+   *  bug that always answered "default" and let a short multi-line commit
+   *  shrink a manually-taller row). */
+  const growHeightPatch = (curValues: Record<string, unknown> | undefined, vs: unknown[]): Record<string, unknown> => {
+    let lines = 1;
+    for (const v of vs) lines = Math.max(lines, lineCountOf(v));
+    if (lines <= 1) return {};
+    const cur = readRowHeight(curValues?.[ROW_HEIGHT_KEY]) ?? SHEET_ROW_H;
+    const needed = fitHeightFor(lines);
     return needed > cur ? { [ROW_HEIGHT_KEY]: needed } : {};
   };
+  const autoGrowFor = (rowId: string, v: unknown): Record<string, unknown> =>
+    growHeightPatch((rowsRef.current ?? []).find((r) => r.id === rowId)?.values, [v]);
 
   const commitEditorValue = (rowId: string, colId: string, v: unknown) => {
     if (typeof v === "string" && v.trimStart().startsWith("=")) {
@@ -4211,6 +4323,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             rowHeight={kernelRowHeight}
             rowHeightsVersion={rowHeightsVersion}
             onRowResize={resizeRowsTo}
+            // Boundary double-click fits the row to its content (Sheets);
+            // without this prop the kernel falls back to plain reset.
+            onRowAutofit={autofitRows}
             // While a header-grip width drag is live, the kernel draws the
             // Sheets guide line at this column's live right edge.
             colResizeGuideId={resizingColId}

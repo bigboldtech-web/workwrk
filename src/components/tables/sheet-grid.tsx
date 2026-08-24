@@ -53,7 +53,8 @@
  * (sheet-row-geometry.ts) — O(1) closed-form and formula-identical to the
  * old constant-height kernel when no custom height exists, prefix sums +
  * binary search when one does. The gutter grows a boundary hit-zone per row
- * (drag = guide line, release = onRowResize, double-click = reset); column
+ * (drag = guide line, release = onRowResize, double-click = autofit via
+ * onRowAutofit when the page provides it, else reset to default); column
  * resize stays page-owned, the kernel only draws its guide line
  * (colResizeGuideId).
  */
@@ -265,10 +266,18 @@ export type SheetGridProps = {
   rowHeightsVersion?: number;
   /** A gutter row-boundary drag ended: persist `height` px (already
    *  clamped 16..400) on the row. A double-click on the boundary fires
-   *  with SHEET_ROW_H, meaning "reset to default". Omit it and the gutter
+   *  with SHEET_ROW_H, meaning "reset to default" — unless `onRowAutofit`
+   *  is provided, which then owns the double-click. Omit it and the gutter
    *  renders no resize zones at all — rendering is byte-identical to the
    *  pre-resize kernel. */
   onRowResize?: (rowId: string, height: number) => void;
+  /** Sheets' boundary DOUBLE-CLICK semantics: fit the row to its content.
+   *  The kernel cannot compute the fit (it never sees raw cell text, only
+   *  rendered nodes), so the page owns the measurement and the write; the
+   *  kernel only reroutes the gesture. Provided, double-click fires this
+   *  INSTEAD of onRowResize(rowId, SHEET_ROW_H); absent, the old
+   *  reset-to-default double-click stands. Drag is untouched either way. */
+  onRowAutofit?: (rowId: string) => void;
   /** Column-resize guide line (the column GESTURE stays page-owned): while
    *  the page is dragging a width it passes the resizing column's id and
    *  the kernel draws a full-height 2px guide at that column's LIVE right
@@ -286,7 +295,7 @@ export function SheetGrid({
   onRowContextMenu, onHeaderContextMenu, onRowMove, onGrowRows, renderHeader,
   headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
   onRedo, onFormatKey, cellStyle, onSelectionChange, freeze, isCellEmpty,
-  rowHeight, rowHeightsVersion, onRowResize, colResizeGuideId,
+  rowHeight, rowHeightsVersion, onRowResize, onRowAutofit, colResizeGuideId,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -1753,7 +1762,7 @@ export function SheetGrid({
       key={rowId}
       role="row"
       aria-rowindex={r + 1}
-      className="absolute left-0 right-0 flex border-b border-zinc-50"
+      className="absolute left-0 right-0 flex border-b border-zinc-200"
       style={{ top, height: geom.rowHeight(r) }}
       onContextMenu={(e) => {
         if ((e.target as HTMLElement).closest("input, textarea, [contenteditable=true]")) return;
@@ -1837,7 +1846,7 @@ export function SheetGrid({
         {onRowResize && (
           <div
             aria-hidden
-            title="Drag to resize row · double-click to reset"
+            title={onRowAutofit ? "Drag to resize row · double-click to fit" : "Drag to resize row · double-click to reset"}
             className="absolute inset-x-0 bottom-0"
             style={{ height: ROW_RESIZE_ZONE_PX, cursor: "row-resize", touchAction: "none" }}
             onPointerDown={(e) => {
@@ -1878,11 +1887,14 @@ export function SheetGrid({
             onPointerCancel={(e) => { releasePointer(e); endRowResize(false); }}
             onLostPointerCapture={() => endRowResize(true)}
             onDoubleClick={(e) => {
-              // Sheets: double-click the boundary resets the row. The two
+              // Sheets: double-click the boundary FITS the row to its
+              // content — the page owns that measurement (onRowAutofit);
+              // without it the legacy reset-to-default stands. The two
               // clicks' own down/up pairs each committed nothing (height
               // unchanged), so this is the only write of the gesture.
               e.stopPropagation();
-              onRowResize(rowId, SHEET_ROW_H);
+              if (onRowAutofit) onRowAutofit(rowId);
+              else onRowResize(rowId, SHEET_ROW_H);
             }}
           />
         )}
@@ -1897,7 +1909,7 @@ export function SheetGrid({
             role="gridcell"
             aria-colindex={c + 1}
             aria-selected={selected || isActive}
-            className={`flex border-r border-zinc-100 px-2 text-[13px] leading-tight ${
+            className={`flex border-r border-zinc-200 px-2 text-[13px] leading-tight ${
               // Editing: the cell un-clips and rises above frozen cells
               // (z-15/16) so a multi-line editor can grow past the row
               // height, Sheets' expanding-editor look. Display cells keep
@@ -2004,13 +2016,29 @@ export function SheetGrid({
         >
           {/* Header */}
           <div className="sticky top-0 z-20 flex border-b border-zinc-200 bg-zinc-50/95 backdrop-blur" style={{ height: SHEET_ROW_H }}>
-            {/* Corner above the gutter: empty, like Sheets. */}
-            <div className="sticky left-0 z-10 border-r border-zinc-200 bg-zinc-50" style={{ width: GUTTER_W, minWidth: GUTTER_W }} />
+            {/* Corner above the gutter: Sheets' select-all. Click performs
+              * EXACTLY the Cmd/Ctrl+A selection — the same guard and the
+              * same one setAnchor + one setActive pair, so the rAF-deduped
+              * onSelectionChange emission is shared, not duplicated. The
+              * grid is refocused first (clicking a non-focusable div would
+              * otherwise drop focus to body, killing follow-up keyboard
+              * shortcuts — and the focus steal is what commits any open
+              * editor, same as every other grid pointerdown). */}
+            <div
+              role="button"
+              aria-label="Select all"
+              className="sticky left-0 z-10 cursor-pointer border-r border-zinc-200 bg-zinc-50 hover:bg-zinc-100"
+              style={{ width: GUTTER_W, minWidth: GUTTER_W }}
+              onClick={() => {
+                gridRef.current?.focus();
+                if (rowCount > 0 && colCount > 0) { setAnchor({ rowId: rowIds[0], c: 0 }); setActive({ rowId: rowIds[rowCount - 1], c: colCount - 1 }); }
+              }}
+            />
             {columns.map((col, c) => (
               <div
                 key={col.id}
                 role="columnheader"
-                className="flex items-center border-r border-zinc-100 px-1"
+                className="flex items-center border-r border-zinc-200 px-1"
                 // Frozen column headers stick like their cells. Opaque
                 // zinc-50 (the header's own ground is 95% + blur, which
                 // would let scrolled letters ghost through); the last one
