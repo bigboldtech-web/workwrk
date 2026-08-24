@@ -3646,6 +3646,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   /** Text editors commit through here so "=…" becomes a stored formula even
    *  when the editor was opened plain (F2 first, "=" typed after) — the
    *  seed path below only catches type-to-replace. */
+  /** Sheets auto-fit: a committed multi-line value grows its row to show
+   *  every line (never shrinks — other cells may need the height; manual
+   *  taller resizes are respected). 17px per line tracks the display's
+   *  13px/leading-tight; the first line rides the default row. */
+  const autoGrowFor = (rowId: string, v: unknown): Record<string, unknown> => {
+    if (typeof v !== "string" || !v.includes("\n")) return {};
+    const needed = Math.min(400, SHEET_ROW_H + (v.split("\n").length - 1) * 17 + 4);
+    const row = (rowsRef.current ?? []).find((r) => r.id === rowId);
+    const cur = row ? (readRowHeight(row.values) ?? SHEET_ROW_H) : SHEET_ROW_H;
+    return needed > cur ? { [ROW_HEIGHT_KEY]: needed } : {};
+  };
+
   const commitEditorValue = (rowId: string, colId: string, v: unknown) => {
     if (typeof v === "string" && v.trimStart().startsWith("=")) {
       commitCellText(rowId, colId, v);
@@ -3659,7 +3671,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const col = table.columns.find((c) => c.id === colId);
     if (col && isOpenColumnType(col.type) && typeof v === "string") {
       // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
-      void patchRow(rowId, openEntryValues(rowId, colId, v), { guard: true });
+      // autoGrowFor rides the SAME patch: one write, one undo entry, and
+      // the reserved-key filter keeps "$rh" out of the expect map.
+      void patchRow(rowId, { ...openEntryValues(rowId, colId, v), ...autoGrowFor(rowId, v) }, { guard: true });
       return;
     }
     // Legacy note: a cell that still holds the STRING "5" (typed before this
@@ -3668,7 +3682,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // always meant) and it cannot false-409: patchRow builds `expect` from
     // the STORED value ("5"), which is exactly what the server still holds.
     // Guarded (Phase 5c): see patchRow's guard note for the opt-in policy.
-    void patchRow(rowId, { [colId]: v }, { guard: true });
+    void patchRow(rowId, { [colId]: v, ...autoGrowFor(rowId, v) }, { guard: true });
   };
 
   /** The row patch for a plain-editor commit on an OPEN cell: the typed
@@ -4969,7 +4983,10 @@ function CellEditor({ column, value, cellStyle, onChange }: {
           onInput={(e) => autosize(e.currentTarget)}
           onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
           className="dtbl__input dtbl__input--area"
-          style={{ background: "white", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", resize: "none", overflow: "hidden" }}
+          // Flush with the cell: the grown cell (white ground + the active
+          // outline) IS the editor's frame — any shadow/border here read as
+          // a floating "note" pasted over the grid.
+          style={{ background: "transparent", resize: "none", overflow: "hidden", lineHeight: "17px", padding: "2px 0" }}
         />
       );
     }

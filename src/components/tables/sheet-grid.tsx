@@ -1928,11 +1928,17 @@ export function SheetGrid({
                 zIndex: 15,
                 backgroundColor: frozenBg(isActive, selected, page?.backgroundColor),
                 ...(c === fc - 1 ? { borderRightColor: "#d4d4d8" } : null),
+                ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "white", zIndex: 30 } : null),
               };
             })() : {
               width: col.width ?? COL_W,
               minWidth: col.width ?? COL_W,
               ...(isActive ? withoutBackground(cellStyle?.(rowId, col.id)) : cellStyle?.(rowId, col.id)),
+              // Editing: the cell itself grows with the editor content (the
+              // outline wraps the grown box — Sheets' expanding editor).
+              // alignSelf breaks the flex stretch so height:auto can win;
+              // the white ground covers the rows it overlaps.
+              ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "white" } : null),
             }}
             onPointerDown={(e) => {
               /* Sheets' click-hold-pull: ARM the selection drag. The
