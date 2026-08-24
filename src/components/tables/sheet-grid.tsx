@@ -162,7 +162,7 @@ export type SheetGridProps = {
   renderDisplay: (rowId: string, colId: string) => React.ReactNode;
   /** Live editor for the active cell. Call commit() (with the editor's
    *  blur) when done; the kernel moves focus back to the grid. */
-  renderEditor: (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => React.ReactNode;
+  renderEditor: (rowId: string, colId: string, opts: { seed: string | null; commit: () => void; move: (dr: number, dc: number) => void }) => React.ReactNode;
   /** Clear these cells (Delete key). */
   onClearCells: (cells: { rowId: string; colId: string }[]) => void;
   /** Read values for a rectangular block. Grid supplies geometry, page owns
@@ -489,6 +489,16 @@ export function SheetGrid({
   // render, so the compiler requires it not to read refs. The refocus
   // happens in the effect below when editing closes.
   const commitEdit = useCallback(() => setEditing(null), []);
+  /** Tab/Enter inside an editor: the editor's own blur already wrote the
+   *  draft (the host blurs before calling this); the kernel closes the
+   *  editor, takes focus back — so the next keystroke types into the grid,
+   *  not the void the browser's default Tab would have focused — and steps
+   *  the active cell (Sheets: Tab right, Shift+Tab left, Enter down). */
+  const commitEditAndMove = useCallback((dr: number, dc: number) => {
+    setEditing(null);
+    gridRef.current?.focus();
+    move(dr, dc, false);
+  }, [move]);
   useEffect(() => {
     if (!editing) {
       const t = requestAnimationFrame(() => {
@@ -1358,7 +1368,7 @@ export function SheetGrid({
           >
             {isEditing ? (
               <div className="w-full" onMouseDown={(e) => e.stopPropagation()}>
-                {renderEditor(rowId, col.id, { seed: editing.seed, commit: commitEdit })}
+                {renderEditor(rowId, col.id, { seed: editing.seed, commit: commitEdit, move: commitEditAndMove })}
               </div>
             ) : (
               <div className="w-full truncate pointer-events-none select-none">

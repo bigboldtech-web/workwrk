@@ -676,6 +676,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [headerMenu, setHeaderMenu] = useState<{ colId: string; x: number; y: number } | null>(null);
   const headerMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
   const headerMenuPanelRef = useRef<HTMLDivElement | null>(null);
+  // Cmd/Ctrl+B/I/U anywhere on the sheet (capture phase): after clicking a
+  // toolbar button the focus sits on that button, where the grid's own
+  // keydown never hears the shortcut and the browser does its own thing
+  // with it. Grid-focused events are skipped — the kernel's handler owns
+  // those (skipping prevents a double toggle). Ref-filled per render since
+  // toggleStyleFlag is defined after the early returns below.
+  const formatKeyRef = useRef<((k: "b" | "i" | "u") => void) | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "b" && k !== "i" && k !== "u") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+      if (t?.closest?.('[role="grid"]')) return; // kernel path owns it there
+      if (!formatKeyRef.current) return;
+      e.preventDefault();
+      formatKeyRef.current(k as "b" | "i" | "u");
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   useEffect(() => {
     if (!headerMenu) return;
     const onDown = (e: MouseEvent) => {
@@ -2899,6 +2921,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const name = STYLE_FLAG_NAMES[flag];
     void formatCells(targets, every ? `remove ${name}` : name, { [flag]: every ? undefined : true });
   };
+  // Window-level Cmd+B/I/U (declared in the hooks zone above) calls through
+  // this ref — filled here, after the function exists.
+  formatKeyRef.current = toggleStyleFlag;
 
   /** Σ button: open the active cell's editor seeded with "=SUM(" through
    *  the kernel's own type-to-replace path — a real "=" keydown dispatched
@@ -3480,7 +3505,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return values;
   };
 
-  const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void }) => {
+  const kernelEditor = (rowId: string, colId: string, opts: { seed: string | null; commit: () => void; move: (dr: number, dc: number) => void }) => {
     const r = rowById.get(rowId);
     const c = table.columns.find((x) => x.id === colId);
     if (!r || !c) return null;
@@ -3517,7 +3542,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const sigma = sigmaSessionRef.current;
       const seed = formulaSeed && sigma && sigma.rowId === rowId && sigma.colId === colId ? sigma.seed : opts.seed;
       return (
-        <SheetEditorHost seed={seed} commit={() => { sigmaSessionRef.current = null; opts.commit(); }}>
+        <SheetEditorHost seed={seed} commit={() => { sigmaSessionRef.current = null; opts.commit(); }} move={opts.move}>
           <SheetFormulaEditor
             initial={seed ?? src}
             baseline={src}
@@ -3535,7 +3560,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     ) : (
       <CellEditor column={c} value={r.values[c.id]} cellStyle={readCellStyle(r.values, c.id)} onChange={(v) => commitEditorValue(r.id, c.id, v)} />
     );
-    return <SheetEditorHost seed={opts.seed} commit={opts.commit}>{inner}</SheetEditorHost>;
+    return <SheetEditorHost seed={opts.seed} commit={opts.commit} move={opts.move}>{inner}</SheetEditorHost>;
   };
 
   // ── Formula bar plumbing (Tables Phase 3) ───────────────────────
@@ -4581,7 +4606,7 @@ function FormulaCell({ value }: { value: number | string }) {
  *  save on blur, so commit-on-focus-exit preserves their semantics — and
  *  Escape has to suppress that save (see CellEditCancel) rather than just
  *  close, or cancelling would write the in-progress value. */
-function SheetEditorHost({ children, seed, commit }: { children: React.ReactNode; seed: string | null; commit: () => void }) {
+function SheetEditorHost({ children, seed, commit, move }: { children: React.ReactNode; seed: string | null; commit: () => void; move?: (dr: number, dc: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const cancelRef = useRef(false);
   useEffect(() => {
@@ -4608,9 +4633,24 @@ function SheetEditorHost({ children, seed, commit }: { children: React.ReactNode
         // Any other keystroke means the user is still editing — a stale cancel
         // must never swallow the commit that follows it.
         if (e.key !== "Escape") cancelRef.current = false;
+        if (e.key === "Tab") {
+          // Sheets: Tab commits the draft and moves right (Shift+Tab left).
+          // The browser default moved FOCUS out of the editor instead — the
+          // grid never advanced and lost focus, which read as "my text
+          // disappeared". Blur first: that is what makes editors write.
+          e.preventDefault();
+          e.stopPropagation();
+          const dc = e.shiftKey ? -1 : 1;
+          (e.target as HTMLElement).blur?.();
+          move?.(0, dc);
+          return;
+        }
         if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) {
           e.stopPropagation();
           (e.target as HTMLElement).blur?.();
+          // Sheets: Enter commits and moves DOWN (the blur above wrote the
+          // draft; without a move the cell just closed in place).
+          move?.(1, 0);
         }
         if (e.key === "Escape") {
           e.stopPropagation();
