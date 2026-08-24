@@ -1591,7 +1591,13 @@ export function SheetGrid({
             role="gridcell"
             aria-colindex={c + 1}
             aria-selected={selected || isActive}
-            className={`flex items-center overflow-hidden border-r border-zinc-100 px-2 text-[13px] leading-tight ${
+            className={`flex border-r border-zinc-100 px-2 text-[13px] leading-tight ${
+              // Editing: the cell un-clips and rises above frozen cells
+              // (z-15/16) so a multi-line editor can grow past the row
+              // height, Sheets' expanding-editor look. Display cells keep
+              // the old clipped, centered layout to the letter.
+              isEditing ? "items-start overflow-visible z-30" : "items-center overflow-hidden"
+            } ${
               isActive ? "outline outline-2 -outline-offset-1 outline-[#0073EA] bg-white" : selected ? "bg-[#0073EA]/8" : ""
             }`}
             // Page-owned cell style (text styles + fill +

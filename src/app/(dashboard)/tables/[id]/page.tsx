@@ -3176,6 +3176,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       // cellStyleFor's job.
       default: {
         if (v == null || v === "") return null;
+        // Multi-line text must carry its OWN white-space: the kernel's
+        // display wrapper is truncate (nowrap), and a cell-level style
+        // cannot cascade past it — the span's wins for its text.
+        if (typeof v === "string" && v.includes("\n")) {
+          return <span style={{ whiteSpace: "pre-wrap" }}>{v}</span>;
+        }
         return isOpenColumnType(c.type) ? formatOpenCell(v, readCellStyle(r.values, c.id)) : String(v);
       }
     }
@@ -3205,6 +3211,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // explicit align style ("a") from the toolbar always wins, because the
     // user chose it.
     if (c && isOpenColumnType(c.type) && !style?.a && typeof r.values[colId] === "number") css.textAlign = "right";
+    // Multi-line content (Shift/Cmd+Enter breaks): wrap and top-align so a
+    // taller row (resizable) reveals the lines instead of center-clipping.
+    if (typeof r.values[colId] === "string" && (r.values[colId] as string).includes("\n")) {
+      css.whiteSpace = "pre-wrap";
+      css.alignItems = "flex-start";
+    }
     if (c?.rules && c.rules.length > 0) {
       const v = r.values[c.id];
       // Streaming honesty gate: a rule must not paint from a computed value
@@ -4831,12 +4843,40 @@ function SheetEditorHost({ children, seed, commit, move }: { children: React.Rea
           move?.(0, dc);
           return;
         }
-        if (e.key === "Enter" && !(e.target instanceof HTMLTextAreaElement)) {
+        if (e.key === "Enter") {
+          const wantsBreak = e.shiftKey || e.metaKey || e.ctrlKey || e.altKey;
+          const ta = e.target instanceof HTMLTextAreaElement;
+          if (wantsBreak && ta) {
+            // Sheets: Shift/Cmd/Alt+Enter breaks the line INSIDE the cell.
+            // Shift+Enter inserts natively; the others are inserted by
+            // hand so all the combos behave identically.
+            e.stopPropagation();
+            if (!e.shiftKey) {
+              e.preventDefault();
+              const el = e.target as HTMLTextAreaElement;
+              const at = el.selectionStart ?? el.value.length;
+              const to = el.selectionEnd ?? at;
+              el.value = `${el.value.slice(0, at)}\n${el.value.slice(to)}`;
+              el.setSelectionRange(at + 1, at + 1);
+              // Bubbling input keeps the autosize handler (and any
+              // controlled consumer) honest about the manual edit.
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+            return;
+          }
+          if (wantsBreak) {
+            // Single-line editors cannot hold a break: swallow the combo
+            // so the browser does nothing surprising; the cell stays open.
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          // Sheets: plain Enter commits and moves DOWN (the blur below is
+          // what makes editors write their draft).
           e.stopPropagation();
           (e.target as HTMLElement).blur?.();
-          // Sheets: Enter commits and moves DOWN (the blur above wrote the
-          // draft; without a move the cell just closed in place).
           move?.(1, 0);
+          return;
         }
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -4912,10 +4952,31 @@ function CellEditor({ column, value, cellStyle, onChange }: {
     // Open cells edit in Sheets' form: "5%" for an nf-percent cell, the
     // bare number for currency (the $ is format, not content).
     const initial = open ? openCellEditText(value, cellStyle) : ((value as string | number) ?? "");
+    if (t === "short_text") {
+      // A textarea, not an input: open cells hold multi-line content
+      // (Shift/Cmd/Alt+Enter — the host inserts the break). Auto-grows to
+      // its content; the kernel un-clips the editing cell so the growth
+      // shows, Sheets' expanding-editor look.
+      const autosize = (el: HTMLTextAreaElement) => {
+        el.style.height = "auto";
+        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+      };
+      return (
+        <textarea
+          rows={1}
+          defaultValue={String(initial ?? "")}
+          ref={(el) => { if (el) autosize(el); }}
+          onInput={(e) => autosize(e.currentTarget)}
+          onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
+          className="dtbl__input dtbl__input--area"
+          style={{ background: "white", boxShadow: "0 2px 8px rgba(0,0,0,0.12)", resize: "none", overflow: "hidden" }}
+        />
+      );
+    }
     return (
       <input
-        type={t === "short_text" ? "text" : t}
-        defaultValue={initial}
+        type={t}
+        defaultValue={String(initial ?? "")}
         onBlur={(e) => { if (cancelled?.current) return; if (!unchanged(e.target.value)) onChange(e.target.value); }}
         className="dtbl__input"
       />
