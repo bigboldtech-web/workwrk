@@ -3,7 +3,9 @@
 /* SheetGrid — the spreadsheet kernel (Tables Phase 1, docs/plans/tables.md).
  *
  * What it owns: virtualized rows, the selection model (active cell +
- * anchor + rectangular range), full keyboard navigation, frozen first
+ * anchor + rectangular range — set by click, Shift+click, Shift/Cmd+
+ * arrows, and Sheets' click-hold-pull drag with edge auto-scroll, see the
+ * cell-selection-drag section), full keyboard navigation, frozen first
  * column, and the Sheets-style row-number gutter: clicking a number
  * selects its row as a normal full-width range, dragging it reorders the
  * row (onRowMove). Sort UI and column operations live on the page —
@@ -75,6 +77,12 @@ const COL_W = 180;   // default column width
  * row DRAG, not a click. Small enough that a deliberate drag converts almost
  * immediately, large enough that a twitchy click never moves a row. */
 const ROW_DRAG_THRESHOLD_PX = 4;
+
+/* Edge auto-scroll cap for the click-hold-pull selection drag, in layout px
+ * per animation frame. The step ramps at overshoot/4 and tops out here —
+ * fast enough to cross a 1000-row grid in a few held seconds, slow enough
+ * to release on the row you meant. */
+const CELL_DRAG_MAX_SCROLL_PX = 24;
 
 /* Every caret in the grid — a mounted cell editor, anything the page renders
  * into a header — sits INSIDE the grid div, so its keystrokes bubble to the
@@ -892,6 +900,52 @@ export function SheetGrid({
     return geom.rowAtY(y);
   }, [rowCount, bodyYFromClientY, geom]);
 
+  /** Which column a pointer is over, 0..colCount-1 — the horizontal mirror
+   *  of bodyYFromClientY + rowFromClientY, collapsed into one function
+   *  because columns need no band split (they are not virtualized and
+   *  colOffsets already holds every edge).
+   *
+   *  Mirror math (bodyYFromClientY's, rotated 90°):
+   *    vx = (clientX - rect.left) / zoom - clientLeft
+   *  clientX is VISUAL px, colOffsets are LAYOUT px: divide by the
+   *  effective CSS zoom first, then drop the scroller's left border
+   *  (clientLeft, the twin of clientTop above) — vx is now the pointer's
+   *  layout-px x inside the scroller's viewport.
+   *
+   *  The gutter + frozen columns are sticky-left: they sit pinned at
+   *  viewport x 0..colOffsets[fc] whatever scrollLeft is (colOffsets[fc]
+   *  is exactly GUTTER_W when fc = 0 — the same identity the
+   *  scroll-into-view inset uses). A pointer INSIDE that zone is over
+   *  content whose layout x equals its viewport x (frozen cells never
+   *  move), so it resolves WITHOUT scrollLeft; past the zone it is over
+   *  scrolled content, x = vx + scrollLeft. The threshold compare happens
+   *  in layout px AFTER the zoom division, mirroring the band test in
+   *  bodyYFromClientY.
+   *
+   *  Clamping is Sheets': a selection drag never cancels for leaving the
+   *  columns. The gutter (and anything left of the scroller) reads as
+   *  column 0; anything past the last column's right edge (including the
+   *  trailing add-column strip) reads as the last column. */
+  const colFromClientX = useCallback((clientX: number) => {
+    const el = scrollRef.current;
+    if (!el || colCount === 0) return null;
+    const rect = el.getBoundingClientRect();
+    const vx = (clientX - rect.left) / cssZoomOf(el) - el.clientLeft;
+    const frozenEdge = colOffsets[fc] ?? GUTTER_W;
+    const x = vx < frozenEdge ? vx : vx + el.scrollLeft;
+    if (x < colOffsets[1]) return 0;                    // gutter / left overshoot / column 0
+    if (x >= colOffsets[colCount]) return colCount - 1; // right overshoot
+    // Greatest c with colOffsets[c] <= x — the same invariant rowAtY keeps.
+    let lo = 1;
+    let hi = colCount - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (colOffsets[mid] <= x) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }, [colCount, colOffsets, fc]);
+
   const commitFill = useCallback(async (base: Rect, to: number) => {
     const down = to > base.r2;
     // Dragging back inside the seed is a no-op. Sheets would shrink the
@@ -1043,6 +1097,253 @@ export function SheetGrid({
   useEffect(() => {
     if (rowResize && !rowIndex.has(rowResize.rowId)) endRowResize(false);
   });
+
+  /* ── cell selection drag (Sheets' click-hold-pull) ──────────── */
+  /* Press a cell and pull: the selection grows to the rectangle between
+   * the mousedown cell and the cell under the pointer — Sheets' primary
+   * selection gesture. Three deliberate structural choices:
+   *
+   * · ARM on cell pointerdown, but touch NO state: the selection itself
+   *   is still set by the cell's onMouseDown exactly as before, so a
+   *   plain click renders byte-identical and emits nothing new. Only a
+   *   pointer that hits a DIFFERENT cell touches state (the lastHit gate
+   *   below), so a micro-jitter click causes zero churn too.
+   * · Document listeners, NOT pointer capture: the pressed cell is
+   *   virtualized and WILL unmount when edge auto-scroll carries it out
+   *   of the mount window (capture on it would die mid-drag — the
+   *   stranded-capture bug the gutter comments describe), and capture on
+   *   the grid div would retarget the compat mouseup there, composing
+   *   dblclick on the grid instead of the cell and killing double-click-
+   *   to-edit. The listeners are created per drag and carried ON the drag
+   *   object, so teardown removes exactly this drag's ears and can never
+   *   detach a newer drag's.
+   * · The selection applies LIVE on every hit change — there is no commit
+   *   step — so ending the drag is pure teardown, idempotent by
+   *   construction: every exit (pointerup, pointercancel, Escape, the
+   *   missed-release self-heal, unmount) just calls endCellDrag, and a
+   *   nulled ref can never hijack a later gesture. Escape ends the DRAG
+   *   but keeps the range selected so far, like Sheets. */
+  type CellDragState = {
+    pointerId: number;
+    /** The mousedown cell — the anchor fallback (`anchor ?? origin`): a
+     *  plain press anchors here on its first extending move, while a
+     *  Shift+press keeps extending from the anchor its own mousedown
+     *  already set (the functional update never overwrites a non-null
+     *  anchor), so Shift+click-then-pull extends like Sheets. */
+    origin: Cell;
+    /** Last hit-tested (display row, col). Selection updates are gated on
+     *  the hit actually CHANGING; seeded with the pressed cell so motion
+     *  inside it is free. */
+    lastHit: { r: number; c: number };
+    /** Last pointer position in client px. The auto-scroll loop
+     *  re-hit-tests with THIS while the content slides underneath a
+     *  stationary pointer — hold-at-the-edge keeps selecting. */
+    lastClientX: number;
+    lastClientY: number;
+    /** Press position — the engagement threshold measures from here. */
+    startClientX: number;
+    startClientY: number;
+    /** True once the pointer actually dragged (left the press threshold).
+     *  The auto-scroll frame is gated on this: a plain click on a
+     *  frozen-zone cell must never move the viewport. */
+    engaged: boolean;
+    /** Live rAF handle of the auto-scroll loop; cancelled at teardown. */
+    raf: number | null;
+    listeners: {
+      move: (e: PointerEvent) => void;
+      up: (e: PointerEvent) => void;
+      key: (e: KeyboardEvent) => void;
+    };
+  };
+  const cellDragRef = useRef<CellDragState | null>(null);
+  /* The rAF loop and the per-drag document listeners outlive many renders
+   * (auto-scroll itself re-renders through viewport state), so they reach
+   * the CURRENT render's hit-test/scroll logic through these refs — the
+   * onSelectionChangeRef pattern. */
+  const cellDragMoveRef = useRef<(clientX: number, clientY: number) => void>(() => {});
+  const cellDragFrameRef = useRef<() => void>(() => {});
+
+  /** End of the cell drag: pure teardown, nothing to commit (the
+   *  selection was applied live). Whoever nulls the ref tears down;
+   *  every later exit sees null and does nothing — the endFillDrag/
+   *  endRowDrag dual-exit safety, made trivial by having no commit.
+   *  Stable and ref-only so the unmount cleanup below can BE it. */
+  const endCellDrag = useCallback(() => {
+    const drag = cellDragRef.current;
+    if (!drag) return;
+    cellDragRef.current = null;
+    if (drag.raf != null) cancelAnimationFrame(drag.raf);
+    document.removeEventListener("pointermove", drag.listeners.move);
+    document.removeEventListener("pointerup", drag.listeners.up);
+    document.removeEventListener("pointercancel", drag.listeners.up);
+    window.removeEventListener("keydown", drag.listeners.key, true);
+  }, []);
+  // A mid-drag unmount must not leak the document listeners or the rAF
+  // loop: the unmount cleanup IS endCellDrag.
+  useEffect(() => endCellDrag, [endCellDrag]);
+
+  /** Hit-test the pointer and extend the selection to it. Row via the
+   *  freeze/zoom-aware rowFromClientY (geom.rowAtY clamps into the
+   *  sheet's rows), column via its mirror colFromClientX (gutter → 0,
+   *  right overshoot → last) — Sheets CLAMPS an out-of-grid pointer to
+   *  the nearest cell, it never cancels the drag. The functional
+   *  setAnchor is ordering-proof: even when the arming mousedown's
+   *  setAnchor(null) and the first extending move land in one React
+   *  batch, `a ?? origin` reads the queued null and anchors at the
+   *  pressed cell. A vanished origin row leaves a stale anchor, which
+   *  the range memo already collapses to the active cell — the same
+   *  stale-anchor story as every other gesture. */
+  const updateCellDragSel = (clientX: number, clientY: number) => {
+    const drag = cellDragRef.current;
+    if (!drag || rowCount === 0 || colCount === 0) return;
+    const c = colFromClientX(clientX);
+    const r = rowFromClientY(clientY);
+    if (c == null || r == null) return;
+    if (drag.lastHit.r === r && drag.lastHit.c === c) return; // same cell: zero churn
+    drag.lastHit = { r, c };
+    const rowId = rowIds[r];
+    if (!rowId) return;
+    const origin = drag.origin;
+    setAnchor((a) => a ?? origin);
+    setActive({ rowId, c });
+    // No scrollCellIntoView here: mid-drag scrolling belongs to the
+    // proportional edge loop below, and snapping would fight it.
+  };
+
+  /* One edge auto-scroll frame, run on a rAF loop that lives exactly as
+   * long as the drag. While the pointer sits outside the scroller's BODY
+   * area — past the sticky header + frozen band on top, past the gutter +
+   * frozen columns on the left, past the client box's right/bottom — the
+   * scroller moves by a step proportional to the overshoot (capped at
+   * CELL_DRAG_MAX_SCROLL_PX) and the selection is re-hit-tested with the
+   * LAST pointer position: pointermove stops when the pointer stops, but
+   * the content keeps sliding underneath it, and re-hit-testing here is
+   * what makes hold-at-the-edge keep selecting like Sheets. Inside the
+   * body area the frame is a cheap bounds check that does nothing.
+   * Bounds are computed in VISUAL px (clientX/Y's space): layout offsets
+   * are multiplied by the effective CSS zoom — the exact inverse of the
+   * division the hit-test helpers apply. */
+  const cellDragFrame = () => {
+    const drag = cellDragRef.current;
+    const el = scrollRef.current;
+    if (!drag || !el) return;
+    // Scroll only once the gesture has ENGAGED (pointer left the pressed
+    // cell or crossed the drag threshold): a plain click on a frozen-zone
+    // cell is "outside the body area" by these bounds from the first
+    // frame, and without this gate a 150ms press visibly yanked the
+    // viewport. Selection extension itself needs no gate.
+    if (!drag.engaged) return;
+    const rect = el.getBoundingClientRect();
+    const z = cssZoomOf(el);
+    const bodyTop = rect.top + (el.clientTop + SHEET_ROW_H + bandH) * z;
+    const bodyBottom = rect.top + (el.clientTop + el.clientHeight) * z;
+    const bodyRight = rect.left + (el.clientLeft + el.clientWidth) * z;
+    // min() guards the degenerate frozen-columns-wider-than-viewport
+    // layout: the left bound must never cross the right one.
+    const bodyLeft = Math.min(rect.left + (el.clientLeft + (colOffsets[fc] ?? GUTTER_W)) * z, bodyRight);
+    const x = drag.lastClientX;
+    const y = drag.lastClientY;
+    const overX = x < bodyLeft ? x - bodyLeft : x > bodyRight ? x - bodyRight : 0;
+    const overY = y < bodyTop ? y - bodyTop : y > bodyBottom ? y - bodyBottom : 0;
+    if (overX === 0 && overY === 0) return;
+    // Overshoot (visual px) → layout scroll step: divide by zoom, ramp at
+    // a quarter of the overshoot, floor 1 so any overshoot creeps, cap so
+    // a wild fling stays controllable.
+    const step = (over: number) => {
+      const mag = Math.min(CELL_DRAG_MAX_SCROLL_PX, Math.max(1, Math.abs(over) / (4 * z)));
+      return over < 0 ? -mag : mag;
+    };
+    const prevTop = el.scrollTop;
+    const prevLeft = el.scrollLeft;
+    if (overY !== 0) el.scrollTop = prevTop + step(overY);
+    if (overX !== 0) el.scrollLeft = prevLeft + step(overX);
+    // At a scroll limit nothing moved and the hit cannot have changed —
+    // skip the re-test so a pinned drag idles instead of churning.
+    if (el.scrollTop !== prevTop || el.scrollLeft !== prevLeft) cellDragMoveRef.current(x, y);
+  };
+
+  // Re-point the loop/listener refs at THIS render's logic (every render:
+  // rowIds, geometry, freeze and zoom all flow through these closures).
+  useEffect(() => {
+    cellDragMoveRef.current = updateCellDragSel;
+    cellDragFrameRef.current = cellDragFrame;
+  });
+
+  /** Arm the drag from a cell's pointerdown. State untouched here — see
+   *  the section comment. Mutual exclusion with the other three drag
+   *  gestures is by construction: each arms from a disjoint DOM zone
+   *  (cells here; the gutter, its resize strip and the fill handle each
+   *  own theirs, and the handle additionally stops propagation), and
+   *  every arm site abandons any STALE sibling ref first — a gesture
+   *  whose release was missed (capture lost off-window, per the gutter's
+   *  Chrome note) must never keep driving a later one. */
+  const armCellDrag = (e: React.PointerEvent, origin: Cell, r: number, c: number) => {
+    // A touch pan must scroll, not select: the browser cancels the pointer
+    // once native scrolling takes over, but the few moves before that
+    // would flicker the selection.
+    if (e.pointerType === "touch") return;
+    if (cellDragRef.current) endCellDrag();
+    if (rowDragRef.current) endRowDrag(false);
+    if (rowResizeRef.current) endRowResize(false);
+    // A LIVE fill drag holds pointer capture, so a cell pointerdown from
+    // that pointer is impossible — this only ever clears a stale one.
+    if (fillDrag) endFillDrag(false);
+
+    const onMove = (ev: PointerEvent) => {
+      if (cellDragRef.current !== drag || ev.pointerId !== drag.pointerId) return;
+      // Button already up: the release happened where no listener heard
+      // it. Abandon on the next move — the row-drag self-heal rule.
+      if (ev.buttons === 0) { endCellDrag(); return; }
+      if (!drag.engaged
+        && (Math.abs(ev.clientX - drag.startClientX) > ROW_DRAG_THRESHOLD_PX
+          || Math.abs(ev.clientY - drag.startClientY) > ROW_DRAG_THRESHOLD_PX)) {
+        drag.engaged = true;
+      }
+      drag.lastClientX = ev.clientX;
+      drag.lastClientY = ev.clientY;
+      cellDragMoveRef.current(ev.clientX, ev.clientY);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (cellDragRef.current !== drag || ev.pointerId !== drag.pointerId) return;
+      endCellDrag();
+    };
+    // Escape ends the DRAG, keeps the selection made so far (Sheets).
+    // Window-level and capture-phase like the row drag's Escape: it must
+    // work with focus anywhere, and it must stop the grid's own Escape
+    // handler, which would collapse the anchor we are keeping.
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape" || cellDragRef.current !== drag) return;
+      ev.stopPropagation();
+      endCellDrag();
+    };
+    const drag: CellDragState = {
+      pointerId: e.pointerId,
+      origin,
+      lastHit: { r, c },
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      lastClientX: e.clientX,
+      lastClientY: e.clientY,
+      engaged: false,
+      raf: null,
+      listeners: { move: onMove, up: onUp, key: onKey },
+    };
+    cellDragRef.current = drag;
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
+    window.addEventListener("keydown", onKey, true);
+    // The auto-scroll / re-hit-test loop, alive for exactly this drag:
+    // both identity checks pin the loop to THE drag it was started for,
+    // so a superseding drag always runs on its own fresh loop and a
+    // finished one reschedules nothing.
+    const tick = () => {
+      if (cellDragRef.current !== drag) return;
+      cellDragFrameRef.current();
+      if (cellDragRef.current === drag) drag.raf = requestAnimationFrame(tick);
+    };
+    drag.raf = requestAnimationFrame(tick);
+  };
 
   // A row can vanish under an open editor (deleted, or filtered out by a
   // value the editor itself just changed). Close without committing —
@@ -1355,6 +1656,7 @@ export function SheetGrid({
           // would collapse the selection we are about to fill from.
           e.preventDefault();
           e.stopPropagation();
+          if (cellDragRef.current) endCellDrag(); // never two live gestures
           (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
           setFillDrag({ base: { ...range }, to: range.r2 });
         }}
@@ -1482,6 +1784,9 @@ export function SheetGrid({
           // self-heal, so THIS gesture would drive the previous
           // drag: abandon any stale drag before arming a new one.
           if (rowDragRef.current) endRowDrag(false);
+          // Mutual exclusion with the cell selection drag: a stale one
+          // (release missed) must not keep driving the selection from here.
+          if (cellDragRef.current) endCellDrag();
           selectRow(rowId, e.shiftKey);
           // Shift extends a selection; it never starts a move.
           if (!onRowMove || e.shiftKey) return;
@@ -1545,6 +1850,7 @@ export function SheetGrid({
               // Same stale-capture self-heal as the row drag: a scroll can
               // unmount a captured zone and strand the ref.
               if (rowResizeRef.current) endRowResize(false);
+              if (cellDragRef.current) endCellDrag(); // never two live gestures
               const el = scrollRef.current;
               const st = {
                 rowId, pointerId: e.pointerId,
@@ -1627,6 +1933,20 @@ export function SheetGrid({
               width: col.width ?? COL_W,
               minWidth: col.width ?? COL_W,
               ...(isActive ? withoutBackground(cellStyle?.(rowId, col.id)) : cellStyle?.(rowId, col.id)),
+            }}
+            onPointerDown={(e) => {
+              /* Sheets' click-hold-pull: ARM the selection drag. The
+               * selection itself is set by onMouseDown below exactly as
+               * before (arming touches no state), so a press-and-release
+               * is byte-identical to the pre-drag kernel. Never arms from
+               * a non-left press (right-click stays the context menu),
+               * this cell's own open editor, or any editable the page
+               * rendered into the cell. The gutter, header, resize strip
+               * and fill handle never reach here — disjoint DOM zones
+               * (the handle also stops propagation). */
+              if (e.button !== 0 || isEditing) return;
+              if ((e.target as HTMLElement | null)?.closest?.(EDITABLE_SEL)) return;
+              armCellDrag(e, { rowId, c }, r, c);
             }}
             onMouseDown={(e) => {
               if (isEditing) return;
