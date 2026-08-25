@@ -1974,7 +1974,14 @@ export function SheetGrid({
                 position: "sticky" as const,
                 left: colOffsets[c],
                 zIndex: 15,
-                backgroundColor: frozenBg(isActive, selected, page?.backgroundColor),
+                // A page-level `background` SHORTHAND (find's current-match
+                // green rides it exactly because the active cell strips the
+                // longhand) is an explicit opaque fill — keep it instead of
+                // pinning white over it; it satisfies the frozen-column
+                // opacity requirement by itself.
+                backgroundColor: page?.background != null
+                  ? (typeof page.background === "string" ? page.background : frozenBg(isActive, selected, page?.backgroundColor))
+                  : frozenBg(isActive, selected, page?.backgroundColor),
                 ...(c === fc - 1 ? { borderRightColor: "#d4d4d8" } : null),
                 ...(isEditing ? { height: "auto", minHeight: "100%", alignSelf: "flex-start", background: "white", zIndex: 30 } : null),
               };

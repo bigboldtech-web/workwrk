@@ -2962,6 +2962,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Find state is per sheet — a query (and its rowId-keyed matches) from
   // the previous table must never survive into the next one.
   useEffect(() => {
+    // The pending debounce timer must die too — firing after this reset
+    // would resurrect the previous sheet's query into the fresh state.
+    if (findDebounceRef.current !== null) { window.clearTimeout(findDebounceRef.current); findDebounceRef.current = null; }
     setFindOpen(false); setFindShowReplace(false); setFindQuery(""); setFindQueryDebounced("");
     setFindReplace(""); setFindIndex(0); setFindActivated(false); setFindNotice(null);
     setFindActiveRequest(null);
@@ -3223,7 +3226,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // Window Cmd+F/H calls through this ref. A columnless table renders the
   // "Start sheet" branch, not the card — leave the browser's find alone
   // there rather than swallowing the shortcut into an invisible state.
-  findKeyRef.current = table.columns.length === 0 ? null : openFind;
+  // Null (native browser find) when the card can't render: a columnless
+  // table shows the start branch, and the row-detail modal would hide the
+  // card under its backdrop while autoFocus steals the modal's focus.
+  findKeyRef.current = table.columns.length === 0 || activeRowId ? null : openFind;
 
   /** Escape / the X. The GRID selection is untouched on purpose — the
    *  kernel's own Escape (which collapses the anchor) only runs while the
@@ -3275,7 +3281,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     return coercePaste(col, replaced);
   };
 
-  const skippedNote = (n: number) => `${n} skipped — formulas and computed cells can't be replaced`;
+  const skippedNote = (n: number) => `${n} skipped — computed cells, or results that don't fit the column's type`;
 
   /** Replace the CURRENT match: one guarded row PATCH (the same write an
    *  editor commit makes — one undoable command, 409-guarded because we
@@ -3303,6 +3309,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     }
     setFindNotice(null);
     void patchRow(m.rowId, { [m.colId]: res.value }, { label: "replace", guard: true });
+    // When the REPLACEMENT still contains the query ("x" → "xx") the cell
+    // keeps matching and would stay current forever — repeated Enter would
+    // grow it exponentially instead of walking the sheet. Advance past it
+    // the way Sheets does; the rescan keeps indices aligned because the
+    // still-matching cell keeps its slot.
+    const newText = res.kind === "write" && res.value != null ? String(res.value) : "";
+    if (matchesFindQuery(newText, findQueryDebounced) && findMatches.length > 1) {
+      setFindIndex((findCurrentIdx + 1) % findMatches.length);
+    }
   };
 
   /** Replace ALL matches: ONE writeValuesBatchStrict (host + mirror +
