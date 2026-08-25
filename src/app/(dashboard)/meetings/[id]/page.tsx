@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { MeetingCall } from "@/components/meetings/meeting-call";
+import { CallPanel } from "@/components/calls/call-panel";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -582,7 +582,8 @@ export default function MeetingDetailPage() {
 
       {callOpen && meeting.call?.room ? (
         <div className="px-5 pt-4" style={{ height: "68vh" }}>
-          <MeetingCall
+          <CallPanel
+            meetingId={id}
             room={meeting.call.room}
             subject={meeting.title}
             displayName={sessionName}

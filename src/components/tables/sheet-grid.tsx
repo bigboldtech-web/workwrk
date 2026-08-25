@@ -286,6 +286,16 @@ export type SheetGridProps = {
    *  math and is immune to zoom and scroll by construction. null/absent
    *  renders nothing. */
   colResizeGuideId?: string | null;
+  /** Externally drive the ACTIVE cell (find & replace navigation). The
+   *  kernel owns selection state, so the page cannot set it directly; it
+   *  hands over one request and the NONCE is the trigger — a new nonce
+   *  applies the request exactly once (setAnchor(null) + setActive +
+   *  scrollCellIntoView), even when { rowId, c } repeats (Enter on a
+   *  single wrap-around match must still recentre it). A rowId no longer
+   *  in the grid, or a c outside the columns, is a stale request (the data
+   *  changed between compute and click) and is ignored — the find bar
+   *  recomputes and re-requests. Absent, this costs nothing. */
+  activeRequest?: { rowId: string; c: number; nonce: number };
 };
 
 type Cell = { rowId: string; c: number };
@@ -296,6 +306,7 @@ export function SheetGrid({
   headerTrailing, footer, readOnlyCols, getRangeValues, applyMatrix, onUndo,
   onRedo, onFormatKey, cellStyle, onSelectionChange, freeze, isCellEmpty,
   rowHeight, rowHeightsVersion, onRowResize, onRowAutofit, colResizeGuideId,
+  activeRequest,
 }: SheetGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -533,6 +544,31 @@ export function SheetGrid({
     setActive({ rowId: rowIds[0], c: 0 });
     scrollCellIntoView(0, 0);
   }, [rowCount, colCount, rowIds, scrollCellIntoView]);
+
+  /* ── externally driven active cell (activeRequest) ──────────── */
+  // The nonce is the trigger, guarded by a ref: parent re-renders that
+  // merely recreate the request object (or rows reordering re-running this
+  // effect via rowIndex/scrollCellIntoView) must NOT re-apply it — one
+  // nonce, one application. The ref-not-dep-array guard also means a
+  // request that arrives while the same nonce is already recorded is
+  // dropped by value, not by identity, matching the selection-emission
+  // dedupe philosophy above. Stale requests (rowId gone, column count
+  // shrunk past c) no-op: the requester recomputes against live data and
+  // asks again with a fresh nonce, and applying a clamped guess here would
+  // activate a cell that was never the match.
+  const lastActiveRequestNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!activeRequest) return;
+    if (activeRequest.nonce === lastActiveRequestNonceRef.current) return;
+    lastActiveRequestNonceRef.current = activeRequest.nonce;
+    const r = rowIndex.get(activeRequest.rowId);
+    if (r == null) return; // stale rowId
+    const c = activeRequest.c;
+    if (!Number.isInteger(c) || c < 0 || c >= colCount) return; // stale column
+    setAnchor(null);
+    setActive({ rowId: activeRequest.rowId, c });
+    scrollCellIntoView(r, c);
+  }, [activeRequest, rowIndex, colCount, scrollCellIntoView]);
 
   /* ── growth signal (onGrowRows) ─────────────────────────────── */
   // Ref-read so move() — a dependency of the whole keyboard path — doesn't

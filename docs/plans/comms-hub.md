@@ -38,7 +38,13 @@ through our box.
 
 ---
 
-## 3. Media backend — decision gate, not a bet
+## 3. Media backend — RESOLVED 2026-08-25: we own it (see native-calls.md)
+
+The user closed this gate: Jitsi is being removed entirely in favour of a
+self-hosted LiveKit SFU on a dedicated calls box, with a fully WorkwrK
+call UI and Slack-huddle presence. The ladder below is kept for history.
+
+## 3-old. Media backend — decision gate, not a bet
 
 All phases embed via the Jitsi IFrame API, so the backend is swappable by
 changing a domain string + adding a JWT param:

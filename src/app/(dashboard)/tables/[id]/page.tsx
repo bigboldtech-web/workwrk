@@ -32,8 +32,8 @@ import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
   Globe, Lock, Sigma, Star, Link2, Check,
-  Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown,
-  ArrowDownAZ, ArrowUpZA, X, Pencil,
+  Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown, ChevronUp,
+  ArrowDownAZ, ArrowUpZA, X, Pencil, MoreVertical,
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
   TextAlignStart, TextAlignCenter, TextAlignEnd,
   ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
@@ -53,6 +53,7 @@ import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, 
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
 import { autoTypeEntry, autoTypeEntryRich, isOpenColumnType } from "@/lib/sheet-entry";
+import { matchesFindQuery, replaceAllOccurrences, REPLACE_SKIP_TYPES } from "@/lib/sheet-find";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { RelationConfigModal } from "@/components/tables/relation-config-modal";
@@ -293,6 +294,13 @@ function resolveOpenEntry(
 // The red the grid already uses for formula errors — reused for
 // negative-styled numbers so "red negatives" match the existing token.
 const NEGATIVE_RED: React.CSSProperties = { color: "#dc2626" };
+
+/* Find & Replace highlight — Sheets' find green. Every matched cell tints
+ * light green; the CURRENT match paints the full-strength swatch. Hex
+ * literals like the formatting swatches above: the tint must look the same
+ * in every theme (it marks data, not chrome). */
+const FIND_MATCH_BG = "rgba(183, 225, 205, 0.45)"; // #b7e1cd at ~45%
+const FIND_CURRENT_BG = "#b7e1cd";
 
 /* Toolbar colour swatches (Sheets' compact grid, reduced to the brand
  * YBRG + neutrals). Hex literals on purpose: a persisted style must look
@@ -727,6 +735,31 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       if (!formatKeyRef.current) return;
       e.preventDefault();
       formatKeyRef.current(k as "b" | "i" | "u");
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+  // Cmd/Ctrl+F / Cmd/Ctrl+H anywhere on the sheet page (capture phase, same
+  // shape as the B/I/U handler above): preventDefault so the browser's own
+  // find bar never opens over the sheet. Unlike B/I/U, grid-focused events
+  // are NOT skipped — the kernel has no find handler, so this is the only
+  // door. v1 scope decision (Sheets diverges: it commits the edit first):
+  // while the caret sits in any editor input the browser's native find
+  // stays reachable — EXCEPT inside the find card's own inputs, where
+  // Cmd+F re-focuses the query and Cmd+H reveals the replace row instead
+  // of stacking the native bar on top of ours. Ref-filled per render like
+  // formatKeyRef, since openFind is defined after the early returns.
+  const findKeyRef = useRef<((withReplace: boolean) => void) | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== "f" && k !== "h") return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !t?.closest?.(".shx__find")) return;
+      if (!findKeyRef.current) return;
+      e.preventDefault();
+      findKeyRef.current(k === "h");
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
@@ -2886,6 +2919,114 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     read();
   }, []);
 
+  /* ── Find & Replace (Sheets' Cmd+F / Cmd+H) ──────────────────────
+   * Page-local, never persisted: the card, its query and its highlights
+   * exist only while this sheet is mounted, and closing the card clears
+   * every tint (the match set below empties when findOpen drops).
+   *
+   * findQuery is the input's live value; findQueryDebounced is what the
+   * scan actually runs on, ~150ms behind — the scan is a full
+   * sortedRows × columns pass (computed cells read the engine host), and
+   * re-running it on every keystroke of a fast typist would burn frames
+   * for match sets nobody sees. */
+  const [findOpen, setFindOpen] = useState(false);
+  const [findShowReplace, setFindShowReplace] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findQueryDebounced, setFindQueryDebounced] = useState("");
+  const [findReplace, setFindReplace] = useState("");
+  // Index into findMatches of the CURRENT match (clamped at read time —
+  // the list can shrink under it after a replace or an edit elsewhere).
+  const [findIndex, setFindIndex] = useState(0);
+  // Whether the user has NAVIGATED yet for this query: the first Enter
+  // activates match 1 (already shown as current) instead of skipping to 2.
+  const [findActivated, setFindActivated] = useState(false);
+  // The honest replace note ("N skipped — …"), shown inside the card.
+  const [findNotice, setFindNotice] = useState<string | null>(null);
+  // The kernel's activeRequest prop: bumping the nonce makes (rowId, c)
+  // the active cell exactly once. The kernel owns the active cell; this is
+  // the page's only handle on it.
+  const [findActiveRequest, setFindActiveRequest] = useState<{ rowId: string; c: number; nonce: number } | null>(null);
+  const findNonceRef = useRef(0);
+  const findInputRef = useRef<HTMLInputElement | null>(null);
+  const findDebounceRef = useRef<number | null>(null);
+  const setFindQueryLive = useCallback((v: string) => {
+    setFindQuery(v);
+    if (findDebounceRef.current !== null) window.clearTimeout(findDebounceRef.current);
+    findDebounceRef.current = window.setTimeout(() => setFindQueryDebounced(v), 150);
+  }, []);
+  // A pending debounce must not fire into an unmounted page.
+  useEffect(() => () => { if (findDebounceRef.current !== null) window.clearTimeout(findDebounceRef.current); }, []);
+  // A new query means a new match list: the cursor restarts at the first
+  // match, un-navigated, and any stale replace note stops applying.
+  useEffect(() => { setFindIndex(0); setFindActivated(false); setFindNotice(null); }, [findQueryDebounced]);
+  // Find state is per sheet — a query (and its rowId-keyed matches) from
+  // the previous table must never survive into the next one.
+  useEffect(() => {
+    setFindOpen(false); setFindShowReplace(false); setFindQuery(""); setFindQueryDebounced("");
+    setFindReplace(""); setFindIndex(0); setFindActivated(false); setFindNotice(null);
+    setFindActiveRequest(null);
+  }, [tableId]);
+
+  /** The text find matches against for ONE cell — the page's single source
+   *  for the scan AND for replace (surgery must run on exactly the text
+   *  that matched). Literals read the same projection the search filter
+   *  reads (raw stored text, arrays joined with a space — NOT the
+   *  formatted display: search has always matched "0.07", not "7%", and
+   *  find keeps that contract); computed cells (a formula column, a
+   *  per-cell "=…" anywhere, lookup/rollup) read their computed display.
+   *  Mid-stream the host is empty or one world behind, so computed cells
+   *  go find-dark exactly as they go search-dark — but the whole scan is
+   *  gated below anyway (a partial-set count is a lie). Reserved keys
+   *  ($fmt/$rh) can never reach this function: callers iterate
+   *  table.columns, and those keys are row-values riders, not columns. */
+  const findCellText = useCallback((col: Column, r: ApiRow): string => {
+    const v = r.values[col.id];
+    if (col.type === "formula" || isFormulaCell(v)) {
+      return streamProgress ? "" : String(engineHost.display(col.id, r.id) ?? "");
+    }
+    if (col.type === "lookup" || col.type === "rollup") {
+      const rv = relationalValue(col, r);
+      return rv == null ? "" : String(rv);
+    }
+    if (v === undefined || v === null) return "";
+    return String(Array.isArray(v) ? v.join(" ") : v);
+  }, [engineHost, relationalValue, streamProgress]);
+
+  /** Every matched cell in DISPLAY order (sortedRows × columns, so
+   *  next/prev walk the sheet the way the user reads it — left to right,
+   *  top to bottom, under whatever sort and filter are live). One entry
+   *  per CELL, not per occurrence. Empty while the card is closed (no
+   *  scan, no tint), while the query is empty, and mid-stream (the card
+   *  shows "Loading rows…" instead — counting matches over a partial row
+   *  set would be a lie). Recomputes whenever the data world moves:
+   *  sortedRows (rows, sort, filter, search) and engineVersion (computed
+   *  values) are both dependencies. */
+  const findMatches = useMemo<{ rowId: string; colId: string; c: number }[]>(() => {
+    void engineVersion; // computed cell text changes when the host mutates in place
+    if (!findOpen || streamProgress || findQueryDebounced === "") return [];
+    const cols = table?.columns ?? [];
+    const out: { rowId: string; colId: string; c: number }[] = [];
+    for (const r of sortedRows) {
+      for (let c = 0; c < cols.length; c++) {
+        if (matchesFindQuery(findCellText(cols[c], r), findQueryDebounced)) {
+          out.push({ rowId: r.id, colId: cols[c].id, c });
+        }
+      }
+    }
+    return out;
+  }, [findOpen, streamProgress, findQueryDebounced, table?.columns, sortedRows, findCellText, engineVersion]);
+
+  // "rowId:colId" keys for cellStyleFor's O(1) tint lookup; null while
+  // nothing matches so the style path costs one falsy check per cell.
+  const findMatchKeys = useMemo(
+    () => (findMatches.length === 0 ? null : new Set(findMatches.map((m) => `${m.rowId}:${m.colId}`))),
+    [findMatches],
+  );
+  const findCurrentIdx = findMatches.length === 0 ? 0 : Math.min(findIndex, findMatches.length - 1);
+  const findCurrentKey = findMatches.length > 0
+    ? `${findMatches[findCurrentIdx].rowId}:${findMatches[findCurrentIdx].colId}`
+    : null;
+
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
   if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
 
@@ -3068,6 +3209,150 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // this ref — filled here, after the function exists.
   formatKeyRef.current = toggleStyleFlag;
 
+  // ── Find & Replace plumbing (state + scan in the hooks zone above) ──
+
+  /** Cmd/Ctrl+F (withReplace=false) / Cmd/Ctrl+H (true), and re-presses
+   *  while the card is already open: re-focus the query and select it, so
+   *  typing replaces the old search (Sheets' reopen behaviour). The rAF
+   *  waits out the mount render on first open. */
+  const openFind = (withReplace: boolean) => {
+    setFindOpen(true);
+    if (withReplace) setFindShowReplace(true);
+    requestAnimationFrame(() => { findInputRef.current?.focus(); findInputRef.current?.select(); });
+  };
+  // Window Cmd+F/H calls through this ref. A columnless table renders the
+  // "Start sheet" branch, not the card — leave the browser's find alone
+  // there rather than swallowing the shortcut into an invisible state.
+  findKeyRef.current = table.columns.length === 0 ? null : openFind;
+
+  /** Escape / the X. The GRID selection is untouched on purpose — the
+   *  kernel's own Escape (which collapses the anchor) only runs while the
+   *  grid has focus, and it never does while the card's input owns the
+   *  key. Focus is handed back to the grid so arrows work immediately,
+   *  the same hand-back the formula bar commit does. */
+  const closeFind = () => {
+    setFindOpen(false);
+    setFindNotice(null);
+    gridWrapElRef.current?.querySelector<HTMLElement>('[role="grid"]')?.focus();
+  };
+
+  /** Next (+1) / previous (-1) with wrap-around; the landed-on match
+   *  becomes the ACTIVE cell via the kernel's activeRequest (nonce bump =
+   *  apply once). The first forward step activates the CURRENT match
+   *  (shown as "1 of M") rather than skipping past it. */
+  const findStep = (dir: 1 | -1) => {
+    const total = findMatches.length;
+    if (total === 0) return;
+    const next = !findActivated && dir === 1 ? findCurrentIdx : (findCurrentIdx + dir + total) % total;
+    setFindActivated(true);
+    setFindIndex(next);
+    const m = findMatches[next];
+    setFindActiveRequest({ rowId: m.rowId, c: m.c, nonce: ++findNonceRef.current });
+  };
+
+  /** What Replace writes into ONE matched cell — or "skip", the honest
+   *  outcome the card counts. Computed and relational cells and shapes
+   *  with no text encoding (REPLACE_SKIP_TYPES) skip statically; a
+   *  per-cell "=…" formula in an otherwise open column skips by its
+   *  stored shape. The surgery runs on EXACTLY the text that matched
+   *  (findCellText), then re-enters storage by column type:
+   *   - open columns take the plain entry grammar (autoTypeEntry), the
+   *     same chokepoint paste and fill use — replacing the "x" out of
+   *     "5x" stores the NUMBER 5. Plain, not rich, deliberately: a
+   *     replace result is mechanical surgery, not a symbol the user typed
+   *     to format the cell, so "5%" landing here stays text exactly as a
+   *     pasted "5%" does.
+   *   - every other literal type rides coercePaste, so the stored shape
+   *     stays honest (numbers parse, dates must be ISO, selects must name
+   *     an option) — an unreadable result SKIPS the cell rather than
+   *     planting a string a number column would silently missort. */
+  const replacementFor = (col: Column, r: ApiRow): PasteCoercion => {
+    if (REPLACE_SKIP_TYPES.has(col.type) || isFormulaCell(r.values[col.id])) return { kind: "skip" };
+    const replaced = replaceAllOccurrences(findCellText(col, r), findQueryDebounced, findReplace);
+    if (isOpenColumnType(col.type)) {
+      return { kind: "write", value: replaced === "" ? null : autoTypeEntry(replaced) };
+    }
+    return coercePaste(col, replaced);
+  };
+
+  const skippedNote = (n: number) => `${n} skipped — formulas and computed cells can't be replaced`;
+
+  /** Replace the CURRENT match: one guarded row PATCH (the same write an
+   *  editor commit makes — one undoable command, 409-guarded because we
+   *  know the exact stored value the user is looking at). A skipped
+   *  current match steps forward so repeated presses walk the sheet.
+   *  After the write lands the mirror changes, the scan re-runs, and the
+   *  shrunken list leaves findIndex pointing at the next match. When the
+   *  REPLACEMENT still contains the query ("x" → "xx") the cell keeps
+   *  matching and stays current — Sheets keeps finding it too. */
+  const runReplaceCurrent = () => {
+    if (findMatches.length === 0) return;
+    const m = findMatches[findCurrentIdx];
+    const col = table.columns.find((c) => c.id === m.colId);
+    const r = rowById.get(m.rowId);
+    if (!col || !r) return; // a frame behind a delete: the scan will re-run
+    const res = replacementFor(col, r);
+    setFindActivated(true);
+    // Show the cell the action lands on (or walks past) either way.
+    setFindActiveRequest({ rowId: m.rowId, c: m.c, nonce: ++findNonceRef.current });
+    if (res.kind === "skip") {
+      setFindNotice(skippedNote(1));
+      const total = findMatches.length;
+      if (total > 1) setFindIndex((findCurrentIdx + 1) % total);
+      return;
+    }
+    setFindNotice(null);
+    void patchRow(m.rowId, { [m.colId]: res.value }, { label: "replace", guard: true });
+  };
+
+  /** Replace ALL matches: ONE writeValuesBatchStrict (host + mirror +
+   *  chunked batch route in one queued job) and ONE undo command over
+   *  every touched row — exactly the clearCells shape. Skipped cells are
+   *  counted and reported in the card, never silently dropped. */
+  const runReplaceAll = async () => {
+    if (findMatches.length === 0) return;
+    const byRow = new Map<string, Record<string, unknown>>();
+    const befores = new Map<string, Record<string, unknown>>();
+    let skipped = 0;
+    let replaced = 0;
+    for (const m of findMatches) {
+      const col = table.columns.find((c) => c.id === m.colId);
+      const r = rowById.get(m.rowId);
+      if (!col || !r) continue; // a frame behind a delete — not a skip worth reporting
+      const res = replacementFor(col, r);
+      if (res.kind === "skip") { skipped += 1; continue; }
+      const values = byRow.get(m.rowId) ?? {};
+      values[m.colId] = res.value;
+      byRow.set(m.rowId, values);
+      const b = befores.get(m.rowId) ?? {};
+      b[m.colId] = r.values[m.colId] ?? null; // absent restores as null, patchRow's rule
+      befores.set(m.rowId, b);
+      replaced += 1;
+    }
+    if (replaced === 0) {
+      setFindNotice(skipped > 0 ? skippedNote(skipped) : null);
+      return;
+    }
+    const updates = [...byRow].map(([id, values]) => ({ id, values }));
+    const beforeUpdates = [...befores].map(([id, values]) => ({ id, values }));
+    try {
+      await writeValuesBatchStrict(updates);
+      pushUndo({
+        label: `replace all (${replaced} cell${replaced === 1 ? "" : "s"})`,
+        undo: () => writeValuesBatchStrict(beforeUpdates),
+        redo: () => writeValuesBatchStrict(updates),
+      });
+      setFindNotice(`Replaced ${replaced} cell${replaced === 1 ? "" : "s"}${skipped > 0 ? ` · ${skippedNote(skipped)}` : ""}`);
+    } catch { toast("Couldn't replace — reloading"); void load(); }
+  };
+
+  // The card's counter line: mid-stream honesty beats a partial count.
+  const findCounter = streamProgress
+    ? "Loading rows…"
+    : findQueryDebounced === ""
+      ? null
+      : `${findMatches.length === 0 ? 0 : findCurrentIdx + 1} of ${findMatches.length}`;
+
   /** Σ button: open the active cell's editor seeded with "=SUM(" through
    *  the kernel's own type-to-replace path — a real "=" keydown dispatched
    *  at the grid (the exact mechanism typing uses; React's root listener
@@ -3231,6 +3516,31 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
         const bg = matchRule(raw, c.rules);
         if (bg) css.backgroundColor = /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg;
+      }
+    }
+    // Find & Replace tint, merged LAST on purpose: find is a transient
+    // MODE, and while its card is open the match highlight overrides both
+    // the cell's manual fill and any rule background — the whole point of
+    // the mode is seeing the matches; closing the card restores every
+    // fill (findMatchKeys empties with it). The CURRENT match sets the
+    // `background` SHORTHAND as well: the kernel deliberately drops
+    // backgroundColor on the ACTIVE cell (its white ground keeps the
+    // outline legible), but the navigated-to match IS the active cell and
+    // must stay visibly green under the cursor, as in Sheets — the
+    // shorthand is the one property that survives that drop. The specific
+    // backgroundColor rides along (inserted after, so it wins wherever
+    // both apply) for the frozen-column path, whose opaque-fill rule reads
+    // backgroundColor, not the shorthand.
+    if (findMatchKeys) {
+      const key = `${rowId}:${colId}`;
+      if (findMatchKeys.has(key)) {
+        if (key === findCurrentKey) {
+          delete css.backgroundColor;
+          css.background = FIND_CURRENT_BG;
+          css.backgroundColor = FIND_CURRENT_BG;
+        } else {
+          css.backgroundColor = FIND_MATCH_BG;
+        }
       }
     }
     return Object.keys(css).length > 0 ? css : undefined;
@@ -4329,6 +4639,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             // While a header-grip width drag is live, the kernel draws the
             // Sheets guide line at this column's live right edge.
             colResizeGuideId={resizingColId}
+            // Find & Replace navigation: each nonce bump makes the current
+            // match the active cell (the kernel scrolls it into view).
+            activeRequest={findActiveRequest ?? undefined}
             // Row moving exists ONLY while display order IS storage order:
             // under a sort/filter/search the gutter's display index names a
             // different storage slot, and mid-stream the tail hasn't even
@@ -4363,6 +4676,53 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           >
             {addingRows ? <Loader2 className="frmb__spin" /> : <Plus />}
           </button>
+          {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): compact, floats
+              top-right over the grid, Sheets' quick-find shape. Lives
+              OUTSIDE the grid div on purpose — its Enter/Escape never
+              bubble into the kernel's keydown, so Enter can't open an
+              editor and Escape can't collapse the selection. */}
+          {findOpen && (
+            <div className="shx__find shx__np" role="dialog" aria-label="Find and replace">
+              <div className="shx__find-row">
+                <input
+                  ref={findInputRef}
+                  className="shx__find-input"
+                  type="text"
+                  value={findQuery}
+                  placeholder="Find in sheet"
+                  autoFocus
+                  onChange={(e) => setFindQueryLive(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); findStep(e.shiftKey ? -1 : 1); }
+                    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); }
+                  }}
+                />
+                {findCounter !== null && <span className="shx__find-count">{findCounter}</span>}
+                <button type="button" className="shx__find-btn" onClick={() => findStep(-1)} disabled={findMatches.length === 0} title="Previous match (Shift+Enter)" aria-label="Previous match"><ChevronUp /></button>
+                <button type="button" className="shx__find-btn" onClick={() => findStep(1)} disabled={findMatches.length === 0} title="Next match (Enter)" aria-label="Next match"><ChevronDown /></button>
+                <button type="button" className={`shx__find-btn ${findShowReplace ? "is-on" : ""}`} onClick={() => setFindShowReplace((v) => !v)} title="More options" aria-label="More options"><MoreVertical /></button>
+                <button type="button" className="shx__find-btn" onClick={closeFind} title="Close (Esc)" aria-label="Close find"><X /></button>
+              </div>
+              {findShowReplace && (
+                <div className="shx__find-row">
+                  <input
+                    className="shx__find-input"
+                    type="text"
+                    value={findReplace}
+                    placeholder="Replace with"
+                    onChange={(e) => setFindReplace(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); runReplaceCurrent(); }
+                      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeFind(); }
+                    }}
+                  />
+                  <button type="button" className="shx__find-action" onClick={runReplaceCurrent} disabled={findMatches.length === 0}>Replace</button>
+                  <button type="button" className="shx__find-action" onClick={() => void runReplaceAll()} disabled={findMatches.length === 0}>Replace all</button>
+                </div>
+              )}
+              {findNotice && <div className="shx__find-note">{findNotice}</div>}
+            </div>
+          )}
         </div>
       )}
 

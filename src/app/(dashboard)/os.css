@@ -34100,3 +34100,44 @@ table.os-tbl {
   font-size: 12px; font-weight: 500; color: var(--os-ink-2); cursor: pointer;
 }
 .shx__dd-menu .shx__swatch-reset:hover { background: var(--os-bg-2); color: var(--os-ink); }
+
+/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): compact card floating
+ * top-right over the grid, below the fx bar — Sheets' quick-find shape.
+ * Additive block; positioning rides the position:relative shx__sheet
+ * already declares for the corner add-rows button. Hidden in print via
+ * shx__np on the card itself. */
+.shx__find {
+  position: absolute; top: 34px; right: 26px; z-index: 30;
+  display: flex; flex-direction: column; gap: 6px;
+  width: 320px; max-width: calc(100% - 40px); padding: 8px 10px;
+  background: var(--os-surface); border: 1px solid var(--os-line); border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .14);
+}
+.shx__find-row { display: flex; align-items: center; gap: 6px; }
+.shx__find-input {
+  flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 8px;
+  border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-bg);
+  font-size: 12.5px; color: var(--os-ink); outline: none;
+}
+.shx__find-input:focus { border-color: var(--os-c-blue); background: var(--os-surface); }
+.shx__find-count {
+  flex: 0 0 auto; padding: 0 2px; white-space: nowrap;
+  font-size: 11.5px; color: var(--os-ink-3); font-variant-numeric: tabular-nums;
+}
+.shx__find-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border: none; border-radius: 6px;
+  background: transparent; color: var(--os-ink-2); cursor: pointer; flex: 0 0 auto;
+}
+.shx__find-btn:hover:not(:disabled) { background: var(--os-bg-2); color: var(--os-ink); }
+.shx__find-btn:disabled { opacity: .35; cursor: default; }
+.shx__find-btn svg { width: 14px; height: 14px; }
+.shx__find-btn.is-on { background: color-mix(in srgb, var(--os-c-blue) 14%, transparent); color: var(--os-c-blue); }
+.shx__find-action {
+  flex: 0 0 auto; height: 26px; padding: 0 10px;
+  border: 1px solid var(--os-line); border-radius: 6px; background: var(--os-surface);
+  font-size: 12px; font-weight: 600; color: var(--os-ink-2); cursor: pointer;
+}
+.shx__find-action:hover:not(:disabled) { background: var(--os-bg-2); color: var(--os-ink); }
+.shx__find-action:disabled { opacity: .35; cursor: default; }
+.shx__find-note { font-size: 11.5px; color: var(--os-ink-3); }

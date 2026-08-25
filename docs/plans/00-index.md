@@ -66,6 +66,9 @@ embeds) · per-node "…" menus (rename/icon/favorite/archive) · `/api/me/items
 - **`tables.md`** — Sheets/Excel-grade Tables (user-mandated, next after Room acceptance): virtualized grid
   kernel w/ selection+keyboard, Excel/Sheets clipboard interop + fill handle, per-cell formula engine v2
   (dep graph, ~30 functions, tested), undo/redo + Intl formatting, concurrency guard. 5 phases.
+- **`native-calls.md`** — Jitsi removal + our OWN video system (user 2026-08-25): self-hosted LiveKit SFU on a
+  dedicated calls box, WorkwrK-native call UI, Slack-huddle live presence via webhooks, guest/notetaker tokens,
+  recording later. Needs one infra approval (~$24/mo node).
 - **`comms-hub.md`** — Slack × Zoom × Meet inside WorkwrK: team chat (DMs/groups/channels) + video/audio
   calls, built LIGHT (Jitsi carries all media, polling-first realtime, 3 lean tables). Phase 0 (meeting
   calls + public guest door for external people and AI notetakers) is live; chat phases ship one at a time.

@@ -20,7 +20,7 @@ import {
   Bell, BellOff, Hash, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
   UserPlus, Users, Video,
 } from "lucide-react";
-import { MeetingCall } from "@/components/meetings/meeting-call";
+import { CallPanel } from "@/components/calls/call-panel";
 import { TeamAvatar } from "@/components/team/ui";
 import { useOsToast } from "@/components/layout/os/toast";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -623,7 +623,8 @@ export default function ConversationPage() {
       {/* Call panel */}
       {callOpen && meta?.call?.room && (
         <div className="px-4 pt-3 shrink-0" style={{ height: "48vh" }}>
-          <MeetingCall
+          <CallPanel
+            conversationId={id}
             room={meta.call.room}
             subject={title}
             displayName={myName}
