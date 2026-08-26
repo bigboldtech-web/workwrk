@@ -18,7 +18,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   Bell, BellOff, Hash, Link2, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
-  RefreshCw, UserPlus, Users, Video,
+  RefreshCw, Star, UserPlus, Users, Video,
 } from "lucide-react";
 import { CallPanel } from "@/components/calls/call-panel";
 import { TeamAvatar } from "@/components/team/ui";
@@ -36,7 +36,7 @@ type ConversationMeta = {
   id: string;
   type: "DM" | "GROUP" | "CHANNEL";
   name: string | null;
-  members: { userId: string; notifyLevel?: string; user: ChatUserLite & { email?: string } }[];
+  members: { userId: string; notifyLevel?: string; starred?: boolean; user: ChatUserLite & { email?: string } }[];
   call: { room: string; guestUrl?: string };
   activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
 };
@@ -534,6 +534,21 @@ export default function ConversationPage() {
 
   /* ── conversation actions ───────────────────────────────────── */
   const myNotify = meta?.members.find((m) => m.userId === meId)?.notifyLevel ?? "all";
+  const myStarred = meta?.members.find((m) => m.userId === meId)?.starred ?? false;
+  const toggleStar = async () => {
+    setMenuOpen(false);
+    const next = !myStarred;
+    const res = await fetch(`/api/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ starred: next }),
+    }).catch(() => null);
+    if (res?.ok) {
+      setMeta((prev) => prev ? { ...prev, members: prev.members.map((m) => (m.userId === meId ? { ...m, starred: next } : m)) } : prev);
+      window.dispatchEvent(new Event("workwrk:chat-changed"));
+      toast(next ? "Added to Starred" : "Removed from Starred");
+    } else toast("Couldn't update the star");
+  };
   const toggleMute = async () => {
     setMenuOpen(false);
     const next = myNotify === "mute" ? "all" : "mute";
@@ -669,6 +684,10 @@ export default function ConversationPage() {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-9 z-20 w-52 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
+                <button type="button" onClick={() => void toggleStar()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <Star className={`w-4 h-4 ${myStarred ? "fill-amber-400 text-amber-400" : "text-zinc-400"}`} />
+                  {myStarred ? "Remove from Starred" : "Star conversation"}
+                </button>
                 <button type="button" onClick={() => void toggleMute()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
                   {myNotify === "mute" ? <Bell className="w-4 h-4 text-zinc-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}

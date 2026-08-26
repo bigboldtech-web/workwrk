@@ -5,8 +5,12 @@
 // attachments (picker + drag-drop) uploaded through the same pipeline
 // as every other file in WorkwrK.
 
-import { useMemo, useRef, useState } from "react";
-import { AtSign, Loader2, Mic, Paperclip, Send, Smile, Video, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AtSign, Bold, Code, Italic, Link2, List, ListOrdered, Loader2, Mic,
+  Paperclip, Send, Smile, SquareCode, Strikethrough, TextQuote, Type,
+  Underline, Video, X,
+} from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
 import { dragHasFiles } from "@/lib/upload-dropped-files";
 import type { ChatUserLite } from "@/components/chat/conversation-utils";
@@ -36,6 +40,16 @@ export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, on
   const [mentionIndex, setMentionIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  // Slack's Aa toggle: the formatting row shows above the text, persisted.
+  const [fmtOpen, setFmtOpen] = useState(false);
+  useEffect(() => {
+    try { setFmtOpen(localStorage.getItem("workwrk:room:fmtbar") === "1"); } catch { /* defaults */ }
+  }, []);
+  const toggleFmt = () => setFmtOpen((v) => {
+    const n = !v;
+    try { localStorage.setItem("workwrk:room:fmtbar", n ? "1" : "0"); } catch { /* private mode */ }
+    return n;
+  });
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Successful uploads survive a failed batch — retrying re-uses them
@@ -106,8 +120,10 @@ export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, on
 
     // Mentions = roster names actually present in the text. Boundary
     // check so "@Sam Lee" doesn't also match inside "@Sam Leeson".
+    // (?![A-Za-z0-9]) not (?!\w): _ is a word char, and an italic- or
+    // underline-wrapped "_@Name_" must still count as a mention.
     const mentions = roster
-      .filter((r) => r.name && new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w])`).test(body))
+      .filter((r) => r.name && new RegExp(`@${r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`).test(body))
       .map((r) => r.id);
 
     // The message leaves the composer NOW — anything typed during a slow
@@ -159,6 +175,74 @@ ${cur}` : body));
 
     onSend({ body, mentions, attachments });
   };
+
+  /** Wrap the selection in paired markers (bold/italic/…): no selection
+   *  inserts the pair and parks the caret inside; a wrapped selection
+   *  unwraps (toggle). Line ops (quote/lists) prefix every selected line. */
+  const applyFormat = (kind: "bold" | "italic" | "underline" | "strike" | "code" | "codeblock" | "link" | "quote" | "ul" | "ol") => {
+    const el = inputRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? start;
+    const sel = input.slice(start, end);
+    const set = (next: string, selStart: number, selEnd: number) => {
+      setInput(next);
+      requestAnimationFrame(() => { el.focus(); el.setSelectionRange(selStart, selEnd); });
+    };
+    const wrap = (marker: string) => {
+      const already = sel.startsWith(marker) && sel.endsWith(marker) && sel.length >= marker.length * 2;
+      if (already) {
+        const inner = sel.slice(marker.length, sel.length - marker.length);
+        set(input.slice(0, start) + inner + input.slice(end), start, start + inner.length);
+      } else {
+        set(input.slice(0, start) + marker + sel + marker + input.slice(end),
+          start + marker.length, start + marker.length + sel.length);
+      }
+    };
+    const prefixLines = (prefix: (i: number) => string) => {
+      const lineStart = input.lastIndexOf("\n", start - 1) + 1;
+      const block = input.slice(lineStart, end);
+      const lines = block.split("\n").map((l, i) => prefix(i) + l);
+      const next = input.slice(0, lineStart) + lines.join("\n") + input.slice(end);
+      set(next, lineStart, lineStart + lines.join("\n").length);
+    };
+    switch (kind) {
+      case "bold": return wrap("**");
+      case "italic": return wrap("_");
+      case "underline": return wrap("__");
+      case "strike": return wrap("~");
+      case "code": return wrap("`");
+      case "codeblock": {
+        const block = "```\n" + (sel || "") + "\n```";
+        set(input.slice(0, start) + block + input.slice(end), start + 4, start + 4 + sel.length);
+        return;
+      }
+      case "link": {
+        const url = window.prompt("Link URL (https://…)", "https://");
+        if (!url || !/^https?:\/\//.test(url)) return;
+        const label = sel || "link";
+        const md = `[${label}](${url})`;
+        set(input.slice(0, start) + md + input.slice(end), start + 1, start + 1 + label.length);
+        return;
+      }
+      case "quote": return prefixLines(() => "> ");
+      case "ul": return prefixLines(() => "- ");
+      case "ol": return prefixLines((i) => `${i + 1}. `);
+    }
+  };
+
+  const FMT_BUTTONS: { kind: Parameters<typeof applyFormat>[0]; icon: React.ReactNode; label: string; divider?: boolean }[] = [
+    { kind: "bold", icon: <Bold className="h-4 w-4" />, label: "Bold (**)" },
+    { kind: "italic", icon: <Italic className="h-4 w-4" />, label: "Italic (_)" },
+    { kind: "underline", icon: <Underline className="h-4 w-4" />, label: "Underline (__)" },
+    { kind: "strike", icon: <Strikethrough className="h-4 w-4" />, label: "Strikethrough (~)" },
+    { kind: "link", icon: <Link2 className="h-4 w-4" />, label: "Link", divider: true },
+    { kind: "ol", icon: <ListOrdered className="h-4 w-4" />, label: "Ordered list", divider: true },
+    { kind: "ul", icon: <List className="h-4 w-4" />, label: "Bullet list" },
+    { kind: "quote", icon: <TextQuote className="h-4 w-4" />, label: "Blockquote", divider: true },
+    { kind: "code", icon: <Code className="h-4 w-4" />, label: "Inline code", divider: true },
+    { kind: "codeblock", icon: <SquareCode className="h-4 w-4" />, label: "Code block" },
+  ];
 
   /** Insert text at the caret and refocus — the emoji picker and the @
    *  button both ride this; @ also re-runs mention detection so the
@@ -223,6 +307,24 @@ ${cur}` : body));
       )}
 
       <div className="flex flex-col">
+        {fmtOpen && (
+          <div className="mb-1 flex items-center gap-0.5 border-b border-zinc-100 pb-1">
+            {FMT_BUTTONS.map((b) => (
+              <span key={b.kind} className="flex items-center">
+                {b.divider && <span className="mx-1 h-4 w-px bg-zinc-200" />}
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault() /* keep textarea selection */}
+                  onClick={() => applyFormat(b.kind)}
+                  title={b.label}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                >
+                  {b.icon}
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -269,6 +371,14 @@ ${cur}` : body));
             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
           >
             <Paperclip className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={toggleFmt}
+            title={fmtOpen ? "Hide formatting" : "Show formatting"}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${fmtOpen ? "bg-zinc-100 text-zinc-700 underline underline-offset-2" : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"}`}
+          >
+            <Type className="h-4 w-4" />
           </button>
           <div className="relative">
             <button

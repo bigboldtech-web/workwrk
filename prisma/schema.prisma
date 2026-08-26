@@ -5563,6 +5563,8 @@ model ConversationMember {
   lastReadAt     DateTime     @default(now())
   /// "all" | "mentions" | "mute"
   notifyLevel    String       @default("all")
+  /// Slack-style star — pins the conversation into the Starred section.
+  starred        Boolean      @default(false)
   joinedAt       DateTime     @default(now())
 
   @@unique([conversationId, userId])

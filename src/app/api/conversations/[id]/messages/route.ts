@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import type { Prisma } from "@/generated/prisma";
 import { presignGetUrl } from "@/lib/s3";
+import { stripMarkup } from "@/lib/chat-markup";
 
 // Messages — cursor-paged reads + sends. This is the hot path (the open
 // pane polls GET every few seconds), so reads are one indexed query and
@@ -284,7 +285,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (fresh.length > 0) {
         const preview = isCallCard
           ? "📞 Started a call — tap to join"
-          : text ? text.slice(0, 140) : "📎 Sent an attachment";
+          : text ? stripMarkup(text.slice(0, 300)).slice(0, 140) : "📎 Sent an attachment";
         await prisma.notification.createMany({
           data: fresh.map((t) => ({
             userId: t.userId,

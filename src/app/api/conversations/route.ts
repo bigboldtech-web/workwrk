@@ -26,6 +26,7 @@ export async function GET() {
     select: {
       lastReadAt: true,
       notifyLevel: true,
+      starred: true,
       conversation: {
         select: {
           id: true,
@@ -70,6 +71,7 @@ export async function GET() {
       _count: undefined,
       myLastReadAt: m.lastReadAt,
       myNotifyLevel: m.notifyLevel,
+      myStarred: m.starred,
       unreadCount: unread.get(m.conversation.id) ?? 0,
     }))
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());

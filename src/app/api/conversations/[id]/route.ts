@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         select: {
           userId: true,
           notifyLevel: true,
+          starred: true,
           user: { select: { id: true, firstName: true, lastName: true, avatar: true, email: true } },
         },
       },
@@ -80,6 +81,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!membership) return jsonError("Conversation not found", 404);
 
   const body = await req.json().catch(() => null);
+
+  // Per-member star — always self-service.
+  if (typeof body?.starred === "boolean") {
+    await prisma.conversationMember.update({
+      where: { id: membership.id },
+      data: { starred: body.starred },
+    });
+  }
 
   // Per-member notification level — always self-service.
   if (typeof body?.notifyLevel === "string") {

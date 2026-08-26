@@ -9,6 +9,7 @@ import {
   Check, MessageSquare, Paperclip, Pencil, RefreshCw, Smile, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
+import { RichBody } from "@/components/chat/rich-body";
 import type { ChatUserLite } from "@/components/chat/conversation-utils";
 
 export type ChatAttachment = { url: string; name: string; type: string; size: number; s3Key?: string };
@@ -181,10 +182,14 @@ function MessageRow({ msg, head, mine, meId, memberNames, onRetry, onJoinCall, o
         ) : (
           <>
             {(msg.body || deleted) && (
-              <p className={`text-[14px] leading-6 whitespace-pre-wrap break-words ${deleted ? "italic text-zinc-400" : "text-zinc-800"} ${msg.pending ? "opacity-60" : ""}`}>
-                {deleted ? "Message removed" : renderBody(msg.body, memberNames)}
-                {!deleted && msg.editedAt && <span className="ml-1 text-[11px] text-zinc-400">(edited)</span>}
-              </p>
+              deleted ? (
+                <p className="text-[14px] leading-6 italic text-zinc-400">Message removed</p>
+              ) : (
+                <div className={`text-zinc-800 ${msg.pending ? "opacity-60" : ""}`}>
+                  <RichBody body={msg.body} memberNames={memberNames} />
+                  {msg.editedAt && <span className="ml-1 text-[11px] text-zinc-400">(edited)</span>}
+                </div>
+              )
             )}
             {!deleted && attachments.length > 0 && (
               <div className="mt-1 flex flex-wrap gap-2">
@@ -301,34 +306,3 @@ function prettySize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Linkify URLs and highlight @Name mentions against the member roster. */
-function renderBody(text: string, memberNames: Map<string, string>): React.ReactNode {
-  const names = [...memberNames.values()].filter(Boolean).sort((a, b) => b.length - a.length);
-  const mentionAlt = names.map(escapeRegex).join("|");
-  const pattern = mentionAlt
-    ? new RegExp(`(https?:\\/\\/[^\\s<>"]+)|(@(?:${mentionAlt}))`, "g")
-    : /(https?:\/\/[^\s<>"]+)/g;
-  const parts = text.split(pattern).filter((p) => p !== undefined && p !== "");
-  if (parts.length <= 1) return text;
-  return parts.map((part, i) => {
-    if (/^https?:\/\//.test(part)) {
-      return (
-        <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-[#0073EA] underline underline-offset-2 break-all">
-          {part}
-        </a>
-      );
-    }
-    if (part.startsWith("@") && names.includes(part.slice(1))) {
-      return (
-        <span key={i} className="rounded bg-[#0073EA]/10 px-1 py-0.5 text-[#0073EA] font-medium">
-          {part}
-        </span>
-      );
-    }
-    return part;
-  });
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}

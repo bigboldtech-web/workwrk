@@ -14,6 +14,7 @@ export type ConversationListRow = {
   lastMessageAt: string;
   unreadCount: number;
   myNotifyLevel?: string;
+  myStarred?: boolean;
   members: { userId: string; user: ChatUserLite }[];
   lastMessage: { body: string; authorId: string; createdAt: string; metadata?: unknown } | null;
 };

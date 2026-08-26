@@ -10,10 +10,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { ChevronDown, ChevronRight, Hash, MessageCircle, Phone, Plus, Search, Users, Video, X } from "lucide-react";
+import { BookUser, ChevronDown, ChevronRight, Hash, MessageCircle, Phone, Plus, Search, Star, Users, Video, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
+import { stripMarkup } from "@/lib/chat-markup";
 import { useOsToast } from "./toast";
 import {
   conversationTitle, conversationAvatarUser, type ConversationListRow,
@@ -41,6 +42,7 @@ export function ChatSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
   const { query } = useSidebarSearch();
+  const [localFind, setLocalFind] = useState("");
   const { data: session } = useSession();
   const { toast } = useOsToast();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
@@ -107,7 +109,7 @@ export function ChatSidebar() {
     };
   }, []);
 
-  const q = query.trim().toLowerCase();
+  const q = (localFind || query).trim().toLowerCase();
 
   // Message search rides the same sidebar search box: 2+ chars kicks
   // off a debounced lookup across my conversations.
@@ -184,6 +186,27 @@ export function ChatSidebar() {
 
   return (
     <div className="flex flex-col">
+      <div className="mb-2 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 h-8 focus-within:border-zinc-300 focus-within:bg-white">
+        <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+        <input
+          type="text"
+          value={localFind}
+          onChange={(e) => setLocalFind(e.target.value)}
+          placeholder="Find a conversation…"
+          className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400"
+        />
+        {localFind && (
+          <button type="button" onClick={() => setLocalFind("")} aria-label="Clear" className="text-zinc-400 hover:text-zinc-700">
+            <X className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+      <Link
+        href="/people"
+        className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-[14px] text-zinc-700 hover:bg-zinc-50"
+      >
+        <BookUser className="h-4 w-4 text-zinc-500" /> Directory
+      </Link>
       <div className="flex items-center gap-1.5 mb-2">
         <button
           type="button"
@@ -202,6 +225,38 @@ export function ChatSidebar() {
           <Video className="w-4 h-4" />
         </button>
       </div>
+
+      {filtered !== null && !q && filtered.some((r) => r.myStarred) && (
+        <>
+          <div className="px-1 pt-1 pb-1">
+            <span className="inline-flex items-center gap-1 px-1 text-[13px] font-semibold text-zinc-600">
+              <Star className="h-3.5 w-3.5 text-zinc-400" /> Starred
+            </span>
+          </div>
+          <ul className="mb-2 flex flex-col gap-0.5">
+            {filtered.filter((r) => r.myStarred).map((row) => (
+              <li key={`star-${row.id}`}>
+                <Link
+                  href={`/room/${row.id}`}
+                  className={`flex h-8 items-center gap-2 rounded-md px-2 ${pathname === `/room/${row.id}` ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
+                >
+                  {row.type === "CHANNEL"
+                    ? <Hash className="h-4 w-4 shrink-0 text-zinc-400" />
+                    : <MessageCircle className="h-4 w-4 shrink-0 text-zinc-400" />}
+                  <span className={`flex-1 truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                    {row.type === "CHANNEL" ? `#${row.name ?? "channel"}` : conversationTitle(row, meId)}
+                  </span>
+                  {row.unreadCount > 0 && (
+                    <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[#0073EA] px-1.5 text-[11px] font-semibold text-white tabular-nums">
+                      {row.unreadCount > 99 ? "99+" : row.unreadCount}
+                    </span>
+                  )}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
 
       {filtered !== null && (visibleChannels.length > 0 || q === "") && (
         <>
@@ -289,7 +344,7 @@ export function ChatSidebar() {
             const lastMeta = row.lastMessage?.metadata as { kind?: string; attachments?: unknown[] } | null;
             const lastBody = row.lastMessage
               ? lastMeta?.kind === "call" ? "📞 Call"
-                : row.lastMessage.body || (lastMeta?.attachments?.length ? "📎 Attachment" : "")
+                : row.lastMessage.body ? stripMarkup(row.lastMessage.body.slice(0, 200)) : (lastMeta?.attachments?.length ? "📎 Attachment" : "")
               : "";
             const preview = row.lastMessage
               ? `${row.lastMessage.authorId === meId ? "You: " : ""}${lastBody}`
