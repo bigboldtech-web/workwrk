@@ -1149,13 +1149,13 @@ function TimesheetsSidebar() {
 
 export const APPS: AppEntry[] = [
   // ── Core (always pinned by default) ──────────────────────────
-  { key: "home", label: "Work", Icon: Home, defaultHref: "/today",
+  { key: "home", label: "WRK", Icon: Home, defaultHref: "/today",
     matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" },
     // Home is the OS-wide catch-all — it keeps the global create menu.
     createActions: "global" },
-  { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
+  { key: "planner", label: "PLN", Icon: Calendar, defaultHref: "/planner",
     matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
@@ -1198,12 +1198,12 @@ export const APPS: AppEntry[] = [
       { label: "New whiteboard", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
       { label: "Upload file", icon: Upload, description: "Drop a file into the Library", href: "/library?tab=files" },
     ] },
-  { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms",
+  { key: "forms", label: "FRMS", Icon: ClipboardCheck, defaultHref: "/forms",
     matchPaths: ["/forms"], Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
   // Clips has no separate creatable object — /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
-  { key: "clips", label: "Clips", Icon: Video, defaultHref: "/notetaker",
+  { key: "clips", label: "CLPS", Icon: Video, defaultHref: "/notetaker",
     matchPaths: ["/notetaker", "/clips"], Sidebar: ClipsSidebar,
     category: "Core", defaultPinned: true },
   { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs",
@@ -1291,7 +1291,7 @@ export const APPS: AppEntry[] = [
       { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
     ]) },
   // ── Build & Extend ──────────────────────────────────────────
-  { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build",
+  { key: "build", label: "BLD", Icon: Wrench, defaultHref: "/build",
     matchPaths: ["/build"], category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },
   { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store",
@@ -1319,7 +1319,7 @@ export const APPS: AppEntry[] = [
       { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },
     ]) },
   // Org-wide recycle bin — one place to recover anything deleted (60-day window).
-  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash",
+  { key: "trash", label: "TRSH", Icon: Trash2, defaultHref: "/trash",
     matchPaths: ["/trash"], category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
     Sidebar: linksSidebar([
       { href: "/trash", label: "All deleted items", Icon: Trash2 },
