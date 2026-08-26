@@ -22,7 +22,9 @@ export async function GET() {
   const orgId = getOrgId(session);
 
   const memberships = await prisma.conversationMember.findMany({
-    where: { userId, conversation: { organizationId: orgId } },
+    // hidden = Slack's closed conversations: out of the sidebar, history
+    // intact; the messages route un-hides on any new message.
+    where: { userId, hidden: false, conversation: { organizationId: orgId } },
     select: {
       lastReadAt: true,
       notifyLevel: true,
@@ -242,7 +244,14 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true },
     });
-    if (existing) return jsonSuccess({ id: existing.id, existed: true });
+    if (existing) {
+      // Starting a DM that exists but is CLOSED re-opens it (Slack model).
+      await prisma.conversationMember.updateMany({
+        where: { conversationId: existing.id, userId, hidden: true },
+        data: { hidden: false },
+      });
+      return jsonSuccess({ id: existing.id, existed: true });
+    }
   }
 
   const name = type === "GROUP" && typeof body?.name === "string" && body.name.trim()

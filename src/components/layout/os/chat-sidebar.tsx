@@ -10,7 +10,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { BookUser, ChevronDown, ChevronRight, Hash, MessageCircle, Phone, Plus, Search, Star, Users, Video, X } from "lucide-react";
+import {
+  Bell, BellOff, BookUser, ChevronDown, ChevronRight, ExternalLink, Hash,
+  LogOut, MessageCircle, Phone, Plus, Search, Star, Users, Video, X,
+} from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
@@ -66,6 +70,12 @@ export function ChatSidebar() {
       return next;
     });
   const [channelModalOpen, setChannelModalOpen] = useState(false);
+  // Right-click context menu on rows (channels + DMs), Slack-style.
+  const [rowMenu, setRowMenu] = useState<{
+    id: string; type: string; name: string; starred: boolean; muted: boolean;
+    isGeneral: boolean; x: number; y: number;
+  } | null>(null);
+  const [confirmLeaveId, setConfirmLeaveId] = useState<{ id: string; name: string } | null>(null);
   const [joining, setJoining] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -158,11 +168,58 @@ export function ChatSidebar() {
     try {
       const r = await fetch("/api/meetings/instant", { method: "POST" });
       const d = await r.json().catch(() => null);
-      if (!r.ok || !d?.id) { toast("Couldn't create the call link"); return; }
+      if (!r.ok || !d?.id) { toast("Couldn't create the TalkTok link"); return; }
       try { await navigator.clipboard.writeText(d.guestUrl); } catch { /* clipboard denied */ }
-      toast("Call link copied — share it with anyone, then join");
+      toast("TalkTok link copied — share it with anyone, then join");
       router.push(d.url);
-    } catch { toast("Couldn't create the call link — check your connection"); }
+    } catch { toast("Couldn't create the TalkTok link — check your connection"); }
+  };
+
+  /* ── row context-menu actions (all optimistic + toast on failure) ── */
+  const patchConversation = async (id: string, body: Record<string, unknown>, okMsg: string, failMsg: string) => {
+    const res = await fetch(`/api/conversations/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }).catch(() => null);
+    if (res?.ok) { toast(okMsg); void load(); }
+    else toast(failMsg);
+  };
+
+  /** Slack's close: hides the row, keeps every message. Any new message
+   *  (or starting the DM again) brings it back. DMs only — groups have
+   *  Leave (closing a group would have no reopen path). The PATCH is
+   *  AWAITED before any redirect so the /room landing can't race the
+   *  still-visible row and bounce back in; failure restores the row. */
+  const closeConversation = async (id: string) => {
+    const snapshot = rows;
+    setRows((prev) => prev ? prev.filter((r) => r.id !== id) : prev);
+    const res = await fetch(`/api/conversations/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hidden: true }),
+    }).catch(() => null);
+    if (res?.ok) {
+      toast("Conversation closed — history is kept");
+      if (pathname === `/room/${id}`) router.push("/room");
+    } else {
+      setRows(snapshot);
+      toast("Couldn't close it");
+    }
+  };
+
+  const leaveChannel = async () => {
+    const target = confirmLeaveId;
+    setConfirmLeaveId(null);
+    if (!target) return;
+    const res = await fetch(`/api/conversations/${target.id}`, { method: "DELETE" }).catch(() => null);
+    if (res?.ok) {
+      try { sessionStorage.setItem(`workwrk:chat-left:${target.id}`, "1"); } catch { /* private mode */ }
+      if (pathname === `/room/${target.id}`) router.push("/room");
+      void load();
+    } else toast("Couldn't leave the channel");
+  };
+
+  const openRowMenu = (e: React.MouseEvent, opts: { id: string; type: string; name: string; starred: boolean; muted: boolean; isGeneral: boolean }) => {
+    e.preventDefault();
+    setRowMenu({ ...opts, x: e.clientX, y: e.clientY });
   };
 
   const openChannel = async (c: ChannelRow) => {
@@ -219,14 +276,14 @@ export function ChatSidebar() {
         <button
           type="button"
           onClick={() => void newCallLink()}
-          title="New call link — an instant call with a shareable guest link (Zoom-style)"
+          title="New TalkTok link — an instant call with a shareable guest link (Zoom-style)"
           className="flex items-center justify-center h-8 w-9 rounded-md text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 border border-dashed border-zinc-200"
         >
           <Video className="w-4 h-4" />
         </button>
       </div>
 
-      {filtered !== null && !q && filtered.some((r) => r.myStarred) && (
+      {rows !== null && !q && rows.some((r) => r.myStarred) && (
         <>
           <div className="px-1 pt-1 pb-1">
             <span className="inline-flex items-center gap-1 px-1 text-[13px] font-semibold text-zinc-600">
@@ -234,7 +291,7 @@ export function ChatSidebar() {
             </span>
           </div>
           <ul className="mb-2 flex flex-col gap-0.5">
-            {filtered.filter((r) => r.myStarred).map((row) => (
+            {(rows ?? []).filter((r) => r.myStarred).map((row) => (
               <li key={`star-${row.id}`}>
                 <Link
                   href={`/room/${row.id}`}
@@ -283,6 +340,12 @@ export function ChatSidebar() {
                   <button
                     type="button"
                     onClick={() => void openChannel(c)}
+                    onContextMenu={(e) => c.isMember && openRowMenu(e, {
+                      id: c.id, type: "CHANNEL", name: `#${c.name ?? "channel"}`,
+                      starred: Boolean((rows ?? []).find((r) => r.id === c.id)?.myStarred),
+                      muted: (rows ?? []).find((r) => r.id === c.id)?.myNotifyLevel === "mute",
+                      isGeneral: (c.name ?? "").toLowerCase() === "general",
+                    })}
                     disabled={joining === c.id}
                     className={`w-full flex items-center gap-2 h-8 px-2 rounded-md text-left ${
                       active ? "bg-zinc-100" : "hover:bg-zinc-50"
@@ -312,7 +375,7 @@ export function ChatSidebar() {
               );
             })}
           </ul>
-          <div className="px-1 pt-1 pb-1">
+          <div className="flex items-center justify-between px-1 pt-1 pb-1">
             <button
               type="button"
               onClick={() => toggleSection("dms")}
@@ -321,6 +384,9 @@ export function ChatSidebar() {
             >
               {collapsed.dms ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
               Direct messages
+            </button>
+            <button type="button" onClick={() => setModalOpen(true)} aria-label="New conversation" className="mr-1 text-zinc-400 hover:text-zinc-700">
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
         </>
@@ -343,16 +409,21 @@ export function ChatSidebar() {
             const avatarUser = conversationAvatarUser(row, meId);
             const lastMeta = row.lastMessage?.metadata as { kind?: string; attachments?: unknown[] } | null;
             const lastBody = row.lastMessage
-              ? lastMeta?.kind === "call" ? "📞 Call"
+              ? lastMeta?.kind === "call" ? "📞 TalkTok"
                 : row.lastMessage.body ? stripMarkup(row.lastMessage.body.slice(0, 200)) : (lastMeta?.attachments?.length ? "📎 Attachment" : "")
               : "";
             const preview = row.lastMessage
               ? `${row.lastMessage.authorId === meId ? "You: " : ""}${lastBody}`
               : "No messages yet";
             return (
-              <li key={row.id}>
+              <li key={row.id} className="group/dm relative">
                 <Link
                   href={`/room/${row.id}`}
+                  onContextMenu={(e) => openRowMenu(e, {
+                    id: row.id, type: row.type, name: conversationTitle(row, meId),
+                    starred: Boolean(row.myStarred), muted: row.myNotifyLevel === "mute",
+                    isGeneral: row.type === "CHANNEL" && (row.name ?? "").toLowerCase() === "general",
+                  })}
                   className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md ${
                     active ? "bg-zinc-100" : "hover:bg-zinc-50"
                   }`}
@@ -386,6 +457,17 @@ export function ChatSidebar() {
                     </span>
                   )}
                 </Link>
+                {row.type === "DM" && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.preventDefault(); void closeConversation(row.id); }}
+                    title="Close conversation — history is kept"
+                    aria-label="Close conversation"
+                    className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 group-hover/dm:block"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </li>
             );
           })}
@@ -425,6 +507,85 @@ export function ChatSidebar() {
             </ul>
           )}
         </>
+      )}
+
+      {rowMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setRowMenu(null)} onContextMenu={(e) => { e.preventDefault(); setRowMenu(null); }} />
+          <div
+            className="fixed z-50 w-56 rounded-lg border border-zinc-200 bg-white py-1 shadow-xl"
+            style={{ left: Math.min(rowMenu.x, typeof window !== "undefined" ? window.innerWidth - 240 : rowMenu.x), top: Math.min(rowMenu.y, typeof window !== "undefined" ? window.innerHeight - 260 : rowMenu.y) }}
+          >
+            <button type="button" onClick={() => { setRowMenu(null); router.push(`/room/${rowMenu.id}`); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
+              <ExternalLink className="h-4 w-4 text-zinc-400" /> Open
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const m = rowMenu; setRowMenu(null);
+                if (pathname === `/room/${m.id}`) window.dispatchEvent(new CustomEvent("workwrk:room:start-talktok", { detail: { id: m.id } }));
+                else router.push(`/room/${m.id}?call=1`);
+              }}
+              className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+            >
+              <Video className="h-4 w-4 text-zinc-400" /> Start TalkTok
+            </button>
+            {(() => {
+              // Live state at ACTION time — the snapshot in rowMenu can go
+              // stale if the 20s poll lands while the menu is open.
+              const liveRow = (rows ?? []).find((r) => r.id === rowMenu.id);
+              const starred = liveRow ? Boolean(liveRow.myStarred) : rowMenu.starred;
+              const muted = liveRow ? liveRow.myNotifyLevel === "mute" : rowMenu.muted;
+              // Channels un-mute back to their quiet "mentions" default,
+              // never to per-message bells.
+              const unmuteLevel = rowMenu.type === "CHANNEL" ? "mentions" : "all";
+              return (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { const m = rowMenu; setRowMenu(null); void patchConversation(m.id, { starred: !starred }, starred ? "Removed from Starred" : "Added to Starred", "Couldn't update the star"); }}
+                    className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                  >
+                    <Star className={`h-4 w-4 ${starred ? "fill-amber-400 text-amber-400" : "text-zinc-400"}`} />
+                    {starred ? "Remove from Starred" : "Star"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { const m = rowMenu; setRowMenu(null); void patchConversation(m.id, { notifyLevel: muted ? unmuteLevel : "mute" }, muted ? "Notifications on" : "Muted", "Couldn't update notifications"); }}
+                    className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                  >
+                    {muted ? <Bell className="h-4 w-4 text-zinc-400" /> : <BellOff className="h-4 w-4 text-zinc-400" />}
+                    {muted ? "Unmute" : "Mute"}
+                  </button>
+                  <div className="my-1 h-px bg-zinc-100" />
+                  {rowMenu.type === "CHANNEL" ? (
+                    !rowMenu.isGeneral && (
+                      <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-red-600 hover:bg-red-50">
+                        <LogOut className="h-4 w-4" /> Leave channel
+                      </button>
+                    )
+                  ) : rowMenu.type === "DM" ? (
+                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); void closeConversation(m.id); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                      <X className="h-4 w-4 text-zinc-400" /> Close conversation
+                    </button>
+                  ) : null}
+                </>
+              );
+            })()}
+          </div>
+        </>
+      )}
+
+      {confirmLeaveId && (
+        <ConfirmDialog
+          open
+          onClose={() => setConfirmLeaveId(null)}
+          onConfirm={() => void leaveChannel()}
+          title={`Leave ${confirmLeaveId.name}?`}
+          description="You'll stop receiving its messages. The channel and its history stay for everyone else."
+          confirmLabel="Leave channel"
+          destructive
+        />
       )}
 
       {channelModalOpen && (

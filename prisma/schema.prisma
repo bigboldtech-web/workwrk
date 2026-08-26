@@ -5565,6 +5565,9 @@ model ConversationMember {
   notifyLevel    String       @default("all")
   /// Slack-style star — pins the conversation into the Starred section.
   starred        Boolean      @default(false)
+  /// Slack-style close: hides the row from MY sidebar only. History is
+  /// untouched; any new message flips this back for every member.
+  hidden         Boolean      @default(false)
   joinedAt       DateTime     @default(now())
 
   @@unique([conversationId, userId])

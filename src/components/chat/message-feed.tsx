@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from "react";
 import {
-  Check, MessageSquare, Paperclip, Pencil, RefreshCw, Smile, Trash2, Video, X,
+  Check, MessageSquare, Paperclip, Pencil, Phone, RefreshCw, Smile, Trash2, Video, X,
 } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
 import { RichBody } from "@/components/chat/rich-body";
@@ -29,6 +29,10 @@ export type FeedMessage = {
     reactions?: Record<string, string[]>;
     attachments?: ChatAttachment[];
     mentions?: string[];
+    /// TalkTok cards: cumulative participant roll + finish stamp.
+    names?: string[];
+    endedAt?: string;
+    durationMin?: number;
   } | null;
   author: ChatUserLite;
   /** Client-only send states. */
@@ -36,9 +40,9 @@ export type FeedMessage = {
   failed?: boolean;
 };
 
-export const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏"];
+export const QUICK_REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏", "🙌"];
 
-export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread }: {
+export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread, activeCall }: {
   messages: FeedMessage[];
   meId: string | null;
   /** userId → display name, for reaction tooltips + mention highlighting. */
@@ -50,7 +54,19 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   onDelete: (m: FeedMessage) => void;
   /** Absent inside a thread panel — threads don't nest. */
   onOpenThread?: (m: FeedMessage) => void;
+  /** The conversation's live TalkTok, if one is running — drives the
+   *  LIVE card variant on the latest un-ended call card. */
+  activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
 }) {
+  const liveCardId = useMemo(() => {
+    if (!activeCall) return null;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const meta = messages[i].metadata;
+      if (meta?.kind === "call") return meta.endedAt ? null : messages[i].id;
+    }
+    return null;
+  }, [messages, activeCall]);
+
   const items = useMemo(() => {
     const out: Array<{ kind: "day"; key: string; label: string } | { kind: "msg"; key: string; msg: FeedMessage; head: boolean }> = [];
     let prevDay = "";
@@ -87,6 +103,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
           key={it.key}
           msg={it.msg}
           head={it.head}
+          live={it.msg.id === liveCardId ? activeCall ?? null : null}
           mine={it.msg.authorId === meId}
           meId={meId}
           memberNames={memberNames}
@@ -102,9 +119,10 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   );
 }
 
-function MessageRow({ msg, head, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread }: {
+function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinCall, onReact, onEdit, onDelete, onOpenThread }: {
   msg: FeedMessage;
   head: boolean;
+  live: { participants: { identity: string; name: string }[]; startedAt: string } | null;
   mine: boolean;
   meId: string | null;
   memberNames: Map<string, string>;
@@ -153,13 +171,38 @@ function MessageRow({ msg, head, mine, meId, memberNames, onRetry, onJoinCall, o
         )}
 
         {isCall ? (
-          <div className="mt-1 inline-flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-            <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#0073EA]/10 text-[#0073EA]"><Video className="w-4 h-4" /></span>
-            <span className="text-[14px] text-zinc-800">{msg.body}</span>
-            <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]">
-              Join
-            </button>
-          </div>
+          live ? (
+            <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-semibold text-zinc-900">
+                  {live.participants.map((p) => p.name).slice(0, 3).join(", ")}
+                  {live.participants.length > 3 ? ` +${live.participants.length - 3}` : ""} {live.participants.length === 1 ? "is" : "are"} in the TalkTok
+                </span>
+                <span className="inline-flex items-center rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Live</span>
+              </div>
+              <button type="button" onClick={onJoinCall} className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 text-[13px] font-medium text-emerald-800 hover:bg-emerald-100">
+                <Video className="h-4 w-4" /> Join TalkTok
+              </button>
+            </div>
+          ) : msg.metadata?.endedAt ? (
+            <div className="mt-1 flex items-start gap-3">
+              <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><Phone className="w-4 h-4" /></span>
+              <span>
+                <span className="block text-[14px] font-semibold text-zinc-900">A TalkTok happened</span>
+                <span className="block text-[13px] text-zinc-500">
+                  {formatCallRoll(msg.metadata?.names, meId ? memberNames.get(meId) : undefined)} in the TalkTok for {msg.metadata.durationMin ?? 0}m.
+                </span>
+              </span>
+            </div>
+          ) : (
+            <div className="mt-1 inline-flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#0073EA]/10 text-[#0073EA]"><Video className="w-4 h-4" /></span>
+              <span className="text-[14px] text-zinc-800">{msg.body}</span>
+              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]">
+                Join
+              </button>
+            </div>
+          )
         ) : editing ? (
           <div className="mt-1">
             <textarea
@@ -254,6 +297,11 @@ function MessageRow({ msg, head, mine, meId, memberNames, onRetry, onJoinCall, o
       {/* Hover actions */}
       {canAct && !editing && (
         <div className="absolute -top-3 right-2 hidden group-hover:flex items-center rounded-lg border border-zinc-200 bg-white shadow-sm">
+          {["✅", "👀", "🙌"].map((e) => (
+            <button key={e} type="button" onClick={() => onReact(msg, e)} title={`React ${e}`} className="h-7 w-7 inline-flex items-center justify-center text-[14px] hover:bg-zinc-100 rounded-md">
+              {e}
+            </button>
+          ))}
           <div className="relative">
             <button type="button" onClick={() => setReactOpen((v) => !v)} title="React" className="h-7 w-7 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700">
               <Smile className="w-4 h-4" />
@@ -290,6 +338,20 @@ function MessageRow({ msg, head, mine, meId, memberNames, onRetry, onJoinCall, o
       )}
     </div>
   );
+}
+
+/** "You and Pranjal were" / "Sam was" — the ended-card participant roll. */
+function formatCallRoll(names: string[] | undefined, myName: string | undefined): string {
+  const list = (names ?? []).filter(Boolean);
+  if (list.length === 0) return "People were";
+  const display = list.map((n) => (myName && n === myName ? "You" : n));
+  // "You" leads, like Slack.
+  display.sort((a, b) => (a === "You" ? -1 : b === "You" ? 1 : 0));
+  const head = display.slice(0, 3);
+  const extra = display.length - head.length;
+  const joined = head.length === 1 ? head[0] : `${head.slice(0, -1).join(", ")} and ${head[head.length - 1]}`;
+  const subject = extra > 0 ? `${joined} +${extra}` : joined;
+  return `${subject} ${display.length === 1 && display[0] !== "You" ? "was" : "were"}`;
 }
 
 function dayLabel(d: Date): string {

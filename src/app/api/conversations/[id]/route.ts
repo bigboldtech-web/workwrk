@@ -82,24 +82,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const body = await req.json().catch(() => null);
 
-  // Per-member star — always self-service.
-  if (typeof body?.starred === "boolean") {
-    await prisma.conversationMember.update({
-      where: { id: membership.id },
-      data: { starred: body.starred },
-    });
-  }
-
-  // Per-member notification level — always self-service.
-  if (typeof body?.notifyLevel === "string") {
-    if (!["all", "mentions", "mute"].includes(body.notifyLevel)) return jsonError("Invalid notify level", 400);
-    await prisma.conversationMember.update({
-      where: { id: membership.id },
-      data: { notifyLevel: body.notifyLevel },
-    });
-  }
-
-  // Renames apply to named conversations only — DMs derive their name.
+  // VALIDATE the rename first — nothing may apply if any part 400s
+  // (fleet finding: hidden used to commit before a rename rejection).
+  let validatedName: string | null = null;
   if (typeof body?.name === "string") {
     const conversation = await prisma.conversation.findUnique({
       where: { id },
@@ -109,8 +94,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const name = body.name.trim().replace(/^#/, "").slice(0, 80);
     if (!name) return jsonError("Name can't be empty", 400);
     if (conversation?.type === "CHANNEL") {
-      // #general is the org's seeded home channel — its name is its
-      // identity (the seeder keys on it), so it can never change.
       if ((conversation.name ?? "").toLowerCase() === "general") {
         return jsonError("#general is the company channel — it can't be renamed", 400);
       }
@@ -125,7 +108,38 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       });
       if (clash) return jsonError("A channel with that name already exists", 400);
     }
-    await prisma.conversation.update({ where: { id }, data: { name } });
+    validatedName = name;
+  }
+  if (typeof body?.notifyLevel === "string" && !["all", "mentions", "mute"].includes(body.notifyLevel)) {
+    return jsonError("Invalid notify level", 400);
+  }
+
+  // Per-member close/hide — always self-service. History untouched.
+  if (typeof body?.hidden === "boolean") {
+    await prisma.conversationMember.update({
+      where: { id: membership.id },
+      data: { hidden: body.hidden },
+    });
+  }
+
+  // Per-member star — always self-service.
+  if (typeof body?.starred === "boolean") {
+    await prisma.conversationMember.update({
+      where: { id: membership.id },
+      data: { starred: body.starred },
+    });
+  }
+
+  // Per-member notification level — always self-service (validated above).
+  if (typeof body?.notifyLevel === "string") {
+    await prisma.conversationMember.update({
+      where: { id: membership.id },
+      data: { notifyLevel: body.notifyLevel },
+    });
+  }
+
+  if (validatedName !== null) {
+    await prisma.conversation.update({ where: { id }, data: { name: validatedName } });
   }
 
   return jsonSuccess({ ok: true });

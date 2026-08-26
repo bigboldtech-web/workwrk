@@ -42,10 +42,10 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
       });
       if (r.status === 503) { setFallback(true); return; }
       const d = await r.json().catch(() => null);
-      if (!r.ok || !d?.token) throw new Error(d?.error ?? "Couldn't join the call");
+      if (!r.ok || !d?.token) throw new Error(d?.error ?? "Couldn't join the TalkTok");
       setGrant(d);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't join the call");
+      setError(e instanceof Error ? e.message : "Couldn't join the TalkTok");
     } finally {
       setJoining(false);
     }
@@ -90,7 +90,7 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
                 disabled={!name.trim() || joining}
                 className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#0073EA] px-4 py-2.5 text-[14px] font-medium text-white hover:bg-[#0060c2] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Join call
+                {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Join TalkTok
               </button>
             </div>
           </div>

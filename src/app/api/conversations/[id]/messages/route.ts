@@ -225,7 +225,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: {
         conversationId: id,
         authorId: userId,
-        body: text || (isCallCard ? "Started a call" : ""),
+        body: text || (isCallCard ? "Started a TalkTok" : ""),
         parentId,
         metadata: Object.keys(metadata).length > 0 ? (metadata as Prisma.InputJsonValue) : undefined,
       },
@@ -233,6 +233,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }),
     prisma.conversation.update({ where: { id }, data: { lastMessageAt: now } }),
     prisma.conversationMember.update({ where: { id: membership.id }, data: { lastReadAt: now } }),
+    // New activity re-opens closed (hidden) sidebars for every member —
+    // Slack's rule: closing is tidy-up, never a way to miss messages.
+    // Inside the send transaction: the reappear invariant is not
+    // best-effort (fleet finding — a detached promise could fail silently).
+    prisma.conversationMember.updateMany({
+      where: { conversationId: id, hidden: true },
+      data: { hidden: false },
+    }),
   ]);
 
   // A reply changes its parent's reply count — touch the parent so every
@@ -284,7 +292,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const fresh = targets.filter((t) => !alreadySet.has(t.userId));
       if (fresh.length > 0) {
         const preview = isCallCard
-          ? "📞 Started a call — tap to join"
+          ? "📞 Started a TalkTok — tap to join"
           : text ? stripMarkup(text.slice(0, 300)).slice(0, 140) : "📎 Sent an attachment";
         await prisma.notification.createMany({
           data: fresh.map((t) => ({

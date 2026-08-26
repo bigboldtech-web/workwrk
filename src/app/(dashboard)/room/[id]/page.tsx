@@ -503,13 +503,46 @@ export default function ConversationPage() {
     if (!callOpen) {
       setCallRoom(meta?.call?.room ?? null);
       setCallOpen(true);
-      // Joining a huddle that's already LIVE is not starting one — no card.
-      if (meta?.activeCall) return;
-      const recentCall = [...messages].reverse().find((m) => m.metadata?.kind === "call");
-      const recentMs = recentCall ? Date.now() - new Date(recentCall.createdAt).getTime() : Infinity;
-      if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio call" : "Started a call");
+      maybePostCard(audioOnly);
     }
   };
+
+  /** Post the TalkTok card unless one is already standing: a LIVE huddle
+   *  needs no second card, and only an UN-ENDED recent card suppresses —
+   *  a call that finished five minutes ago must not swallow the next
+   *  call's card (fleet finding). */
+  const maybePostCard = (audioOnly: boolean) => {
+    if (meta?.activeCall) return;
+    const recentOpen = [...messages].reverse().find(
+      (m) => m.metadata?.kind === "call" && !m.metadata?.endedAt,
+    );
+    const recentMs = recentOpen ? Date.now() - new Date(recentOpen.createdAt).getTime() : Infinity;
+    if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio TalkTok" : "Started a TalkTok");
+  };
+
+  // ?call=1 entries (deep links, sidebar Start TalkTok on a fresh page)
+  // initialize callOpen WITHOUT running startCall — once the data is in,
+  // latch the room and run the same card logic exactly once.
+  const urlCallHandledRef = useRef(false);
+  useEffect(() => {
+    if (!callOpen || urlCallHandledRef.current || !meta || !loadedOnce) return;
+    urlCallHandledRef.current = true;
+    setCallRoom((cur) => cur ?? meta.call?.room ?? null);
+    maybePostCard(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [callOpen, meta, loadedOnce]);
+
+  // Sidebar "Start TalkTok" on the ALREADY-OPEN conversation: a query-only
+  // push never remounts this page, so it arrives as an event instead.
+  useEffect(() => {
+    const onStart = (e: Event) => {
+      const detail = (e as CustomEvent<{ id?: string }>).detail;
+      if (detail?.id === id) startCall(false);
+    };
+    window.addEventListener("workwrk:room:start-talktok", onStart);
+    return () => window.removeEventListener("workwrk:room:start-talktok", onStart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, callOpen, meta, messages]);
 
   /** Revoke every previously shared guest link for this room's calls —
    *  the only revocation DMs and #general have (they can't be left, so
@@ -520,7 +553,7 @@ export default function ConversationPage() {
     if (res?.ok) {
       const d = await res.json().catch(() => null);
       if (d) setMeta((prev) => (prev ? { ...prev, call: d.call } : prev));
-      toast("Guest link reset — old links are dead");
+      toast("TalkTok link reset — old links are dead");
     } else toast("Couldn't reset the link");
   };
 
@@ -529,7 +562,7 @@ export default function ConversationPage() {
     const url = meta?.call?.guestUrl;
     if (!url) { toast("Guest link unavailable"); return; }
     void navigator.clipboard.writeText(url);
-    toast("Guest link copied — outsiders join this room's calls with it");
+    toast("TalkTok guest link copied — outsiders join this room's TalkToks with it");
   };
 
   /* ── conversation actions ───────────────────────────────────── */
@@ -551,7 +584,7 @@ export default function ConversationPage() {
   };
   const toggleMute = async () => {
     setMenuOpen(false);
-    const next = myNotify === "mute" ? "all" : "mute";
+    const next = myNotify === "mute" ? (meta?.type === "CHANNEL" ? "mentions" : "all") : "mute";
     const res = await fetch(`/api/conversations/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -600,6 +633,12 @@ export default function ConversationPage() {
     );
   }
 
+  // Ghost-roster mitigation: a missed leave webhook can pin a stale
+  // roster; LIVE affordances only trust sessions younger than 4h.
+  const freshActiveCall = meta?.activeCall && Date.now() - new Date(meta.activeCall.startedAt).getTime() < 4 * 3600_000
+    ? meta.activeCall
+    : null;
+
   const title = meta
     ? meta.type === "CHANNEL" ? `#${meta.name ?? "channel"}` : conversationTitle(meta, meId)
     : "…";
@@ -640,24 +679,24 @@ export default function ConversationPage() {
             <span className="text-[12px] font-medium text-zinc-600 tabular-nums">{meta.members.length}</span>
           </button>
         )}
-        {meta?.activeCall && !callOpen && (
+        {freshActiveCall && !callOpen && (
           <button
             type="button"
             onClick={() => startCall(false)}
             className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-medium hover:bg-emerald-100"
-            title={meta.activeCall.participants.map((p) => p.name).join(", ")}
+            title={freshActiveCall.participants.map((p) => p.name).join(", ")}
           >
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
-            {meta.activeCall.participants.length} in call · Join
+            {freshActiveCall.participants.length} in TalkTok · Join
           </button>
         )}
         <button
           type="button"
           onClick={() => startCall(true)}
-          title="Start an audio call"
+          title="Audio TalkTok"
           className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
         >
           <Phone className="w-4 h-4" />
@@ -665,10 +704,10 @@ export default function ConversationPage() {
         <button
           type="button"
           onClick={() => startCall(false)}
-          title="Start a video call"
+          title="Start TalkTok"
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]"
         >
-          <Video className="w-4 h-4" /> {callOpen ? "In call" : "Call"}
+          <Video className="w-4 h-4" /> {callOpen ? "In TalkTok" : "TalkTok"}
         </button>
         <div className="relative">
           <button
@@ -693,10 +732,10 @@ export default function ConversationPage() {
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
                 <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy guest call link
+                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy TalkTok guest link
                 </button>
                 <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset guest call link
+                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset TalkTok guest link
                 </button>
                 {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
                   <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
@@ -788,6 +827,7 @@ export default function ConversationPage() {
             onEdit={editMessage}
             onDelete={setDeleteTarget}
             onOpenThread={(m) => void openThread(m)}
+            activeCall={freshActiveCall}
           />
             )}
           </>

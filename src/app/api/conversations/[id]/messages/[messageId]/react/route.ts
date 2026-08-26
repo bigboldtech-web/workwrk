@@ -8,7 +8,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 // inside a transaction so two simultaneous toggles can't lose each
 // other's update; the write bumps updatedAt so the poll propagates it.
 
-const ALLOWED = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏"];
+const ALLOWED = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏", "🙌", "👏"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
   const { error, session } = await getSessionOrFail();
