@@ -168,11 +168,11 @@ export function ChatSidebar() {
     try {
       const r = await fetch("/api/meetings/instant", { method: "POST" });
       const d = await r.json().catch(() => null);
-      if (!r.ok || !d?.id) { toast("Couldn't create the TalkTok link"); return; }
+      if (!r.ok || !d?.id) { toast("Couldn't create the call link"); return; }
       try { await navigator.clipboard.writeText(d.guestUrl); } catch { /* clipboard denied */ }
-      toast("TalkTok link copied — share it with anyone, then join");
+      toast("Call link copied — share it with anyone, then join");
       router.push(d.url);
-    } catch { toast("Couldn't create the TalkTok link — check your connection"); }
+    } catch { toast("Couldn't create the call link — check your connection"); }
   };
 
   /* ── row context-menu actions (all optimistic + toast on failure) ── */
@@ -198,7 +198,7 @@ export function ChatSidebar() {
     }).catch(() => null);
     if (res?.ok) {
       toast("Conversation closed — history is kept");
-      if (pathname === `/room/${id}`) router.push("/room");
+      if (pathname === `/tlk/${id}`) router.push("/tlk");
     } else {
       setRows(snapshot);
       toast("Couldn't close it");
@@ -212,7 +212,7 @@ export function ChatSidebar() {
     const res = await fetch(`/api/conversations/${target.id}`, { method: "DELETE" }).catch(() => null);
     if (res?.ok) {
       try { sessionStorage.setItem(`workwrk:chat-left:${target.id}`, "1"); } catch { /* private mode */ }
-      if (pathname === `/room/${target.id}`) router.push("/room");
+      if (pathname === `/tlk/${target.id}`) router.push("/tlk");
       void load();
     } else toast("Couldn't leave the channel");
   };
@@ -226,13 +226,13 @@ export function ChatSidebar() {
     // An explicit open is consent — clear any "just left" marker so the
     // page's auto-join guard doesn't block this deliberate rejoin.
     try { sessionStorage.removeItem(`workwrk:chat-left:${c.id}`); } catch { /* private mode */ }
-    if (c.isMember) { router.push(`/room/${c.id}`); return; }
+    if (c.isMember) { router.push(`/tlk/${c.id}`); return; }
     setJoining(c.id);
     try {
       const r = await fetch(`/api/conversations/${c.id}/join`, { method: "POST" });
       if (r.ok) {
         window.dispatchEvent(new Event("workwrk:chat-changed"));
-        router.push(`/room/${c.id}`);
+        router.push(`/tlk/${c.id}`);
       } else {
         toast("Couldn't join the channel — try again");
       }
@@ -276,7 +276,7 @@ export function ChatSidebar() {
         <button
           type="button"
           onClick={() => void newCallLink()}
-          title="New TalkTok link — an instant call with a shareable guest link (Zoom-style)"
+          title="New call link — an instant call with a shareable guest link (Zoom-style)"
           className="flex items-center justify-center h-8 w-9 rounded-md text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 border border-dashed border-zinc-200"
         >
           <Video className="w-4 h-4" />
@@ -294,8 +294,8 @@ export function ChatSidebar() {
             {(rows ?? []).filter((r) => r.myStarred).map((row) => (
               <li key={`star-${row.id}`}>
                 <Link
-                  href={`/room/${row.id}`}
-                  className={`flex h-8 items-center gap-2 rounded-md px-2 ${pathname === `/room/${row.id}` ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
+                  href={`/tlk/${row.id}`}
+                  className={`flex h-8 items-center gap-2 rounded-md px-2 ${pathname === `/tlk/${row.id}` ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
                 >
                   {row.type === "CHANNEL"
                     ? <Hash className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -333,7 +333,7 @@ export function ChatSidebar() {
           </div>
           <ul className={`flex flex-col gap-0.5 mb-2 ${collapsed.channels ? "hidden" : ""}`}>
             {visibleChannels.map((c) => {
-              const active = pathname === `/room/${c.id}`;
+              const active = pathname === `/tlk/${c.id}`;
               const unread = channelUnread.get(c.id) ?? 0;
               return (
                 <li key={c.id}>
@@ -404,12 +404,12 @@ export function ChatSidebar() {
       ) : collapsed.dms && !q ? null : (
         <ul className="flex flex-col gap-0.5">
           {filtered.map((row) => {
-            const active = pathname === `/room/${row.id}`;
+            const active = pathname === `/tlk/${row.id}`;
             const title = conversationTitle(row, meId);
             const avatarUser = conversationAvatarUser(row, meId);
             const lastMeta = row.lastMessage?.metadata as { kind?: string; attachments?: unknown[] } | null;
             const lastBody = row.lastMessage
-              ? lastMeta?.kind === "call" ? "📞 TalkTok"
+              ? lastMeta?.kind === "call" ? "📞 Call"
                 : row.lastMessage.body ? stripMarkup(row.lastMessage.body.slice(0, 200)) : (lastMeta?.attachments?.length ? "📎 Attachment" : "")
               : "";
             const preview = row.lastMessage
@@ -418,7 +418,7 @@ export function ChatSidebar() {
             return (
               <li key={row.id} className="group/dm relative">
                 <Link
-                  href={`/room/${row.id}`}
+                  href={`/tlk/${row.id}`}
                   onContextMenu={(e) => openRowMenu(e, {
                     id: row.id, type: row.type, name: conversationTitle(row, meId),
                     starred: Boolean(row.myStarred), muted: row.myNotifyLevel === "mute",
@@ -492,7 +492,7 @@ export function ChatSidebar() {
                     );
                 return (
                   <li key={hit.messageId}>
-                    <Link href={`/room/${hit.conversationId}`} className="block px-2 py-1.5 rounded-md hover:bg-zinc-50">
+                    <Link href={`/tlk/${hit.conversationId}`} className="block px-2 py-1.5 rounded-md hover:bg-zinc-50">
                       <span className="block truncate text-[13px] font-medium text-zinc-800">
                         {convTitle}
                         {hit.inThread && <span className="ml-1 text-[11px] font-normal text-zinc-400">in thread</span>}
@@ -516,19 +516,19 @@ export function ChatSidebar() {
             className="fixed z-50 w-56 rounded-lg border border-zinc-200 bg-white py-1 shadow-xl"
             style={{ left: Math.min(rowMenu.x, typeof window !== "undefined" ? window.innerWidth - 240 : rowMenu.x), top: Math.min(rowMenu.y, typeof window !== "undefined" ? window.innerHeight - 260 : rowMenu.y) }}
           >
-            <button type="button" onClick={() => { setRowMenu(null); router.push(`/room/${rowMenu.id}`); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <button type="button" onClick={() => { setRowMenu(null); router.push(`/tlk/${rowMenu.id}`); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
               <ExternalLink className="h-4 w-4 text-zinc-400" /> Open
             </button>
             <button
               type="button"
               onClick={() => {
                 const m = rowMenu; setRowMenu(null);
-                if (pathname === `/room/${m.id}`) window.dispatchEvent(new CustomEvent("workwrk:room:start-talktok", { detail: { id: m.id } }));
-                else router.push(`/room/${m.id}?call=1`);
+                if (pathname === `/tlk/${m.id}`) window.dispatchEvent(new CustomEvent("workwrk:room:start-talktok", { detail: { id: m.id } }));
+                else router.push(`/tlk/${m.id}?call=1`);
               }}
               className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
             >
-              <Video className="h-4 w-4 text-zinc-400" /> Start TalkTok
+              <Video className="h-4 w-4 text-zinc-400" /> Start call
             </button>
             {(() => {
               // Live state at ACTION time — the snapshot in rowMenu can go
@@ -594,7 +594,7 @@ export function ChatSidebar() {
           onCreated={(id) => {
             setChannelModalOpen(false);
             window.dispatchEvent(new Event("workwrk:chat-changed"));
-            router.push(`/room/${id}`);
+            router.push(`/tlk/${id}`);
           }}
         />
       )}
@@ -606,7 +606,7 @@ export function ChatSidebar() {
           onCreated={(id) => {
             setModalOpen(false);
             window.dispatchEvent(new Event("workwrk:chat-changed"));
-            router.push(`/room/${id}`);
+            router.push(`/tlk/${id}`);
           }}
         />
       )}

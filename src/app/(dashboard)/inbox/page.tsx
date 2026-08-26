@@ -38,7 +38,7 @@ const TYPE_VISUAL: Record<string, TypeVisual> = {
   task_assigned:   { Icon: CheckSquare,   color: "#3b82f6", label: "Task assigned", bucket: "primary" },
   approval:        { Icon: ShieldAlert,   color: "#ef4444", label: "Approval",      bucket: "primary" },
   boundary_request:{ Icon: GitBranch,     color: "#0073EA", label: "Request",       bucket: "primary" },
-  chat_message:    { Icon: MessageCircle, color: "#0073EA", label: "Room",          bucket: "primary" },
+  chat_message:    { Icon: MessageCircle, color: "#0073EA", label: "TLK",           bucket: "primary" },
   kudos:           { Icon: Heart,         color: "#E2445C", label: "Kudo",          bucket: "other" },
   task_due:        { Icon: Clock,         color: "#f97316", label: "Due",           bucket: "other" },
   candor_session:  { Icon: MessageCircle, color: "#71717A", label: "Candor",        bucket: "other" },

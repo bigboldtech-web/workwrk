@@ -1163,8 +1163,8 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
-  { key: "chat", label: "Room", Icon: MessageCircle, defaultHref: "/room",
-    matchPaths: ["/room"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+  { key: "chat", label: "TLK", Icon: MessageCircle, defaultHref: "/tlk",
+    matchPaths: ["/tlk"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },

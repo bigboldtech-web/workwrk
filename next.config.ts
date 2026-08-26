@@ -8,8 +8,10 @@ const nextConfig: NextConfig = {
   // stored notification links and bookmarks keep working.
   async redirects() {
     return [
-      { source: "/chat", destination: "/room", permanent: false },
-      { source: "/chat/:id", destination: "/room/:id", permanent: false },
+      { source: "/chat", destination: "/tlk", permanent: false },
+      { source: "/chat/:id", destination: "/tlk/:id", permanent: false },
+      { source: "/room", destination: "/tlk", permanent: false },
+      { source: "/room/:id", destination: "/tlk/:id", permanent: false },
     ];
   },
   /* config options here */

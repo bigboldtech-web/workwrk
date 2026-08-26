@@ -517,7 +517,7 @@ export default function ConversationPage() {
       (m) => m.metadata?.kind === "call" && !m.metadata?.endedAt,
     );
     const recentMs = recentOpen ? Date.now() - new Date(recentOpen.createdAt).getTime() : Infinity;
-    if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio TalkTok" : "Started a TalkTok");
+    if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio call" : "Started a call");
   };
 
   // ?call=1 entries (deep links, sidebar Start TalkTok on a fresh page)
@@ -553,7 +553,7 @@ export default function ConversationPage() {
     if (res?.ok) {
       const d = await res.json().catch(() => null);
       if (d) setMeta((prev) => (prev ? { ...prev, call: d.call } : prev));
-      toast("TalkTok link reset — old links are dead");
+      toast("Guest link reset — old links are dead");
     } else toast("Couldn't reset the link");
   };
 
@@ -562,7 +562,7 @@ export default function ConversationPage() {
     const url = meta?.call?.guestUrl;
     if (!url) { toast("Guest link unavailable"); return; }
     void navigator.clipboard.writeText(url);
-    toast("TalkTok guest link copied — outsiders join this room's TalkToks with it");
+    toast("Guest link copied — outsiders join this room's calls with it");
   };
 
   /* ── conversation actions ───────────────────────────────────── */
@@ -620,7 +620,7 @@ export default function ConversationPage() {
     if (res?.ok) {
       try { sessionStorage.setItem(`workwrk:chat-left:${id}`, "1"); } catch { /* private mode */ }
       window.dispatchEvent(new Event("workwrk:chat-changed"));
-      router.push("/room");
+      router.push("/tlk");
     } else toast("Couldn't leave the conversation");
   };
 
@@ -690,13 +690,13 @@ export default function ConversationPage() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
             </span>
-            {freshActiveCall.participants.length} in TalkTok · Join
+            {freshActiveCall.participants.length} in call · Join
           </button>
         )}
         <button
           type="button"
           onClick={() => startCall(true)}
-          title="Audio TalkTok"
+          title="Start an audio call"
           className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800"
         >
           <Phone className="w-4 h-4" />
@@ -704,10 +704,10 @@ export default function ConversationPage() {
         <button
           type="button"
           onClick={() => startCall(false)}
-          title="Start TalkTok"
+          title="Start a video call"
           className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]"
         >
-          <Video className="w-4 h-4" /> {callOpen ? "In TalkTok" : "TalkTok"}
+          <Video className="w-4 h-4" /> {callOpen ? "In call" : "Call"}
         </button>
         <div className="relative">
           <button
@@ -732,10 +732,10 @@ export default function ConversationPage() {
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
                 <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy TalkTok guest link
+                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy guest call link
                 </button>
                 <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
-                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset TalkTok guest link
+                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset guest call link
                 </button>
                 {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
                   <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">

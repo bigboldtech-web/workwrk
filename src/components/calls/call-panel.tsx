@@ -45,12 +45,12 @@ export function CallPanel({ conversationId, meetingId, room, subject, displayNam
       .then(async (r) => {
         if (!active) return;
         if (r.status === 503) { setCall({ grant: null, fallback: true, error: null }); return; }
-        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Couldn't join the TalkTok");
+        if (!r.ok) throw new Error((await r.json().catch(() => null))?.error ?? "Couldn't join the call");
         const d = await r.json();
         if (active) setCall({ grant: d, fallback: false, error: null });
       })
       .catch((e) => {
-        if (active) setCall({ grant: null, fallback: false, error: e instanceof Error ? e.message : "Couldn't join the TalkTok" });
+        if (active) setCall({ grant: null, fallback: false, error: e instanceof Error ? e.message : "Couldn't join the call" });
       });
     return () => { active = false; };
   }, [conversationId, meetingId]);
@@ -70,7 +70,7 @@ export function CallPanel({ conversationId, meetingId, room, subject, displayNam
   if (!grant) {
     return (
       <div className="flex h-full items-center justify-center rounded-xl border border-zinc-200 bg-zinc-900 text-zinc-400">
-        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Starting the TalkTok…
+        <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Starting the call…
       </div>
     );
   }

@@ -176,21 +176,21 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
               <div className="flex items-center gap-2">
                 <span className="text-[14px] font-semibold text-zinc-900">
                   {live.participants.map((p) => p.name).slice(0, 3).join(", ")}
-                  {live.participants.length > 3 ? ` +${live.participants.length - 3}` : ""} {live.participants.length === 1 ? "is" : "are"} in the TalkTok
+                  {live.participants.length > 3 ? ` +${live.participants.length - 3}` : ""} {live.participants.length === 1 ? "is" : "are"} in the call
                 </span>
                 <span className="inline-flex items-center rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Live</span>
               </div>
               <button type="button" onClick={onJoinCall} className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 text-[13px] font-medium text-emerald-800 hover:bg-emerald-100">
-                <Video className="h-4 w-4" /> Join TalkTok
+                <Video className="h-4 w-4" /> Join call
               </button>
             </div>
           ) : msg.metadata?.endedAt ? (
             <div className="mt-1 flex items-start gap-3">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><Phone className="w-4 h-4" /></span>
               <span>
-                <span className="block text-[14px] font-semibold text-zinc-900">A TalkTok happened</span>
+                <span className="block text-[14px] font-semibold text-zinc-900">A call happened</span>
                 <span className="block text-[13px] text-zinc-500">
-                  {formatCallRoll(msg.metadata?.names, meId ? memberNames.get(meId) : undefined)} in the TalkTok for {msg.metadata.durationMin ?? 0}m.
+                  {formatCallRoll(msg.metadata?.names, meId ? memberNames.get(meId) : undefined)} in the call for {msg.metadata.durationMin ?? 0}m.
                 </span>
               </span>
             </div>

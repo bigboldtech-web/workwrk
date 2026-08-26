@@ -225,7 +225,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       data: {
         conversationId: id,
         authorId: userId,
-        body: text || (isCallCard ? "Started a TalkTok" : ""),
+        body: text || (isCallCard ? "Started a call" : ""),
         parentId,
         metadata: Object.keys(metadata).length > 0 ? (metadata as Prisma.InputJsonValue) : undefined,
       },
@@ -255,7 +255,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   //   thread parent   → the person you replied to gets a ring
   //   notifyLevel all → the ordinary DM/group ring
   try {
-    const link = `/room/${id}`;
+    const link = `/tlk/${id}`;
     const senderName = `${message.author.firstName} ${message.author.lastName}`.trim();
     const convoLabel = membership.conversation.type === "DM"
       ? senderName
@@ -292,7 +292,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       const fresh = targets.filter((t) => !alreadySet.has(t.userId));
       if (fresh.length > 0) {
         const preview = isCallCard
-          ? "📞 Started a TalkTok — tap to join"
+          ? "📞 Started a call — tap to join"
           : text ? stripMarkup(text.slice(0, 300)).slice(0, 140) : "📎 Sent an attachment";
         await prisma.notification.createMany({
           data: fresh.map((t) => ({

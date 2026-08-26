@@ -559,7 +559,7 @@ export default function MeetingDetailPage() {
         </div>
         <div className="mtgr__head-actions">
           <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={() => setCallOpen((v) => !v)}>
-            <Video /> {callOpen ? "Hide TalkTok" : "Join TalkTok"}
+            <Video /> {callOpen ? "Hide call" : "Join call"}
           </button>
           {meeting.call?.guestUrl ? (
             <button

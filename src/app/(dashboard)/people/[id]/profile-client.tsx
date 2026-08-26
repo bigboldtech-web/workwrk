@@ -247,7 +247,7 @@ function MessagePersonButton({ userId }: { userId: string }) {
         body: JSON.stringify({ type: "DM", memberIds: [userId] }),
       });
       const d = await res.json().catch(() => null);
-      if (res.ok && d?.id) router.push(`/room/${d.id}`);
+      if (res.ok && d?.id) router.push(`/tlk/${d.id}`);
       else setBusy(false);
     } catch { setBusy(false); }
   };

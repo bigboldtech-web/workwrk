@@ -326,7 +326,7 @@ function HeroCard({ meeting }: { meeting: ApiMeeting }) {
           </a>
         ) : (
           <Link href={`/meetings/${meeting.id}?call=1`} className="mtg-hero__join" onClick={(e) => e.stopPropagation()}>
-            <Video /> Join TalkTok
+            <Video /> Join call
           </Link>
         )}
       </footer>
