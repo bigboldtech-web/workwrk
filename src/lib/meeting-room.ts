@@ -38,6 +38,26 @@ export function meetingJitsiUrl(meetingId: string): string {
   return `https://meet.jit.si/${meetingRoomName(meetingId)}`;
 }
 
+/** Signed guest code for a ROOM huddle: "c.<conversationId>.<epoch>.<sig>".
+ *  Epoch is baked in, so a member leaving (which bumps callEpoch) kills
+ *  every previously shared guest link for that conversation. */
+export function chatGuestCode(conversationId: string, epoch: number): string {
+  return `c.${conversationId}.${epoch}.${hmac(`chatguest:${conversationId}:${epoch}`).slice(0, 16)}`;
+}
+
+/** Verify a chat guest code; returns { conversationId, epoch } or null.
+ *  The caller must ALSO check epoch against the live conversation —
+ *  a stale epoch means the link was rotated away. */
+export function verifyChatGuestCode(code: string): { conversationId: string; epoch: number } | null {
+  if (!code.startsWith("c.")) return null;
+  const parts = code.slice(2).split(".");
+  if (parts.length !== 3) return null;
+  const [conversationId, epochRaw, sig] = parts;
+  const epoch = Number(epochRaw);
+  if (!conversationId || !Number.isInteger(epoch) || epoch < 0) return null;
+  return sig === hmac(`chatguest:${conversationId}:${epoch}`).slice(0, 16) ? { conversationId, epoch } : null;
+}
+
 /** Jitsi room for a chat conversation's calls (huddles). Same derivation
  *  scheme as meetings, distinct namespace so the two never collide. The
  *  epoch (bumped when a member leaves) rotates the room so ex-members'

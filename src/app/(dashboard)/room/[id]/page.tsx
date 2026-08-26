@@ -17,8 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  Bell, BellOff, Hash, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
-  UserPlus, Users, Video,
+  Bell, BellOff, Hash, Link2, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
+  RefreshCw, UserPlus, Users, Video,
 } from "lucide-react";
 import { CallPanel } from "@/components/calls/call-panel";
 import { TeamAvatar } from "@/components/team/ui";
@@ -37,7 +37,8 @@ type ConversationMeta = {
   type: "DM" | "GROUP" | "CHANNEL";
   name: string | null;
   members: { userId: string; notifyLevel?: string; user: ChatUserLite & { email?: string } }[];
-  call: { room: string };
+  call: { room: string; guestUrl?: string };
+  activeCall?: { participants: { identity: string; name: string }[]; startedAt: string } | null;
 };
 
 type Thread = { parent: FeedMessage; replies: FeedMessage[] };
@@ -59,6 +60,11 @@ export default function ConversationPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [callOpen, setCallOpen] = useState(() =>
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1");
+  // Snapshot of the room taken when the panel OPENED: the 10s meta poll
+  // may re-derive a rotated room name mid-call, and swapping the live
+  // conference's room prop would disconnect everyone (Jitsi fallback
+  // recreates on room change). The latch holds until the panel closes.
+  const [callRoom, setCallRoom] = useState<string | null>(null);
   const [callAudioOnly, setCallAudioOnly] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -116,6 +122,24 @@ export default function ConversationPage() {
       });
     return () => { active = false; };
   }, [id]);
+
+  // Huddle roster refresh: ALWAYS on while the page is visible — a user
+  // already sitting in the conversation must see the chip appear when
+  // someone else starts a huddle (gating on activeCall was a chicken-and-
+  // egg: it could never turn on). 20s idle, 10s while in/near a call.
+  // Stale guards: responses for another conversation (fast switch) or
+  // from an unmounted tick never land.
+  useEffect(() => {
+    let alive = true;
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      fetch(`/api/conversations/${id}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (alive && d && d.id === id) setMeta(d); })
+        .catch(() => { /* next tick */ });
+    }, callOpen || meta?.activeCall ? 10_000 : 20_000);
+    return () => { alive = false; clearInterval(t); };
+  }, [id, callOpen, meta?.activeCall]);
 
   const markRead = useCallback(async () => {
     try {
@@ -477,11 +501,35 @@ export default function ConversationPage() {
   const startCall = (audioOnly: boolean) => {
     setCallAudioOnly(audioOnly);
     if (!callOpen) {
+      setCallRoom(meta?.call?.room ?? null);
       setCallOpen(true);
+      // Joining a huddle that's already LIVE is not starting one — no card.
+      if (meta?.activeCall) return;
       const recentCall = [...messages].reverse().find((m) => m.metadata?.kind === "call");
       const recentMs = recentCall ? Date.now() - new Date(recentCall.createdAt).getTime() : Infinity;
       if (recentMs > 10 * 60 * 1000) sendCallCard(audioOnly ? "Started an audio call" : "Started a call");
     }
+  };
+
+  /** Revoke every previously shared guest link for this room's calls —
+   *  the only revocation DMs and #general have (they can't be left, so
+   *  the epoch never rotates on its own). */
+  const resetGuestLink = async () => {
+    setMenuOpen(false);
+    const res = await fetch(`/api/conversations/${id}/rotate-call`, { method: "POST" }).catch(() => null);
+    if (res?.ok) {
+      const d = await res.json().catch(() => null);
+      if (d) setMeta((prev) => (prev ? { ...prev, call: d.call } : prev));
+      toast("Guest link reset — old links are dead");
+    } else toast("Couldn't reset the link");
+  };
+
+  const copyGuestLink = () => {
+    setMenuOpen(false);
+    const url = meta?.call?.guestUrl;
+    if (!url) { toast("Guest link unavailable"); return; }
+    void navigator.clipboard.writeText(url);
+    toast("Guest link copied — outsiders join this room's calls with it");
   };
 
   /* ── conversation actions ───────────────────────────────────── */
@@ -565,6 +613,20 @@ export default function ConversationPage() {
             <p className="text-[12px] text-zinc-400">{meta.members.length} members</p>
           )}
         </div>
+        {meta?.activeCall && !callOpen && (
+          <button
+            type="button"
+            onClick={() => startCall(false)}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-medium hover:bg-emerald-100"
+            title={meta.activeCall.participants.map((p) => p.name).join(", ")}
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            {meta.activeCall.participants.length} in call · Join
+          </button>
+        )}
         <button
           type="button"
           onClick={() => startCall(true)}
@@ -599,6 +661,12 @@ export default function ConversationPage() {
                   {myNotify === "mute" ? <Bell className="w-4 h-4 text-zinc-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
+                <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <Link2 className="w-4 h-4 text-zinc-400" /> Copy guest call link
+                </button>
+                <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset guest call link
+                </button>
                 {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
                   <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
                     <UserPlus className="w-4 h-4 text-zinc-400" /> Add people
@@ -625,11 +693,11 @@ export default function ConversationPage() {
         <div className="px-4 pt-3 shrink-0" style={{ height: "48vh" }}>
           <CallPanel
             conversationId={id}
-            room={meta.call.room}
+            room={callRoom ?? meta.call.room}
             subject={title}
             displayName={myName}
             audioOnly={callAudioOnly}
-            onLeave={() => setCallOpen(false)}
+            onLeave={() => { setCallOpen(false); setCallRoom(null); }}
           />
         </div>
       )}

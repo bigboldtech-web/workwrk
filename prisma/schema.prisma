@@ -5593,6 +5593,33 @@ model ConversationMessage {
 }
 
 // ==========================================
+// 🆕 Native calls — live huddle presence (docs/plans/native-calls.md
+// Phase 2). One row per call room session: created when the first
+// token is minted, updated by LiveKit webhooks, closed on
+// room_finished. Room names are HMAC-derived and can't be reversed,
+// so the token mint records the mapping to its conversation/meeting.
+// ==========================================
+
+model CallSession {
+  id             String    @id @default(cuid())
+  organizationId String
+  roomName       String
+  conversationId String?
+  meetingId      String?
+  /// [{ identity, name, joinedAt }] — live roster, webhook-maintained.
+  participants   Json      @default("[]")
+  startedAt      DateTime  @default(now())
+  /// Bumped on every webhook — the staleness reaper keys on this.
+  lastSeenAt     DateTime  @default(now())
+  endedAt        DateTime?
+
+  @@index([organizationId, endedAt])
+  @@index([conversationId, endedAt])
+  @@index([meetingId, endedAt])
+  @@index([roomName, endedAt])
+}
+
+// ==========================================
 // 🆕 Whiteboards — Excalidraw-powered infinite canvas
 // Mind maps, diagrams, brainstorming, retros, flow charts. Each board
 // is one row; the `scene` JSON holds the full Excalidraw scene

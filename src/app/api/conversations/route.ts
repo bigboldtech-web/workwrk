@@ -74,6 +74,32 @@ export async function GET() {
     }))
     .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
 
+  // Live huddle presence (native-calls Phase 2): one indexed query for
+  // every conversation with an open call session. 12h staleness cap so a
+  // missed room_finished webhook can't pin a ghost huddle forever.
+  let activeCalls = new Map<string, { participants: { identity: string; name: string }[]; startedAt: Date }>();
+  try {
+    const convIds = conversations.map((c) => c.id);
+    if (convIds.length > 0) {
+      const sessions = await prisma.callSession.findMany({
+        where: {
+          conversationId: { in: convIds },
+          endedAt: null,
+          startedAt: { gt: new Date(Date.now() - 12 * 3600_000) },
+        },
+        select: { conversationId: true, participants: true, startedAt: true },
+      });
+      activeCalls = new Map(sessions
+        .filter((s) => Array.isArray(s.participants) && (s.participants as unknown[]).length > 0)
+        .map((s) => [s.conversationId as string, {
+          participants: s.participants as { identity: string; name: string }[],
+          startedAt: s.startedAt,
+        }]));
+    }
+  } catch (e) { console.error("active call lookup failed", e); }
+
+  const withCalls = conversations.map((c) => ({ ...c, activeCall: activeCalls.get(c.id) ?? null }));
+
   // Channel directory — org channels are open: everyone can see and join
   // them. Failures here must never break the conversation list.
   let channels: { id: string; name: string | null; memberCount: number; isMember: boolean }[] = [];
@@ -83,7 +109,7 @@ export async function GET() {
     console.error("channel directory failed", e);
   }
 
-  return jsonSuccess({ conversations, channels });
+  return jsonSuccess({ conversations: withCalls, channels });
 }
 
 /** Org-open channel list. Also lazily seeds #general (whole org joined)

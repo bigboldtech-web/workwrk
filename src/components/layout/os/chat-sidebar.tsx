@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Hash, MessageCircle, Plus, Search, Users, X } from "lucide-react";
+import { Hash, MessageCircle, Phone, Plus, Search, Users, Video, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
@@ -22,6 +22,8 @@ import {
 const LIST_POLL_MS = 20_000;
 
 type ChannelRow = { id: string; name: string | null; memberCount: number; isMember: boolean };
+
+type ActiveCall = { participants: { identity: string; name: string }[]; startedAt: string } | null;
 
 type MessageHit = {
   messageId: string;
@@ -43,7 +45,7 @@ export function ChatSidebar() {
   const { toast } = useOsToast();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
 
-  const [rows, setRows] = useState<ConversationListRow[] | null>(null);
+  const [rows, setRows] = useState<(ConversationListRow & { activeCall?: ActiveCall })[] | null>(null);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [msgResults, setMsgResults] = useState<MessageHit[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -55,7 +57,7 @@ export function ChatSidebar() {
       const r = await fetch("/api/conversations", { cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
-      setRows((d.conversations ?? []) as ConversationListRow[]);
+      setRows((d.conversations ?? []) as (ConversationListRow & { activeCall?: ActiveCall })[]);
       setChannels((d.channels ?? []) as ChannelRow[]);
     } catch { /* keep the last good list — a blip must not blank the sidebar */ }
   }, []);
@@ -114,10 +116,18 @@ export function ChatSidebar() {
     return direct.filter((r) => conversationTitle(r, meId).toLowerCase().includes(q));
   }, [rows, q, meId]);
 
-  // Unread badges for channels come from the conversation list (member rows).
+  // Unread + live-call badges for channels come from the conversation
+  // list (member rows) — the channel directory itself carries neither.
   const channelUnread = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of rows ?? []) if (r.type === "CHANNEL") map.set(r.id, r.unreadCount);
+    return map;
+  }, [rows]);
+  const channelCalls = useMemo(() => {
+    const map = new Map<string, NonNullable<ActiveCall>>();
+    for (const r of rows ?? []) {
+      if (r.type === "CHANNEL" && r.activeCall && r.activeCall.participants.length > 0) map.set(r.id, r.activeCall);
+    }
     return map;
   }, [rows]);
 
@@ -125,6 +135,19 @@ export function ChatSidebar() {
     () => (q ? channels.filter((c) => (c.name ?? "").toLowerCase().includes(q)) : channels),
     [channels, q],
   );
+
+  /** Zoom's "New meeting" gesture: mint an instant call, copy its guest
+   *  link, and jump straight into the call. */
+  const newCallLink = async () => {
+    try {
+      const r = await fetch("/api/meetings/instant", { method: "POST" });
+      const d = await r.json().catch(() => null);
+      if (!r.ok || !d?.id) { toast("Couldn't create the call link"); return; }
+      try { await navigator.clipboard.writeText(d.guestUrl); } catch { /* clipboard denied */ }
+      toast("Call link copied — share it with anyone, then join");
+      router.push(d.url);
+    } catch { toast("Couldn't create the call link — check your connection"); }
+  };
 
   const openChannel = async (c: ChannelRow) => {
     // An explicit open is consent — clear any "just left" marker so the
@@ -147,14 +170,24 @@ export function ChatSidebar() {
 
   return (
     <div className="flex flex-col">
-      <button
-        type="button"
-        onClick={() => setModalOpen(true)}
-        className="flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200 mb-2"
-      >
-        <Plus className="w-4 h-4 text-zinc-500" />
-        New message
-      </button>
+      <div className="flex items-center gap-1.5 mb-2">
+        <button
+          type="button"
+          onClick={() => setModalOpen(true)}
+          className="flex flex-1 items-center gap-2 h-8 px-2 rounded-md text-[14px] text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200"
+        >
+          <Plus className="w-4 h-4 text-zinc-500" />
+          New message
+        </button>
+        <button
+          type="button"
+          onClick={() => void newCallLink()}
+          title="New call link — an instant call with a shareable guest link (Zoom-style)"
+          className="flex items-center justify-center h-8 w-9 rounded-md text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800 border border-dashed border-zinc-200"
+        >
+          <Video className="w-4 h-4" />
+        </button>
+      </div>
 
       {filtered !== null && (visibleChannels.length > 0 || q === "") && (
         <>
@@ -182,6 +215,14 @@ export function ChatSidebar() {
                     <span className={`flex-1 truncate text-[14px] ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                       {c.name}
                     </span>
+                    {channelCalls.has(c.id) && (
+                      <span
+                        className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold tabular-nums"
+                        title={`In call: ${channelCalls.get(c.id)!.participants.map((p) => p.name).join(", ")}`}
+                      >
+                        <Phone className="w-3 h-3" /> {channelCalls.get(c.id)!.participants.length}
+                      </span>
+                    )}
                     {unread > 0 ? (
                       <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
                         {unread > 99 ? "99+" : unread}
@@ -246,6 +287,14 @@ export function ChatSidebar() {
                       {preview}
                     </span>
                   </span>
+                  {row.activeCall && row.activeCall.participants.length > 0 && (
+                    <span
+                      className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold tabular-nums"
+                      title={`In call: ${row.activeCall.participants.map((p) => p.name).join(", ")}`}
+                    >
+                      <Phone className="w-3 h-3" /> {row.activeCall.participants.length}
+                    </span>
+                  )}
                   {row.unreadCount > 0 && (
                     <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
                       {row.unreadCount > 99 ? "99+" : row.unreadCount}

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { chatRoomName } from "@/lib/meeting-room";
+import { chatGuestCode, chatRoomName } from "@/lib/meeting-room";
 
 // One conversation: meta + members + the derived call room.
 // Membership is the only key — non-members get 404, not 403, so
@@ -44,7 +44,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!conversation) return jsonError("Conversation not found", 404);
 
   const { callEpoch, ...rest } = conversation;
-  return jsonSuccess({ ...rest, call: { room: chatRoomName(id, callEpoch) } });
+  const room = chatRoomName(id, callEpoch);
+  // Live huddle roster for the header chip (12h staleness cap, ghost-proof).
+  let activeCall: { participants: { identity: string; name: string }[]; startedAt: Date } | null = null;
+  try {
+    // A conversation can briefly hold several open sessions (epoch
+    // rotation mid-call splits rooms) — surface the one people are
+    // actually IN, not merely the newest row.
+    const sessions = await prisma.callSession.findMany({
+      where: { conversationId: id, endedAt: null, startedAt: { gt: new Date(Date.now() - 12 * 3600_000) } },
+      orderBy: { startedAt: "desc" },
+      take: 5,
+      select: { participants: true, startedAt: true },
+    });
+    const live = sessions.find((x) => Array.isArray(x.participants) && (x.participants as unknown[]).length > 0);
+    if (live) {
+      activeCall = { participants: live.participants as { identity: string; name: string }[], startedAt: live.startedAt };
+    }
+  } catch (e) { console.error("active call lookup failed", e); }
+  const base = process.env.NEXTAUTH_URL || "https://workwrk.com";
+  return jsonSuccess({
+    ...rest,
+    call: { room, guestUrl: `${base}/meet/${chatGuestCode(id, callEpoch)}` },
+    activeCall,
+  });
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

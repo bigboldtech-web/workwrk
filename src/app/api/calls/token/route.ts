@@ -13,6 +13,7 @@ import { AccessToken } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { chatRoomName, meetingRoomName } from "@/lib/meeting-room";
+import { ensureCallSession } from "@/lib/call-session";
 
 function callsConfigured(): boolean {
   return Boolean(process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET);
@@ -63,6 +64,13 @@ export async function POST(req: NextRequest) {
     }
     room = meetingRoomName(meetingId!);
   }
+
+  // Presence mapping: room names are HMAC-derived and irreversible, so
+  // THIS is where a live CallSession learns which conversation/meeting a
+  // room belongs to — and where stale/abandoned sessions self-heal.
+  try {
+    await ensureCallSession({ organizationId: orgId, roomName: room, conversationId, meetingId });
+  } catch (e) { console.error("call session record failed", e); }
 
   const at = new AccessToken(process.env.LIVEKIT_API_KEY!, process.env.LIVEKIT_API_SECRET!, {
     identity: userId,
