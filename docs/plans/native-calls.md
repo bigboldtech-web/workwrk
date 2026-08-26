@@ -1,6 +1,6 @@
 # Native Calls: our own video system for Room (Jitsi removal)
 
-**Date:** 2026-08-25 · **Status:** PLANNED, awaiting one infra decision
+**Date:** 2026-08-26 · **Status:** Phases 1-3 SHIPPED (c7a2962, 0c466e8); SFU co-tenant on the app box per user (dedicated node later); Phase 4 (recording/reactions) remains
 **Mandate (user):** "Remove all the Jitsi stuff and make it like Slack, exactly like Slack: multiple people can join, chat, video call. We need to have our own video call system."
 
 ---
@@ -24,19 +24,19 @@ The engineering reality: browsers can send video peer-to-peer, but a mesh where 
 
 ## 3. Phases
 
-### Phase 1: swap the engine (Jitsi out, LiveKit in)
+### Phase 1: swap the engine (Jitsi out, LiveKit in) — SHIPPED (c7a2962)
 - `POST /api/calls/token`: membership-checked (conversation member / meeting attendee), mints a LiveKit JWT for room `chat:{conversationId}:{callEpoch}` or `meeting:{id}`. The HMAC room-name scheme and callEpoch rotation survive unchanged; only the media backend changes.
 - `components/calls/call-panel.tsx`: OUR call UI on `@livekit/components-react` primitives: tile grid with speaker highlight, mic/cam toggles, screen share, device picker, leave. Same mount points MeetingCall uses today (Room conversation panel, meeting detail, `?call=1`).
 - **Remove all Jitsi**: `meeting-call.tsx`, the `external_api.js` loader, `meetingJitsiUrl`, docs references. No Google/GitHub host sign-in ever again, no meet.jit.si branding, prejoin is ours (name + device check).
 - Meetings and Room both ride the new panel from day one.
 
-### Phase 2: Slack-huddle presence (the part Jitsi could never do)
+### Phase 2: Slack-huddle presence — SHIPPED (0c466e8, 10 fleet findings fixed: self-healing session lifecycle, FOR-UPDATE rosters, always-on refresh, room latching)
 LiveKit webhooks (`room_started`, `participant_joined/left`, `room_finished`) hit `POST /api/calls/webhook` (signature-verified) and land in a tiny `CallSession` table (roomName, conversationId, participants JSON, startedAt/endedAt). That gives Room what Slack has and we faked with call cards:
 - **Live huddle chip** in the conversation header and sidebar row: stacked avatars of who is IN the call right now + one-click Join. Visible before you join, gone when the call ends.
 - Call cards upgrade from "Started a call" to live state: "3 in the call · 12m · Join", then "Call ended · 24m" when it finishes.
 - The existing 4s/20s polls carry this state; zero new realtime infra on the app box.
 
-### Phase 3: the Zoom layer — links + outside guests everywhere
+### Phase 3: the Zoom layer — SHIPPED (0c466e8; + Reset-guest-link revocation, 24h meeting-link expiry)
 "Zoom infused in Slack" (user, 2026-08-25). Three doors, all token-gated on our system, zero accounts for guests:
 - **Instant call links.** A "New call link" action (topbar create menu + Room) mints a shareable `workwrk.com/meet/...` URL on the spot, Zoom's "new meeting" gesture: no scheduling, no form. Under the hood it creates a lightweight Meeting row so the call has a home for notes/transcript afterwards. Copy, paste anywhere, people join.
 - **Guest links on ANY Room huddle.** Every conversation call panel gets "Copy guest link": the signed code for `chat:{conversationId}:{callEpoch}`. An outside client or candidate lands in the team's live huddle next to internal folks. Leaving a member still rotates callEpoch, which kills old guest links for that room automatically.
