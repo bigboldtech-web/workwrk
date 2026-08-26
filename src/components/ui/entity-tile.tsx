@@ -16,10 +16,12 @@
 // first letter of `name`).
 //
 // 2026-08-26 restyle (user: "make all the icons lined like TLK"): the
-// colored square is GONE. The glyph renders as a plain outline icon
-// stroked with the entity's color (zinc when none), letters become
-// colored letters, emoji stay emoji. The box keeps its exact size so
-// no row or picker shifts by a pixel.
+// colored square is GONE, and after a second pass ("I still see
+// colourful icons") the glyph is MONOCHROME zinc like TLK's sidebar —
+// the entity's color is no longer painted at all (emoji excepted:
+// they are user-chosen glyphs and have no line form). The box keeps
+// its exact size so no row or picker shifts by a pixel. The `color`
+// prop is accepted and ignored so no call site breaks.
 
 import { createElement, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -69,7 +71,7 @@ const GLYPH: Record<NonNullable<VariantProps<typeof tileVariants>["size"]>, stri
 export interface EntityTileProps extends VariantProps<typeof tileVariants> {
   /** Lucide icon name (catalog), a lucide component, or an emoji string. */
   icon?: string | LucideIcon | null;
-  /** Stroke/letter color (the entity's identity color). Neutral zinc default. */
+  /** Accepted for call-site compatibility; icons render monochrome. */
   color?: string | null;
   /** Name — first letter is the glyph when no icon resolves. */
   name?: string | null;
@@ -90,7 +92,7 @@ function resolveLucide(icon: EntityTileProps["icon"]): LucideIcon | null {
 
 export function EntityTile({
   icon,
-  color,
+  color: _color, // eslint-disable-line @typescript-eslint/no-unused-vars
   name,
   fallbackIcon,
   fallback,
@@ -113,8 +115,7 @@ export function EntityTile({
 
   return (
     <span
-      className={cn(tileVariants({ size: sz }), className)}
-      style={{ color: color ?? DEFAULT_TILE_COLOR }}
+      className={cn(tileVariants({ size: sz }), "text-zinc-500", className)}
       title={title}
       aria-hidden
     >
