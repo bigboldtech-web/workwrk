@@ -609,10 +609,22 @@ export default function ConversationPage() {
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[15px] font-semibold text-zinc-900">{title}</h1>
-          {meta && meta.type !== "DM" && (
-            <p className="text-[12px] text-zinc-400">{meta.members.length} members</p>
-          )}
         </div>
+        {meta && meta.type !== "DM" && (
+          <button
+            type="button"
+            onClick={() => setAddPeopleOpen(true)}
+            title={`${meta.members.length} members — add people`}
+            className="hidden sm:inline-flex items-center gap-1 h-8 rounded-md border border-zinc-200 pl-1.5 pr-2 hover:bg-zinc-50"
+          >
+            <span className="flex -space-x-1.5">
+              {meta.members.slice(0, 3).map((m) => (
+                <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={22} />
+              ))}
+            </span>
+            <span className="text-[12px] font-medium text-zinc-600 tabular-nums">{meta.members.length}</span>
+          </button>
+        )}
         {meta?.activeCall && !callOpen && (
           <button
             type="button"
@@ -713,14 +725,40 @@ export default function ConversationPage() {
         )}
         {!loadedOnce ? (
           <div className="flex justify-center py-10 text-zinc-400"><Loader2 className="w-5 h-5 animate-spin" /></div>
-        ) : messages.length === 0 ? (
-          <div className="py-14 text-center">
-            <p className="text-[15px] font-medium text-zinc-700">Say hello 👋</p>
-            <p className="text-[13px] text-zinc-400 mt-1">
-              {meta?.type === "CHANNEL" ? `This is the very beginning of ${title}.` : `This is the start of your conversation with ${title}.`}
-            </p>
-          </div>
         ) : (
+          <>
+            {!hasMore && meta && (
+              /* Slack's history intro: shown at the TRUE beginning of the
+                 conversation (empty or fully paged back). */
+              <div className="pb-3 pt-2">
+                <div className="flex items-center gap-1 pb-3">
+                  {(meta.type === "DM" ? others : others.slice(0, 4)).map((m) => (
+                    <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={44} />
+                  ))}
+                </div>
+                <p className="text-[15px] text-zinc-800">
+                  {meta.type === "CHANNEL" ? (
+                    <>This is the very beginning of <span className="font-semibold">{title}</span>.</>
+                  ) : (
+                    <>
+                      This is the very beginning of your direct message history with{" "}
+                      {others.map((m, i) => (
+                        <span key={m.userId}>
+                          <span className="rounded bg-[#0073EA]/10 px-1 py-0.5 font-medium text-[#0073EA]">@{m.user.firstName} {m.user.lastName}</span>
+                          {i < others.length - 2 ? ", " : i === others.length - 2 ? " and " : ""}
+                        </span>
+                      ))}.
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+            {messages.length === 0 && !(!hasMore && meta) && (
+              <div className="py-14 text-center">
+                <p className="text-[15px] font-medium text-zinc-700">Say hello 👋</p>
+              </div>
+            )}
+            {messages.length > 0 && (
           <MessageFeed
             messages={messages}
             meId={meId}
@@ -732,6 +770,8 @@ export default function ConversationPage() {
             onDelete={setDeleteTarget}
             onOpenThread={(m) => void openThread(m)}
           />
+            )}
+          </>
         )}
       </div>
 
@@ -743,6 +783,7 @@ export default function ConversationPage() {
           placeholder={`Message ${title}`}
           onSend={sendMain}
           onError={(msg) => toast(msg)}
+          onStartCall={startCall}
         />
       </div>
 

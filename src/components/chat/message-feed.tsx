@@ -75,10 +75,11 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
   return (
     <div className="flex flex-col">
       {items.map((it) => it.kind === "day" ? (
-        <div key={it.key} className="flex items-center gap-3 py-3">
-          <span className="h-px flex-1 bg-zinc-100" />
-          <span className="text-[12px] font-medium text-zinc-400">{it.label}</span>
-          <span className="h-px flex-1 bg-zinc-100" />
+        <div key={it.key} className="relative flex items-center justify-center py-3">
+          <span className="absolute inset-x-0 top-1/2 h-px bg-zinc-100" />
+          <span className="relative rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] font-semibold text-zinc-600 shadow-sm">
+            {it.label}
+          </span>
         </div>
       ) : (
         <MessageRow

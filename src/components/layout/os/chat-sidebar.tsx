@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { Hash, MessageCircle, Phone, Plus, Search, Users, Video, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Hash, MessageCircle, Phone, Plus, Search, Users, Video, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
@@ -49,6 +49,20 @@ export function ChatSidebar() {
   const [channels, setChannels] = useState<ChannelRow[]>([]);
   const [msgResults, setMsgResults] = useState<MessageHit[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  // Slack's collapsible sections; persisted so the layout is stable.
+  const [collapsed, setCollapsed] = useState<{ channels: boolean; dms: boolean }>({ channels: false, dms: false });
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("workwrk:room:sections");
+      if (raw) setCollapsed(JSON.parse(raw));
+    } catch { /* corrupt/absent — defaults */ }
+  }, []);
+  const toggleSection = (key: "channels" | "dms") =>
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem("workwrk:room:sections", JSON.stringify(next)); } catch { /* private mode */ }
+      return next;
+    });
   const [channelModalOpen, setChannelModalOpen] = useState(false);
   const [joining, setJoining] = useState<string | null>(null);
 
@@ -191,13 +205,21 @@ export function ChatSidebar() {
 
       {filtered !== null && (visibleChannels.length > 0 || q === "") && (
         <>
-          <div className="flex items-center justify-between px-2 pt-1 pb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Channels</span>
-            <button type="button" onClick={() => setChannelModalOpen(true)} aria-label="New channel" className="text-zinc-400 hover:text-zinc-700">
+          <div className="flex items-center justify-between px-1 pt-1 pb-1">
+            <button
+              type="button"
+              onClick={() => toggleSection("channels")}
+              className="inline-flex items-center gap-1 rounded px-1 text-[13px] font-semibold text-zinc-600 hover:bg-zinc-50"
+              aria-expanded={!collapsed.channels}
+            >
+              {collapsed.channels ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
+              Channels
+            </button>
+            <button type="button" onClick={() => setChannelModalOpen(true)} aria-label="New channel" className="mr-1 text-zinc-400 hover:text-zinc-700">
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
-          <ul className="flex flex-col gap-0.5 mb-2">
+          <ul className={`flex flex-col gap-0.5 mb-2 ${collapsed.channels ? "hidden" : ""}`}>
             {visibleChannels.map((c) => {
               const active = pathname === `/room/${c.id}`;
               const unread = channelUnread.get(c.id) ?? 0;
@@ -235,8 +257,16 @@ export function ChatSidebar() {
               );
             })}
           </ul>
-          <div className="px-2 pt-1 pb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Direct messages</span>
+          <div className="px-1 pt-1 pb-1">
+            <button
+              type="button"
+              onClick={() => toggleSection("dms")}
+              className="inline-flex items-center gap-1 rounded px-1 text-[13px] font-semibold text-zinc-600 hover:bg-zinc-50"
+              aria-expanded={!collapsed.dms}
+            >
+              {collapsed.dms ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
+              Direct messages
+            </button>
           </div>
         </>
       )}
@@ -250,7 +280,7 @@ export function ChatSidebar() {
             {q ? "No conversations match" : "No conversations yet. Start one with New message."}
           </p>
         </div>
-      ) : (
+      ) : collapsed.dms && !q ? null : (
         <ul className="flex flex-col gap-0.5">
           {filtered.map((row) => {
             const active = pathname === `/room/${row.id}`;

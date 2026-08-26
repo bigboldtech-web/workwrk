@@ -6,8 +6,7 @@
 
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { LiveKitRoom, VideoConference } from "@livekit/components-react";
-import "@livekit/components-styles";
+import { ConferenceSurface } from "@/components/calls/conference-surface";
 import { MeetingCall } from "@/components/meetings/meeting-call";
 
 type Grant = { url: string; token: string };
@@ -67,10 +66,8 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
         {fallback ? (
           <MeetingCall room={fallbackRoom} subject={title} />
         ) : grant ? (
-          <div className="h-full w-full overflow-hidden rounded-xl bg-zinc-900" data-lk-theme="default">
-            <LiveKitRoom serverUrl={grant.url} token={grant.token} connect audio video style={{ height: "100%" }}>
-              <VideoConference />
-            </LiveKitRoom>
+          <div className="h-full w-full overflow-hidden rounded-xl bg-zinc-900">
+            <ConferenceSurface url={grant.url} token={grant.token} video />
           </div>
         ) : (
           <div className="flex h-full items-center justify-center">

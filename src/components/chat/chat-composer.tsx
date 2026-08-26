@@ -6,7 +6,7 @@
 // as every other file in WorkwrK.
 
 import { useMemo, useRef, useState } from "react";
-import { Loader2, Paperclip, Send, X } from "lucide-react";
+import { AtSign, Loader2, Mic, Paperclip, Send, Smile, Video, X } from "lucide-react";
 import { TeamAvatar } from "@/components/team/ui";
 import { dragHasFiles } from "@/lib/upload-dropped-files";
 import type { ChatUserLite } from "@/components/chat/conversation-utils";
@@ -17,7 +17,7 @@ const MAX_FILE_MB = 25;
 
 export type ComposerPayload = { body: string; mentions: string[]; attachments: ChatAttachment[] };
 
-export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, onError }: {
+export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, onError, onStartCall }: {
   members: { userId: string; user: ChatUserLite }[];
   meId: string | null;
   placeholder: string;
@@ -25,6 +25,9 @@ export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, on
   /** Called with the finished payload — the caller owns optimistic state. */
   onSend: (payload: ComposerPayload) => void;
   onError: (message: string) => void;
+  /** Slack puts camera + mic in the composer's toolbar — main pane only
+   *  (thread panels omit it; threads don't start huddles). */
+  onStartCall?: (audioOnly: boolean) => void;
 }) {
   const [input, setInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -32,6 +35,7 @@ export function ChatComposer({ members, meId, placeholder, autoFocus, onSend, on
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Successful uploads survive a failed batch — retrying re-uses them
@@ -156,6 +160,24 @@ ${cur}` : body));
     onSend({ body, mentions, attachments });
   };
 
+  /** Insert text at the caret and refocus — the emoji picker and the @
+   *  button both ride this; @ also re-runs mention detection so the
+   *  people popover opens exactly as if it was typed. */
+  const insertAtCaret = (text: string, refreshMentions = false) => {
+    const el = inputRef.current;
+    const caret = el?.selectionStart ?? input.length;
+    const next = input.slice(0, caret) + text + input.slice(el?.selectionEnd ?? caret);
+    setInput(next);
+    requestAnimationFrame(() => {
+      el?.focus();
+      const pos = caret + text.length;
+      el?.setSelectionRange(pos, pos);
+      if (refreshMentions) refreshMentionState(next, pos);
+    });
+  };
+
+  const COMPOSER_EMOJI = ["😀", "😂", "😍", "👍", "🙏", "🎉", "🔥", "❤️", "😮", "😢", "👀", "✅"];
+
   return (
     <div
       className={`relative rounded-xl border bg-white px-3 py-2 focus-within:border-zinc-300 ${dragOver ? "border-[#0073EA] bg-[#0073EA]/5" : "border-zinc-200"}`}
@@ -200,15 +222,7 @@ ${cur}` : body));
         </div>
       )}
 
-      <div className="flex items-end gap-2">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          title="Attach files"
-          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-        >
-          <Paperclip className="w-4 h-4" />
-        </button>
+      <div className="flex flex-col">
         <input
           ref={fileInputRef}
           type="file"
@@ -244,17 +258,87 @@ ${cur}` : body));
           onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
           placeholder={placeholder}
           rows={Math.min(6, Math.max(1, input.split("\n").length))}
-          className="flex-1 resize-none bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400 leading-6 max-h-40"
+          className="w-full resize-none bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400 leading-6 max-h-40"
         />
-        <button
-          type="button"
-          onClick={() => void send()}
-          disabled={(!input.trim() && files.length === 0) || uploading}
-          aria-label="Send"
-          className="shrink-0 inline-flex items-center justify-center h-8 w-8 rounded-lg bg-[#0073EA] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#0060c2]"
-        >
-          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-        </button>
+        {/* Slack's toolbar row: attach · emoji · mention | camera · mic … send */}
+        <div className="mt-1 flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Attach files"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setEmojiOpen((v) => !v)}
+              title="Emoji"
+              className={`inline-flex h-7 w-7 items-center justify-center rounded-md ${emojiOpen ? "bg-zinc-100 text-zinc-700" : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"}`}
+            >
+              <Smile className="h-4 w-4" />
+            </button>
+            {emojiOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setEmojiOpen(false)} />
+                <div className="absolute bottom-8 left-0 z-20 grid grid-cols-6 gap-0.5 rounded-lg border border-zinc-200 bg-white p-1.5 shadow-lg">
+                  {COMPOSER_EMOJI.map((e) => (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => { setEmojiOpen(false); insertAtCaret(e); }}
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-[17px] hover:bg-zinc-100"
+                    >
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => insertAtCaret("@", true)}
+            title="Mention someone"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+          >
+            <AtSign className="h-4 w-4" />
+          </button>
+          {onStartCall && (
+            <>
+              <span className="mx-1 h-4 w-px bg-zinc-200" />
+              <button
+                type="button"
+                onClick={() => onStartCall(false)}
+                title="Start a video call"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+              >
+                <Video className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => onStartCall(true)}
+                title="Start an audio call"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            </>
+          )}
+          <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={(!input.trim() && files.length === 0) || uploading}
+            aria-label="Send"
+            className={`inline-flex h-7 w-8 items-center justify-center rounded-md text-white disabled:cursor-not-allowed ${
+              input.trim() || files.length > 0 ? "bg-[#0073EA] hover:bg-[#0060c2]" : "bg-zinc-200"
+            }`}
+          >
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
     </div>
   );

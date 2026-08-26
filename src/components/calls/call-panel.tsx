@@ -12,8 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { LiveKitRoom, VideoConference } from "@livekit/components-react";
-import "@livekit/components-styles";
+import { ConferenceSurface } from "@/components/calls/conference-surface";
 import { MeetingCall } from "@/components/meetings/meeting-call";
 
 type Grant = { url: string; token: string; room: string };
@@ -77,18 +76,8 @@ export function CallPanel({ conversationId, meetingId, room, subject, displayNam
   }
 
   return (
-    <div className="h-full w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900" data-lk-theme="default">
-      <LiveKitRoom
-        serverUrl={grant.url}
-        token={grant.token}
-        connect
-        audio
-        video={!audioOnly}
-        onDisconnected={() => onLeave?.()}
-        style={{ height: "100%" }}
-      >
-        <VideoConference />
-      </LiveKitRoom>
+    <div className="h-full w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900">
+      <ConferenceSurface url={grant.url} token={grant.token} video={!audioOnly} onDisconnected={() => onLeave?.()} />
     </div>
   );
 }
