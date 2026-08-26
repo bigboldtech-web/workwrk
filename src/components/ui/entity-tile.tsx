@@ -14,6 +14,12 @@
 // lucide icon NAME (resolved via the Space icon catalog), a lucide
 // component directly, an emoji string, or nothing (falls back to the
 // first letter of `name`).
+//
+// 2026-08-26 restyle (user: "make all the icons lined like TLK"): the
+// colored square is GONE. The glyph renders as a plain outline icon
+// stroked with the entity's color (zinc when none), letters become
+// colored letters, emoji stay emoji. The box keeps its exact size so
+// no row or picker shifts by a pixel.
 
 import { createElement, type ReactNode } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -37,33 +43,33 @@ export type EntityTileFallback = keyof typeof FALLBACK_ICONS;
 export const DEFAULT_TILE_COLOR = "#71717A";
 
 const tileVariants = cva(
-  "inline-flex items-center justify-center text-white font-semibold uppercase shrink-0 leading-none select-none overflow-hidden",
+  "inline-flex items-center justify-center font-semibold uppercase shrink-0 leading-none select-none overflow-hidden",
   {
     variants: {
       size: {
-        xs: "h-4 w-4 rounded-[4px] text-[10px]",
-        sm: "h-[18px] w-[18px] rounded-[5px] text-[11px]",
-        md: "h-5 w-5 rounded-[6px] text-[12px]",
-        lg: "h-9 w-9 rounded-[9px] text-[15px]",
+        xs: "h-4 w-4 text-[10px]",
+        sm: "h-[18px] w-[18px] text-[11px]",
+        md: "h-5 w-5 text-[12px]",
+        lg: "h-9 w-9 text-[16px]",
       },
     },
     defaultVariants: { size: "sm" },
   },
 );
 
-// Glyph (inner lucide icon) size per tile size — kept ~60% of the square
-// so every tile reads as the same shape regardless of size.
+// Glyph size per box — a touch larger than the old chip glyphs since
+// there is no square around them anymore.
 const GLYPH: Record<NonNullable<VariantProps<typeof tileVariants>["size"]>, string> = {
-  xs: "h-2.5 w-2.5",
-  sm: "h-3 w-3",
-  md: "h-3.5 w-3.5",
-  lg: "h-5 w-5",
+  xs: "h-3 w-3",
+  sm: "h-3.5 w-3.5",
+  md: "h-4 w-4",
+  lg: "h-6 w-6",
 };
 
 export interface EntityTileProps extends VariantProps<typeof tileVariants> {
   /** Lucide icon name (catalog), a lucide component, or an emoji string. */
   icon?: string | LucideIcon | null;
-  /** Background fill. Falls back to neutral zinc. */
+  /** Stroke/letter color (the entity's identity color). Neutral zinc default. */
   color?: string | null;
   /** Name — first letter is the glyph when no icon resolves. */
   name?: string | null;
@@ -108,7 +114,7 @@ export function EntityTile({
   return (
     <span
       className={cn(tileVariants({ size: sz }), className)}
-      style={{ backgroundColor: color ?? DEFAULT_TILE_COLOR }}
+      style={{ color: color ?? DEFAULT_TILE_COLOR }}
       title={title}
       aria-hidden
     >
