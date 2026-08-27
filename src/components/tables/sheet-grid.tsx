@@ -30,7 +30,8 @@
  * horizontally · Enter edits (or commits an edit and moves down) ·
  * F2/double-click edits · typing replaces · Escape cancels · Delete/
  * Backspace clears the selection · Cmd/Ctrl+A selects all · Cmd/Ctrl+C/X/V
- * copy/cut/paste the selection · Cmd/Ctrl+D fills down · Cmd/Ctrl+R fills
+ * copy/cut/paste the selection · Cmd/Ctrl+; stamps today · Cmd/Ctrl+Shift+;
+ * stamps the time · Cmd/Ctrl+D fills down · Cmd/Ctrl+R fills
  * right · Cmd/Ctrl+Z undoes · Shift+Cmd/Ctrl+Z and Ctrl+Y redo (page-owned
  * command stack; the grid only forwards).
  *
@@ -178,6 +179,19 @@ export function dataEdgeTarget(cur: number, count: number, step: 1 | -1, isEmpty
   }
   while (i !== edge && isEmpty(i)) i += step;
   return i;
+}
+
+/** Local-timezone YYYY-MM-DD, the shape date cells store (Sheets' Cmd+;). */
+function todayStamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+/** Local HH:MM (24h) for Cmd+Shift+;. */
+function nowTimeStamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export type SheetGridProps = {
@@ -737,6 +751,32 @@ export function SheetGrid({
       setApplying(false);
     }
   }, [applyMatrix, colCount]);
+
+  /** Stamp one string into every editable cell of the selection (or the
+   *  active cell if there's no range) via the same write path paste uses,
+   *  so it's one undo step and re-enters storage through the entry grammar
+   *  (an ISO date lands as a real date, not text). Powers Cmd/Ctrl+; and
+   *  Cmd/Ctrl+Shift+;. */
+  const stampSelection = useCallback(async (value: string) => {
+    const aR = active ? rowIndex.get(active.rowId) : undefined;
+    const r = range ?? (active && aR != null ? { r1: aR, r2: aR, c1: active.c, c2: active.c } : null);
+    if (!r) return;
+    const rowsSpan = r.r2 - r.r1 + 1;
+    const colsSpan = r.c2 - r.c1 + 1;
+    // Read-only columns (formula/lookup/rollup) are skipped — an empty
+    // string in applyMatrix leaves a cell untouched.
+    const matrix: string[][] = [];
+    for (let rr = 0; rr < rowsSpan; rr++) {
+      const row: string[] = [];
+      for (let cc = 0; cc < colsSpan; cc++) {
+        const colId = columns[r.c1 + cc]?.id;
+        row.push(colId && !readOnlyCols?.has(colId) ? value : "");
+      }
+      matrix.push(row);
+    }
+    await applyMatrix({ rowId: rowIds[r.r1], c: r.c1 }, matrix);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range, active, rowIndex, columns, readOnlyCols, rowIds, applyMatrix]);
 
   /** Land the selection on a rectangle after a write. Clamped to rows that
    *  exist: rows the page appended have ids this render hasn't seen. */
@@ -1486,7 +1526,23 @@ export function SheetGrid({
           onFormatKey(e.key.toLowerCase() as "b" | "i" | "u");
           return;
         }
+        // Cmd/Ctrl+; stamps TODAY into the selection (Sheets). ";" and ":"
+        // share a physical key, so a user pressing Cmd+: lands here too.
+        case ";":
+        case ":": {
+          e.preventDefault();
+          void stampSelection(todayStamp());
+          return;
+        }
       }
+    }
+
+    // Cmd/Ctrl+Shift+; stamps the current TIME (Sheets' companion shortcut).
+    // Lives outside the !shift block above since it needs Shift held.
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === ";" || e.key === ":")) {
+      e.preventDefault();
+      void stampSelection(nowTimeStamp());
+      return;
     }
 
     const extend = e.shiftKey;
