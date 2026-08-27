@@ -8,7 +8,17 @@ import { welcomeTemplate } from "@/lib/email-templates";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { organizationName, firstName, lastName, email, password } = body;
+    const { organizationName: rawOrgName, firstName: rawFirst, lastName: rawLast, email, password } = body;
+
+    // Public endpoint — probe traffic has submitted HTML payloads as org
+    // names (found in prod 2026-08-27). Names are PLAIN TEXT: strip angle
+    // brackets outright, collapse whitespace, cap length. React escapes on
+    // render, but emails/exports/logs also carry these strings.
+    const cleanName = (v: unknown, max: number) =>
+      typeof v === "string" ? v.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, max) : "";
+    const organizationName = cleanName(rawOrgName, 80);
+    const firstName = cleanName(rawFirst, 60);
+    const lastName = cleanName(rawLast, 60);
 
     if (!organizationName || !firstName || !lastName || !email || !password) {
       return NextResponse.json(
