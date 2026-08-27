@@ -5,9 +5,9 @@
 //
 //   Emails row: multi-email chip input (comma / space / Enter separated)
 //   Access level: same ACCESS_LEVELS catalog the Members page uses
-//   Role definition: KRA + SOP multi-selects — the POST /api/invitations
-//     contract REQUIRES at least one of each (the vision's KRA/SOP-gated
-//     entry rule), so the picker is required here too, not decorative.
+//   Role: optional — the role IS the definition (user 2026-08-27): its
+//     KRAs and their published SOPs seed automatically when the invite
+//     is accepted. No per-item picking.
 //   Personal message: optional note, quoted inside the invite email.
 //
 // Sends one POST /api/invitations per email; summarizes results in a
@@ -24,17 +24,6 @@ import {
 } from "@/components/ui/dialog";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
 import { useOsToast } from "./toast";
-
-interface KraOption {
-  id: string;
-  name: string;
-  category?: string | null;
-}
-
-interface SopOption {
-  id: string;
-  title: string;
-}
 
 interface DeptOption {
   id: string;
@@ -78,10 +67,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const [invalidTokens, setInvalidTokens] = useState<string[]>([]);
   const [accessLevel, setAccessLevel] = useState<AccessLevel>("EMPLOYEE");
   const [message, setMessage] = useState("");
-  const [kras, setKras] = useState<KraOption[] | null>(null);
-  const [sops, setSops] = useState<SopOption[] | null>(null);
-  const [kraIds, setKraIds] = useState<Set<string>>(new Set());
-  const [sopIds, setSopIds] = useState<Set<string>>(new Set());
+
   // Placement — all optional. The Invitation model + POST /api/invitations
   // carry departmentId / roleId / managerId, so a hire can land in the
   // right seat instead of arriving unplaced. Picking a role also lets
@@ -94,32 +80,6 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const [managerId, setManagerId] = useState("");
   const [sending, setSending] = useState(false);
 
-  // Load the KRA / SOP catalogs once per open.
-  useEffect(() => {
-    if (!open) return;
-    fetch("/api/kras?scope=all&limit=200")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setKras((d?.data as KraOption[]) ?? []))
-      .catch(() => setKras([]));
-    fetch("/api/sops?limit=200")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setSops((d?.data as SopOption[]) ?? []))
-      .catch(() => setSops([]));
-    // Placement catalogs. /api/departments and /api/roles return arrays
-    // directly; /api/users wraps rows in { data }.
-    fetch("/api/departments")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setDepts(Array.isArray(d) ? (d as DeptOption[]) : []))
-      .catch(() => setDepts([]));
-    fetch("/api/roles")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setRoles(Array.isArray(d) ? (d as RoleOption[]) : []))
-      .catch(() => setRoles([]));
-    fetch("/api/users?scope=all&limit=200")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setPeople((d?.data as PersonOption[]) ?? []))
-      .catch(() => setPeople([]));
-  }, [open]);
 
   const reset = useCallback(() => {
     setEmails([]);
@@ -127,8 +87,6 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
     setInvalidTokens([]);
     setAccessLevel("EMPLOYEE");
     setMessage("");
-    setKraIds(new Set());
-    setSopIds(new Set());
     setDepartmentId("");
     setRoleId("");
     setManagerId("");
@@ -171,12 +129,6 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
     }
   };
 
-  const toggle = (set: Set<string>, id: string, apply: (next: Set<string>) => void) => {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    apply(next);
-  };
 
   // The server rejects invites without ≥1 KRA and ≥1 SOP — mirror that
   // gate here so the button state is honest.
@@ -185,12 +137,12 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
     return EMAIL_RE.test(d) && !emails.includes(d) ? [...emails, d] : emails;
   }, [emails, draft]);
   const canSend =
-    allEmails.length > 0 && kraIds.size > 0 && sopIds.size > 0 && !sending;
+    allEmails.length > 0 && !sending;
 
   const handleSend = async () => {
     // Pull any last un-committed draft email into the batch.
     const batch = allEmails;
-    if (batch.length === 0 || kraIds.size === 0 || sopIds.size === 0) return;
+    if (batch.length === 0) return;
     setSending(true);
     const failed: { email: string; reason: string }[] = [];
     let sent = 0;
@@ -205,8 +157,6 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             departmentId: departmentId || undefined,
             roleId: roleId || undefined,
             managerId: managerId || undefined,
-            kraIds: Array.from(kraIds),
-            sopIds: Array.from(sopIds),
             message: message.trim() || undefined,
           }),
         });
@@ -235,8 +185,6 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
     }
   };
 
-  const catalogsLoading = kras === null || sops === null;
-  const noCatalog = !catalogsLoading && (kras.length === 0 || sops.length === 0);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -370,74 +318,10 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           </select>
         </div>
 
-        {/* Role definition — required by the invitations contract */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
-              KRAs <span className="font-normal normal-case text-zinc-400">(pick at least 1)</span>
-            </label>
-            <div className="max-h-[140px] overflow-y-auto rounded-md border border-zinc-200 bg-white">
-              {kras === null ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-zinc-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
-                </div>
-              ) : kras.length === 0 ? (
-                <div className="px-2.5 py-2 text-[13px] text-zinc-400">No KRAs yet</div>
-              ) : (
-                kras.map((k) => (
-                  <label
-                    key={k.id}
-                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[13.5px] text-zinc-800 hover:bg-zinc-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={kraIds.has(k.id)}
-                      onChange={() => toggle(kraIds, k.id, setKraIds)}
-                      className="h-3.5 w-3.5 accent-[var(--os-brand)]"
-                    />
-                    <span className="truncate">{k.name}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
-              SOPs <span className="font-normal normal-case text-zinc-400">(pick at least 1)</span>
-            </label>
-            <div className="max-h-[140px] overflow-y-auto rounded-md border border-zinc-200 bg-white">
-              {sops === null ? (
-                <div className="flex items-center gap-2 px-2.5 py-2 text-[13px] text-zinc-400">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
-                </div>
-              ) : sops.length === 0 ? (
-                <div className="px-2.5 py-2 text-[13px] text-zinc-400">No SOPs yet</div>
-              ) : (
-                sops.map((s) => (
-                  <label
-                    key={s.id}
-                    className="flex cursor-pointer items-center gap-2 px-2.5 py-1.5 text-[13.5px] text-zinc-800 hover:bg-zinc-50"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={sopIds.has(s.id)}
-                      onChange={() => toggle(sopIds, s.id, setSopIds)}
-                      className="h-3.5 w-3.5 accent-[var(--os-brand)]"
-                    />
-                    <span className="truncate">{s.title}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-        {noCatalog ? (
-          <p className="text-[12.5px] text-zinc-500">
-            Invites need at least one KRA and one SOP so every new hire lands
-            with a role definition. Create them under KRA &amp; KPI and SOPs
-            first.
-          </p>
-        ) : null}
+        <p className="text-[12.5px] text-zinc-500">
+          Pick a role above and its KRAs, KPIs and published SOPs attach
+          automatically when they join — no per-item selection needed.
+        </p>
 
         {/* Personal message */}
         <div>

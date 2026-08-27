@@ -54,18 +54,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
     }
 
-    // Role-definition gate. Every new hire enters with KRAs + SOPs
-    // already attached so AI Sidekick has immediate context for their
-    // work. Skipped only for the very first user of an org (the
-    // founder onboarding flow uses a different code path).
+    // Role-definition comes from the ROLE (user decision 2026-08-27):
+    // attaching a role is enough — its KRAs and their published SOPs
+    // seed automatically at acceptance. Explicit per-item picks remain
+    // supported for API callers but are no longer required.
     const cleanKraIds: string[] = Array.isArray(kraIds) ? kraIds.filter((s) => typeof s === "string") : [];
     const cleanSopIds: string[] = Array.isArray(sopIds) ? sopIds.filter((s) => typeof s === "string") : [];
-    if (cleanKraIds.length === 0) {
-      return NextResponse.json({ error: "Pick at least one KRA before sending the invite — every new hire needs a role definition." }, { status: 400 });
-    }
-    if (cleanSopIds.length === 0) {
-      return NextResponse.json({ error: "Pick at least one SOP before sending the invite — every new hire needs starter SOPs to acknowledge." }, { status: 400 });
-    }
     // Cross-tenant safety: confirm every KRA/SOP id belongs to this org.
     if (cleanKraIds.length > 0) {
       const kraCount = await prisma.kRA.count({ where: { id: { in: cleanKraIds }, organizationId: orgId } });

@@ -98,21 +98,41 @@ export async function POST(req: Request) {
         },
       });
 
-      // Role-definition fan-out. KRAs and SOPs were chosen by the
-      // inviting admin and stamped on the Invitation; we materialize
-      // them as assignment rows here. Each KRA's role-level weight is
+      // Role-definition fan-out. The ROLE is the source of truth (user
+      // decision 2026-08-27: "the KRA and SOP is connected to a role —
+      // I just have to attach a role"): when the invitation carries no
+      // explicit picks, the role's LIVE KRAs and their published SOPs
+      // are derived at acceptance time, so a role updated between
+      // invite and join seeds the current definition. Explicit picks on
+      // older invitations still win. Each KRA's role-level weight is
       // inherited when set; KRAs without one fall back to an even split
       // (admin can rebalance later from /kra-kpi). SOPs default to
       // mandatory acknowledgement.
-      if (invitation.kraIds.length > 0) {
-        const evenWeight = Math.round((100 / invitation.kraIds.length) * 100) / 100;
+      let seedKraIds = invitation.kraIds;
+      let seedSopIds = invitation.sopIds;
+      if (seedKraIds.length === 0 && invitation.roleId) {
+        const roleKras = await tx.kRA.findMany({
+          where: { roleId: invitation.roleId, organizationId: invitation.organizationId },
+          select: { id: true },
+        });
+        seedKraIds = roleKras.map((k) => k.id);
+        if (seedSopIds.length === 0 && seedKraIds.length > 0) {
+          const roleSops = await tx.sOP.findMany({
+            where: { kraId: { in: seedKraIds }, organizationId: invitation.organizationId, status: "PUBLISHED" },
+            select: { id: true },
+          });
+          seedSopIds = roleSops.map((x) => x.id);
+        }
+      }
+      if (seedKraIds.length > 0) {
+        const evenWeight = Math.round((100 / seedKraIds.length) * 100) / 100;
         const kraWeights = await tx.kRA.findMany({
-          where: { id: { in: invitation.kraIds } },
+          where: { id: { in: seedKraIds } },
           select: { id: true, weight: true },
         });
         const weightByKra = new Map(kraWeights.map((k) => [k.id, k.weight]));
         await tx.kRAAssignment.createMany({
-          data: invitation.kraIds.map((kraId) => ({
+          data: seedKraIds.map((kraId) => ({
             userId: user.id,
             kraId,
             weightage: (weightByKra.get(kraId) ?? 0) > 0 ? weightByKra.get(kraId)! : evenWeight,
@@ -122,12 +142,12 @@ export async function POST(req: Request) {
           skipDuplicates: true,
         });
       }
-      if (invitation.sopIds.length > 0) {
+      if (seedSopIds.length > 0) {
         // SOP step count lives inside SOP.content (a JSON blob), not a
         // separate relation — we leave stepsTotal at 0 and let the
         // first acknowledgement update it from the content shape.
         await tx.sOPAssignment.createMany({
-          data: invitation.sopIds.map((sopId) => ({
+          data: seedSopIds.map((sopId) => ({
             userId: user.id,
             sopId,
             status: "ASSIGNED" as const,
