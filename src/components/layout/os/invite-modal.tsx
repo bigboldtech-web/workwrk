@@ -15,6 +15,7 @@
 // in the chip row so the sender can fix and retry.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSession } from "next-auth/react";
 import { Loader2, Send, X } from "lucide-react";
 import {
   Dialog,
@@ -65,6 +66,12 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const [emails, setEmails] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [invalidTokens, setInvalidTokens] = useState<string[]>([]);
+  const [wrongDomain, setWrongDomain] = useState<string[]>([]);
+  const { data: sessionData } = useSession();
+  // Company-domain lock: invitees must share the workspace's email
+  // domain (the server enforces org.domain ?? inviter's; the signed-in
+  // user's domain is the client's best mirror of that rule).
+  const companyDomain = sessionData?.user?.email?.split("@")[1]?.toLowerCase() ?? null;
   const [accessLevel, setAccessLevel] = useState<AccessLevel>("EMPLOYEE");
   const [message, setMessage] = useState("");
 
@@ -79,6 +86,24 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
   const [roleId, setRoleId] = useState("");
   const [managerId, setManagerId] = useState("");
   const [sending, setSending] = useState(false);
+
+  // Load the placement catalogs once per open. /api/departments and
+  // /api/roles return arrays directly; /api/users wraps rows in { data }.
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/departments")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setDepts(Array.isArray(d) ? (d as DeptOption[]) : []))
+      .catch(() => setDepts([]));
+    fetch("/api/roles")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setRoles(Array.isArray(d) ? (d as RoleOption[]) : []))
+      .catch(() => setRoles([]));
+    fetch("/api/users?scope=all&limit=200")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPeople((d?.data as PersonOption[]) ?? []))
+      .catch(() => setPeople([]));
+  }, [open]);
 
 
   const reset = useCallback(() => {
@@ -106,18 +131,21 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
       if (tokens.length === 0) return;
       const good: string[] = [];
       const bad: string[] = [];
+      const offDomain: string[] = [];
       for (const t of tokens) {
         const lower = t.toLowerCase();
-        if (EMAIL_RE.test(lower)) good.push(lower);
-        else bad.push(t);
+        if (!EMAIL_RE.test(lower)) { bad.push(t); continue; }
+        if (companyDomain && lower.split("@")[1] !== companyDomain) { offDomain.push(t); continue; }
+        good.push(lower);
       }
       if (good.length > 0) {
         setEmails((prev) => [...prev, ...good.filter((e) => !prev.includes(e))]);
       }
       setInvalidTokens(bad);
-      setDraft(bad.length > 0 ? bad.join(" ") : "");
+      setWrongDomain(offDomain);
+      setDraft([...bad, ...offDomain].length > 0 ? [...bad, ...offDomain].join(" ") : "");
     },
-    [],
+    [companyDomain],
   );
 
   const onDraftKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -235,6 +263,11 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
               className="min-w-[140px] flex-1 bg-transparent text-[14px] text-zinc-800 outline-none placeholder:text-zinc-400"
             />
           </div>
+          {wrongDomain.length > 0 ? (
+            <p className="mt-1 text-[12.5px] text-red-600">
+              Only @{companyDomain} addresses can join this workspace: {wrongDomain.join(", ")}
+            </p>
+          ) : null}
           {invalidTokens.length > 0 ? (
             <p className="mt-1 text-[12.5px] text-red-600">
               Not a valid email: {invalidTokens.join(", ")}

@@ -54,6 +54,24 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Valid email is required" }, { status: 400 });
     }
 
+    // Company-domain lock (user rule 2026-08-27): everyone invited to a
+    // workspace joins on the company's own email domain. The domain is
+    // the org's stored one, falling back to the inviting admin's — so
+    // an @cashkr.com admin can only invite @cashkr.com addresses.
+    const orgDomainRow = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { domain: true },
+    });
+    const inviterEmail = (session.user as any).email as string | undefined;
+    const allowedDomain = (orgDomainRow?.domain?.trim() || inviterEmail?.split("@")[1] || "").toLowerCase();
+    const inviteDomain = String(email).split("@")[1]?.toLowerCase() ?? "";
+    if (allowedDomain && inviteDomain !== allowedDomain) {
+      return NextResponse.json(
+        { error: `Only @${allowedDomain} addresses can join this workspace` },
+        { status: 400 },
+      );
+    }
+
     // Role-definition comes from the ROLE (user decision 2026-08-27):
     // attaching a role is enough — its KRAs and their published SOPs
     // seed automatically at acceptance. Explicit per-item picks remain
