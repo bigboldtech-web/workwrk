@@ -107,7 +107,7 @@ export function ClickTopbar() {
           <span className="w-5 h-5 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[11px] font-bold">
             {orgInitials(orgName)}
           </span>
-          <span className="text-[14px] font-medium text-zinc-900 leading-none max-w-[160px] truncate">{orgName}</span>
+          <span className="text-[14px] font-medium text-zinc-900 leading-5 max-w-[160px] truncate">{orgName}</span>
           <ChevronDown className="w-3 h-3 text-zinc-500" />
         </button>
         <CalendarPeek />

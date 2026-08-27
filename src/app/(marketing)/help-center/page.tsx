@@ -97,7 +97,7 @@ export default function HelpCenterPage() {
                 <Link
                   key={g.title}
                   href="#"
-                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
+                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
                 >
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text} border ${t.border}`}>
                     <Icon size={18} strokeWidth={2.4} />
@@ -126,7 +126,7 @@ export default function HelpCenterPage() {
                 <Link
                   key={hub.slug}
                   href={`#${hub.slug}`}
-                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:-translate-y-0.5 hover:border-slate-300 transition shadow-sm"
+                  className="group p-5 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition shadow-sm"
                 >
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
                     <Icon size={18} strokeWidth={2.4} />

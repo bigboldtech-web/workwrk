@@ -367,7 +367,7 @@ export function SpaceTreeRow({
           aria-expanded={expanded}
         >
           <span className="group-hover/space:opacity-0 transition-opacity">
-            <EntityTile size="xs" icon={space.icon} color={space.color} name={space.name} />
+            <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
           </span>
           <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-500">
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}

@@ -2899,7 +2899,7 @@ function GroupHeaderMenu({
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
       {open && menuPos ? (
-        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 190 }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[14px]">
+        <div style={{ position: "fixed", left: menuPos.left, minWidth: 190, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[14px]">
           <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
@@ -2989,7 +2989,7 @@ function StatusCell({
           {circle}
         </button>
         {open && menuPos ? (
-          <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 224 }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
+          <div style={{ position: "fixed", left: menuPos.left, width: 224, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
             {/* Status / Task Type tab switch (ClickUp). */}
             <div className="flex items-center gap-1 p-0.5 mb-1.5 bg-zinc-100 rounded-md">
               <button type="button" onClick={() => setTab("status")} className={`flex-1 h-7 rounded-[5px] text-[13.5px] font-medium transition-colors ${tab === "status" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Status</button>
@@ -3064,7 +3064,7 @@ function StatusCell({
           {fill}
         </button>
         {open && menuPos ? (
-          <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 160 }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+          <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
             {statuses.map((opt) => {
               const active = opt.value === row.status;
               return (
@@ -3111,7 +3111,7 @@ function StatusCell({
         <ChevronDown className="w-3 h-3 text-zinc-500" />
       </button>
       {open && menuPos ? (
-        <div style={{ position: "fixed", top: menuPos.top, left: menuPos.left, minWidth: 160 }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+        <div style={{ position: "fixed", left: menuPos.left, minWidth: 160, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-md border border-zinc-200 bg-white shadow-lg py-1">
           {statuses.map((opt) => {
             const active = opt.value === row.status;
             return (

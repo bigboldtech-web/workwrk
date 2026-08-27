@@ -140,7 +140,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
       </button>
       {open && menuPos ? (
         <div
-          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 240 }}
+          style={{ position: "fixed", left: menuPos.left, width: 240, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }}
           className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >

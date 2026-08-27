@@ -512,7 +512,7 @@ export function BoardView<T>(props: Props<T>) {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); saveTabFromCurrent(t.id); }}
-                  className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-zinc-500-2 hover:text-[var(--os-brand)]"
+                  className="opacity-0 group-hover:opacity-100 text-[10px] uppercase tracking-wider text-zinc-500 hover:text-[var(--os-brand)]"
                   tabIndex={-1}
                   title="Save current view to this tab"
                 >
@@ -560,7 +560,7 @@ export function BoardView<T>(props: Props<T>) {
 
           {!props.hideSearch && (
             <div className="relative">
-              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500-2 pointer-events-none" aria-hidden />
+              <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none" aria-hidden />
               <input
                 type="text"
                 value={query}
@@ -572,7 +572,7 @@ export function BoardView<T>(props: Props<T>) {
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500-2 hover:text-zinc-900"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-900"
                   aria-label="Clear search"
                 >
                   <X size={11} />
@@ -621,7 +621,7 @@ export function BoardView<T>(props: Props<T>) {
             const selected = filters[field.key] ?? new Set<string>();
             return (
               <div key={field.key} className="flex items-start gap-2 flex-wrap">
-                <span className="text-[11px] uppercase tracking-wider text-zinc-500-2 font-semibold pt-1.5 min-w-[80px]">{field.label}</span>
+                <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold pt-1.5 min-w-[80px]">{field.label}</span>
                 <div className="flex flex-wrap gap-1">
                   {choices.map((c) => {
                     const isOn = selected.has(c.value);
@@ -650,7 +650,7 @@ export function BoardView<T>(props: Props<T>) {
 
       {/* Result count when filtered */}
       {(query || activeFilterCount > 0) && (
-        <div className="text-[12px] text-zinc-500-2 mb-2">
+        <div className="text-[12px] text-zinc-500 mb-2">
           Showing {filteredItems.length} of {props.items.length}
         </div>
       )}
@@ -677,7 +677,7 @@ export function BoardView<T>(props: Props<T>) {
                 </button>
                 {showBulkUpdate && (
                   <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-white border border-zinc-200 shadow-lg py-1 max-h-72 overflow-y-auto">
-                    <div className="px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-500-2">
+                    <div className="px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-500">
                       Set <span className="font-mono normal-case">{selectFields.find((f) => f.key === showBulkUpdate)?.label}</span> for {selectedIds.size}
                     </div>
                     {selectFields.length > 1 && (
@@ -807,7 +807,7 @@ function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>)
 
   return (
     <div className="mt-3 flex items-center gap-3" aria-label={`${field.label} distribution across ${total} rows`}>
-      <span className="text-[11px] uppercase tracking-wider text-zinc-500-2 font-semibold w-20 flex-shrink-0">
+      <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold w-20 flex-shrink-0">
         {field.label}
       </span>
       <div className="flex-1 h-3 rounded-full overflow-hidden flex bg-zinc-50 border border-zinc-200">
@@ -820,7 +820,7 @@ function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>)
           />
         ))}
       </div>
-      <span className="text-[11px] text-zinc-500-2 font-mono tabular-nums flex-shrink-0">{total}</span>
+      <span className="text-[11px] text-zinc-500 font-mono tabular-nums flex-shrink-0">{total}</span>
     </div>
   );
 }
@@ -897,7 +897,7 @@ function TableView<T>({ items, fields, getId, getTitle, getValue, onRowClick, on
     <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-500-2">
+          <thead className="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-500">
             <tr>
               {selectable && (
                 <th className="w-8 px-3 py-2.5">
@@ -1322,11 +1322,11 @@ function KanbanView<T>({
                 <span className="w-2 h-2 rounded-full" style={{ background: col.color ?? "#94a3b8" }} aria-hidden />
                 <span className="text-sm font-semibold">{col.label}</span>
               </div>
-              <span className="text-xs text-zinc-500-2">{colItems.length}</span>
+              <span className="text-xs text-zinc-500">{colItems.length}</span>
             </div>
             <div className="space-y-2">
               {colItems.length === 0 ? (
-                <div className="text-xs text-zinc-500-2 italic py-3 text-center border border-dashed border-zinc-200 rounded-lg">Empty</div>
+                <div className="text-xs text-zinc-500 italic py-3 text-center border border-dashed border-zinc-200 rounded-lg">Empty</div>
               ) : (
                 colItems.map((item) => (
                   <KanbanCard
@@ -1382,7 +1382,7 @@ function KanbanCard<T>({
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="absolute top-2 right-2 p-1 rounded hover:bg-zinc-50 text-zinc-500-2"
+            className="absolute top-2 right-2 p-1 rounded hover:bg-zinc-50 text-zinc-500"
             aria-label="Move"
           >
             <MoreVertical size={11} />
@@ -1390,7 +1390,7 @@ function KanbanCard<T>({
         )}
         {menuOpen && onMove && (
           <div className="absolute top-7 right-2 z-10 w-40 rounded-lg bg-white border border-zinc-200 shadow-lg py-1">
-            <div className="px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-500-2">Move to</div>
+            <div className="px-3 py-1 text-[11px] uppercase tracking-wider text-zinc-500">Move to</div>
             {columns.map((c) => (
               <button
                 key={c.value}
@@ -1406,13 +1406,13 @@ function KanbanCard<T>({
         )}
       </div>
       {detailFields.length > 0 && (
-        <div className="flex flex-wrap gap-2 text-[12px] text-zinc-500-2 mt-1">
+        <div className="flex flex-wrap gap-2 text-[12px] text-zinc-500 mt-1">
           {detailFields.map((f) => {
             const v = getValue(item, f.key);
             if (v == null || v === "") return null;
             return (
               <span key={f.key} className="inline-flex items-center gap-1">
-                <span className="text-zinc-500-2 opacity-60">{f.label}:</span>
+                <span className="text-zinc-500 opacity-60">{f.label}:</span>
                 <CellValue field={f} value={v} compact />
               </span>
             );
@@ -1466,7 +1466,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
     <div className="rounded-xl border border-zinc-200 bg-white divide-y divide-border">
       {buckets.map(([label, rows]) => (
         <div key={label} className="px-4 py-3">
-          <div className="text-[12px] uppercase tracking-wider text-zinc-500-2 font-semibold mb-2 inline-flex items-center gap-1.5">
+          <div className="text-[12px] uppercase tracking-wider text-zinc-500 font-semibold mb-2 inline-flex items-center gap-1.5">
             <Clock size={11} /> Week of {label}
           </div>
           <div className="space-y-1.5">
@@ -1477,7 +1477,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
                 className={"rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm " + (onRowClick ? "cursor-pointer hover:border-[var(--os-brand)]/40" : "")}
               >
                 <div className="font-medium">{getTitle(item)}</div>
-                <div className="text-[12px] text-zinc-500-2 mt-0.5">
+                <div className="text-[12px] text-zinc-500 mt-0.5">
                   {(() => {
                     const v = getValue(item, dateField.key);
                     return typeof v === "string" ? new Date(v).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : "—";
@@ -1490,7 +1490,7 @@ function CalendarView<T>({ items, getId, getTitle, getValue, dateField, onRowCli
       ))}
       {undated.length > 0 && (
         <div className="px-4 py-3">
-          <div className="text-[12px] uppercase tracking-wider text-zinc-500-2 font-semibold mb-2">No date</div>
+          <div className="text-[12px] uppercase tracking-wider text-zinc-500 font-semibold mb-2">No date</div>
           <div className="space-y-1.5">
             {undated.map((item) => (
               <div
@@ -1542,7 +1542,7 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
                 if (v == null || v === "" || (Array.isArray(v) && v.length === 0)) return null;
                 return (
                   <div key={f.key} className="flex items-center gap-2 min-w-0">
-                    <span className="text-zinc-500-2 text-[11px] uppercase tracking-wider flex-shrink-0">{f.label}</span>
+                    <span className="text-zinc-500 text-[11px] uppercase tracking-wider flex-shrink-0">{f.label}</span>
                     <span className="text-zinc-500 truncate">
                       <CellValue field={f} value={v} compact />
                     </span>
@@ -1562,10 +1562,10 @@ function GalleryView<T>({ items, fields, getId, getTitle, getValue, onRowClick }
 // ─────────────────────────────────────────────────────────
 
 function CellValue({ field, value, compact = false }: { field: BoardField; value: unknown; compact?: boolean }) {
-  if (value == null || value === "") return <span className="text-zinc-500-2">—</span>;
+  if (value == null || value === "") return <span className="text-zinc-500">—</span>;
   switch (field.fieldType) {
     case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-zinc-500-2"}>{value ? "✓" : "—"}</span>;
+      return <span className={value ? "text-emerald-600" : "text-zinc-500"}>{value ? "✓" : "—"}</span>;
     case "DATE":
       return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
     case "MULTI_SELECT": {
@@ -1575,7 +1575,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
           {arr.slice(0, compact ? 2 : 6).map((v) => (
             <span key={v} className="text-[11px] px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] dark:bg-white/10 text-[var(--os-brand-deep)]">{v}</span>
           ))}
-          {arr.length > (compact ? 2 : 6) && <span className="text-[11px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
+          {arr.length > (compact ? 2 : 6) && <span className="text-[11px] text-zinc-500">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>
       );
     }
@@ -1629,7 +1629,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "TIMELINE": {
       const tl = typeof value === "object" && value !== null ? value as { start?: string; end?: string } : null;
-      if (!tl?.start || !tl?.end) return <span className="text-zinc-500-2">—</span>;
+      if (!tl?.start || !tl?.end) return <span className="text-zinc-500">—</span>;
       const start = new Date(tl.start);
       const end = new Date(tl.end);
       const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
@@ -1659,13 +1659,13 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
           <div className="flex-1 h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
             <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
           </div>
-          <span className="text-[12px] text-zinc-500-2 tabular-nums w-8 text-right">{pct}%</span>
+          <span className="text-[12px] text-zinc-500 tabular-nums w-8 text-right">{pct}%</span>
         </div>
       );
     }
     case "FILES": {
       const arr = Array.isArray(value) ? (value as unknown[]) : [];
-      if (arr.length === 0) return <span className="text-zinc-500-2">—</span>;
+      if (arr.length === 0) return <span className="text-zinc-500">—</span>;
       return (
         <span className="inline-flex items-center gap-1 text-[12px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500">
           📎 <span className="tabular-nums">{arr.length}</span>
@@ -1694,13 +1694,13 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "TAGS": {
       const arr = Array.isArray(value) ? (value as string[]) : [];
-      if (arr.length === 0) return <span className="text-zinc-500-2">—</span>;
+      if (arr.length === 0) return <span className="text-zinc-500">—</span>;
       return (
         <div className="inline-flex flex-wrap gap-1">
           {arr.slice(0, compact ? 2 : 6).map((t) => (
             <span key={t} className="text-[11px] px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--os-brand)_8%,transparent)] dark:bg-white/5 text-[var(--os-brand-deep)] dark:text-zinc-100 border border-[var(--os-brand)]/30 dark:border-white/20">#{t}</span>
           ))}
-          {arr.length > (compact ? 2 : 6) && <span className="text-[11px] text-zinc-500-2">+{arr.length - (compact ? 2 : 6)}</span>}
+          {arr.length > (compact ? 2 : 6) && <span className="text-[11px] text-zinc-500">+{arr.length - (compact ? 2 : 6)}</span>}
         </div>
       );
     }
@@ -1716,7 +1716,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
     }
     case "FORMULA":
       return (
-        <span className="inline-flex items-center gap-1 text-[12px] font-mono text-zinc-500-2">
+        <span className="inline-flex items-center gap-1 text-[12px] font-mono text-zinc-500">
           ƒ <span className="truncate max-w-[160px]">{String(value)}</span>
         </span>
       );
@@ -1724,7 +1724,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
       const linked = typeof value === "object" && value !== null && "itemIds" in (value as Record<string, unknown>)
         ? ((value as Record<string, unknown>).itemIds as unknown[])
         : Array.isArray(value) ? value as unknown[] : [];
-      if (linked.length === 0) return <span className="text-zinc-500-2">—</span>;
+      if (linked.length === 0) return <span className="text-zinc-500">—</span>;
       return (
         <span className="inline-flex items-center gap-1 text-[12px] px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300">
           🔗 <span className="tabular-nums">{linked.length}</span> linked
@@ -1739,7 +1739,7 @@ function CellValue({ field, value, compact = false }: { field: BoardField; value
 function EmptyView({ label }: { label: string }) {
   return (
     <div className="rounded-xl border border-dashed border-zinc-200 bg-white text-center py-16">
-      <ChevronDown size={28} className="mx-auto mb-2 text-zinc-500-2 rotate-180" />
+      <ChevronDown size={28} className="mx-auto mb-2 text-zinc-500 rotate-180" />
       <p className="text-sm text-zinc-500">{label}</p>
     </div>
   );

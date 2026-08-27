@@ -146,7 +146,7 @@ export function ItemActivityDrawer(props: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-zinc-50 text-zinc-500-2 hover:text-zinc-900"
+            className="p-1.5 rounded-md hover:bg-zinc-50 text-zinc-500 hover:text-zinc-900"
             aria-label="Close"
           >
             <X size={16} />
@@ -182,7 +182,7 @@ export function ItemActivityDrawer(props: Props) {
 function CountBadge({ count }: { count?: number }) {
   if (count === undefined || count <= 0) return null;
   return (
-    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-zinc-50 text-zinc-500-2">{count}</span>
+    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-zinc-50 text-zinc-500">{count}</span>
   );
 }
 
@@ -214,7 +214,7 @@ function UpdatesTab({
           }}
         />
         <div className="flex items-center justify-between pt-2 mt-2 border-t border-zinc-200">
-          <p className="text-[11px] text-zinc-500-2">⌘/Ctrl + Enter to post</p>
+          <p className="text-[11px] text-zinc-500">⌘/Ctrl + Enter to post</p>
           <button
             type="button"
             onClick={onSubmit}
@@ -228,14 +228,14 @@ function UpdatesTab({
       </div>
 
       {loading ? (
-        <p className="text-xs text-zinc-500-2 text-center py-8 inline-flex items-center gap-2 w-full justify-center">
+        <p className="text-xs text-zinc-500 text-center py-8 inline-flex items-center gap-2 w-full justify-center">
           <Loader2 size={12} className="animate-spin" /> Loading updates…
         </p>
       ) : updates.length === 0 ? (
         <div className="text-center py-12">
-          <MessageCircle size={32} className="mx-auto text-zinc-500-2 mb-3" />
+          <MessageCircle size={32} className="mx-auto text-zinc-500 mb-3" />
           <p className="text-sm font-medium mb-1">No updates yet</p>
-          <p className="text-xs text-zinc-500-2">Share progress, mention a teammate, or attach a file to get things moving.</p>
+          <p className="text-xs text-zinc-500">Share progress, mention a teammate, or attach a file to get things moving.</p>
         </div>
       ) : (
         <ul className="space-y-3">
@@ -245,12 +245,12 @@ function UpdatesTab({
                 <Avatar name={u.authorName} image={u.authorImage} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{u.authorName ?? "Unknown"}</p>
-                  <p className="text-[11px] text-zinc-500-2">{fmtAbs(new Date(u.createdAt))}</p>
+                  <p className="text-[11px] text-zinc-500">{fmtAbs(new Date(u.createdAt))}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => onDelete(u.id)}
-                  className="p-1 rounded text-zinc-500-2 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30"
+                  className="p-1 rounded text-zinc-500 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30"
                   aria-label="Archive"
                   title="Archive (keeps history)"
                 >
@@ -269,9 +269,9 @@ function UpdatesTab({
 function FilesPlaceholder() {
   return (
     <div className="p-8 text-center">
-      <Paperclip size={32} className="mx-auto text-zinc-500-2 mb-3" />
+      <Paperclip size={32} className="mx-auto text-zinc-500 mb-3" />
       <p className="text-sm font-medium mb-1">Files coming soon</p>
-      <p className="text-xs text-zinc-500-2">
+      <p className="text-xs text-zinc-500">
         Most modules already have their own attachment surface — we&apos;re unifying them into this tab in a later polish phase.
       </p>
     </div>
@@ -281,7 +281,7 @@ function FilesPlaceholder() {
 function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: boolean }) {
   if (loading) {
     return (
-      <p className="text-xs text-zinc-500-2 text-center py-12 inline-flex items-center gap-2 w-full justify-center">
+      <p className="text-xs text-zinc-500 text-center py-12 inline-flex items-center gap-2 w-full justify-center">
         <Loader2 size={12} className="animate-spin" /> Loading…
       </p>
     );
@@ -289,9 +289,9 @@ function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: 
   if (activity.length === 0) {
     return (
       <div className="text-center py-12 px-6">
-        <ActivityIcon size={32} className="mx-auto text-zinc-500-2 mb-3" />
+        <ActivityIcon size={32} className="mx-auto text-zinc-500 mb-3" />
         <p className="text-sm font-medium mb-1">No activity yet</p>
-        <p className="text-xs text-zinc-500-2">Every field change, owner assignment, and status flip will land here automatically.</p>
+        <p className="text-xs text-zinc-500">Every field change, owner assignment, and status flip will land here automatically.</p>
       </div>
     );
   }
@@ -303,9 +303,9 @@ function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: 
           <div className="flex-1 min-w-0 pt-1">
             <p>
               <span className="font-medium">{a.actorName ?? "System"}</span>{" "}
-              <span className="text-zinc-500-2">{renderActivity(a)}</span>
+              <span className="text-zinc-500">{renderActivity(a)}</span>
             </p>
-            <p className="text-[11px] text-zinc-500-2 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
+            <p className="text-[11px] text-zinc-500 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
           </div>
         </li>
       ))}

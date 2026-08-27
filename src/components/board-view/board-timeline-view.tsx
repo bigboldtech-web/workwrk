@@ -227,10 +227,10 @@ export function BoardTimelineView({ boardId, initialItems, statuses, canEdit = f
               type="button"
               onClick={() => onOpenItem?.(it.id)}
               onContextMenu={(e) => menu.openItemMenu(e, it)}
-              className="inline-flex items-center h-6 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50 max-w-[200px] truncate"
+              className="inline-flex items-center h-6 px-2 rounded-md border border-zinc-200 text-[12.5px] text-zinc-600 hover:bg-zinc-50 max-w-[200px] overflow-hidden"
               title={it.title}
             >
-              {it.title}
+              <span className="truncate">{it.title}</span>
             </button>
           ))}
           {unscheduled.length > 8 ? (

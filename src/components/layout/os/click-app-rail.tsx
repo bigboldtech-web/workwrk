@@ -33,7 +33,7 @@ const HOVER_CLOSE_MS = 120;
 function RailLabel({ children }: { children: React.ReactNode }) {
   return (
     <span className="flex h-[20px] w-full items-center justify-center px-px">
-      <span className="line-clamp-2 break-words text-center text-[10px] leading-[1.1]">
+      <span className="line-clamp-2 break-words text-center text-[10px] leading-[1.3]">
         {children}
       </span>
     </span>

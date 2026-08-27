@@ -261,7 +261,7 @@ export async function ClickupHomeHero() {
             <Link
               key={t.label}
               href={t.href}
-              className="group rounded-xl border border-border bg-surface p-5 transition-fast hover:border-[color:var(--accent)]/40 hover:shadow-[0_4px_16px_-6px_rgba(0,0,0,0.10)] hover:-translate-y-px"
+              className="group rounded-xl border border-border bg-surface p-5 transition-fast hover:border-[color:var(--accent)]/40 hover:shadow-[0_4px_16px_-6px_rgba(0,0,0,0.10)]"
             >
               <div className="flex items-center justify-between mb-4">
                 <span className={`inline-flex items-center justify-center w-10 h-10 rounded-xl ${t.chipBg} ${t.chipFg}`}>

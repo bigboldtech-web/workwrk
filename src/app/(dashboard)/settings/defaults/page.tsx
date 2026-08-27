@@ -286,7 +286,7 @@ export default function DefaultsPage() {
                           boxShadow: active ? "0 0 0 2px #fff, 0 0 0 4px #18181b" : "none",
                         }}
                         className={`flex h-9 w-9 items-center justify-center rounded-full transition-transform ${
-                          saving ? "opacity-60" : active ? "" : "hover:scale-105"
+                          saving ? "opacity-60" : active ? "" : "hover:brightness-110"
                         }`}
                       >
                         {active ? <Check className="h-4 w-4 text-white" strokeWidth={3.5} /> : null}

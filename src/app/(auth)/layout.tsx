@@ -63,7 +63,7 @@ export default function AuthLayout({
               { icon: FileText,   label: "Docs",   hint: "block editor + AI summary",     color: "text-amber-600 bg-amber-50 border-amber-100" },
               { icon: Bot,        label: "Agents", hint: "tools, memory, workflows",      color: "text-rose-600 bg-rose-50 border-rose-100" },
             ].map((p) => (
-              <div key={p.label} className={`flex items-start gap-2.5 text-sm text-slate-700 bg-white border rounded-xl px-3 py-2.5 transition hover:shadow-sm hover:-translate-y-0.5 ${p.color.split(" ")[2]}`}>
+              <div key={p.label} className={`flex items-start gap-2.5 text-sm text-slate-700 bg-white border rounded-xl px-3 py-2.5 transition hover:shadow-sm ${p.color.split(" ")[2]}`}>
                 <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${p.color.split(" ").slice(0, 2).join(" ")}`}>
                   <p.icon size={14} />
                 </span>

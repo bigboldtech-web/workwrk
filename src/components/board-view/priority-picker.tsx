@@ -64,7 +64,7 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       </button>
       {open && menuPos ? (
         <div
-          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 170 }}
+          style={{ position: "fixed", left: menuPos.left, width: 170, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }}
           className="z-[200] rounded-xl border border-zinc-200 bg-white shadow-2xl py-1.5"
           onClick={(e) => e.stopPropagation()}
         >

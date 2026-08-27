@@ -343,8 +343,8 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
                           {it.owner ? (
                             <Avatar className="ml-auto h-4 w-4 shrink-0">
                               <AvatarImage src={it.owner.avatar ?? undefined} />
-                              <AvatarFallback className="text-[7px]">
-                                {`${it.owner.firstName?.[0] ?? ""}${it.owner.lastName?.[0] ?? ""}`}
+                              <AvatarFallback className="text-[10px]">
+                                {it.owner.firstName?.[0] ?? it.owner.lastName?.[0] ?? "?"}
                               </AvatarFallback>
                             </Avatar>
                           ) : null}

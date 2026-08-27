@@ -106,7 +106,7 @@ export default function FAQPage() {
                 <a
                   key={g.name}
                   href={`#${g.name.toLowerCase()}`}
-                  className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:scale-105 transition`}
+                  className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
                 >
                   {g.name}
                 </a>

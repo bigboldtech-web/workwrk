@@ -2781,7 +2781,7 @@ function BoardTaskCard({
       role="button"
       tabIndex={0}
       draggable
-      className="group/card w-full cursor-grab rounded-md border border-zinc-200 bg-white !p-2 text-left text-[13px] shadow-sm transition hover:-translate-y-px hover:border-zinc-300 hover:shadow-md active:cursor-grabbing"
+      className="group/card w-full cursor-grab rounded-md border border-zinc-200 bg-white !p-2 text-left text-[13px] shadow-sm transition  hover:border-zinc-300 hover:shadow-md active:cursor-grabbing"
       onClick={(event) => {
         if (dragStartedRef.current) {
           event.preventDefault();

@@ -184,7 +184,7 @@ export default function AppearancePage() {
                     aria-label={a.label}
                     aria-pressed={active}
                     className={`flex h-9 w-9 items-center justify-center rounded-full transition-all disabled:opacity-60 ${
-                      active ? "ring-2 ring-zinc-900 ring-offset-2 ring-offset-white dark:ring-zinc-100 dark:ring-offset-[#14171D]" : "hover:scale-105"
+                      active ? "ring-2 ring-zinc-900 ring-offset-2 ring-offset-white dark:ring-zinc-100 dark:ring-offset-[#14171D]" : "hover:brightness-110"
                     }`}
                     style={{ background: a.swatch }}
                   >

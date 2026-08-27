@@ -130,7 +130,7 @@ export default function FeaturesPage() {
                 <a
                   key={hub.slug}
                   href={`#${hub.slug}`}
-                  className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:scale-105 transition`}
+                  className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: t.hex }} />
                   {hub.name}

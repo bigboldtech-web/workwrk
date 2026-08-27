@@ -2027,7 +2027,7 @@ export default function SOPDetailPage() {
                             ) : (
                               <p className="text-sm font-medium">{step.description || `Step ${index + 1}`}</p>
                             )}
-                            {step.url && <p className="text-xs text-zinc-500-2 mt-0.5 truncate">{step.url}</p>}
+                            {step.url && <p className="text-xs text-zinc-500 mt-0.5 truncate">{step.url}</p>}
                           </div>
                           {/* Delete button */}
                           {editing && (

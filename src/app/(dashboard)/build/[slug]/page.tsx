@@ -142,7 +142,7 @@ export default function BuildAppPage() {
             </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
             {app.description && <p className="text-sm text-zinc-500">{app.description}</p>}
-            <p className="text-[11px] text-zinc-500-2 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
+            <p className="text-[11px] text-zinc-500 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -156,7 +156,7 @@ export default function BuildAppPage() {
           <button
             type="button"
             onClick={deleteApp}
-            className="p-2 rounded-lg text-zinc-500-2 hover:text-[#E2445C] hover:bg-red-50 dark:hover:bg-red-950/40"
+            className="p-2 rounded-lg text-zinc-500 hover:text-[#E2445C] hover:bg-red-50 dark:hover:bg-red-950/40"
             aria-label="Archive app"
             title="Archive app"
           >
@@ -174,7 +174,7 @@ export default function BuildAppPage() {
       {/* Multi-view rendering — Table / Kanban / Calendar / Gallery */}
       {rows.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white text-center py-16">
-          <Wand2 size={32} className="mx-auto mb-2 text-zinc-500-2" />
+          <Wand2 size={32} className="mx-auto mb-2 text-zinc-500" />
           <p className="font-medium text-sm mb-1">No rows yet</p>
           <p className="text-xs text-zinc-500 mb-4">Add the first row to populate your app.</p>
           <button
@@ -245,10 +245,10 @@ export default function BuildAppPage() {
 }
 
 function CellValue({ field, value }: { field: AppField; value: unknown }) {
-  if (value == null) return <span className="text-zinc-500-2">—</span>;
+  if (value == null) return <span className="text-zinc-500">—</span>;
   switch (field.fieldType) {
     case "CHECKBOX":
-      return <span className={value ? "text-emerald-600" : "text-zinc-500-2"}>{value ? "✓" : "—"}</span>;
+      return <span className={value ? "text-emerald-600" : "text-zinc-500"}>{value ? "✓" : "—"}</span>;
     case "DATE":
       return <span>{typeof value === "string" ? new Date(value).toLocaleDateString() : String(value)}</span>;
     case "MULTI_SELECT": {
@@ -315,7 +315,7 @@ function NewRowModal({
         </div>
         {fields.map((f) => (
           <div key={f.key}>
-            <label className="block text-xs font-medium text-zinc-500-2 mb-1">{f.label}</label>
+            <label className="block text-xs font-medium text-zinc-500 mb-1">{f.label}</label>
             {f.fieldType === "TEXTAREA" ? (
               <textarea
                 value={String(values[f.key] ?? "")}

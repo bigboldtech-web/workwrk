@@ -328,7 +328,7 @@ export default function DocsPage() {
               <span className="min-w-0">
                 <span className="flex items-center gap-1 text-[14.5px] font-semibold text-zinc-900">
                   {t.title}
-                  {t.verified ? <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-blue-500 text-white text-[8px]">✓</span> : null}
+                  {t.verified ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white text-[10px]">✓</span> : null}
                 </span>
                 <span className="block text-[13px] text-zinc-500 truncate">{t.hint}</span>
               </span>

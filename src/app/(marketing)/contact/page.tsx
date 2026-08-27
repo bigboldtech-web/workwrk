@@ -80,7 +80,7 @@ export default function ContactPage() {
                 <Link
                   key={c.title}
                   href={c.href}
-                  className="group p-7 bg-white rounded-2xl border border-slate-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
+                  className="group p-7 bg-white rounded-2xl border border-slate-200 hover:border-slate-300 hover:shadow-[0_18px_50px_-18px_rgba(15,23,42,0.18)] transition shadow-sm"
                 >
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center bg-gradient-to-br ${t.gradVia} text-white`}>
                     <c.icon size={20} strokeWidth={2.4} />

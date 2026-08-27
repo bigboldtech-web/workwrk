@@ -91,7 +91,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-md hover:bg-zinc-50 text-zinc-500-2 hover:text-zinc-900"
+            className="p-1.5 rounded-md hover:bg-zinc-50 text-zinc-500 hover:text-zinc-900"
             aria-label="Close"
           >
             <X size={16} />
@@ -100,7 +100,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <section>
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Details</h3>
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">Details</h3>
             <div className="space-y-3">
               {fields.map((f) => {
                 const value = getValue(item, f.key);
@@ -119,7 +119,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           </section>
 
           <section>
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500-2 mb-3">Custom fields</h3>
+            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">Custom fields</h3>
             <CustomFieldsPanel entityType={entityType} entityId={id} showEmptyState />
           </section>
 
@@ -150,7 +150,7 @@ interface FieldEditorProps {
 
 function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
   const labelEl = (
-    <label className="block text-xs font-medium text-zinc-500-2 mb-1">{field.label}</label>
+    <label className="block text-xs font-medium text-zinc-500 mb-1">{field.label}</label>
   );
 
   if (!editable) {
@@ -208,7 +208,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             onChange={(e) => onChange(e.target.checked)}
             id={`drawer-${field.key}`}
           />
-          <label htmlFor={`drawer-${field.key}`} className="text-xs font-medium text-zinc-500-2">{field.label}</label>
+          <label htmlFor={`drawer-${field.key}`} className="text-xs font-medium text-zinc-500">{field.label}</label>
         </div>
       );
     case "SELECT": {
@@ -304,7 +304,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
 
 function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
   if (value == null || value === "") {
-    return <p className="text-sm text-zinc-500-2">—</p>;
+    return <p className="text-sm text-zinc-500">—</p>;
   }
   if (field.fieldType === "SELECT") {
     const choice = field.options?.choices?.find((c) => c.value === value);

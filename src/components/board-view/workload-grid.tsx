@@ -575,10 +575,10 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                   {monthBands.map((band, i) => (
                     <div
                       key={`${band.label}-${i}`}
-                      className="px-2 flex items-center text-[11.5px] font-medium text-zinc-500 truncate"
+                      className="px-2 flex items-center text-[11.5px] font-medium text-zinc-500 overflow-hidden"
                       style={{ gridColumn: `span ${band.span}` }}
                     >
-                      {band.label}
+                      <span className="truncate">{band.label}</span>
                     </div>
                   ))}
                 </div>

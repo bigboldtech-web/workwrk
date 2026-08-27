@@ -1573,7 +1573,7 @@ function OwnerBadge({
   avatar: string | null;
   size?: "sm" | "md";
 }) {
-  const dim = size === "sm" ? "h-4 w-4 text-[8px]" : "h-5 w-5 text-[10px]";
+  const dim = size === "sm" ? "h-5 w-5 text-[10px]" : "h-6 w-6 text-[11px]";
   const initials = name
     .split(" ").map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
   if (avatar) {

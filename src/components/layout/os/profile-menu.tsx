@@ -156,9 +156,9 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-zinc-900 truncate">{displayName}</div>
-          <div className="text-zinc-400 text-[12.5px] truncate flex items-center gap-1">
-            {presenceStatus.emoji ? <span>{presenceStatus.emoji}</span> : null}
-            <span>{statusLabel}</span>
+          <div className="text-zinc-400 text-[12.5px] flex items-center gap-1 min-w-0">
+            {presenceStatus.emoji ? <span className="shrink-0">{presenceStatus.emoji}</span> : null}
+            <span className="truncate min-w-0">{statusLabel}</span>
           </div>
         </div>
       </div>
