@@ -37,11 +37,12 @@ import {
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
   TextAlignStart, TextAlignCenter, TextAlignEnd,
   ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
-  Pin, PinOff,
+  Pin, PinOff, Palette,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { MenuList, MenuItem } from "@/components/ui/menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { createTableEngine, columnLetter, type StructureResult, type TableEngine } from "@/lib/sheet-engine-host";
 import { createSerialQueue } from "@/lib/sheet-serial-queue";
@@ -467,6 +468,91 @@ function normalizeIsoDate(text: string): string | null {
  *  - skip:  leave the cell exactly as it was, and count it. */
 type PasteCoercion = { kind: "write"; value: unknown } | { kind: "skip" };
 
+const RULE_LABELS: Record<ConditionalRule["when"], string> = {
+  gt: "greater than", lt: "less than", gte: "≥", lte: "≤",
+  eq: "equals", neq: "not equals", contains: "contains",
+  empty: "is empty", nonempty: "is not empty",
+};
+const RULE_ORDER: ConditionalRule["when"][] = ["gt", "lt", "gte", "lte", "eq", "neq", "contains", "empty", "nonempty"];
+const RULE_COLORS = ["#FBD9DE", "#FFE4C2", "#FFF2B3", "#CCF4E3", "#D6E8FF", "#E7DAF7"];
+
+/** Conditional formatting editor — re-exposes col.rules (the render path in
+ *  cellStyleFor always kept painting; this restores creating/editing them).
+ *  Local draft; commits the whole rule list on Save through one undo step. */
+function ConditionalRulesDialog({ column, onClose, onSave }: {
+  column: Column;
+  onClose: () => void;
+  onSave: (rules: ConditionalRule[]) => void;
+}) {
+  const [rules, setRules] = useState<ConditionalRule[]>(() => (column.rules ?? []).map((r) => ({ ...r })));
+  const addRule = () => setRules((prev) => [...prev, { when: "gt", value: "", bg: RULE_COLORS[prev.length % RULE_COLORS.length] }]);
+  const update = (i: number, patch: Partial<ConditionalRule>) => setRules((prev) => prev.map((r, x) => (x === i ? { ...r, ...patch } : r)));
+  const remove = (i: number) => setRules((prev) => prev.filter((_, x) => x !== i));
+  const needsValue = (w: ConditionalRule["when"]) => w !== "empty" && w !== "nonempty";
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Conditional formatting — {column.label}</DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
+        <div className="flex flex-col gap-2 max-h-[46vh] overflow-y-auto">
+          {rules.length === 0 ? (
+            <p className="py-4 text-center text-[13px] text-zinc-400">No rules yet.</p>
+          ) : rules.map((r, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
+              <select
+                value={r.when}
+                onChange={(e) => update(i, { when: e.target.value as ConditionalRule["when"] })}
+                className="h-8 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+              >
+                {RULE_ORDER.map((w) => <option key={w} value={w}>{RULE_LABELS[w]}</option>)}
+              </select>
+              {needsValue(r.when) && (
+                <input
+                  type="text"
+                  value={r.value == null ? "" : String(r.value)}
+                  onChange={(e) => update(i, { value: e.target.value })}
+                  placeholder="value"
+                  className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                />
+              )}
+              <div className="flex items-center gap-1">
+                {RULE_COLORS.map((hex) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => update(i, { bg: hex })}
+                    aria-label={`Colour ${hex}`}
+                    className={`h-5 w-5 rounded-full border ${r.bg === hex ? "ring-2 ring-[var(--os-brand)] ring-offset-1" : "border-zinc-300"}`}
+                    style={{ background: hex }}
+                  />
+                ))}
+              </div>
+              <button type="button" onClick={() => remove(i)} className="ml-auto text-zinc-400 hover:text-red-600" aria-label="Remove rule">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-[13px] text-zinc-600 hover:bg-zinc-50">
+          <Plus className="h-3.5 w-3.5" /> Add rule
+        </button>
+        <div className="mt-3 flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+          <button
+            type="button"
+            onClick={() => onSave(rules.filter((r) => !needsValue(r.when) || String(r.value ?? "").trim() !== ""))}
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"
+          >
+            Save
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function coercePaste(col: Column, raw: string): PasteCoercion {
   const text = raw.trim();
   switch (col.type) {
@@ -715,6 +801,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // and the per-column "…" popover are gone. Same MorePortal point-mode
   // pattern as the row menu above.
   const [headerMenu, setHeaderMenu] = useState<{ colId: string; x: number; y: number } | null>(null);
+  const [rulesColId, setRulesColId] = useState<string | null>(null);
   const headerMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
   const headerMenuPanelRef = useRef<HTMLDivElement | null>(null);
   // Cmd/Ctrl+B/I/U anywhere on the sheet (capture phase): after clicking a
@@ -2650,6 +2737,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             return disp;
           }
           if (v === undefined || v === null) return "";
+          // Rating shows stars in the grid; formatted CSV should match.
+          if (formatted && c.type === "rating") {
+            const n = typeof v === "number" ? Math.max(0, Math.min(5, Math.round(v))) : 0;
+            return n > 0 ? "★".repeat(n) : "";
+          }
           if (formatted && FORMATTABLE_TYPES.has(c.type) && !Array.isArray(v)) return formatCellValue(v, c.type, c.format);
           // An open cell's own nf/dp is what the user sees, so the
           // formatted export honours it the way it honours a column's.
@@ -4933,6 +5025,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 />
               ) : null}
               <MenuItem
+                icon={Palette}
+                label="Conditional formatting"
+                onClick={() => { setHeaderMenu(null); setRulesColId(hc.id); }}
+              />
+              <MenuItem
                 icon={Trash2}
                 label={`Delete column ${letter}`}
                 destructive
@@ -4940,6 +5037,21 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
               />
             </MenuList>
           </MorePortal>
+        );
+      })() : null}
+
+      {rulesColId ? (() => {
+        const col = table.columns.find((c) => c.id === rulesColId);
+        if (!col) return null;
+        return (
+          <ConditionalRulesDialog
+            column={col}
+            onClose={() => setRulesColId(null)}
+            onSave={(rules) => {
+              pushColumnPatch(`conditional formatting on "${col.label}"`, col.id, { rules: col.rules }, { rules });
+              setRulesColId(null);
+            }}
+          />
         );
       })() : null}
 

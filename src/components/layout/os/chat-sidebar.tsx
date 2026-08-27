@@ -568,7 +568,11 @@ export function ChatSidebar() {
                     <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); void closeConversation(m.id); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
                       <X className="h-4 w-4 text-zinc-400" /> Close conversation
                     </button>
-                  ) : null}
+                  ) : (
+                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-red-600 hover:bg-red-50">
+                      <LogOut className="h-4 w-4" /> Leave group
+                    </button>
+                  )}
                 </>
               );
             })()}

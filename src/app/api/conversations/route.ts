@@ -61,6 +61,7 @@ export async function GET() {
     WHERE m."createdAt" > cm."lastReadAt"
       AND m."authorId" <> ${userId}
       AND m."deletedAt" IS NULL
+      AND m."parentId" IS NULL
     GROUP BY m."conversationId"`;
   const unread = new Map(unreadRows.map((r) => [r.conversationId, Number(r.n)]));
 

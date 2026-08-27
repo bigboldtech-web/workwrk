@@ -284,12 +284,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     );
 
     if (targets.length > 0) {
+      // Priority targets (mentioned, or the person you replied to) always
+      // get their own notification — an earlier plain unread must never
+      // swallow a mention. Only ordinary "all"-tier targets dedup against
+      // an existing unread row for this conversation.
+      const isPriority = (uid: string) => mentionSet.has(uid) || uid === parentAuthorId;
       const already = await prisma.notification.findMany({
         where: { userId: { in: targets.map((t) => t.userId) }, link, read: false },
         select: { userId: true },
       });
       const alreadySet = new Set(already.map((a) => a.userId));
-      const fresh = targets.filter((t) => !alreadySet.has(t.userId));
+      const fresh = targets.filter((t) => isPriority(t.userId) || !alreadySet.has(t.userId));
       if (fresh.length > 0) {
         const preview = isCallCard
           ? "📞 Started a call — tap to join"
