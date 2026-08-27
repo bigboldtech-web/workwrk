@@ -251,7 +251,7 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-none ${
+      className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
       }`}
     >
@@ -275,7 +275,7 @@ function MoreNavItem() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-none text-zinc-700 hover:bg-white/80"
+        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-5 text-zinc-700 hover:bg-white/80"
       >
         <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-500" />
         <span className="min-w-0 flex-1 truncate text-left">More</span>
@@ -320,7 +320,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
       <li className="relative group/taskrow">
         <Link
           href="/tasks"
-          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-none ${
+          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
             pathname === "/tasks"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
@@ -395,7 +395,7 @@ function SubNavItem({
     <li>
       <Link
         href={href}
-        className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-none ${
+        className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
           active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
         }`}
       >
