@@ -151,8 +151,14 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
       </button>
       {open && menuPos ? (
         <div
-          style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: 260 }}
-          className="z-[200] overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
+          style={{
+            position: "fixed",
+            left: menuPos.left,
+            width: 260,
+            ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }),
+            maxHeight: menuPos.maxHeight,
+          }}
+          className="z-[200] flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex h-9 items-center gap-2 px-3 border-b border-zinc-100">
@@ -165,7 +171,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               className="flex-1 text-[14px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
-          <div className="max-h-[260px] overflow-y-auto py-1.5">
+          <div className="max-h-[260px] min-h-0 flex-1 overflow-y-auto py-1.5">
             {value ? (
               <>
                 <MenuItem

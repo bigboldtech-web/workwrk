@@ -33,7 +33,13 @@ function CellPopover({
   if (!open || !pos) return null;
   return (
     <div
-      style={{ position: "fixed", top: pos.top, left: pos.left, width, maxHeight: maxH }}
+      style={{
+        position: "fixed",
+        left: pos.left,
+        width,
+        ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
+        maxHeight: maxH != null ? Math.min(maxH, pos.maxHeight) : pos.maxHeight,
+      }}
       className="z-[60] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1"
       onMouseLeave={onMouseLeave}
     >

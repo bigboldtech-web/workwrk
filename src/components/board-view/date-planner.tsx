@@ -275,7 +275,16 @@ export function DatePlanner({
         ? createPortal(
             <div
               ref={panelRef}
-              style={{ position: "fixed", top: pos.top, left: pos.left, width: PANEL_WIDTH, maxHeight: "78vh" }}
+              style={{
+                position: "fixed",
+                left: pos.left,
+                width: PANEL_WIDTH,
+                // Hook-fitted: flips above near the bottom edge, and the
+                // maxHeight always fits the chosen side so the Repeat
+                // tab scrolls inside the panel instead of off-screen.
+                ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
+                maxHeight: Math.min(pos.maxHeight, Math.round(window.innerHeight * 0.78)),
+              }}
               className="z-[120] rounded-xl bg-white dark:bg-[#14171D] border border-zinc-200 dark:border-[#2A2F38] dark:text-zinc-200 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col"
               // Keep popover interactions from bubbling (React tree) to the row /
               // card that hosts this planner — otherwise a click here can trigger
