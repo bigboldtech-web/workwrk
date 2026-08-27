@@ -234,14 +234,14 @@ export function DatePlanner({
       onClick={(e) => { e.stopPropagation(); if (canEdit) setOpen((v) => !v); }}
       className={`inline-flex items-center gap-1 rounded font-medium disabled:cursor-default ${
         due
-          ? `px-1.5 py-0.5 text-[11.5px] ${overdue ? "bg-red-50 text-red-600" : "bg-zinc-100 text-zinc-600"}`
+          ? `px-1.5 py-0.5 text-[11.5px] ${overdue ? "bg-[var(--signal-danger-bg)] text-[var(--signal-danger-fg)]" : "bg-zinc-100 text-zinc-600"}`
           : "text-zinc-400 hover:text-zinc-600"
       }`}
       title={due ? "Edit date / recurrence" : "Set date"}
     >
-      <CalendarPlus className={due ? "w-3 h-3" : "w-[17px] h-[17px]"} />
+      <CalendarPlus className={due ? "w-3 h-3" : "w-4 h-4"} />
       {due ? new Date(due).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null}
-      {hasReminder ? <Bell className="w-2.5 h-2.5 text-amber-500" /> : null}
+      {hasReminder ? <Bell className="w-2.5 h-2.5 text-[var(--signal-warning-fg)]" /> : null}
       {recurrence ? (
         <span className="inline-flex" title={buildRecurrenceSummary(recurrence)}>
           <Repeat className="w-2.5 h-2.5 text-[var(--os-brand)]" />
@@ -258,7 +258,7 @@ export function DatePlanner({
     >
       <CalendarDays className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
       <span className={`truncate ${summary ? "" : "text-zinc-400"}`}>{summary || "Set date"}</span>
-      {hasReminder ? <Bell className="w-3 h-3 text-amber-500 flex-shrink-0" /> : null}
+      {hasReminder ? <Bell className="w-3 h-3 text-[var(--signal-warning-fg)] flex-shrink-0" /> : null}
       {recurrence ? (
         <span className="inline-flex flex-shrink-0" title={buildRecurrenceSummary(recurrence)}>
           <Repeat className="w-3 h-3 text-[var(--os-brand)]" />
@@ -285,7 +285,7 @@ export function DatePlanner({
                 ...(pos.top != null ? { top: pos.top } : { bottom: pos.bottom }),
                 maxHeight: Math.min(pos.maxHeight, Math.round(window.innerHeight * 0.78)),
               }}
-              className="z-[120] rounded-xl bg-white dark:bg-[#14171D] border border-zinc-200 dark:border-[#2A2F38] dark:text-zinc-200 shadow-[0_16px_40px_-8px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col"
+              className="z-[120] rounded-xl bg-white dark:bg-[#14171D] border border-zinc-200 dark:border-[#2A2F38] dark:text-zinc-200 shadow-2xl overflow-hidden flex flex-col"
               // Keep popover interactions from bubbling (React tree) to the row /
               // card that hosts this planner — otherwise a click here can trigger
               // the ancestor's open/select handlers.
@@ -343,7 +343,7 @@ export function DatePlanner({
                         <ul>
                           {reminders.map((r) => (
                             <li key={r.id} className="flex items-center gap-2 h-8 px-2 -mx-2 rounded-md text-[13.5px] text-zinc-700 hover:bg-zinc-50 transition-colors">
-                              <Bell className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+                              <Bell className="w-3.5 h-3.5 text-[var(--signal-warning-fg)] flex-shrink-0" />
                               <span className="flex-1 truncate">{fmtWhen(r.remindAt)}</span>
                               <button type="button" onClick={() => removeReminder(r.id)} className="text-zinc-300 hover:text-red-600 transition-colors" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
                             </li>
@@ -743,7 +743,7 @@ function RepeatTab({
                   type="button"
                   onClick={() => setTrigger(o.v)}
                   className={`w-full text-left px-2.5 py-1.5 rounded-md border transition-colors ${
-                    trigger === o.v ? "border-[var(--os-brand)] bg-[#0073EA]/[0.04]" : "border-zinc-200 hover:bg-zinc-50"
+                    trigger === o.v ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_4%,transparent)]" : "border-zinc-200 hover:bg-zinc-50"
                   }`}
                 >
                   <span className={`block text-[13.5px] font-medium ${trigger === o.v ? "text-[var(--os-brand)]" : "text-zinc-700"}`}>

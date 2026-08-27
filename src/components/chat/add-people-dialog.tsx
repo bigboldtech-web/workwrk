@@ -136,7 +136,7 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
             type="button"
             onClick={() => void add()}
             disabled={picked.length === 0 || saving}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {saving ? "Adding…" : `Add ${picked.length || ""}`.trim()}
           </button>

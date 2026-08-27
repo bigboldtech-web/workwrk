@@ -563,7 +563,7 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
                   type="button"
                   onClick={saveCurrent}
                   disabled={!saveName.trim() || activeRuleCount(filters) === 0}
-                  className="h-7 px-2.5 rounded-md text-[13px] font-medium bg-zinc-900 hover:bg-zinc-800 text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-7 px-2.5 rounded-md text-[13px] font-medium bg-[var(--os-brand)] hover:bg-[var(--os-brand-deep)] text-white disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Save
                 </button>

@@ -951,25 +951,6 @@ function CalendarSidebar() {
         <NavItem href="/planner" Icon={Calendar} label="Planner" />
         <NavItem href="/timesheets" Icon={Calendar} label="Timesheets" />
       </ul>
-      <SectionLabel>Integrations</SectionLabel>
-      <div className="px-2 pt-1 pb-2 space-y-1.5">
-        <button
-          type="button"
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-[13px]"
-        >
-          <span className="w-4 h-4 rounded bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">31</span>
-          <span className="flex-1 text-left">Google Calendar</span>
-          <span className="text-[11px] text-zinc-500">Connect</span>
-        </button>
-        <button
-          type="button"
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md border border-zinc-200 hover:bg-zinc-50 text-[13px]"
-        >
-          <span className="w-4 h-4 rounded bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center">O</span>
-          <span className="flex-1 text-left">Outlook</span>
-          <span className="text-[11px] text-zinc-500">Connect</span>
-        </button>
-      </div>
     </>
   );
 }

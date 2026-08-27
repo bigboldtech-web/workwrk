@@ -413,19 +413,6 @@ function InboxSettingsPanel({
       </div>
 
       <div className="border-b border-zinc-100 py-4">
-        <p className="!px-5 text-[13px] font-medium text-zinc-500">Important notifications</p>
-        <button
-          type="button"
-          className="mt-3 flex w-full items-center gap-3 !px-5 py-2 text-left text-[14px] text-zinc-800 hover:bg-zinc-50"
-        >
-          <Settings2 className="h-4 w-4 text-zinc-500" />
-          <span className="flex-1">Customize importance</span>
-          <span className="text-[13px] text-zinc-400">11/42</span>
-          <ChevronRight className="h-4 w-4 text-zinc-400" />
-        </button>
-      </div>
-
-      <div className="border-b border-zinc-100 py-4">
         <p className="!px-5 text-[13px] font-medium text-zinc-500">Display mode</p>
         <div className="mt-4 grid grid-cols-2 gap-4 !px-5">
           <DisplayModeCard
@@ -443,10 +430,6 @@ function InboxSettingsPanel({
         </div>
       </div>
 
-      <div className="py-3">
-        <SettingsRow Icon={Settings} label="Notification settings" />
-        <SettingsRow Icon={Keyboard} label="Keyboard shortcuts" />
-      </div>
     </aside>
   );
 }
@@ -613,12 +596,6 @@ function InboxEmpty({ tab }: { tab: Tab }) {
           <p className="mx-auto max-w-[520px] text-[20px] font-semibold leading-snug text-zinc-900">
             Pin your Favorites bar to the top of your screen to interact with them faster than ever!
           </p>
-          <button
-            type="button"
-            className="mt-5 text-[14px] px-3 py-1 rounded-md bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
-          >
-            Learn more
-          </button>
         </div>
       </div>
     </div>

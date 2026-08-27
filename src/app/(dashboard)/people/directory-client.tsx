@@ -242,7 +242,7 @@ export default function PeopleDirectoryPage() {
           </div>
           <div className="inline-flex items-center gap-1">
             {([["all", "All"], ["active", "Active"], ["new", "New"], ["former", "Former"]] as const).map(([k, label]) => (
-              <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[13.5px] ${filter === k ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
+              <button key={k} type="button" onClick={() => setFilter(k)} className={`h-8 px-2.5 rounded-md text-[13.5px] ${filter === k ? "bg-[var(--os-brand)] text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>{label}</button>
             ))}
           </div>
           <select value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)} className="h-8 px-2 rounded-md border border-zinc-200 text-[13.5px] text-zinc-600 outline-none">
@@ -256,11 +256,11 @@ export default function PeopleDirectoryPage() {
         {/* Department chips (actives only — hidden on the Former tab) */}
         {filter !== "former" && depts.length > 0 ? (
           <div className="flex items-center gap-1.5 flex-wrap">
-            <button type="button" onClick={() => setActiveDept(null)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === null ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+            <button type="button" onClick={() => setActiveDept(null)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === null ? "border-zinc-900 bg-[var(--os-brand)] text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
               All <span className="opacity-60">{stats.total}</span>
             </button>
             {depts.map((d) => (
-              <button key={d.id} type="button" onClick={() => setActiveDept(d.id)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === d.id ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
+              <button key={d.id} type="button" onClick={() => setActiveDept(d.id)} className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[13px] border ${activeDept === d.id ? "border-zinc-900 bg-[var(--os-brand)] text-white" : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>
                 <span className="w-2 h-2 rounded-full" style={{ background: d.color }} />
                 {d.name}
                 <span className="opacity-60">{d.count}</span>

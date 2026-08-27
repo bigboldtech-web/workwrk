@@ -146,7 +146,7 @@ export default function BillingPage() {
             <button
               onClick={openPortal}
               disabled={opening}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13px] font-medium text-white hover:bg-zinc-800 disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
             >
               {opening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CreditCard className="h-3.5 w-3.5" />}
               Manage billing

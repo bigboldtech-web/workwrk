@@ -300,11 +300,11 @@ export function ChatSidebar() {
                   {row.type === "CHANNEL"
                     ? <Hash className="h-4 w-4 shrink-0 text-zinc-400" />
                     : <MessageCircle className="h-4 w-4 shrink-0 text-zinc-400" />}
-                  <span className={`flex-1 truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                  <span className={`min-w-0 flex-1 truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                     {row.type === "CHANNEL" ? `#${row.name ?? "channel"}` : conversationTitle(row, meId)}
                   </span>
                   {row.unreadCount > 0 && (
-                    <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[#0073EA] px-1.5 text-[11px] font-semibold text-white tabular-nums">
+                    <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[var(--os-brand)] px-1.5 text-[11px] font-semibold text-white tabular-nums">
                       {row.unreadCount > 99 ? "99+" : row.unreadCount}
                     </span>
                   )}
@@ -352,7 +352,7 @@ export function ChatSidebar() {
                     } ${c.isMember ? "" : "opacity-70"}`}
                   >
                     <Hash className="w-4 h-4 text-zinc-400 shrink-0" />
-                    <span className={`flex-1 truncate text-[14px] ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                    <span className={`min-w-0 flex-1 truncate text-[14px] ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                       {c.name}
                     </span>
                     {channelCalls.has(c.id) && (
@@ -364,7 +364,7 @@ export function ChatSidebar() {
                       </span>
                     )}
                     {unread > 0 ? (
-                      <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                      <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
                         {unread > 99 ? "99+" : unread}
                       </span>
                     ) : !c.isMember ? (
@@ -452,7 +452,7 @@ export function ChatSidebar() {
                     </span>
                   )}
                   {row.unreadCount > 0 && (
-                    <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[#0073EA] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                    <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
                       {row.unreadCount > 99 ? "99+" : row.unreadCount}
                     </span>
                   )}
@@ -755,7 +755,7 @@ function NewChatModal({ meId, onClose, onCreated }: {
             type="button"
             onClick={() => void create()}
             disabled={picked.length === 0 || creating}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {creating ? "Starting…" : picked.length > 1 ? "Start group chat" : "Start chat"}
           </button>
@@ -832,7 +832,7 @@ function NewChannelDialog({ onClose, onCreated }: {
             type="button"
             onClick={() => void create()}
             disabled={!name.trim() || creating}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060c2] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {creating ? "Creating…" : "Create channel"}
           </button>

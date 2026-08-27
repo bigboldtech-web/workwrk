@@ -157,7 +157,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         {head ? (
           <TeamAvatar name={`${msg.author.firstName} ${msg.author.lastName}`} avatar={msg.author.avatar} size={30} />
         ) : (
-          <span className="hidden group-hover:block text-[10px] text-zinc-300 tabular-nums pt-1.5 text-right pr-0.5">{time}</span>
+          <span className="hidden group-hover:block text-[11px] text-zinc-400 tabular-nums pt-1.5 text-right pr-0.5">{time}</span>
         )}
       </div>
       <div className="min-w-0 flex-1 pb-0.5">
@@ -172,7 +172,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
 
         {isCall ? (
           live ? (
-            <div className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2">
+            <div className="mt-1 rounded-lg border border-[var(--signal-success-border)] bg-[var(--signal-success-bg)] px-3 py-2">
               <div className="flex items-center gap-2">
                 <span className="text-[14px] font-semibold text-zinc-900">
                   {live.participants.map((p) => p.name).slice(0, 3).join(", ")}
@@ -196,9 +196,9 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             </div>
           ) : (
             <div className="mt-1 inline-flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
-              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#0073EA]/10 text-[#0073EA]"><Video className="w-4 h-4" /></span>
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--os-brand-soft)] text-[var(--os-brand)]"><Video className="w-4 h-4" /></span>
               <span className="text-[14px] text-zinc-800">{msg.body}</span>
-              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]">
+              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)]">
                 Join
               </button>
             </div>
@@ -213,11 +213,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
               }}
               rows={Math.min(6, Math.max(1, draft.split("\n").length))}
-              className="w-full resize-none rounded-md border border-zinc-300 px-2 py-1.5 text-[14px] leading-6 outline-none focus:border-[#0073EA]"
+              className="w-full resize-none rounded-md border border-zinc-300 px-2 py-1.5 text-[14px] leading-6 outline-none focus:border-[var(--os-brand)]"
               autoFocus
             />
             <div className="mt-1 flex items-center gap-2 text-[12px]">
-              <button type="button" onClick={saveEdit} className="inline-flex items-center gap-1 text-[#0073EA] font-medium"><Check className="w-3.5 h-3.5" /> Save</button>
+              <button type="button" onClick={saveEdit} className="inline-flex items-center gap-1 text-[var(--os-brand)] font-medium"><Check className="w-3.5 h-3.5" /> Save</button>
               <button type="button" onClick={() => { setEditing(false); setDraft(msg.body); }} className="inline-flex items-center gap-1 text-zinc-500"><X className="w-3.5 h-3.5" /> Cancel</button>
               <span className="text-zinc-400">Enter saves · Esc cancels</span>
             </div>
@@ -265,7 +265,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 title={users.map((u) => (u === meId ? "You" : memberNames.get(u) ?? "Someone")).join(", ")}
                 className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-[12px] tabular-nums ${
                   meId && users.includes(meId)
-                    ? "border-[#0073EA]/40 bg-[#0073EA]/8 text-[#0073EA]"
+                    ? "border-[var(--os-brand)]/40 bg-[var(--os-brand-soft)] text-[var(--os-brand)]"
                     : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300"
                 }`}
               >
@@ -280,7 +280,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           <button
             type="button"
             onClick={() => onOpenThread(msg)}
-            className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-medium text-[#0073EA] hover:underline"
+            className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--os-brand)] hover:underline"
           >
             <MessageSquare className="w-3.5 h-3.5" />
             {msg.replyCount} {msg.replyCount === 1 ? "reply" : "replies"}
@@ -303,7 +303,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             </button>
           ))}
           <div className="relative">
-            <button type="button" onClick={() => setReactOpen((v) => !v)} title="React" className="h-7 w-7 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700">
+            <button type="button" onClick={() => setReactOpen((v) => !v)} title="React" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
               <Smile className="w-4 h-4" />
             </button>
             {reactOpen && (
@@ -320,16 +320,16 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             )}
           </div>
           {onOpenThread && !msg.parentId && !isCall && (
-            <button type="button" onClick={() => onOpenThread(msg)} title="Reply in thread" className="h-7 w-7 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700">
+            <button type="button" onClick={() => onOpenThread(msg)} title="Reply in thread" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
               <MessageSquare className="w-4 h-4" />
             </button>
           )}
           {mine && !isCall && (
             <>
-              <button type="button" onClick={() => { setDraft(msg.body); setEditing(true); }} title="Edit" className="h-7 w-7 inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700">
+              <button type="button" onClick={() => { setDraft(msg.body); setEditing(true); }} title="Edit" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
                 <Pencil className="w-4 h-4" />
               </button>
-              <button type="button" onClick={() => onDelete(msg)} title="Delete" className="h-7 w-7 inline-flex items-center justify-center text-zinc-400 hover:text-red-600">
+              <button type="button" onClick={() => onDelete(msg)} title="Delete" className="h-7 w-7 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-red-600">
                 <Trash2 className="w-4 h-4" />
               </button>
             </>

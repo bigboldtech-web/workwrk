@@ -542,7 +542,7 @@ function TrackTimeField({ itemId, canEdit }: { itemId: string; canEdit: boolean 
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={closePopover} aria-hidden="true" />
-          <div className="absolute right-0 top-full z-20 mt-1 w-[340px] rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)]">
+          <div className="absolute right-0 top-full z-20 mt-1 w-[340px] rounded-xl border border-zinc-200 bg-white p-3 shadow-2xl">
             <TimeTracker entityType="BOARD_ITEM" entityId={itemId} canEdit={canEdit} />
           </div>
         </>
@@ -629,8 +629,8 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute z-20 mt-1 right-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] p-2">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
+          <div className="absolute z-20 mt-1 right-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-2xl p-2">
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-200 focus-within:border-[var(--os-brand)] mb-2">
               <Search className="w-3.5 h-3.5 text-zinc-400" />
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
             </div>
@@ -641,12 +641,12 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
               ) : (
                 fKpis.map((k) => (
                   <button key={k.id} type="button" onClick={() => commit(k.kra?.id ?? null, k.id)} className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-[14px] hover:bg-zinc-50 rounded">
-                    <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
+                    <Target className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" />
                     <span className="flex-1 min-w-0">
                       <span className="block truncate text-zinc-700">{k.name}</span>
                       {k.kra ? <span className="block text-[12px] text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
                     </span>
-                    {kpiId === k.id ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
+                    {kpiId === k.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
                   </button>
                 ))
               )}
@@ -661,7 +661,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
                       <span className="block truncate text-zinc-700">{k.name}</span>
                       {k.category ? <span className="block text-[12px] text-zinc-400 truncate">{k.category}</span> : null}
                     </span>
-                    {kraId === k.id && !kpiId ? <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" /> : null}
+                    {kraId === k.id && !kpiId ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
                   </button>
                 ))
               )}
@@ -776,7 +776,7 @@ function StatusPicker({ value, statuses, canEdit, onChange }: { value: string | 
         ) : null}
       </span>
       {open ? (
-        <div className="absolute z-10 mt-1 left-0 min-w-[180px] rounded-md border border-zinc-200 bg-white shadow-lg py-1" onMouseLeave={() => setOpen(false)}>
+        <div className="absolute z-10 mt-1 left-0 min-w-[190px] rounded-xl border border-zinc-200 bg-white shadow-2xl py-1.5" onMouseLeave={() => setOpen(false)}>
           {statuses.map((opt) => (
             <button key={opt.value} type="button" onClick={() => { onChange(opt.value); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
               <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${opt.color}22`, color: opt.color }}>{opt.label}</span>

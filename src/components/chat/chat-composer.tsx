@@ -264,7 +264,7 @@ ${cur}` : body));
 
   return (
     <div
-      className={`relative rounded-xl border bg-white px-3 py-2 focus-within:border-zinc-300 ${dragOver ? "border-[#0073EA] bg-[#0073EA]/5" : "border-zinc-200"}`}
+      className={`relative rounded-xl border bg-white px-3 py-2 focus-within:border-zinc-300 ${dragOver ? "border-[var(--os-brand)] bg-[var(--os-brand)]/5" : "border-zinc-200"}`}
       onDragOver={(e) => { if (dragHasFiles(e)) { e.preventDefault(); setDragOver(true); } }}
       onDragLeave={() => setDragOver(false)}
       onDrop={(e) => {
@@ -442,8 +442,8 @@ ${cur}` : body));
             onClick={() => void send()}
             disabled={(!input.trim() && files.length === 0) || uploading}
             aria-label="Send"
-            className={`inline-flex h-7 w-8 items-center justify-center rounded-md text-white disabled:cursor-not-allowed ${
-              input.trim() || files.length > 0 ? "bg-[#0073EA] hover:bg-[#0060c2]" : "bg-zinc-200"
+            className={`inline-flex h-7 w-8 items-center justify-center rounded-md text-white  ${
+              input.trim() || files.length > 0 ? "bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]" : "bg-zinc-200"
             }`}
           >
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

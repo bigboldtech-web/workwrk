@@ -152,7 +152,7 @@ export default function MembersPage() {
           <button
             type="button"
             onClick={() => setInviteOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-[13.5px] font-medium text-white hover:bg-zinc-800"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-[13.5px] font-medium text-white hover:bg-[var(--os-brand-hover)]"
           >
             <UserPlus className="h-3.5 w-3.5" /> Invite
           </button>

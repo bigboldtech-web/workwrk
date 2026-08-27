@@ -566,13 +566,13 @@ function KanbanCard({
         </div>
         {/* Mark complete — filled when done (always), else in the hover rail. */}
         {canEdit && done ? (
-          <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-emerald-600 shrink-0" title="Mark incomplete" aria-label="Mark incomplete">
+          <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-[var(--signal-success-fg)] shrink-0" title="Mark incomplete" aria-label="Mark incomplete">
             <CheckCircle2 className="w-3.5 h-3.5" style={{ fill: "currentColor" }} />
           </button>
         ) : null}
         <div className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-0.5 shrink-0" onClick={stop}>
           {canEdit && !done ? (
-            <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-emerald-600 hover:bg-zinc-100" title="Mark complete" aria-label="Mark complete">
+            <button type="button" onClick={(e) => { stop(e); onToggleComplete(); }} className="inline-flex items-center justify-center w-5 h-5 rounded text-zinc-400 hover:text-[var(--signal-success-fg)] hover:bg-zinc-100" title="Mark complete" aria-label="Mark complete">
               <CheckCircle2 className="w-3.5 h-3.5" />
             </button>
           ) : null}

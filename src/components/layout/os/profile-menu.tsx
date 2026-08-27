@@ -141,7 +141,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
       ref={panelRef}
       role="menu"
       aria-label="Account menu"
-      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-white text-zinc-900 rounded-xl shadow-xl border border-zinc-200 overflow-hidden text-[14px]"
+      className="absolute right-0 top-full mt-1.5 z-[70] w-[280px] bg-white text-zinc-900 rounded-xl shadow-2xl border border-zinc-200 overflow-hidden text-[14px]"
     >
       {/* User header */}
       <div className="px-3 py-3 flex items-center gap-2.5">

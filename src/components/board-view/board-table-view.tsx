@@ -1349,7 +1349,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                 return (
                   <React.Fragment key={b.key}>
                     <tr className={`group/ghdr ${monday ? "bg-zinc-50/80 border-y border-zinc-100" : ""}`}>
-                      <td colSpan={colCount} className={monday ? "px-3 py-2" : "px-3 pt-4 pb-0.5"} style={monday && b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
+                      <td colSpan={colCount} className={monday ? "px-3 py-1.5" : "px-3 pt-4 pb-0.5"} style={monday && b.color ? { boxShadow: `inset 3px 0 0 ${b.color}` } : undefined}>
                         <div className="inline-flex items-center gap-2">
                           <button
                             type="button"
@@ -1705,42 +1705,42 @@ function Row({
         </MetaCell>
       ))}
       {showCreated ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-1.5 text-xs text-zinc-500">
           {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showStart ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-1.5 text-xs text-zinc-500">
           {row.startAt ? new Date(row.startAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showUpdated ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-1.5 text-xs text-zinc-500">
           {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : "—"}
         </td>
       ) : null}
       {showTaskId ? (
-        <td className="px-3 py-2 text-[12px] font-mono text-zinc-400">
+        <td className="px-3 py-1.5 text-[12px] font-mono text-zinc-400">
           {row.id.slice(-6)}
         </td>
       ) : null}
       {showComments ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-1.5 text-xs text-zinc-500">
           {row.commentCount ? (
             <span className="inline-flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5 text-zinc-400" />{row.commentCount}</span>
           ) : "—"}
         </td>
       ) : null}
       {showTimeline ? (
-        <td className="px-3 py-2"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
+        <td className="px-3 py-1.5"><TimelineCell startAt={row.startAt} dueAt={row.dueAt} /></td>
       ) : null}
       {showTime ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">
+        <td className="px-3 py-1.5 text-xs text-zinc-500">
           {row.timeTrackedMs ? <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-zinc-400" />{formatDuration(row.timeTrackedMs)}</span> : "—"}
         </td>
       ) : null}
       {showCreatedBy ? (
-        <td className="px-3 py-2">
+        <td className="px-3 py-1.5">
           {row.createdBy ? (
             <span className="inline-flex items-center gap-1.5">
               <PersonAvatar person={{ ...row.createdBy, email: null }} size={18} />
@@ -1750,13 +1750,13 @@ function Row({
         </td>
       ) : null}
       {showDocs ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-zinc-400" />{row.linkedDocCount}</span> : "—"}</td>
+        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedDocCount ? <span className="inline-flex items-center gap-1"><FileText className="w-3.5 h-3.5 text-zinc-400" />{row.linkedDocCount}</span> : "—"}</td>
       ) : null}
       {showLinked ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-zinc-400" />{row.linkedTaskCount}</span> : "—"}</td>
+        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedTaskCount ? <span className="inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5 text-zinc-400" />{row.linkedTaskCount}</span> : "—"}</td>
       ) : null}
       {showSops ? (
-        <td className="px-3 py-2 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
+        <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
       ) : null}
       <td className="sticky right-0 bg-white group-hover:bg-zinc-50 px-2 py-1.5 text-right">
         {canEdit ? (
@@ -1977,7 +1977,7 @@ function TimelineCell({ startAt, dueAt }: { startAt?: Date | string | null; dueA
   const label = s && e ? `${fmt(s)} – ${fmt(e)}` : fmt((s ?? e)!);
   return (
     <span className="inline-flex items-center gap-1.5" title={label}>
-      <span className="h-1.5 w-8 rounded-full bg-emerald-400/70 shrink-0" />
+      <span className="h-1.5 w-8 rounded-full bg-[#00C875]/70 shrink-0" />
       <span className="text-xs text-zinc-500 truncate">{label}</span>
     </span>
   );
@@ -2647,7 +2647,7 @@ function GroupSummaryRow({
           ) : (
             <span className="inline-flex items-center gap-1 flex-wrap">
               {tags.slice(0, 3).map((t) => {
-                const c = t.color || "#94a3b8";
+                const c = t.color || "#71717A";
                 return (
                   <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium" style={{ background: `${c}22`, color: c }}>
                     {t.name}
@@ -2701,7 +2701,7 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
       </summary>
       <div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] rounded-md border border-zinc-200 bg-white shadow-lg py-1.5">
         {(["ACTIVE", "DONE", "CLOSED"] as const).map((bucket) => {
-          const dotColor = bucket === "ACTIVE" ? "#71717A" : bucket === "DONE" ? "#10B981" : "#EC4899";
+          const dotColor = bucket === "ACTIVE" ? "#71717A" : bucket === "DONE" ? "#00C875" : "#71717A";
           const label = bucket === "ACTIVE" ? "OPEN" : bucket;
           return (
             <div key={bucket} className="flex items-center gap-2 px-3 py-1 text-[12.5px]">

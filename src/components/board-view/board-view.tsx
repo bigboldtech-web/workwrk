@@ -501,7 +501,7 @@ export function BoardView<T>(props: Props<T>) {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); deleteTab(t.id); }}
-                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-rose-100 hover:text-rose-600"
+                  className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-red-500/10 hover:text-red-500"
                   aria-label="Delete tab"
                   tabIndex={-1}
                 >
@@ -662,7 +662,7 @@ export function BoardView<T>(props: Props<T>) {
             {selectedIds.size} selected
           </span>
           {bulkError && (
-            <span className="text-[12px] text-rose-700">· {bulkError}</span>
+            <span className="text-[12px] text-red-500">· {bulkError}</span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
             {props.onBulkChange && selectFields.length > 0 && (
@@ -701,7 +701,7 @@ export function BoardView<T>(props: Props<T>) {
                         disabled={bulking}
                         className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-50 disabled:opacity-40 inline-flex items-center gap-2"
                       >
-                        <span className="w-2 h-2 rounded-full" style={{ background: c.color ?? "#94a3b8" }} aria-hidden />
+                        <span className="w-2 h-2 rounded-full" style={{ background: c.color ?? "#71717A" }} aria-hidden />
                         {c.label ?? c.value}
                       </button>
                     ))}
@@ -714,7 +714,7 @@ export function BoardView<T>(props: Props<T>) {
                 type="button"
                 onClick={runBulkDelete}
                 disabled={bulking}
-                className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-white text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+                className="text-xs px-3 py-1.5 rounded-md border border-rose-300 bg-white text-red-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
               >
                 Delete {selectedIds.size}
               </button>
@@ -788,7 +788,7 @@ function StatusDistributionBar<T>({ items, field, getValue }: StatusBarProps<T>)
     segments.push({
       key: c.value,
       label: c.label ?? c.value,
-      color: c.color ?? "#a78bfa",
+      color: c.color ?? "#71717A",
       n,
       pct: (n / total) * 100,
     });
@@ -1319,7 +1319,7 @@ function KanbanView<T>({
           <div key={col.value} className="flex-shrink-0 w-[260px] rounded-xl bg-zinc-50 p-3">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full" style={{ background: col.color ?? "#94a3b8" }} aria-hidden />
+                <span className="w-2 h-2 rounded-full" style={{ background: col.color ?? "#71717A" }} aria-hidden />
                 <span className="text-sm font-semibold">{col.label}</span>
               </div>
               <span className="text-xs text-zinc-500">{colItems.length}</span>

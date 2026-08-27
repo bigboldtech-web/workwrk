@@ -705,7 +705,7 @@ export default function ConversationPage() {
           type="button"
           onClick={() => startCall(false)}
           title="Start a video call"
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[#0073EA] text-white text-[13px] font-medium hover:bg-[#0060c2]"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)]"
         >
           <Video className="w-4 h-4" /> {callOpen ? "In call" : "Call"}
         </button>
@@ -802,7 +802,7 @@ export default function ConversationPage() {
                       This is the very beginning of your direct message history with{" "}
                       {others.map((m, i) => (
                         <span key={m.userId}>
-                          <span className="rounded bg-[#0073EA]/10 px-1 py-0.5 font-medium text-[#0073EA]">@{m.user.firstName} {m.user.lastName}</span>
+                          <span className="rounded bg-[var(--os-brand)]/10 px-1 py-0.5 font-medium text-[var(--os-brand)]">@{m.user.firstName} {m.user.lastName}</span>
                           {i < others.length - 2 ? ", " : i === others.length - 2 ? " and " : ""}
                         </span>
                       ))}.

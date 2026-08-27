@@ -249,8 +249,8 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
                   className={
                     "text-xs px-2 py-1 rounded-md border transition-colors " +
                     (selected
-                      ? "bg-violet-100 dark:bg-violet-950/40 border-violet-300 text-violet-700"
-                      : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:border-muted-2")
+                      ? "bg-[var(--os-brand-soft)] border-[color-mix(in_srgb,var(--os-brand)_30%,transparent)] text-[var(--os-brand)]"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-500 hover:border-zinc-300")
                   }
                 >
                   {c.label ?? c.value}
@@ -338,7 +338,7 @@ function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
   }
   if (field.fieldType === "URL" && typeof value === "string") {
     return (
-      <a href={value} target="_blank" rel="noopener noreferrer" className="text-sm text-violet-600 hover:underline truncate block">
+      <a href={value} target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--os-brand)] hover:underline truncate block">
         {value}
       </a>
     );

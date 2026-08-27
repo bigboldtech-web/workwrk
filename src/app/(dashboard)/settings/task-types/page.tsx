@@ -150,9 +150,9 @@ export default function TaskTypesPage() {
           </div>
           {recCats.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mb-3">
-              <button type="button" onClick={() => setRecCat(null)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === null ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>All</button>
+              <button type="button" onClick={() => setRecCat(null)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === null ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>All</button>
               {recCats.map((c) => (
-                <button key={c} type="button" onClick={() => setRecCat(recCat === c ? null : c)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === c ? "bg-zinc-900 text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>{c}</button>
+                <button key={c} type="button" onClick={() => setRecCat(recCat === c ? null : c)} className={`h-7 px-2.5 rounded-full text-[13px] ${recCat === c ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"}`}>{c}</button>
               ))}
             </div>
           ) : null}

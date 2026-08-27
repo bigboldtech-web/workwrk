@@ -225,11 +225,11 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Emails */}
         <div>
-          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[13px] font-medium text-zinc-500">
             Email addresses
           </label>
           <div
-            className="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1.5 focus-within:border-zinc-400"
+            className="flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-2 py-1.5 focus-within:border-[var(--os-brand)]"
           >
             {emails.map((email) => (
               <span
@@ -277,13 +277,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Access level */}
         <div>
-          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[13px] font-medium text-zinc-500">
             Access level
           </label>
           <select
             value={accessLevel}
             onChange={(e) => setAccessLevel(e.target.value as AccessLevel)}
-            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
           >
             {INVITE_LEVELS.map((l) => (
               <option key={l.value} value={l.value}>
@@ -299,13 +299,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             at accept-invite time. */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[13px] font-medium text-zinc-500">
               Department <span className="font-normal normal-case text-zinc-400">(optional)</span>
             </label>
             <select
               value={departmentId}
               onChange={(e) => setDepartmentId(e.target.value)}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
             >
               <option value="">No department</option>
               {(depts ?? []).map((d) => (
@@ -316,13 +316,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             </select>
           </div>
           <div>
-            <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+            <label className="mb-1 block text-[13px] font-medium text-zinc-500">
               Role <span className="font-normal normal-case text-zinc-400">(optional)</span>
             </label>
             <select
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
-              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+              className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
             >
               <option value="">No role</option>
               {(roles ?? []).map((r) => (
@@ -334,13 +334,13 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[13px] font-medium text-zinc-500">
             Reporting manager <span className="font-normal normal-case text-zinc-400">(optional)</span>
           </label>
           <select
             value={managerId}
             onChange={(e) => setManagerId(e.target.value)}
-            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-zinc-400 focus:outline-none"
+            className="h-9 w-full rounded-md border border-zinc-200 bg-white px-2 text-[14px] text-zinc-800 focus:border-[var(--os-brand)] focus:outline-none"
           >
             <option value="">No manager</option>
             {(people ?? []).map((p) => (
@@ -358,7 +358,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
 
         {/* Personal message */}
         <div>
-          <label className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+          <label className="mb-1 block text-[13px] font-medium text-zinc-500">
             Personal message <span className="font-normal normal-case text-zinc-400">(optional)</span>
           </label>
           <textarea
@@ -367,7 +367,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             maxLength={1000}
             rows={3}
             placeholder="Add a note to the invitation email…"
-            className="w-full resize-none rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[14px] text-zinc-800 placeholder:text-zinc-400 focus:border-zinc-400 focus:outline-none"
+            className="w-full resize-none rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-[14px] text-zinc-800 placeholder:text-zinc-400 focus:border-[var(--os-brand)] focus:outline-none"
           />
         </div>
 
@@ -383,7 +383,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             type="button"
             onClick={() => void handleSend()}
             disabled={!canSend}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[13.5px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-4 text-[13.5px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
           >
             {sending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
