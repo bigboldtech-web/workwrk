@@ -1445,7 +1445,7 @@ const createWorkspaceTool: ToolDefinition = {
 const invitePersonWithRole: ToolDefinition = {
   name: "invite_person_with_role",
   description:
-    "Send an invitation to a new hire with their role definition pre-attached. Required: at least one KRA id and one SOP id (the org's KRA/KPI/SOP entry gate refuses empty arrays). Use `search_employees`-style discovery to find existing KRAs/SOPs before calling this. The invitee gets the standard /register?token=… email flow.",
+    "Send an invitation to a new hire. Attach a roleId and the role's KRAs plus their published SOPs seed automatically when the invite is accepted — kraIds/sopIds are OPTIONAL explicit overrides, not requirements. The invitee gets the standard /register?token=… email flow.",
   input_schema: {
     type: "object",
     properties: {
@@ -1465,8 +1465,8 @@ const invitePersonWithRole: ToolDefinition = {
     if (!email.includes("@")) throw new Error("Valid email is required");
     const kraIds = Array.isArray(input.kraIds) ? (input.kraIds as string[]) : [];
     const sopIds = Array.isArray(input.sopIds) ? (input.sopIds as string[]) : [];
-    if (kraIds.length === 0) throw new Error("kraIds is required — pick at least one KRA for the role");
-    if (sopIds.length === 0) throw new Error("sopIds is required — pick at least one SOP for the role");
+    // kraIds/sopIds optional since 2026-08-27: the role carries the
+    // definition; explicit ids remain supported as overrides.
 
     // Duplicates / existing-user check, same as POST /api/invitations.
     const existingUser = await prisma.user.findFirst({

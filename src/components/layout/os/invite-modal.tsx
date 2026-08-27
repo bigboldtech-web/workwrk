@@ -192,7 +192,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
         <DialogTitle>Invite people</DialogTitle>
         <DialogDescription>
           Teammates get an email with a link to join your workspace. Every
-          invite carries a role definition — at least one KRA and one SOP.
+          invite can carry a role — its KRAs, KPIs and SOPs attach automatically.
         </DialogDescription>
 
         {/* Emails */}
