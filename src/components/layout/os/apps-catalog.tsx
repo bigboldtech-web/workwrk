@@ -1159,7 +1159,7 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
-  { key: "ai", label: "AI", Icon: BloomMark, defaultHref: "/sidekick",
+  { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick",
     matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },

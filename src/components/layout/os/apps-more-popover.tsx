@@ -28,7 +28,6 @@ import { useRouter } from "next/navigation";
 import { Search, Settings, Clock as ClockIcon } from "lucide-react";
 import { useOsShell } from "./shell-context";
 import { APPS, CATEGORY_ORDER, type AppEntry } from "./apps-catalog";
-import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
 
 export function AppsMorePopover() {
   const router = useRouter();
@@ -115,7 +114,7 @@ export function AppsMorePopover() {
         className="w-full h-[72px] flex flex-col items-center justify-center gap-1 px-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300 transition-colors"
         title={app.label.replace(/\.\.$/, "")}
       >
-        {hasAppGlyph(app.key) ? <AppGlyph appKey={app.key} size={22} /> : <app.Icon className="w-[18px] h-[18px] text-zinc-700" />}
+        <app.Icon className="w-[18px] h-[18px] text-zinc-700" />
         <span className="text-[12px] text-zinc-700 truncate max-w-full leading-tight">
           {app.label.replace(/\.\.$/, "")}
         </span>

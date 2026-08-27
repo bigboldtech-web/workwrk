@@ -21,7 +21,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { UserPlus, ArrowUpCircle, LayoutGrid } from "lucide-react";
 import { type AppEntry } from "./apps-catalog";
-import { AppGlyph, hasAppGlyph } from "@/components/brand/app-glyphs";
 import { InviteModal } from "./invite-modal";
 import { useOsShell } from "./shell-context";
 
@@ -142,7 +141,10 @@ export function ClickAppRail() {
                     color: "var(--os-brand-rail)",
                   } : undefined}
                 >
-                  {hasAppGlyph(app.key) ? <AppGlyph appKey={app.key} size={20} /> : <app.Icon className="w-[16px] h-[16px]" />}
+                  {/* Lined icons only (user 2026-08-27): the duotone
+                      brand glyphs made half the rail colourful while TLK
+                      and Tables sat there as clean lines. */}
+                  <app.Icon className="w-[16px] h-[16px]" />
                 </span>
                 {iconsOnly ? null : <RailLabel>{app.label}</RailLabel>}
               </button>
