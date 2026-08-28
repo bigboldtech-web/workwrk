@@ -40,7 +40,6 @@ export const PROFILE_TOOLS: ProfileTool[] = [
   // (no index → 404); those surfaces never existed.
   { key: "create-whiteboard", label: "Create Whiteboard", Icon: PencilRuler,  href: "/whiteboards" },
   { key: "view-people",       label: "View People",       Icon: Users,        href: "/people" },
-  { key: "create-dashboard",  label: "Create Dashboard",  Icon: BarChart3,    href: "/dashboards" },
   { key: "ai-notetaker",      label: "AI Notetaker",      Icon: Sparkles,     href: "/notetaker" },
 ];
 

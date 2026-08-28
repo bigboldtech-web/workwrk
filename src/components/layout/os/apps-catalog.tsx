@@ -1025,21 +1025,6 @@ function TeamsSidebar() {
 }
 
 
-/* ───────────────────────── Dashboards sidebar ───────────────────────── */
-
-function DashboardsSidebar() {
-  return (
-    <>
-      <ul>
-        <NavItem href="/dashboards" Icon={BarChart3} label="All Dashboards" />
-        <NavItem href="/dashboards?mine=1" Icon={BarChart3} label="My Dashboards" />
-      </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Dashboard to see it here" />
-    </>
-  );
-}
-
 /* ───────────────────────── Library sidebar (Notes + Whiteboards + Files) ───────────────────────── */
 
 function LibrarySidebar() {
@@ -1159,10 +1144,6 @@ export const APPS: AppEntry[] = [
     matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     // DocsSidebar listens for this event and runs its "New page" flow.
     createActions: [{ label: "New doc", icon: FileText, event: "docs-new-page" }] },
-  { key: "dashboards", label: "Dashboard", Icon: BarChart3, defaultHref: "/dashboards",
-    matchPaths: ["/dashboards"], Sidebar: DashboardsSidebar,
-    category: "Core", defaultPinned: true,
-    createActions: [{ label: "New Dashboard", icon: BarChart3, href: "/dashboards?new=1" }] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables",
     matchPaths: ["/tables"], category: "Core", defaultPinned: true,
     // TablesSidebar lists every worksheet (like Docs lists docs); the old

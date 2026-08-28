@@ -1,15 +1,15 @@
 "use client";
 
-// BatteryWidget — "Workload by Status": one horizontal stacked bar with a
-// segment per status (colors from STATUS_LOOKUP; unknown statuses gray)
-// and legend rows underneath (dot, label, count, %). The presentational
-// bar+legend is exported as StatusDistribution so BoardDashboardView's
-// breakdown cards render the exact same chrome.
+// StatusDistribution — one horizontal stacked bar (a segment per status,
+// colors from the canonical status set; unknown/unset gray) with legend
+// rows underneath (dot, label, count, %). Shared chrome for Board and
+// Team status breakdowns. (Extracted from the retired dashboards-canvas
+// battery widget so it outlives the Dashboards app removal.)
 
-import { Loader2 } from "lucide-react";
 import { DEFAULT_STATUS_OPTIONS } from "@/lib/board-items-shared";
-import type { DashWidget } from "../widget-types";
-import { useWidgetItems, type WidgetItem } from "./use-widget-items";
+
+/** Minimal item shape the status breakdown needs. */
+export type StatusItem = { status?: string | null };
 
 /** Gray for statuses outside the known set and for unset status. */
 export const UNKNOWN_STATUS_COLOR = "#A1A1AA";
@@ -24,7 +24,7 @@ export interface StatusSeg {
 /** Items → ordered status segments: known statuses first (canonical
  *  order), then unknown/custom statuses (gray, alphabetical), then a
  *  trailing "No status" bucket. Empty buckets drop. */
-export function buildStatusSegs(items: WidgetItem[]): StatusSeg[] {
+export function buildStatusSegs(items: StatusItem[]): StatusSeg[] {
   const counts = new Map<string, number>();
   for (const it of items) {
     const key = it.status ?? "__unset__";
@@ -77,39 +77,6 @@ export function StatusDistribution({ segs, total }: { segs: StatusSeg[]; total: 
           </li>
         ))}
       </ul>
-    </div>
-  );
-}
-
-export function BatteryWidget({ widget }: { widget: DashWidget }) {
-  const { items, loading, error } = useWidgetItems(widget.config.source);
-
-  if (loading) {
-    return (
-      <div className="flex h-full min-h-[72px] items-center justify-center">
-        <Loader2 className="h-4 w-4 animate-spin text-zinc-300" />
-      </div>
-    );
-  }
-  if (error) {
-    return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
-        Couldn&apos;t load tasks
-      </div>
-    );
-  }
-  const list = items ?? [];
-  const segs = buildStatusSegs(list);
-  if (list.length === 0 || segs.length === 0) {
-    return (
-      <div className="flex h-full min-h-[72px] items-center justify-center text-[13px] text-zinc-400">
-        No tasks here yet
-      </div>
-    );
-  }
-  return (
-    <div className="h-full overflow-y-auto pt-1">
-      <StatusDistribution segs={segs} total={list.length} />
     </div>
   );
 }

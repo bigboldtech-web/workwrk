@@ -17,7 +17,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Loader2, Mail, MoreHorizontal, UserRound } from "lucide-react";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
-import { StatusDistribution, UNKNOWN_STATUS_COLOR, type StatusSeg } from "@/components/dashboard/widgets/battery-widget";
+import { StatusDistribution, UNKNOWN_STATUS_COLOR, type StatusSeg } from "@/components/dashboard/status-distribution";
 import { DEFAULT_STATUS_OPTIONS, STATUS_LOOKUP } from "@/lib/board-items-shared";
 import { pctColor } from "@/components/team/ui";
 import { MorePortal } from "@/components/layout/os/more-portal";

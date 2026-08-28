@@ -93,12 +93,12 @@ export interface EffectivePreferences {
 
 export const DEFAULT_SIDEBAR: SidebarPref = {
   pinned: [
-    "home", "planner", "ai", "teams", "docs", "dashboards",
+    "home", "planner", "ai", "teams", "docs",
     "library", "forms", "clips", "goals", "timesheets",
   ],
   hidden: [],
   order: [
-    "home", "spaces", "planner", "ai", "teams", "docs", "dashboards",
+    "home", "spaces", "planner", "ai", "teams", "docs",
     "whiteboards", "forms", "clips", "goals", "timesheets",
   ],
   iconsOnly: false,

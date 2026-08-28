@@ -44,7 +44,7 @@ import { MenuItem, MenuSectionLabel } from "@/components/ui/menu";
 
 const MENU_WIDTH = 312;
 
-type BuildKind = "doc" | "form" | "dashboard" | "whiteboard" | "database";
+type BuildKind = "doc" | "form" | "whiteboard" | "database";
 
 // Default Database columns — same id scheme as /api/tables' defaultId.
 // Gives a new database an immediately useful grid instead of a single
@@ -98,17 +98,6 @@ const BUILD_META: Record<BuildKind, {
     // /api/forms returns the form row directly (jsonSuccess).
     idFrom: (data) => (data as { id?: string })?.id,
     href: (id) => `/forms/${id}`,
-  },
-  dashboard: {
-    label: "Dashboard",
-    Icon: LayoutDashboard,
-    iconClassName: "text-teal-500",
-    placeholder: "Dashboard name",
-    hasLocation: true,
-    endpoint: "/api/dashboards",
-    body: (name, spaceId) => ({ name, ...(spaceId ? { spaceId } : {}) }),
-    idFrom: (data) => (data as { dashboard?: { id?: string } })?.dashboard?.id,
-    href: (id) => `/dashboards/${id}`,
   },
   whiteboard: {
     label: "Whiteboard",
@@ -376,14 +365,6 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   iconClassName="text-sky-500"
                   submenu
                   onClick={() => setBuildKind("form")}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={LayoutDashboard}
-                  label="Dashboard"
-                  iconClassName="text-teal-500"
-                  submenu
-                  onClick={() => setBuildKind("dashboard")}
                 />
                 <MenuItem
                   variant="inset"

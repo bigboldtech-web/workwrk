@@ -36,12 +36,12 @@ const DEPARTMENTS: DepartmentOption[] = [
 
 const DEPT_RECS: Record<string, string[]> = {
   hr:          ["teams", "reviews", "timesheets", "kudos", "candor", "surveys", "announcements", "policies", "sops"],
-  sales:       ["goals", "dashboards", "docs", "forms", "agreements"],
-  operations:  ["tools", "assets", "sops", "forms", "dashboards"],
-  finance:     ["dashboards", "docs", "agreements", "tools"],
+  sales:       ["goals", "docs", "forms", "agreements"],
+  operations:  ["tools", "assets", "sops", "forms"],
+  finance:     ["docs", "agreements", "tools"],
   it:          ["tools", "assets", "sops", "policies"],
-  marketing:   ["docs", "forms", "clips", "dashboards", "announcements"],
-  engineering: ["goals", "docs", "sops", "dashboards", "build"],
+  marketing:   ["docs", "forms", "clips", "announcements"],
+  engineering: ["goals", "docs", "sops", "build"],
   legal:       ["agreements", "policies", "sops", "docs"],
   support:     ["sops", "forms", "docs", "kudos"],
 };

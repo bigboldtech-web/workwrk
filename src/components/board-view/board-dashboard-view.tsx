@@ -13,7 +13,7 @@ import {
   type BoardItemRow,
   type StatusOption,
 } from "@/lib/board-items-shared";
-import { StatusDistribution } from "@/components/dashboard/widgets/battery-widget";
+import { StatusDistribution } from "@/components/dashboard/status-distribution";
 import { PersonAvatar } from "./assignee-picker";
 
 interface BoardDashboardViewProps {

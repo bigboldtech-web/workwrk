@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
       { source: "/chat/:id", destination: "/tlk/:id", permanent: false },
       { source: "/room", destination: "/tlk", permanent: false },
       { source: "/room/:id", destination: "/tlk/:id", permanent: false },
+      { source: "/dashboards", destination: "/today", permanent: false },
+      { source: "/dashboards/:id", destination: "/today", permanent: false },
     ];
   },
   /* config options here */
