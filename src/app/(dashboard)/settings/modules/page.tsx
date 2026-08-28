@@ -1,81 +1,75 @@
 "use client";
 
-// Enabled modules — the org-level feature-flag surface. Lists the 9
-// canonical product modules and lets an admin toggle each on/off. The
-// enabled set lives in Organization.settings.enabledModules and drives
-// sidebar nav + feature gating elsewhere. Backed by GET /api/settings
-// (settings.enabledModules) + PATCH { section:"modules" } — both already
-// exist; the PATCH is admin-gated server-side, so non-admins see this
-// read-only.
+// Settings → Modules — the org-level premium-module toggles. Lists each
+// module (Talk, Tables) with a live switch that writes ProductInstallation:
+// on → POST /api/products/installations, off → DELETE. Flipping it updates
+// the rail immediately (we dispatch workwrk:prefs-changed, which the shell
+// refetches /api/preferences on). The old 9-key enabledModules UI is gone —
+// it gated nothing. Admin-only edit (SUPER_ADMIN / COMPANY_ADMIN), matching
+// the installations API authz; everyone else sees it read-only.
 
 import { useEffect, useState } from "react";
 import { Boxes, Loader2 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
-
-// The 9 canonical module keys, in display order, with friendly copy.
-const MODULES: { key: string; label: string; desc: string }[] = [
-  { key: "people", label: "People", desc: "HR directory, departments & org chart" },
-  { key: "kra-kpi", label: "KRAs & KPIs", desc: "Alignment, scoring & the performance loop" },
-  { key: "tasks", label: "Tasks", desc: "Projects, boards & to-dos" },
-  { key: "sops", label: "SOPs", desc: "Standard operating procedures & docs" },
-  { key: "reviews", label: "Reviews", desc: "Performance review cycles" },
-  { key: "meetings", label: "Meetings", desc: "Agendas, notes & action items" },
-  { key: "checkins", label: "Check-ins", desc: "1:1s and recurring check-ins" },
-  { key: "ai", label: "AI", desc: "Sidekick assistant & agents" },
-  { key: "analytics", label: "Analytics", desc: "Dashboards & reporting" },
-];
+import { Switch } from "@/components/ui/switch";
+import { MODULES } from "@/lib/modules";
 
 export default function ModulesSettingsPage() {
   const { accessLevel } = useRole();
-  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel);
+  const canEdit = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
   const { toast } = useOsToast();
 
-  const [enabled, setEnabled] = useState<Set<string> | null>(null);
-  const [saving, setSaving] = useState(false);
+  // Active product slugs; null until the installations fetch answers.
+  const [active, setActive] = useState<Set<string> | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/settings")
+    fetch("/api/products/installations")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        const list: string[] = Array.isArray(d?.settings?.enabledModules)
-          ? d.settings.enabledModules
+        const rows: { productSlug?: string; status?: string }[] = Array.isArray(d?.installations)
+          ? d.installations
           : [];
-        setEnabled(new Set(list));
+        setActive(new Set(rows.filter((x) => x.status === "ACTIVE" && x.productSlug).map((x) => x.productSlug as string)));
       })
-      .catch(() => setEnabled(new Set()));
+      .catch(() => setActive(new Set()));
   }, []);
 
-  const toggle = (key: string) => {
-    if (!canEdit) return;
-    setEnabled((prev) => {
+  const setModule = async (slug: string, on: boolean) => {
+    if (!canEdit || busy) return;
+    setBusy(slug);
+    // Optimistic flip so the switch feels instant.
+    setActive((prev) => {
       const next = new Set(prev ?? []);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (on) next.add(slug);
+      else next.delete(slug);
       return next;
     });
-  };
-
-  const save = async () => {
-    if (!enabled) return;
-    setSaving(true);
-    // Preserve canonical order; only keys the org has on are sent.
-    const enabledModules = MODULES.map((m) => m.key).filter((k) => enabled.has(k));
     try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
+      const res = await fetch("/api/products/installations", {
+        method: on ? "POST" : "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ section: "modules", data: { enabledModules } }),
+        body: JSON.stringify({ productSlug: slug }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        throw new Error(d?.error ?? "Save failed");
+        throw new Error(d?.error ?? "Couldn't update the module");
       }
-      toast("Modules updated");
+      // Refresh the rail (and any other prefs consumer) in this tab.
+      window.dispatchEvent(new CustomEvent("workwrk:prefs-changed"));
+      toast(on ? "Module turned on" : "Module turned off");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Save failed");
+      // Revert the optimistic flip.
+      setActive((prev) => {
+        const next = new Set(prev ?? []);
+        if (on) next.delete(slug);
+        else next.add(slug);
+        return next;
+      });
+      toast(e instanceof Error ? e.message : "Couldn't update the module");
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
   };
 
@@ -83,67 +77,50 @@ export default function ModulesSettingsPage() {
     <div className="px-6 pt-6">
       <header className="mb-1 flex items-center gap-2">
         <Boxes className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Enabled modules</h1>
+        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Modules</h1>
       </header>
       <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
-        Turn product modules on or off for your whole organization.
+        Premium modules extend your workspace. Turn one on to add it to every member&apos;s rail.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
-      {enabled === null ? (
+      {active === null ? (
         <div className="flex items-center gap-2 text-[14px] text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading modules…
         </div>
       ) : (
-        <>
-          <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            {MODULES.map((m, i) => {
-              const on = enabled.has(m.key);
-              return (
-                <div
-                  key={m.key}
-                  className={`flex items-center gap-3 px-4 py-3 ${
-                    i < MODULES.length - 1 ? "border-b border-zinc-100" : ""
-                  }`}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[14.5px] font-medium text-zinc-900">{m.label}</div>
-                    <div className="truncate text-[13px] text-zinc-500">{m.desc}</div>
+        <div className="max-w-2xl overflow-hidden rounded-xl border border-zinc-200 bg-white">
+          {MODULES.map((m, i) => {
+            const on = active.has(m.productSlug);
+            return (
+              <div
+                key={m.productSlug}
+                className={`flex items-center gap-4 px-4 py-3.5 ${
+                  i < MODULES.length - 1 ? "border-b border-zinc-100" : ""
+                }`}
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[14.5px] font-medium text-zinc-900">{m.label}</span>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+                      {m.competesWith}
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={on}
-                    aria-label={`Toggle ${m.label}`}
-                    disabled={!canEdit}
-                    onClick={() => toggle(m.key)}
-                    className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      on ? "bg-zinc-900" : "bg-zinc-200"
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                        on ? "translate-x-4" : "translate-x-0.5"
-                      }`}
-                    />
-                  </button>
+                  <div className="mt-0.5 text-[13px] leading-5 text-zinc-500">{m.blurb}</div>
                 </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-5 flex items-center gap-3">
-            <button
-              type="button"
-              onClick={save}
-              disabled={!canEdit || saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-[13px] font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
-            >
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              Save changes
-            </button>
-          </div>
-        </>
+                {busy === m.productSlug ? (
+                  <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-400" />
+                ) : (
+                  <Switch
+                    checked={on}
+                    disabled={!canEdit}
+                    onChange={(next) => void setModule(m.productSlug, next)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
       <div className="h-10" />
     </div>

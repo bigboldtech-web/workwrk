@@ -19,6 +19,7 @@ dotenv.config();
 import { PrismaClient } from "../src/generated/prisma";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PRODUCT_CATALOG, DEFAULT_INSTALLED_SLUGS } from "../src/lib/products/catalog";
+import { MODULE_SLUGS } from "../src/lib/modules";
 
 const connStr = process.env.DATABASE_URL;
 if (!connStr) throw new Error("DATABASE_URL is not set");
@@ -119,6 +120,12 @@ async function backfillExistingOrgs() {
       // behavior was "show everything unless settings restricted it").
       for (const p of products) slugsToInstall.add(p.slug);
     }
+
+    // Premium modules are NEVER auto-installed by this backfill — they are
+    // OFF by default and turned on per-org in Settings → Modules. Without this
+    // an org with no enabledModules (a fresh registration, a secondary
+    // workspace) would silently get Talk + Tables ON. (registry: lib/modules)
+    for (const slug of MODULE_SLUGS) slugsToInstall.delete(slug);
 
     for (const slug of slugsToInstall) {
       const product = bySlug.get(slug);

@@ -79,6 +79,46 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // catalog by design.
 
   // ─────────────────────────────────────────────
+  // PREMIUM MODULES — toggleable per org in Settings → Modules.
+  // OFF by default (defaultEnabled:false); an admin turns them on, which
+  // writes an ACTIVE ProductInstallation. The rail + route gates read that
+  // via lib/entitlements.ts. Slugs are bridged to their rail app in
+  // src/lib/modules.ts (workwrk-talk↔chat, workwrk-tables↔tables).
+  // No legacyModuleKey on purpose: these must NOT auto-install through the
+  // old enabledModules→legacyModuleKey path in setup.
+  // ─────────────────────────────────────────────
+  {
+    slug: "workwrk-talk",
+    name: "WorkwrK Talk",
+    tagline: "Team chat + calls (Slack + Zoom grade)",
+    description:
+      "Channels, direct messages, threads, reactions, mentions, formatting and search, plus huddles and calls on your own LiveKit. The team communication layer.",
+    iconKey: "MessageCircle",
+    hue: "violet",
+    suite: "CROSS",
+    tier: "PLUS",
+    status: "LIVE",
+    defaultEnabled: false,
+    displayOrder: 40,
+    pathPrefix: "/tlk",
+  },
+  {
+    slug: "workwrk-tables",
+    name: "WorkwrK Tables",
+    tagline: "Spreadsheets (Google Sheets + Zoho grade)",
+    description:
+      "A real spreadsheet: a 78-function formula engine with dependency-graph recalc, data validation, conditional formatting, find & replace, frozen panes, sort/filter and relational columns.",
+    iconKey: "Table2",
+    hue: "green",
+    suite: "CROSS",
+    tier: "PLUS",
+    status: "LIVE",
+    defaultEnabled: false,
+    displayOrder: 50,
+    pathPrefix: "/tables",
+  },
+
+  // ─────────────────────────────────────────────
   // PEOPLE SUITE
   // ─────────────────────────────────────────────
   {

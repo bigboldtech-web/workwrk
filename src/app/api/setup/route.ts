@@ -6,6 +6,7 @@ import crypto from "crypto";
 import { sendEmail } from "@/lib/email";
 import { invitationTemplate } from "@/lib/email-templates";
 import { normalizeEnabledModules } from "@/lib/module-keys";
+import { MODULE_SLUGS } from "@/lib/modules";
 import { DEFAULT_INSTALLED_SLUGS, DEPARTMENT_RECOMMENDED_PRODUCTS } from "@/lib/products/catalog";
 
 export async function GET() {
@@ -106,6 +107,11 @@ export async function POST(req: Request) {
         });
         for (const p of legacyProducts) slugsToInstall.add(p.slug);
       }
+
+      // Premium modules are OFF for new orgs — never auto-install them here,
+      // even via "all-in-one" or an explicit selection. An admin turns them on
+      // in Settings → Modules. (registry: src/lib/modules.ts)
+      for (const slug of MODULE_SLUGS) slugsToInstall.delete(slug);
 
       const products = await prisma.product.findMany({
         where: { slug: { in: Array.from(slugsToInstall) } },

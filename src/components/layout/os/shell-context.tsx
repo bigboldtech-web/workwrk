@@ -229,6 +229,10 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // the rail then shows the plain access-filtered catalog in catalog order,
   // which is also the correct steady state for orgs that never customized.
   const [railConfig, setRailConfig] = useState<OrgAppsConfig>({});
+  // Premium module app keys the org has ACTIVE (from /api/preferences). null
+  // until the fetch answers — visibleRailApps treats that as "no modules on"
+  // so a disabled module never flashes into the rail on first paint.
+  const [activeModuleKeys, setActiveModuleKeys] = useState<string[] | null>(null);
   const [recentAppKeys, setRecentAppKeysState] = useState<string[]>([]);
   const [iconsOnly, setIconsOnlyState] = useState<boolean>(false);
   const [profileToolPins, setProfileToolPinsState] = useState<string[]>(DEFAULT_PROFILE_TOOL_PINS);
@@ -298,6 +302,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
         // listener below refetches, so an admin save in the Settings door
         // updates this tab's rail immediately (other tabs and users pick it up on their next load — window CustomEvents are same-tab only) without a reload.
         setRailConfig(parseOrgAppsConfig(sidebar.apps));
+        // Premium module entitlement, org-level. Absent on a stale payload →
+        // [] → modules stay hidden until a fresh payload carries them.
+        const activeAppKeys = data?.effective?.modules?.activeAppKeys;
+        setActiveModuleKeys(
+          Array.isArray(activeAppKeys) && activeAppKeys.every((k: unknown) => typeof k === "string")
+            ? activeAppKeys
+            : [],
+        );
       } catch {}
     };
     void loadServerPrefs();
@@ -427,8 +439,14 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // the admin's order then catalog order. Home (alwaysPinned) always
   // survives, so the rail is never empty for any access level.
   const railApps = useMemo<AppEntry[]>(
-    () => visibleRailApps({ config: railConfig, accessLevel }),
-    [railConfig, accessLevel],
+    () =>
+      visibleRailApps({
+        config: railConfig,
+        accessLevel,
+        // null (pre-fetch) → undefined → module apps stay hidden until known.
+        activeModules: activeModuleKeys ? new Set(activeModuleKeys) : undefined,
+      }),
+    [railConfig, accessLevel, activeModuleKeys],
   );
   const setProfileToolPins = useCallback((keys: string[]) => {
     setProfileToolPinsState(keys);

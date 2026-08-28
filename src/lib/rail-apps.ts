@@ -31,6 +31,9 @@ import {
   type AccessTier,
   type AppEntry,
 } from "../components/layout/os/apps-catalog";
+// Relative on purpose (see header) — the premium-module registry, so the rail
+// can hide a module the org hasn't turned on.
+import { MODULE_APP_KEYS } from "./modules";
 
 // Re-export so the rail and the admin page have ONE import for the whole
 // access story instead of splitting it across this module and the catalog.
@@ -134,8 +137,12 @@ export function visibleRailApps(opts: {
   config: OrgAppsConfig | undefined;
   accessLevel: string | undefined;
   apps?: typeof APPS;
+  // The rail app keys of the premium modules the org has ACTIVE. undefined
+  // until /api/preferences answers; a module app is hidden while unknown so an
+  // org that never enabled it never flashes it. Core apps ignore this.
+  activeModules?: ReadonlySet<string>;
 }): AppEntry[] {
-  const { accessLevel } = opts;
+  const { accessLevel, activeModules } = opts;
   const config = opts.config ?? {};
   const catalog = opts.apps ?? APPS;
   const hidden = new Set(config.hidden ?? []);
@@ -144,6 +151,10 @@ export function visibleRailApps(opts: {
     orderApps(
       catalog.filter((app) => {
         if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
+        // Premium module: hidden unless the org has it ACTIVE. Applied in both
+        // the primary and the last-ditch fallback resolve, so a pathological
+        // all-hidden config can't resurface a disabled module.
+        if (MODULE_APP_KEYS.has(app.key) && !activeModules?.has(app.key)) return false;
         // Catalog baseline first — the org can only TIGHTEN access, never
         // widen it (applies to alwaysPinned apps too).
         if (!canAccessApp(app, accessLevel)) return false;

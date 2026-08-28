@@ -175,12 +175,12 @@ export async function DELETE(req: Request) {
     return NextResponse.json({ error: "product not found" }, { status: 404 });
   }
 
-  await prisma.productInstallation.update({
+  // updateMany (not update) so removing a module the org never installed is a
+  // clean no-op instead of a P2025 500 — the delete stays idempotent.
+  await prisma.productInstallation.updateMany({
     where: {
-      organizationId_productId: {
-        organizationId: ctx.orgId,
-        productId: product.id,
-      },
+      organizationId: ctx.orgId,
+      productId: product.id,
     },
     data: {
       status: "REMOVED",

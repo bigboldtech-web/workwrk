@@ -21,6 +21,7 @@ import {
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { MODULES, MODULE_SLUGS } from "@/lib/modules";
 
 type ApiSettings = {
   organization?: { id: string; name: string; slug?: string | null; plan?: string | null; status?: string | null; domain?: string | null };
@@ -65,7 +66,27 @@ export default function SettingsPage() {
   const v = rowVersion("settings");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  const moduleCount = data?.settings?.enabledModules?.length ?? 0;
+  // Premium module count comes from ProductInstallation, not the retired
+  // enabledModules blob. Refetched on the same prefs-changed pulse the rail uses.
+  const [activeModuleCount, setActiveModuleCount] = useState(0);
+  const loadModules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/products/installations");
+      if (!res.ok) return;
+      const d = await res.json();
+      const rows: { productSlug?: string; status?: string }[] = Array.isArray(d?.installations) ? d.installations : [];
+      const slugs = new Set(MODULE_SLUGS);
+      setActiveModuleCount(rows.filter((r) => r.status === "ACTIVE" && r.productSlug && slugs.has(r.productSlug)).length);
+    } catch {}
+  }, []);
+  useEffect(() => {
+    void loadModules();
+    const onChanged = () => void loadModules();
+    window.addEventListener("workwrk:prefs-changed", onChanged);
+    return () => window.removeEventListener("workwrk:prefs-changed", onChanged);
+  }, [loadModules]);
+
+  const moduleCount = activeModuleCount;
   const org = data?.organization;
   const set = data?.settings ?? {};
   const sec = set.security ?? {};
@@ -114,12 +135,12 @@ export default function SettingsPage() {
       title: "Product & integrations",
       cards: [
         {
-          href: "/settings",
-          title: "Enabled modules",
-          description: "Turn WorkwrK apps on or off for your team.",
+          href: "/settings/modules",
+          title: "Modules",
+          description: "Turn premium modules like Talk and Tables on or off for your team.",
           Icon: Boxes, color: C.blue,
           fields: [
-            { label: "Active", value: `${moduleCount} modules` },
+            { label: "Active", value: `${moduleCount} of ${MODULES.length} on` },
             { label: "Team size", value: set.teamSize ?? "—" },
           ],
         },
@@ -247,7 +268,7 @@ export default function SettingsPage() {
       <div className="px-6 pb-2 pt-6">
         <h1 className="text-[16px] font-bold text-zinc-900">Overview</h1>
         <p className="mt-0.5 text-[13px] text-zinc-500">
-          {data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} modules on · plan ${org?.plan ?? "—"}`}
+          {data === null ? "Loading…" : `${org?.name ?? "Workspace"} · ${moduleCount} of ${MODULES.length} modules on · plan ${org?.plan ?? "—"}`}
         </p>
       </div>
 

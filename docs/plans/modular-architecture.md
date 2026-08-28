@@ -104,6 +104,24 @@ Talk is already Slack×Zoom grade (chat, channels, threads, reactions, mentions,
 - Every phase: fleet review, tsc + tests, prod artifact verify, honest "module disabled" states (never a blank screen).
 - One migration expected (Phase 1 may add a column or lean entirely on `ProductInstallation`; decided at build time). Dashboards removal is delete-only.
 
+## 6b. Phase 1 — BUILT (2026-08-28)
+
+Shipped the module system on `ProductInstallation`:
+- `src/lib/modules.ts` — the ONE registry bridging rail app key ↔ product slug (chat↔workwrk-talk, tables↔workwrk-tables). Read by rail gate, route gate, resolver, Settings.
+- `src/lib/entitlements.ts` — `getActiveModuleAppKeys` / `isModuleActive` (ACTIVE only; PAUSED/REMOVED/missing = OFF).
+- Rail gate: `visibleRailApps` hides a module unless active (both resolve branches; never strands — Home is alwaysPinned core). Fed via `/api/preferences` → `effective.modules.activeAppKeys` (resolved concurrently, no added latency).
+- Route gate: server `layout.tsx` at `/tlk` + `/tables` → `ModuleDisabledScreen` when off.
+- Settings → Modules rebuilt to toggle `ProductInstallation` live (dead 9-key `enabledModules` UI retired; `enabledModules` still written by setup but reads nothing).
+- New-org OFF enforced at both write choke points (`api/setup` + `scripts/seed-products` strip `MODULE_SLUGS`); existing orgs backfilled ACTIVE via `scripts/backfill-modules.ts`.
+- **Rollout order (critical):** run `backfill-modules.ts` against prod BEFORE the gated code serves, or existing orgs' modules vanish until it runs.
+
+Verified by a 3-lens adversarial fleet: gating logic sound (ACTIVE-only, org-scoped, no strand, no flicker, correct fallback), rollout safe after the two fixes above.
+
+### Deferred to Phase 1.5 (known, documented — NOT a Phase-1 blocker)
+- **API-layer gating.** The gate is display + route (page) only; the module's data APIs (`/api/tables/*`, Talk `/api/conversations/*`) are still reachable by a crafted request within the caller's own org (org-scoped, so NO cross-tenant leak — an entitlement bypass, not a breach). Add a shared `requireModule(orgId, slug)` helper to the module-owned API routes. Matters most once billing gates activation.
+- **Public `/embed/tables`** (isPublic sheets) is not module-gated — a published-artifact surface, orthogonal to the in-org toggle. Decide whether disabling a module should revoke existing public embeds.
+- Command-palette "recents" can still list a disabled module (route gate catches the click).
+
 ## 7. Open questions for you
 1. **Goals/Timesheets/Reviews** — confirm the §1 proposal (Goals→core, Timesheets→module, Reviews→Teams) or re-assign.
 2. **Talk + Tables default for NEW orgs** — off (true premium, upsell) or on-with-trial? Plan assumes off.

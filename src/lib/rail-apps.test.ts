@@ -186,3 +186,53 @@ describe("orderedCatalogForAdmin", () => {
       .toMatchObject({ hidden: false, minAccess: null });
   });
 });
+
+describe("visibleRailApps — premium module gating", () => {
+  // Build a catalog with a real module key ("tables") so the module filter
+  // (which imports the real lib/modules registry) actually engages.
+  const mk = (key: string, extra: Record<string, unknown> = {}) =>
+    ({
+      key,
+      label: key,
+      Icon: () => null,
+      defaultHref: `/${key}`,
+      matchPaths: [`/${key}`],
+      Sidebar: () => null,
+      ...extra,
+    }) as unknown as AppEntry;
+  const withModule = [mk("home", { alwaysPinned: true }), mk("planner"), mk("tables")];
+
+  it("hides a premium module until it is active", () => {
+    const out = keys(visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: withModule }));
+    expect(out).toContain("home");
+    expect(out).toContain("planner");
+    expect(out).not.toContain("tables");
+  });
+
+  it("shows a premium module once it is active", () => {
+    const out = keys(
+      visibleRailApps({
+        config: {},
+        accessLevel: "SUPER_ADMIN",
+        apps: withModule,
+        activeModules: new Set(["tables"]),
+      }),
+    );
+    expect(out).toContain("tables");
+  });
+
+  it("keeps the module hidden even through the empty-rail fallback", () => {
+    // No alwaysPinned app + everything hidden forces the last-ditch resolve;
+    // it must NOT resurface an inactive module.
+    const noPin = [mk("planner"), mk("tables")];
+    const out = keys(
+      visibleRailApps({
+        config: { hidden: ["planner", "tables"] },
+        accessLevel: "SUPER_ADMIN",
+        apps: noPin,
+      }),
+    );
+    expect(out).toEqual(["planner"]);
+    expect(out).not.toContain("tables");
+  });
+});

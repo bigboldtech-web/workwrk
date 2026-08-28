@@ -9,6 +9,7 @@
 //      the org's value (admin can freeze keys against user override).
 
 import { prisma } from "@/lib/prisma";
+import { getActiveModuleAppKeys } from "@/lib/entitlements";
 // Type-only on purpose: rail-apps.ts imports the client apps-catalog at
 // runtime, and this module is server code — a value import would drag the
 // whole client component graph into every API route bundle.
@@ -87,6 +88,9 @@ export interface EffectivePreferences {
   theme: ThemePref;
   density: DensityPref;
   lockedKeys: string[];       // pass-through for UI to disable controls
+  /** Premium modules the org has ACTIVE, by rail app key (see lib/modules.ts).
+   *  The client rail hides a module app whose key is absent here. */
+  modules: { activeAppKeys: string[] };
 }
 
 // ── Defaults ───────────────────────────────────────────────────────
@@ -183,7 +187,12 @@ async function loadRaw(userId: string, organizationId: string): Promise<RawPrefs
  * defaults → org → user → locked-keys re-stamp from org values.
  */
 export async function getEffectivePreferences(userId: string, organizationId: string): Promise<EffectivePreferences> {
-  const raw = await loadRaw(userId, organizationId);
+  // Entitlement resolves CONCURRENTLY with the preference rows so the module
+  // gate adds no serial latency to the rail's per-load /api/preferences call.
+  const [raw, activeAppKeys] = await Promise.all([
+    loadRaw(userId, organizationId),
+    getActiveModuleAppKeys(organizationId),
+  ]);
 
   const merged: EffectivePreferences = {
     sidebar: { ...DEFAULT_SIDEBAR, ...(raw.orgSidebar ?? {}), ...(raw.userSidebar ?? {}) },
@@ -191,6 +200,10 @@ export async function getEffectivePreferences(userId: string, organizationId: st
     theme: { ...DEFAULT_THEME, ...(raw.orgTheme ?? {}), ...(raw.userTheme ?? {}) },
     density: raw.userDensity ?? raw.orgDensity ?? DEFAULT_DENSITY,
     lockedKeys: raw.lockedKeys,
+    // Premium module entitlement is ORG-LEVEL (ProductInstallation), never a
+    // user preference — resolved (above, concurrently) so the rail hides a
+    // disabled module.
+    modules: { activeAppKeys },
   };
 
   // sidebar.apps (the ACCESS-system rail config) is ORG-LEVEL ONLY: the
