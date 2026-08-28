@@ -10,6 +10,7 @@ import {
 import {
   FUNCTIONS,
   MAX_TEXT_LENGTH,
+  RANGE_ARGUMENTS,
   callFunction,
   callFunctionWith,
   functionNames,
@@ -75,6 +76,48 @@ describe("registry", () => {
       "VLOOKUP",
       "INDEX",
       "MATCH",
+      "ROUNDUP",
+      "ROUNDDOWN",
+      "TRUNC",
+      "INT",
+      "CEILING",
+      "FLOOR",
+      "SIGN",
+      "PRODUCT",
+      "MEDIAN",
+      "POWER",
+      "XOR",
+      "IFS",
+      "SWITCH",
+      "IFNA",
+      "CONCATENATE",
+      "PROPER",
+      "REPT",
+      "EXACT",
+      "FIND",
+      "SEARCH",
+      "VALUE",
+      "TEXTJOIN",
+      "YEAR",
+      "MONTH",
+      "DAY",
+      "HOUR",
+      "MINUTE",
+      "WEEKDAY",
+      "DAYS",
+      "EDATE",
+      "EOMONTH",
+      "COUNTIFS",
+      "SUMIFS",
+      "AVERAGEIFS",
+      "ISNUMBER",
+      "ISTEXT",
+      "ISLOGICAL",
+      "ISBLANK",
+      "ISERROR",
+      "ISNA",
+      "ISEVEN",
+      "ISODD",
     ];
     expect(functionNames()).toEqual([...expected].sort());
     for (const name of expected) expect(isFunctionName(name)).toBe(true);
@@ -98,7 +141,13 @@ describe("registry", () => {
 
   it("defers arguments only where the semantics need it", () => {
     const lazy = [...FUNCTIONS.values()].filter((entry) => entry.lazy);
-    expect(lazy.map((entry) => entry.name).sort()).toEqual(["IF", "IFERROR"]);
+    expect(lazy.map((entry) => entry.name).sort()).toEqual([
+      "IF",
+      "IFERROR",
+      "IFNA",
+      "IFS",
+      "SWITCH",
+    ]);
   });
 
   it("answers an unknown name with #NAME?, not an exception", () => {
@@ -710,5 +759,219 @@ describe("MATCH", () => {
     expect(call("MATCH", 20, rowRange([10, 20, 30]), 0)).toBe(2);
     expect(call("MATCH", 20)).toBe(NA);
     expect(call("MATCH", 20, ascending, 0, 1)).toBe(NA);
+  });
+});
+
+describe("rounding and integers", () => {
+  it("ROUNDUP goes away from zero, ROUNDDOWN and TRUNC toward it", () => {
+    expect(call("ROUNDUP", 3.14159, 2)).toBe(3.15);
+    expect(call("ROUNDUP", -3.14159, 2)).toBe(-3.15);
+    expect(call("ROUNDUP", 3.001)).toBe(4);
+    expect(call("ROUNDDOWN", 3.999, 2)).toBe(3.99);
+    expect(call("ROUNDDOWN", -3.999, 0)).toBe(-3);
+    expect(call("TRUNC", 8.9)).toBe(8);
+    expect(call("TRUNC", -8.9)).toBe(-8);
+    expect(call("TRUNC", 3.14159, 2)).toBe(3.14);
+  });
+
+  it("INT floors toward minus infinity, unlike TRUNC", () => {
+    expect(call("INT", 2.9)).toBe(2);
+    expect(call("INT", -2.1)).toBe(-3);
+    expect(call("TRUNC", -2.1)).toBe(-2);
+  });
+
+  it("CEILING and FLOOR snap to a multiple", () => {
+    expect(call("CEILING", 7)).toBe(7);
+    expect(call("CEILING", 6.1, 5)).toBe(10);
+    expect(call("FLOOR", 6.9, 5)).toBe(5);
+    expect(call("CEILING", 5, 0)).toBe(0);
+    expect(call("FLOOR", 5, 0)).toBe(0);
+  });
+
+  it("corrects float representation so common money inputs stay exact", () => {
+    // Without the toPrecision snap these each drop or add a whole unit,
+    // because e.g. 0.29 * 100 is 28.999999999999996 in IEEE-754.
+    expect(call("ROUNDDOWN", 0.29, 2)).toBe(0.29);
+    expect(call("ROUNDDOWN", 2.01, 2)).toBe(2.01);
+    expect(call("TRUNC", 0.58, 2)).toBe(0.58);
+    expect(call("ROUNDUP", 1.1, 2)).toBe(1.1);
+    expect(call("ROUNDUP", 1.1, 1)).toBe(1.1);
+    expect(call("FLOOR", 0.3, 0.1)).toBe(0.3);
+    expect(call("FLOOR", 0.29, 0.01)).toBe(0.29);
+    expect(call("CEILING", 0.07, 0.01)).toBe(0.07);
+    expect(call("CEILING", 1.1, 0.1)).toBe(1.1);
+  });
+
+  it("SIGN, PRODUCT, MEDIAN and POWER", () => {
+    expect(call("SIGN", -8)).toBe(-1);
+    expect(call("SIGN", 0)).toBe(0);
+    expect(call("PRODUCT", 2, 3, 4)).toBe(24);
+    expect(call("PRODUCT", columnRange([2, "x", 5, null]))).toBe(10);
+    expect(call("MEDIAN", 3, 1, 2)).toBe(2);
+    expect(call("MEDIAN", 1, 2, 3, 4)).toBe(2.5);
+    expect(call("MEDIAN", columnRange(["x", "y"]))).toBe(NUM);
+    expect(call("POWER", 2, 10)).toBe(1024);
+  });
+});
+
+describe("logical (extended)", () => {
+  it("XOR is true on an odd number of trues", () => {
+    expect(call("XOR", true, false)).toBe(true);
+    expect(call("XOR", true, true)).toBe(false);
+    expect(call("XOR", columnRange([true, true, true]))).toBe(true);
+    expect(call("XOR", columnRange([]))).toBe(VALUE);
+  });
+
+  it("IFS returns the first true branch, else #N/A", () => {
+    expect(call("IFS", false, "a", true, "b")).toBe("b");
+    expect(call("IFS", true, "a", true, "b")).toBe("a");
+    expect(call("IFS", false, "a", false, "b")).toBe(NA);
+  });
+
+  it("SWITCH matches a case or falls back to a default", () => {
+    expect(call("SWITCH", 2, 1, "one", 2, "two")).toBe("two");
+    expect(call("SWITCH", 9, 1, "one", 2, "two", "other")).toBe("other");
+    expect(call("SWITCH", 9, 1, "one")).toBe(NA);
+  });
+
+  it("IFNA replaces only #N/A", () => {
+    expect(call("IFNA", NA, "fallback")).toBe("fallback");
+    expect(call("IFNA", 5, "fallback")).toBe(5);
+    expect(call("IFNA", DIV0, "fallback")).toBe(DIV0);
+  });
+});
+
+describe("text (extended)", () => {
+  it("PROPER title-cases words", () => {
+    expect(call("PROPER", "hELLO woRLD")).toBe("Hello World");
+    expect(call("PROPER", "o'neil-smith")).toBe("O'Neil-Smith");
+  });
+
+  it("REPT repeats and caps runaway output", () => {
+    expect(call("REPT", "ab", 3)).toBe("ababab");
+    expect(call("REPT", "x", 0)).toBe("");
+    expect(call("REPT", "x", -1)).toBe(VALUE);
+    expect(call("REPT", "xy", MAX_TEXT_LENGTH)).toBe(VALUE);
+  });
+
+  it("EXACT, FIND and SEARCH", () => {
+    expect(call("EXACT", "Abc", "Abc")).toBe(true);
+    expect(call("EXACT", "Abc", "abc")).toBe(false);
+    expect(call("FIND", "b", "abcabc")).toBe(2);
+    expect(call("FIND", "b", "abcabc", 3)).toBe(5);
+    expect(call("FIND", "B", "abc")).toBe(VALUE);
+    expect(call("SEARCH", "B", "aBc")).toBe(2);
+    expect(call("SEARCH", "z", "abc")).toBe(VALUE);
+  });
+
+  it("VALUE parses text and TEXTJOIN joins", () => {
+    expect(call("VALUE", "42")).toBe(42);
+    expect(call("VALUE", " 3.5 ")).toBe(3.5);
+    expect(call("VALUE", "")).toBe(0);
+    expect(call("VALUE", "abc")).toBe(VALUE);
+    expect(call("TEXTJOIN", "-", true, "a", "", "b")).toBe("a-b");
+    expect(call("TEXTJOIN", "-", false, "a", "", "b")).toBe("a--b");
+    expect(call("TEXTJOIN", ", ", true, columnRange(["x", null, "y"]))).toBe("x, y");
+  });
+});
+
+describe("date parts", () => {
+  const stamp = serialFromParts(2026, 8, 19, 13, 30, 0);
+
+  it("YEAR / MONTH / DAY / HOUR / MINUTE read the serial", () => {
+    expect(call("YEAR", stamp)).toBe(2026);
+    expect(call("MONTH", stamp)).toBe(8);
+    expect(call("DAY", stamp)).toBe(19);
+    expect(call("HOUR", stamp)).toBe(13);
+    expect(call("MINUTE", stamp)).toBe(30);
+  });
+
+  it("WEEKDAY answers each numbering type", () => {
+    // 2026-08-19 is a Wednesday.
+    expect(call("WEEKDAY", stamp)).toBe(4); // type 1: Sun=1
+    expect(call("WEEKDAY", stamp, 2)).toBe(3); // type 2: Mon=1
+    expect(call("WEEKDAY", stamp, 3)).toBe(2); // type 3: Mon=0
+    expect(call("WEEKDAY", stamp, 9)).toBe(NUM);
+    // A serial past the representable range errors like the other date parts.
+    expect(call("WEEKDAY", 200000000)).toBe(NUM);
+    expect(call("YEAR", 200000000)).toBe(NUM);
+  });
+
+  it("DAYS counts whole days between serials", () => {
+    expect(call("DAYS", serialFromParts(2026, 8, 19), serialFromParts(2026, 8, 9))).toBe(10);
+  });
+
+  it("EDATE shifts months and clamps to the last day", () => {
+    expect(call("EDATE", serialFromParts(2026, 1, 31), 1)).toBe(serialFromParts(2026, 2, 28));
+    expect(call("EDATE", serialFromParts(2026, 3, 15), -1)).toBe(serialFromParts(2026, 2, 15));
+    expect(call("EDATE", serialFromParts(2026, 12, 10), 1)).toBe(serialFromParts(2027, 1, 10));
+  });
+
+  it("EOMONTH lands on the month end", () => {
+    expect(call("EOMONTH", serialFromParts(2026, 1, 15), 0)).toBe(serialFromParts(2026, 1, 31));
+    expect(call("EOMONTH", serialFromParts(2026, 1, 31), 1)).toBe(serialFromParts(2026, 2, 28));
+    expect(call("EOMONTH", serialFromParts(2026, 2, 15), -1)).toBe(serialFromParts(2026, 1, 31));
+  });
+});
+
+describe("multi-criteria conditionals", () => {
+  const region = columnRange(["N", "S", "N", "S", "N"]);
+  const amount = columnRange([10, 20, 30, 40, 50]);
+
+  it("COUNTIFS counts rows meeting every criterion", () => {
+    expect(call("COUNTIFS", region, "N")).toBe(3);
+    expect(call("COUNTIFS", region, "N", amount, ">20")).toBe(2);
+    expect(call("COUNTIFS", region, "Z")).toBe(0);
+  });
+
+  it("SUMIFS and AVERAGEIFS aggregate the matched rows", () => {
+    expect(call("SUMIFS", amount, region, "N")).toBe(90);
+    expect(call("SUMIFS", amount, region, "N", amount, ">20")).toBe(80);
+    expect(call("AVERAGEIFS", amount, region, "N")).toBe(30);
+    expect(call("AVERAGEIFS", amount, region, "Z")).toBe(DIV0);
+  });
+
+  it("refuses a criteria range of a different shape", () => {
+    expect(call("SUMIFS", amount, columnRange(["N", "S"]), "N")).toBe(VALUE);
+    expect(call("COUNTIFS", region, "N", columnRange([1, 2]), ">0")).toBe(VALUE);
+  });
+
+  it("declares range slots for far more than a handful of criteria pairs", () => {
+    // So a bare [Header] ref in a late criteria slot still widens to its
+    // column instead of narrowing to the current row. COUNTIFS ranges are
+    // even slots; SUMIFS/AVERAGEIFS reserve slot 0 and use the odd slots.
+    const count = RANGE_ARGUMENTS.get("COUNTIFS") as readonly number[];
+    const sumifs = RANGE_ARGUMENTS.get("SUMIFS") as readonly number[];
+    expect(count).toContain(20); // 10th criteria range
+    expect(count).not.toContain(21); // its criterion stays scalar
+    expect(sumifs).toContain(0); // the sum range
+    expect(sumifs).toContain(21); // 11th criteria range
+    expect(sumifs).not.toContain(20); // that criterion stays scalar
+    expect(RANGE_ARGUMENTS.get("AVERAGEIFS")).toBe(sumifs);
+  });
+});
+
+describe("type tests", () => {
+  it("classify a value without being poisoned by an error", () => {
+    expect(call("ISNUMBER", 5)).toBe(true);
+    expect(call("ISNUMBER", "5")).toBe(false);
+    expect(call("ISTEXT", "x")).toBe(true);
+    expect(call("ISTEXT", 5)).toBe(false);
+    expect(call("ISLOGICAL", true)).toBe(true);
+    expect(call("ISLOGICAL", 1)).toBe(false);
+    expect(call("ISBLANK", null)).toBe(true);
+    expect(call("ISBLANK", "")).toBe(false);
+    expect(call("ISERROR", DIV0)).toBe(true);
+    expect(call("ISERROR", 5)).toBe(false);
+    expect(call("ISNA", NA)).toBe(true);
+    expect(call("ISNA", DIV0)).toBe(false);
+  });
+
+  it("ISEVEN and ISODD use the integer part", () => {
+    expect(call("ISEVEN", 4)).toBe(true);
+    expect(call("ISEVEN", 3.9)).toBe(false);
+    expect(call("ISODD", 3)).toBe(true);
+    expect(call("ISODD", -3)).toBe(true);
+    expect(call("ISEVEN", "x")).toBe(VALUE);
   });
 });

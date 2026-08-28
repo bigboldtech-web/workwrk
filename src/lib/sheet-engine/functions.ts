@@ -1161,6 +1161,717 @@ const MATCH_FN = fn(
 
 // --- Registry -------------------------------------------------------------
 
+// --- Rounding and integers ------------------------------------------------
+
+/** Snap an IEEE-754 product or quotient to a double's real 15-digit
+ *  precision before a ceil/floor/trunc, so 0.29 * 100 (which is actually
+ *  28.999999999999996) is not cut down a whole unit to 28. This is the same
+ *  correction ROUND makes in `roundHalfAwayFromZero`; without it ROUNDUP/
+ *  ROUNDDOWN/TRUNC/CEILING/FLOOR are off by one on common money inputs. */
+function snapPrecision(value: number): number {
+  return Number.isFinite(value) ? Number(value.toPrecision(15)) : value;
+}
+
+/** Round `value` at `places` decimals: "up" is away from zero, "down" is
+ *  toward it (so ROUNDDOWN and TRUNC share this). */
+function scaledRound(value: number, places: number, away: boolean): number {
+  const factor = 10 ** places;
+  const scaled = snapPrecision(value * factor);
+  const whole = away
+    ? scaled >= 0
+      ? Math.ceil(scaled)
+      : Math.floor(scaled)
+    : Math.trunc(scaled);
+  return whole / factor;
+}
+
+const ROUNDUP_FN = fn(
+  {
+    name: "ROUNDUP",
+    min: 1,
+    max: 2,
+    signature: "ROUNDUP(value, [places])",
+    summary: "Rounds away from zero: ROUNDUP(3.141, 1) is 3.2.",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    const places = args.length > 1 ? argInteger(args[1]) : 0;
+    if (isErrorValue(places)) return places;
+    return finiteOrError(scaledRound(value, places, true));
+  },
+);
+
+const ROUNDDOWN_FN = fn(
+  {
+    name: "ROUNDDOWN",
+    min: 1,
+    max: 2,
+    signature: "ROUNDDOWN(value, [places])",
+    summary: "Rounds toward zero: ROUNDDOWN(3.99, 0) is 3.",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    const places = args.length > 1 ? argInteger(args[1]) : 0;
+    if (isErrorValue(places)) return places;
+    return finiteOrError(scaledRound(value, places, false));
+  },
+);
+
+const TRUNC_FN = fn(
+  {
+    name: "TRUNC",
+    min: 1,
+    max: 2,
+    signature: "TRUNC(value, [places])",
+    summary: "Drops digits past `places` without rounding (toward zero).",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    const places = args.length > 1 ? argInteger(args[1]) : 0;
+    if (isErrorValue(places)) return places;
+    return finiteOrError(scaledRound(value, places, false));
+  },
+);
+
+const INT_FN = fn(
+  {
+    name: "INT",
+    min: 1,
+    max: 1,
+    signature: "INT(value)",
+    summary: "Rounds down toward minus infinity: INT(-2.1) is -3.",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    return finiteOrError(Math.floor(value));
+  },
+);
+
+const CEILING_FN = fn(
+  {
+    name: "CEILING",
+    min: 1,
+    max: 2,
+    signature: "CEILING(value, [factor])",
+    summary: "Rounds up to the nearest multiple of factor (default 1).",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    const factor = args.length > 1 ? argNumber(args[1]) : 1;
+    if (isErrorValue(factor)) return factor;
+    if (factor === 0) return 0;
+    // Snap the quotient before the ceil AND the product after it: 3 * 0.1 is
+    // 0.30000000000000004, so multiplying back by a non-power-of-ten factor
+    // reintroduces the error the first snap removed.
+    return finiteOrError(snapPrecision(Math.ceil(snapPrecision(value / factor)) * factor));
+  },
+);
+
+const FLOOR_FN = fn(
+  {
+    name: "FLOOR",
+    min: 1,
+    max: 2,
+    signature: "FLOOR(value, [factor])",
+    summary: "Rounds down to the nearest multiple of factor (default 1).",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    const factor = args.length > 1 ? argNumber(args[1]) : 1;
+    if (isErrorValue(factor)) return factor;
+    if (factor === 0) return 0;
+    // Snap the quotient before the floor AND the product after it (see CEILING).
+    return finiteOrError(snapPrecision(Math.floor(snapPrecision(value / factor)) * factor));
+  },
+);
+
+const SIGN_FN = fn(
+  {
+    name: "SIGN",
+    min: 1,
+    max: 1,
+    signature: "SIGN(value)",
+    summary: "1, -1 or 0 for the sign of value.",
+  },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    return value > 0 ? 1 : value < 0 ? -1 : 0;
+  },
+);
+
+const PRODUCT_FN = fn(
+  {
+    name: "PRODUCT",
+    min: 1,
+    max: MANY,
+    signature: "PRODUCT(value1, [value2, …])",
+    summary: "Multiplies its numbers; empty ranges contribute nothing.",
+  },
+  (args) => {
+    const numbers = collectNumbers(args);
+    if (isErrorValue(numbers)) return numbers;
+    if (numbers.length === 0) return 0;
+    let out = 1;
+    for (const n of numbers) out *= n;
+    return finiteOrError(out);
+  },
+);
+
+const MEDIAN_FN = fn(
+  {
+    name: "MEDIAN",
+    min: 1,
+    max: MANY,
+    signature: "MEDIAN(value1, [value2, …])",
+    summary: "The middle value; the mean of the two middles for an even count.",
+  },
+  (args) => {
+    const numbers = collectNumbers(args);
+    if (isErrorValue(numbers)) return numbers;
+    if (numbers.length === 0) return cellError("#NUM!");
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 1
+      ? sorted[mid]
+      : divide(sorted[mid - 1] + sorted[mid], 2);
+  },
+);
+
+// POWER is the standard spelling of POW; share its implementation.
+const POWER_FN: SheetFunction = {
+  ...POW_FN,
+  name: "POWER",
+  signature: "POWER(base, exponent)",
+};
+
+// --- Logical (extended) ---------------------------------------------------
+
+const XOR_FN = fn(
+  {
+    name: "XOR",
+    min: 1,
+    max: MANY,
+    signature: "XOR(logical1, [logical2, …])",
+    summary: "True when an odd number of the logical values are true.",
+  },
+  (args) => {
+    const values = collectBooleans(args);
+    if (isErrorValue(values)) return values;
+    if (values.length === 0) return cellError("#VALUE!");
+    return values.filter(Boolean).length % 2 === 1;
+  },
+);
+
+const IFS_FN = lazyFn(
+  {
+    name: "IFS",
+    min: 2,
+    max: MANY,
+    signature: "IFS(condition1, value1, [condition2, value2, …])",
+    summary: "Returns the value of the first true condition; #N/A if none.",
+  },
+  (args) => {
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      const cond = toBoolean(toScalar(args[i]()));
+      if (isErrorValue(cond)) return cond;
+      if (cond) return toScalar(args[i + 1]());
+    }
+    return cellError("#N/A");
+  },
+);
+
+const SWITCH_FN = lazyFn(
+  {
+    name: "SWITCH",
+    min: 3,
+    max: MANY,
+    signature: "SWITCH(expression, case1, value1, [case2, value2, …], [default])",
+    summary: "Compares expression to each case; a lone trailing arg is the default.",
+  },
+  (args) => {
+    const subject = toScalar(args[0]());
+    if (isErrorValue(subject)) return subject;
+    let i = 1;
+    for (; i + 1 < args.length; i += 2) {
+      const candidate = toScalar(args[i]());
+      if (isErrorValue(candidate)) return candidate;
+      if (valuesEqual(subject, candidate)) return toScalar(args[i + 1]());
+    }
+    // One argument left over is the default.
+    return i < args.length ? toScalar(args[i]()) : cellError("#N/A");
+  },
+);
+
+const IFNA_FN = lazyFn(
+  {
+    name: "IFNA",
+    min: 2,
+    max: 2,
+    signature: "IFNA(value, value_if_na)",
+    summary: "Replaces #N/A only; every other error passes through.",
+  },
+  (args) => {
+    const value = toScalar(args[0]());
+    if (isErrorValue(value) && value.err === "#N/A") return toScalar(args[1]());
+    return value;
+  },
+);
+
+// --- Text (extended) ------------------------------------------------------
+
+// CONCATENATE is the legacy spelling of CONCAT with identical behaviour.
+const CONCATENATE_FN: SheetFunction = {
+  ...CONCAT_FN,
+  name: "CONCATENATE",
+  signature: "CONCATENATE(value1, [value2, …])",
+};
+
+const PROPER_FN = fn(
+  {
+    name: "PROPER",
+    min: 1,
+    max: 1,
+    signature: "PROPER(text)",
+    summary: "Capitalises the first letter of each word, lowercases the rest.",
+  },
+  (args) => {
+    const text = argText(args[0]);
+    if (isErrorValue(text)) return text;
+    let out = "";
+    let prevLetter = false;
+    for (const ch of text) {
+      const isLetter = /\p{L}/u.test(ch);
+      out += isLetter && !prevLetter ? ch.toUpperCase() : ch.toLowerCase();
+      prevLetter = isLetter;
+    }
+    return out;
+  },
+);
+
+const REPT_FN = fn(
+  {
+    name: "REPT",
+    min: 2,
+    max: 2,
+    signature: "REPT(text, count)",
+    summary: "Repeats text count times.",
+  },
+  (args) => {
+    const text = argText(args[0]);
+    if (isErrorValue(text)) return text;
+    const count = argInteger(args[1]);
+    if (isErrorValue(count)) return count;
+    if (count < 0) return cellError("#VALUE!");
+    if (text.length * count > MAX_TEXT_LENGTH) return cellError("#VALUE!");
+    return text.repeat(count);
+  },
+);
+
+const EXACT_FN = fn(
+  {
+    name: "EXACT",
+    min: 2,
+    max: 2,
+    signature: "EXACT(text1, text2)",
+    summary: "True when the two texts match exactly, case included.",
+  },
+  (args) => {
+    const a = argText(args[0]);
+    if (isErrorValue(a)) return a;
+    const b = argText(args[1]);
+    if (isErrorValue(b)) return b;
+    return a === b;
+  },
+);
+
+const FIND_FN = fn(
+  {
+    name: "FIND",
+    min: 2,
+    max: 3,
+    signature: "FIND(needle, haystack, [start])",
+    summary: "Case-sensitive 1-based position of needle; #VALUE! if absent.",
+  },
+  (args) => {
+    const needle = argText(args[0]);
+    if (isErrorValue(needle)) return needle;
+    const haystack = argText(args[1]);
+    if (isErrorValue(haystack)) return haystack;
+    const start = args.length > 2 ? argInteger(args[2]) : 1;
+    if (isErrorValue(start)) return start;
+    if (start < 1) return cellError("#VALUE!");
+    const at = haystack.indexOf(needle, start - 1);
+    return at < 0 ? cellError("#VALUE!") : at + 1;
+  },
+);
+
+const SEARCH_FN = fn(
+  {
+    name: "SEARCH",
+    min: 2,
+    max: 3,
+    signature: "SEARCH(needle, haystack, [start])",
+    summary: "Case-insensitive 1-based position of needle; #VALUE! if absent.",
+  },
+  (args) => {
+    const needle = argText(args[0]);
+    if (isErrorValue(needle)) return needle;
+    const haystack = argText(args[1]);
+    if (isErrorValue(haystack)) return haystack;
+    const start = args.length > 2 ? argInteger(args[2]) : 1;
+    if (isErrorValue(start)) return start;
+    if (start < 1) return cellError("#VALUE!");
+    const at = haystack.toLowerCase().indexOf(needle.toLowerCase(), start - 1);
+    return at < 0 ? cellError("#VALUE!") : at + 1;
+  },
+);
+
+const VALUE_FN = fn(
+  {
+    name: "VALUE",
+    min: 1,
+    max: 1,
+    signature: "VALUE(text)",
+    summary: "Parses text to a number; #VALUE! when it is not numeric.",
+  },
+  (args) => {
+    const text = argText(args[0]);
+    if (isErrorValue(text)) return text;
+    if (text.trim() === "") return 0;
+    const parsed = parseNumberText(text);
+    return parsed === null ? cellError("#VALUE!") : parsed;
+  },
+);
+
+const TEXTJOIN_FN = fn(
+  {
+    name: "TEXTJOIN",
+    min: 3,
+    max: MANY,
+    signature: "TEXTJOIN(delimiter, ignore_empty, value1, [value2, …])",
+    summary: "Joins values with a delimiter, optionally skipping empty ones.",
+  },
+  (args) => {
+    const delimiter = argText(args[0]);
+    if (isErrorValue(delimiter)) return delimiter;
+    const ignoreEmpty = argBoolean(args[1]);
+    if (isErrorValue(ignoreEmpty)) return ignoreEmpty;
+    const parts: string[] = [];
+    let length = 0;
+    for (let i = 2; i < args.length; i++) {
+      const arg = args[i];
+      const cells = isRangeValue(arg) ? rangeCells(arg) : [arg as CellValue];
+      for (const cell of cells) {
+        if (ignoreEmpty && (isBlank(cell) || cell === "")) continue;
+        const text = toText(cell);
+        if (isErrorValue(text)) return text;
+        parts.push(text);
+        length += text.length + delimiter.length;
+        if (length > MAX_TEXT_LENGTH) return cellError("#VALUE!");
+      }
+    }
+    return parts.join(delimiter);
+  },
+);
+
+// --- Date parts -----------------------------------------------------------
+
+/** Date components from a serial argument, or the #NUM! a bad serial gives. */
+function serialParts(arg: FunctionArg) {
+  const serial = argNumber(arg);
+  if (isErrorValue(serial)) return serial;
+  const parts = partsFromSerial(serial);
+  return parts ?? cellError("#NUM!");
+}
+
+const YEAR_FN = fn(
+  { name: "YEAR", min: 1, max: 1, signature: "YEAR(date)", summary: "The year of a date serial." },
+  (args) => {
+    const parts = serialParts(args[0]);
+    return isErrorValue(parts) ? parts : parts.year;
+  },
+);
+
+const MONTH_FN = fn(
+  { name: "MONTH", min: 1, max: 1, signature: "MONTH(date)", summary: "The month (1-12) of a date serial." },
+  (args) => {
+    const parts = serialParts(args[0]);
+    return isErrorValue(parts) ? parts : parts.month;
+  },
+);
+
+const DAY_FN = fn(
+  { name: "DAY", min: 1, max: 1, signature: "DAY(date)", summary: "The day of the month (1-31) of a date serial." },
+  (args) => {
+    const parts = serialParts(args[0]);
+    return isErrorValue(parts) ? parts : parts.day;
+  },
+);
+
+const HOUR_FN = fn(
+  { name: "HOUR", min: 1, max: 1, signature: "HOUR(time)", summary: "The hour (0-23) of a date serial." },
+  (args) => {
+    const parts = serialParts(args[0]);
+    return isErrorValue(parts) ? parts : parts.hours;
+  },
+);
+
+const MINUTE_FN = fn(
+  { name: "MINUTE", min: 1, max: 1, signature: "MINUTE(time)", summary: "The minute (0-59) of a date serial." },
+  (args) => {
+    const parts = serialParts(args[0]);
+    return isErrorValue(parts) ? parts : parts.minutes;
+  },
+);
+
+const WEEKDAY_FN = fn(
+  {
+    name: "WEEKDAY",
+    min: 1,
+    max: 2,
+    signature: "WEEKDAY(date, [type])",
+    summary: "Day of week. Type 1 (default) Sun=1..Sat=7; 2 Mon=1..Sun=7; 3 Mon=0..Sun=6.",
+  },
+  (args) => {
+    const serial = argNumber(args[0]);
+    if (isErrorValue(serial)) return serial;
+    // Reject a serial outside the representable range, the way YEAR/MONTH/DAY
+    // do through partsFromSerial; the modulo below would otherwise answer a
+    // weekday for a date that has no calendar.
+    if (!partsFromSerial(serial)) return cellError("#NUM!");
+    const type = args.length > 1 ? argInteger(args[1]) : 1;
+    if (isErrorValue(type)) return type;
+    // Serial 0 is 1899-12-30, a Saturday; shift to a Sunday=0..Saturday=6 base.
+    const sun0 = ((((wholeDays(serial) % 7) + 7) % 7) + 6) % 7;
+    if (type === 1) return sun0 + 1;
+    if (type === 2) return ((sun0 + 6) % 7) + 1;
+    if (type === 3) return (sun0 + 6) % 7;
+    return cellError("#NUM!");
+  },
+);
+
+const DAYS_FN = fn(
+  {
+    name: "DAYS",
+    min: 2,
+    max: 2,
+    signature: "DAYS(end_date, start_date)",
+    summary: "Whole days from start to end (end minus start).",
+  },
+  (args) => {
+    const end = argNumber(args[0]);
+    if (isErrorValue(end)) return end;
+    const start = argNumber(args[1]);
+    if (isErrorValue(start)) return start;
+    return wholeDays(end) - wholeDays(start);
+  },
+);
+
+/** Last day-of-month for a (possibly out-of-range) year/month, via rollover. */
+function lastDayOfMonth(year: number, month: number): number {
+  const parts = partsFromSerial(serialFromParts(year, month + 1, 0));
+  return parts ? parts.day : 28;
+}
+
+const EDATE_FN = fn(
+  {
+    name: "EDATE",
+    min: 2,
+    max: 2,
+    signature: "EDATE(date, months)",
+    summary: "Shifts a date by whole months, clamping to the month's last day.",
+  },
+  (args) => {
+    const parts = serialParts(args[0]);
+    if (isErrorValue(parts)) return parts;
+    const months = argInteger(args[1]);
+    if (isErrorValue(months)) return months;
+    // Normalise year/month through a serial round-trip, then clamp the day.
+    const normalized = partsFromSerial(serialFromParts(parts.year, parts.month + months, 1));
+    if (!normalized) return cellError("#NUM!");
+    const day = Math.min(parts.day, lastDayOfMonth(normalized.year, normalized.month));
+    return finiteOrError(serialFromParts(normalized.year, normalized.month, day));
+  },
+);
+
+const EOMONTH_FN = fn(
+  {
+    name: "EOMONTH",
+    min: 2,
+    max: 2,
+    signature: "EOMONTH(date, months)",
+    summary: "The last day of the month `months` away from date.",
+  },
+  (args) => {
+    const parts = serialParts(args[0]);
+    if (isErrorValue(parts)) return parts;
+    const months = argInteger(args[1]);
+    if (isErrorValue(months)) return months;
+    return finiteOrError(serialFromParts(parts.year, parts.month + months + 1, 0));
+  },
+);
+
+// --- Multi-criteria conditionals ------------------------------------------
+
+/** AND across criteria pairs, aligned to `reference`'s shape. `pairs` is
+ *  (range, criterion, range, criterion, …). A range whose shape differs from
+ *  the reference is #VALUE!, matching Sheets' refusal to guess an offset. */
+function criteriaMask(
+  reference: RangeValue,
+  pairs: readonly FunctionArg[],
+): boolean[] | ErrorValue {
+  const count = rangeHeight(reference) * rangeWidth(reference);
+  const mask = new Array<boolean>(count).fill(true);
+  for (let p = 0; p + 1 < pairs.length; p += 2) {
+    const range = toRange(pairs[p]);
+    if (
+      rangeHeight(range) !== rangeHeight(reference) ||
+      rangeWidth(range) !== rangeWidth(reference)
+    ) {
+      return cellError("#VALUE!");
+    }
+    const criterion = toScalar(pairs[p + 1]);
+    if (isErrorValue(criterion)) return criterion;
+    const predicate = criterionPredicate(criterion);
+    const cells = rangeCells(range);
+    for (let i = 0; i < count; i++) {
+      if (mask[i] && !(!isErrorValue(cells[i]) && predicate(cells[i]))) mask[i] = false;
+    }
+  }
+  return mask;
+}
+
+const COUNTIFS_FN = fn(
+  {
+    name: "COUNTIFS",
+    min: 2,
+    max: MANY,
+    signature: "COUNTIFS(range1, criterion1, [range2, criterion2, …])",
+    summary: "Counts rows that satisfy every range/criterion pair.",
+    errors: "scalars",
+  },
+  (args) => {
+    const mask = criteriaMask(toRange(args[0]), args);
+    if (isErrorValue(mask)) return mask;
+    return mask.filter(Boolean).length;
+  },
+);
+
+const SUMIFS_FN = fn(
+  {
+    name: "SUMIFS",
+    min: 3,
+    max: MANY,
+    signature: "SUMIFS(sum_range, range1, criterion1, [range2, criterion2, …])",
+    summary: "Adds the sum_range cells whose row satisfies every criterion.",
+    errors: "scalars",
+  },
+  (args) => {
+    const sumRange = toRange(args[0]);
+    const mask = criteriaMask(sumRange, args.slice(1));
+    if (isErrorValue(mask)) return mask;
+    const cells = rangeCells(sumRange);
+    let total = 0;
+    for (let i = 0; i < cells.length; i++) {
+      if (!mask[i]) continue;
+      const cell = cells[i];
+      if (isErrorValue(cell)) return cell;
+      if (typeof cell === "number" && Number.isFinite(cell)) total += cell;
+    }
+    return finiteOrError(total);
+  },
+);
+
+const AVERAGEIFS_FN = fn(
+  {
+    name: "AVERAGEIFS",
+    min: 3,
+    max: MANY,
+    signature: "AVERAGEIFS(average_range, range1, criterion1, [range2, criterion2, …])",
+    summary: "Mean of the average_range cells whose row satisfies every criterion.",
+    errors: "scalars",
+  },
+  (args) => {
+    const avgRange = toRange(args[0]);
+    const mask = criteriaMask(avgRange, args.slice(1));
+    if (isErrorValue(mask)) return mask;
+    const cells = rangeCells(avgRange);
+    let total = 0;
+    let n = 0;
+    for (let i = 0; i < cells.length; i++) {
+      if (!mask[i]) continue;
+      const cell = cells[i];
+      if (isErrorValue(cell)) return cell;
+      if (typeof cell === "number" && Number.isFinite(cell)) {
+        total += cell;
+        n += 1;
+      }
+    }
+    if (n === 0) return cellError("#DIV/0!");
+    return divide(total, n);
+  },
+);
+
+// --- Type tests -----------------------------------------------------------
+
+const ISNUMBER_FN = fn(
+  { name: "ISNUMBER", min: 1, max: 1, signature: "ISNUMBER(value)", summary: "True when value is a number.", errors: "none" },
+  (args) => typeof toScalar(args[0]) === "number",
+);
+
+const ISTEXT_FN = fn(
+  { name: "ISTEXT", min: 1, max: 1, signature: "ISTEXT(value)", summary: "True when value is text.", errors: "none" },
+  (args) => typeof toScalar(args[0]) === "string",
+);
+
+const ISLOGICAL_FN = fn(
+  { name: "ISLOGICAL", min: 1, max: 1, signature: "ISLOGICAL(value)", summary: "True when value is TRUE or FALSE.", errors: "none" },
+  (args) => typeof toScalar(args[0]) === "boolean",
+);
+
+const ISBLANK_FN = fn(
+  { name: "ISBLANK", min: 1, max: 1, signature: "ISBLANK(value)", summary: "True when the cell is empty (not just \"\").", errors: "none" },
+  (args) => isBlank(toScalar(args[0])),
+);
+
+const ISERROR_FN = fn(
+  { name: "ISERROR", min: 1, max: 1, signature: "ISERROR(value)", summary: "True when value is any error.", errors: "none" },
+  (args) => isErrorValue(toScalar(args[0])),
+);
+
+const ISNA_FN = fn(
+  { name: "ISNA", min: 1, max: 1, signature: "ISNA(value)", summary: "True when value is the #N/A error.", errors: "none" },
+  (args) => {
+    const value = toScalar(args[0]);
+    return isErrorValue(value) && value.err === "#N/A";
+  },
+);
+
+const ISEVEN_FN = fn(
+  { name: "ISEVEN", min: 1, max: 1, signature: "ISEVEN(value)", summary: "True when the integer part of value is even." },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    return Math.abs(Math.trunc(value)) % 2 === 0;
+  },
+);
+
+const ISODD_FN = fn(
+  { name: "ISODD", min: 1, max: 1, signature: "ISODD(value)", summary: "True when the integer part of value is odd." },
+  (args) => {
+    const value = argNumber(args[0]);
+    if (isErrorValue(value)) return value;
+    return Math.abs(Math.trunc(value)) % 2 === 1;
+  },
+);
+
 const DEFINITIONS: readonly SheetFunction[] = [
   SUM_FN,
   AVERAGE_FN,
@@ -1198,6 +1909,54 @@ const DEFINITIONS: readonly SheetFunction[] = [
   VLOOKUP_FN,
   INDEX_FN,
   MATCH_FN,
+  // Rounding / integers
+  ROUNDUP_FN,
+  ROUNDDOWN_FN,
+  TRUNC_FN,
+  INT_FN,
+  CEILING_FN,
+  FLOOR_FN,
+  SIGN_FN,
+  PRODUCT_FN,
+  MEDIAN_FN,
+  POWER_FN,
+  // Logical (extended)
+  XOR_FN,
+  IFS_FN,
+  SWITCH_FN,
+  IFNA_FN,
+  // Text (extended)
+  CONCATENATE_FN,
+  PROPER_FN,
+  REPT_FN,
+  EXACT_FN,
+  FIND_FN,
+  SEARCH_FN,
+  VALUE_FN,
+  TEXTJOIN_FN,
+  // Date parts
+  YEAR_FN,
+  MONTH_FN,
+  DAY_FN,
+  HOUR_FN,
+  MINUTE_FN,
+  WEEKDAY_FN,
+  DAYS_FN,
+  EDATE_FN,
+  EOMONTH_FN,
+  // Multi-criteria conditionals
+  COUNTIFS_FN,
+  SUMIFS_FN,
+  AVERAGEIFS_FN,
+  // Type tests
+  ISNUMBER_FN,
+  ISTEXT_FN,
+  ISLOGICAL_FN,
+  ISBLANK_FN,
+  ISERROR_FN,
+  ISNA_FN,
+  ISEVEN_FN,
+  ISODD_FN,
 ];
 
 /**
@@ -1208,6 +1967,15 @@ const DEFINITIONS: readonly SheetFunction[] = [
  * =CONCAT([Name]) collapsed a whole column to one row's value). Anything
  * absent here is scalar. Keep it in step when adding a function.
  */
+// COUNTIFS pairs are (range, criterion) from slot 0: ranges at every even
+// slot. SUMIFS/AVERAGEIFS spend slot 0 on the data range, so their criteria
+// ranges are the odd slots. Both cover the full 255-argument ceiling.
+const COUNTIFS_RANGE_SLOTS: readonly number[] = Array.from({ length: 128 }, (_, i) => i * 2);
+const SUMIFS_RANGE_SLOTS: readonly number[] = [
+  0,
+  ...Array.from({ length: 127 }, (_, i) => i * 2 + 1),
+];
+
 export const RANGE_ARGUMENTS: ReadonlyMap<string, true | readonly number[]> = new Map<
   string,
   true | readonly number[]
@@ -1228,6 +1996,19 @@ export const RANGE_ARGUMENTS: ReadonlyMap<string, true | readonly number[]> = ne
   ["VLOOKUP", [1]],
   ["INDEX", [0]],
   ["MATCH", [1]],
+  // PRODUCT / MEDIAN fold whatever they are given, like the other aggregates.
+  ["PRODUCT", true],
+  ["MEDIAN", true],
+  // Multi-criteria families: the sum/average/count ranges and every
+  // criteria RANGE are arrays; the criteria VALUES between them are scalar.
+  // COUNTIFS pairs start at 0 (range, criterion); SUM/AVERAGEIFS reserve
+  // slot 0 for the data range, so their criteria ranges are the odd slots.
+  // The lists span the whole 255-argument ceiling so that even the 100th
+  // criteria pair written as a bare [Header] ref still widens to its column
+  // rather than narrowing to the current row.
+  ["COUNTIFS", COUNTIFS_RANGE_SLOTS],
+  ["SUMIFS", SUMIFS_RANGE_SLOTS],
+  ["AVERAGEIFS", SUMIFS_RANGE_SLOTS],
 ]);
 
 export const FUNCTIONS: ReadonlyMap<string, SheetFunction> = new Map(
