@@ -37,7 +37,7 @@ import {
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
   TextAlignStart, TextAlignCenter, TextAlignEnd,
   ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
-  Pin, PinOff, Palette,
+  Pin, PinOff, Palette, ListChecks,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -54,6 +54,7 @@ import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, 
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
 import { autoTypeEntry, autoTypeEntryRich, isOpenColumnType } from "@/lib/sheet-entry";
+import { validateValue, isEmptyValidation, type DataValidation } from "@/lib/sheet-validation";
 import { matchesFindQuery, replaceAllOccurrences, REPLACE_SKIP_TYPES } from "@/lib/sheet-find";
 import { notifyTablesChanged, onSidebarRefresh } from "@/components/layout/os/sidebar-refresh";
 import { useOsShell } from "@/components/layout/os/shell-context";
@@ -84,6 +85,7 @@ type Column = {
   // Raw cell values NEVER change shape — sort/formulas/clipboard read raw.
   format?: ColumnFormat;      // column-level number/date formatting
   rules?: ConditionalRule[];  // conditional formatting v1 (value → cell bg)
+  validation?: DataValidation; // data validation (reject-mode): list / number / text-length
 };
 
 type LinkedTable = { id: string; name: string; columns: Column[]; titleColId: string; rows: ApiRow[] };
@@ -553,7 +555,100 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
   );
 }
 
+/** Data validation editor (Zoho/Sheets). Restrict a column to a list
+ *  (renders a dropdown), a number range, or a text length. v1 is
+ *  reject-mode: invalid entries are refused. Commits via one undo step. */
+function DataValidationDialog({ column, onClose, onSave }: {
+  column: Column;
+  onClose: () => void;
+  onSave: (validation: DataValidation | undefined) => void;
+}) {
+  const initial = column.validation;
+  const [kind, setKind] = useState<"none" | DataValidation["kind"]>(initial?.kind ?? "none");
+  const [listText, setListText] = useState(initial?.kind === "list" ? initial.values.join("\n") : "");
+  const [min, setMin] = useState(initial && "min" in initial && initial.min != null ? String(initial.min) : "");
+  const [max, setMax] = useState(initial && "max" in initial && initial.max != null ? String(initial.max) : "");
+
+  const build = (): DataValidation | undefined => {
+    if (kind === "list") {
+      const values = [...new Set(listText.split("\n").map((x) => x.trim()).filter(Boolean))];
+      return values.length ? { kind: "list", values } : undefined;
+    }
+    if (kind === "number" || kind === "textLength") {
+      const mn = min.trim() === "" ? undefined : Number(min);
+      const mx = max.trim() === "" ? undefined : Number(max);
+      const v: DataValidation = kind === "number"
+        ? { kind: "number", ...(Number.isFinite(mn) ? { min: mn } : {}), ...(Number.isFinite(mx) ? { max: mx } : {}) }
+        : { kind: "textLength", ...(Number.isFinite(mn) ? { min: mn } : {}), ...(Number.isFinite(mx) ? { max: mx } : {}) };
+      return isEmptyValidation(v) ? undefined : v;
+    }
+    return undefined;
+  };
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Data validation — {column.label}</DialogTitle>
+        </DialogHeader>
+        <p className="text-[13px] text-zinc-500 mb-3">Restrict what this column accepts. Invalid entries are refused.</p>
+        <label className="mb-1 block text-[13px] font-medium text-zinc-600">Criteria</label>
+        <select
+          value={kind}
+          onChange={(e) => setKind(e.target.value as typeof kind)}
+          className="mb-3 h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+        >
+          <option value="none">No validation</option>
+          <option value="list">List of items (dropdown)</option>
+          <option value="number">Number between…</option>
+          <option value="textLength">Text length between…</option>
+        </select>
+        {kind === "list" && (
+          <div>
+            <label className="mb-1 block text-[13px] font-medium text-zinc-600">Allowed values (one per line)</label>
+            <textarea
+              value={listText}
+              onChange={(e) => setListText(e.target.value)}
+              rows={5}
+              placeholder={"Todo\nIn progress\nDone"}
+              className="w-full rounded-lg border border-zinc-200 px-2.5 py-2 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+            />
+          </div>
+        )}
+        {(kind === "number" || kind === "textLength") && (
+          <div className="flex items-center gap-2">
+            <input type="number" value={min} onChange={(e) => setMin(e.target.value)} placeholder="min" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
+            <span className="text-[13px] text-zinc-400">to</span>
+            <input type="number" value={max} onChange={(e) => setMax(e.target.value)} placeholder="max" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
+          </div>
+        )}
+        <div className="mt-4 flex justify-between">
+          {initial ? (
+            <button type="button" onClick={() => onSave(undefined)} className="h-8 px-3 rounded-md text-[14px] text-red-600 hover:bg-red-50">Remove</button>
+          ) : <span />}
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+            <button type="button" onClick={() => onSave(kind === "none" ? undefined : build())} className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]">Save</button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** coercePaste + column data-validation: a pasted/filled/stamped value that
+ *  fails the column's validation is skipped (never written), matching the
+ *  reject-mode the editor enforces. */
 function coercePaste(col: Column, raw: string): PasteCoercion {
+  const res = coercePasteRaw(col, raw);
+  if (res.kind === "write" && col.validation) {
+    const v = validateValue(col.validation, res.value);
+    if (!v.ok) return { kind: "skip" };
+  }
+  return res;
+}
+
+function coercePasteRaw(col: Column, raw: string): PasteCoercion {
   const text = raw.trim();
   switch (col.type) {
     // Computed. readOnlyCols already tells the grid these can't be edited;
@@ -802,6 +897,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // pattern as the row menu above.
   const [headerMenu, setHeaderMenu] = useState<{ colId: string; x: number; y: number } | null>(null);
   const [rulesColId, setRulesColId] = useState<string | null>(null);
+  const [validationColId, setValidationColId] = useState<string | null>(null);
   const headerMenuAnchorRef = useRef<HTMLElement | null>(null); // unused in point mode
   const headerMenuPanelRef = useRef<HTMLDivElement | null>(null);
   // Cmd/Ctrl+B/I/U anywhere on the sheet (capture phase): after clicking a
@@ -3368,7 +3464,12 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (REPLACE_SKIP_TYPES.has(col.type) || isFormulaCell(r.values[col.id])) return { kind: "skip" };
     const replaced = replaceAllOccurrences(findCellText(col, r), findQueryDebounced, findReplace);
     if (isOpenColumnType(col.type)) {
-      return { kind: "write", value: replaced === "" ? null : autoTypeEntry(replaced) };
+      const value = replaced === "" ? null : autoTypeEntry(replaced);
+      if (col.validation && value != null) {
+        const vr = validateValue(col.validation, value);
+        if (!vr.ok) return { kind: "skip" };
+      }
+      return { kind: "write", value };
     }
     return coercePaste(col, replaced);
   };
@@ -4191,6 +4292,20 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (typeof v === "string" && v.trimStart().startsWith("=")) {
       commitCellText(rowId, colId, v);
       return;
+    }
+    // Data validation (reject-mode): refuse an entry that breaks the
+    // column's rule and leave the old value. Validate the would-be STORED
+    // value (open columns type "5" → 5), never the raw keystrokes.
+    const vcol = table.columns.find((c) => c.id === colId);
+    if (vcol?.validation) {
+      // Validate the value that will actually be STORED. Open columns store
+      // the RICH parse (resolveOpenEntry) — validating the plain autoType
+      // answer could diverge (e.g. "5%" stores 0.05 but plainly reads 5).
+      const candidate = isOpenColumnType(vcol.type) && typeof v === "string"
+        ? resolveOpenEntry(v, readCellStyle((rowsRef.current ?? []).find((r) => r.id === rowId)?.values, colId)).value
+        : v;
+      const res = validateValue(vcol.validation, candidate);
+      if (!res.ok) { toast(res.reason); return; }
     }
     // Entry-time typing (lib/sheet-entry): in an OPEN column the plain
     // editor's "5" is stored as the number 5: Sheets' rule, and the only
@@ -5025,6 +5140,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 />
               ) : null}
               <MenuItem
+                icon={ListChecks}
+                label="Data validation"
+                onClick={() => { setHeaderMenu(null); setValidationColId(hc.id); }}
+              />
+              <MenuItem
                 icon={Palette}
                 label="Conditional formatting"
                 onClick={() => { setHeaderMenu(null); setRulesColId(hc.id); }}
@@ -5048,8 +5168,23 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             column={col}
             onClose={() => setRulesColId(null)}
             onSave={(rules) => {
-              pushColumnPatch(`conditional formatting on "${col.label}"`, col.id, { rules: col.rules }, { rules });
+              applyColumnPatches([{ colId: col.id, before: { rules: col.rules }, after: { rules } }], `conditional formatting on "${col.label}"`);
               setRulesColId(null);
+            }}
+          />
+        );
+      })() : null}
+
+      {validationColId ? (() => {
+        const col = table.columns.find((c) => c.id === validationColId);
+        if (!col) return null;
+        return (
+          <DataValidationDialog
+            column={col}
+            onClose={() => setValidationColId(null)}
+            onSave={(validation) => {
+              applyColumnPatches([{ colId: col.id, before: { validation: col.validation }, after: { validation } }], `data validation on "${col.label}"`);
+              setValidationColId(null);
             }}
           />
         );
@@ -5549,6 +5684,27 @@ function CellEditor({ column, value, cellStyle, onChange }: {
   // Escape cancels: the host raises this before blurring, so a blur that is
   // really a cancel must leave the stored value alone.
   const cancelled = useContext(CellEditCancel);
+  // A list validation turns ANY column into a dropdown of allowed values
+  // (Zoho/Sheets' data-validation pick-list) — the primary reason to add
+  // a list rule. multi_select keeps its own multi-checkbox editor.
+  if (column.validation?.kind === "list" && t !== "multi_select") {
+    const cur = value == null ? "" : String(value);
+    const offList = cur !== "" && !column.validation.values.includes(cur);
+    return (
+      <select
+        autoFocus
+        defaultValue={cur}
+        onChange={(e) => onChange(e.target.value || null)}
+        className="dtbl__input"
+      >
+        <option value="">—</option>
+        {/* Preserve an existing off-list value (imports/legacy) as a real
+            option so the select never silently falls back to "" and wipes it. */}
+        {offList ? <option value={cur}>{cur} (current)</option> : null}
+        {column.validation.values.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    );
+  }
   if (t === "short_text" || t === "email" || t === "url") {
     // An open (short_text) column can hold a real NUMBER; React stringifies
     // it for defaultValue, so a bare `text !== value` would read "5" vs 5
