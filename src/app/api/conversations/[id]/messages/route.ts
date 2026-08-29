@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import type { Prisma } from "@/generated/prisma";
 import { presignGetUrl } from "@/lib/s3";
 import { stripMarkup } from "@/lib/chat-markup";
@@ -59,7 +59,7 @@ async function replyCounts(conversationId: string, parentIds: string[]): Promise
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id } = await params;
   const userId = getUserId(session);
@@ -173,7 +173,7 @@ function cleanAttachments(raw: unknown): { url: string; name: string; type: stri
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id } = await params;
   const userId = getUserId(session);

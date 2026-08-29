@@ -4,6 +4,7 @@ import { authOptions } from "./auth";
 import { AccessLevel } from "@/generated/prisma";
 import { prisma } from "./prisma";
 import { checkPermission, type PermissionModule, type PermissionMatrix, type AccessLevel as PermAccessLevel } from "./permissions";
+import { isModuleActive } from "./entitlements";
 
 export async function getSessionOrFail() {
   const session = await getServerSession(authOptions);
@@ -11,6 +12,33 @@ export async function getSessionOrFail() {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }), session: null };
   }
   return { error: null, session };
+}
+
+/**
+ * Session + premium-module gate for a module-owned API route (Talk, Tables).
+ * Same `{ error, session }` shape as getSessionOrFail, so a handler swaps one
+ * call and keeps its destructure. Returns 403 when the org hasn't turned the
+ * module on — enforcing the entitlement at the DATA layer, since the rail and
+ * route gates only cover the UI and a Next.js layout can't wrap /api handlers.
+ * `slug` is the Product slug, e.g. "workwrk-tables" or "workwrk-talk".
+ */
+export async function getSessionAndModule(slug: string) {
+  const gate = await getSessionOrFail();
+  if (gate.error) return gate;
+  const orgId = getOrgId(gate.session);
+  if (!orgId) {
+    return { error: NextResponse.json({ error: "No organization" }, { status: 400 }), session: null };
+  }
+  if (!(await isModuleActive(orgId, slug))) {
+    return {
+      error: NextResponse.json(
+        { error: "This module isn't enabled for your workspace." },
+        { status: 403 },
+      ),
+      session: null,
+    };
+  }
+  return gate;
 }
 
 export function getOrgId(session: any): string {

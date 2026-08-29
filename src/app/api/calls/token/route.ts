@@ -12,6 +12,7 @@ import { NextRequest } from "next/server";
 import { AccessToken } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { isModuleActive } from "@/lib/entitlements";
 import { chatRoomName, meetingRoomName } from "@/lib/meeting-room";
 import { ensureCallSession } from "@/lib/call-session";
 
@@ -20,6 +21,10 @@ function callsConfigured(): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // This route is dual-purpose: a chat call (conversationId) belongs to the
+  // Talk MODULE, but a meeting call (meetingId) is the CORE Calendar feature.
+  // So gate only the chat branch below — never the whole route, or an org with
+  // Talk off couldn't join a scheduled meeting's video.
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const userId = getUserId(session);
@@ -36,6 +41,10 @@ export async function POST(req: NextRequest) {
   let displayName = "Member";
 
   if (conversationId) {
+    // Chat call → Talk module must be on for this org.
+    if (!(await isModuleActive(orgId, "workwrk-talk"))) {
+      return jsonError("This module isn't enabled for your workspace.", 403);
+    }
     const membership = await prisma.conversationMember.findFirst({
       where: { conversationId, userId, conversation: { organizationId: orgId } },
       select: { conversation: { select: { callEpoch: true } }, user: { select: { firstName: true, lastName: true } } },

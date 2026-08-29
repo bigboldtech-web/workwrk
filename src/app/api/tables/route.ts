@@ -4,13 +4,13 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
+  getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { logActivity } from "@/lib/activity";
 import { visibleSpaceIds } from "@/lib/space";
 
 export async function GET(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const userId = getUserId(session);

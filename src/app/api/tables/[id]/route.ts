@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { moveToTrash } from "@/lib/trash";
 import {
-  getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
+  getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
 
@@ -25,7 +25,7 @@ async function checkSpaceVisible(
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;
@@ -44,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;
@@ -69,7 +69,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;

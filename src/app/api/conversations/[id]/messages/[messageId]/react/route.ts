@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 // Toggle a reaction. Reactions live in the message's metadata as
 // { reactions: { "👍": [userId, ...] } }. The row is locked FOR UPDATE
@@ -11,7 +11,7 @@ import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@
 const ALLOWED = ["👍", "❤️", "😂", "🎉", "👀", "✅", "😮", "🙏", "🙌", "👏"];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id, messageId } = await params;
   const userId = getUserId(session);

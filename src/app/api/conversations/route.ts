@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 // Comms Hub — conversation list + create (docs/plans/comms-hub.md).
 // Every route here is scoped twice: to the caller's org AND to
@@ -16,7 +16,7 @@ const MEMBER_SELECT = {
 } as const;
 
 export async function GET() {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const userId = getUserId(session);
   const orgId = getOrgId(session);
@@ -188,7 +188,7 @@ async function channelDirectory(orgId: string, userId: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const userId = getUserId(session);
   const orgId = getOrgId(session);

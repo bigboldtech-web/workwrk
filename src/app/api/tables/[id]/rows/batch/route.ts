@@ -35,7 +35,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { DataTableRow, Prisma } from "@/generated/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
 import { expectConflicts } from "@/lib/sheet-conflict";
 
@@ -54,7 +54,7 @@ const TX_TIMEOUT_MS = 30_000;
 const TX_MAX_WAIT_MS = 10_000;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const userId = getUserId(session);

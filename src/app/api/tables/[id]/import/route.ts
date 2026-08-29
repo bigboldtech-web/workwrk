@@ -22,7 +22,7 @@
 import { NextRequest } from "next/server";
 import type { Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
 import { autoTypeForColumn } from "@/lib/sheet-entry";
 
@@ -44,7 +44,7 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const userId = getUserId(session);

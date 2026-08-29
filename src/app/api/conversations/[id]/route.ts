@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { chatGuestCode, chatRoomName } from "@/lib/meeting-room";
 
 // One conversation: meta + members + the derived call room.
@@ -15,7 +15,7 @@ async function requireMembership(conversationId: string, userId: string, orgId: 
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id } = await params;
   const userId = getUserId(session);
@@ -72,7 +72,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id } = await params;
   const userId = getUserId(session);
@@ -146,7 +146,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id } = await params;
   const userId = getUserId(session);

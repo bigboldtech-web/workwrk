@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 // Basic chat search: recent messages across MY conversations matching a
 // substring. One indexed-join query, capped at 20 rows — good enough to
 // find "that thing someone said last week" without a search engine.
 
 export async function GET(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const userId = getUserId(session);
   const orgId = getOrgId(session);

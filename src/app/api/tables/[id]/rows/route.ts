@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import {
-  getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
+  getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { getSpaceForReader } from "@/lib/space";
 import { decodeRowCursor, encodeRowCursor, type RowCursor } from "@/lib/table-row-cursor";
@@ -37,7 +37,7 @@ async function resolveTable(id: string, orgId: string, userId: string, accessLev
 const ROW_CHUNK_SIZE = 5000;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;
@@ -108,7 +108,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const userId = getUserId(session);
@@ -140,7 +140,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;
@@ -200,7 +200,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-tables");
   if (error) return error;
   const orgId = getOrgId(session);
   const { id } = await params;

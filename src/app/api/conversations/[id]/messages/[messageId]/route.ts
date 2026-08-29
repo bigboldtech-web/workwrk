@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
 // Edit and delete your OWN messages. Deletes are soft (deletedAt) — the
 // row keeps its place so threads and history stay coherent, and the body
@@ -22,7 +22,7 @@ async function findOwnMessage(messageId: string, conversationId: string, userId:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id, messageId } = await params;
   const userId = getUserId(session);
@@ -45,7 +45,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string; messageId: string }> }) {
-  const { error, session } = await getSessionOrFail();
+  const { error, session } = await getSessionAndModule("workwrk-talk");
   if (error) return error;
   const { id, messageId } = await params;
   const userId = getUserId(session);
