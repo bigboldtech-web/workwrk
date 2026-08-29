@@ -8,13 +8,14 @@
 
 import { notFound, redirect } from "next/navigation";
 import { SpaceFilesCard } from "@/components/spaces/space-files-card";
+import { SpaceBookmarks, type SpaceBookmark } from "@/components/spaces/space-bookmarks";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   Folder as FolderIcon, Lock,
   Sparkles, Users as UsersIcon, User as UserIconSmall,
-  FileText, Bookmark,
+  FileText,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
   ChevronLeft, ChevronRight, ChevronDown, X,
   Zap,
@@ -84,6 +85,17 @@ function readWorkflow(settings: unknown): WorkflowConfig | null {
   const w = (settings as Record<string, unknown>).workflow;
   if (!w || typeof w !== "object") return null;
   return w as WorkflowConfig;
+}
+
+/** Saved bookmarks off Space.settings.bookmarks (tolerant of any shape). */
+function readBookmarks(settings: unknown): SpaceBookmark[] {
+  if (!settings || typeof settings !== "object") return [];
+  const raw = (settings as Record<string, unknown>).bookmarks;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (b): b is SpaceBookmark =>
+      !!b && typeof b === "object" && typeof (b as SpaceBookmark).id === "string" && typeof (b as SpaceBookmark).url === "string",
+  );
 }
 
 type SpaceView = "overview" | "list" | "board" | "team" | "calendar" | "gantt";
@@ -208,6 +220,11 @@ export default async function SpacePage(props: {
   // item PATCH is still gated per-board on the server, so this only governs the
   // editor UI.
   const spaceCanEdit = isAdmin || isSpaceOwner || !!membership;
+  // Bookmarks add/remove matches the API's canEditSpace (OWNER/ADMIN/org-admin),
+  // NOT the broader spaceCanEdit, so a plain member never sees a control the
+  // server would 403.
+  const bookmarksCanEdit = isAdmin || membership?.role === "OWNER" || membership?.role === "ADMIN";
+  const spaceBookmarks = readBookmarks(space.settings);
 
   const workflow = readWorkflow(space.settings);
 
@@ -716,22 +733,11 @@ export default async function SpacePage(props: {
                 ),
                 bookmarks: (
                   <OverviewCard title="Bookmarks">
-                    <div className="flex flex-col items-center justify-center py-6 text-center">
-                      <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-zinc-100 mb-2">
-                        <Bookmark className="w-4 h-4 text-zinc-500" />
-                      </span>
-                      <p className="text-[12.5px] text-zinc-600 max-w-[240px] mb-3">
-                        Bookmarks make it easy to save items or any URL from around the web.
-                      </p>
-                      <button
-                        type="button"
-                        disabled
-                        title="Coming soon"
-                        className="text-[12.5px] px-3 py-1.5 rounded-md bg-zinc-100 text-zinc-500 cursor-not-allowed"
-                      >
-                        Add Bookmark
-                      </button>
-                    </div>
+                    <SpaceBookmarks
+                      spaceId={space.id}
+                      initialBookmarks={spaceBookmarks}
+                      canEdit={bookmarksCanEdit}
+                    />
                   </OverviewCard>
                 ),
                 folders: (
