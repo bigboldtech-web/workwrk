@@ -117,10 +117,15 @@ Shipped the module system on `ProductInstallation`:
 
 Verified by a 3-lens adversarial fleet: gating logic sound (ACTIVE-only, org-scoped, no strand, no flicker, correct fallback), rollout safe after the two fixes above.
 
-### Deferred to Phase 1.5 (known, documented — NOT a Phase-1 blocker)
-- **API-layer gating.** The gate is display + route (page) only; the module's data APIs (`/api/tables/*`, Talk `/api/conversations/*`) are still reachable by a crafted request within the caller's own org (org-scoped, so NO cross-tenant leak — an entitlement bypass, not a breach). Add a shared `requireModule(orgId, slug)` helper to the module-owned API routes. Matters most once billing gates activation.
-- **Public `/embed/tables`** (isPublic sheets) is not module-gated — a published-artifact surface, orthogonal to the in-org toggle. Decide whether disabling a module should revoke existing public embeds.
+### Phase 1.5 — API-layer gating SHIPPED (2026-08-28, commit 4f37a47)
+- `getSessionAndModule(slug)` helper (api-helpers.ts) — same `{error,session}` contract as `getSessionOrFail` + a 403 when the org hasn't turned the module on. For an ACTIVE org it's identical (no functional change). Applied to every module-owned API handler: `/api/tables/*` and `/api/conversations/*`.
+- `/api/calls/token` is DUAL-PURPOSE — its `meetingId` branch is the CORE Calendar meeting call, its `conversationId` branch is Talk. Gated ONLY the chat branch (a review caught this before ship, else Talk-off orgs couldn't join scheduled-meeting video).
+- Left open by design: `/api/calls/webhook` (LiveKit webhook), `/api/calls/guest-token` (public guest door), `/api/public/tables` (public embed), and cross-cutting routes that only reference module data (favorites, docs extract-table, AI/sidekick).
+
+### Still deferred
+- **Public `/embed/tables`** (isPublic sheets) not module-gated — a published-artifact surface, orthogonal to the in-org toggle. Decide whether disabling a module should revoke existing public embeds.
 - Command-palette "recents" can still list a disabled module (route gate catches the click).
+- Billing tie-in: a plan gate before allowing module activation (ProductInstallation already sits next to Subscription/Plan).
 
 ## 7. Open questions for you
 1. **Goals/Timesheets/Reviews** — confirm the §1 proposal (Goals→core, Timesheets→module, Reviews→Teams) or re-assign.
