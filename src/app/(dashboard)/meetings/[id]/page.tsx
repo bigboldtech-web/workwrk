@@ -13,7 +13,6 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { CallPanel } from "@/components/calls/call-panel";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -23,6 +22,7 @@ import {
   Loader2, AlertTriangle, ChevronRight, Video, Link2,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { C } from "@/components/layout/os/catalog";
 
 // ─── Types ────────────────────────────────────────────────
@@ -331,8 +331,10 @@ export default function MeetingDetailPage() {
   const { data: session } = useSession();
   const sessionName = session?.user?.name ?? null;
   const [meeting, setMeeting] = useState<Meeting | null>(null);
-  const [callOpen, setCallOpen] = useState(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1");
+  // The meeting call runs in the shell-level CallDock so it survives leaving
+  // this page. callOpen just derives whether THIS meeting is the active call.
+  const { activeCall, startCall: startGlobalCall, setCallMinimized } = useOsShell();
+  const callOpen = activeCall?.meetingId === id;
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [prevIncomplete, setPrevIncomplete] = useState<ActionItem[]>([]);
@@ -409,6 +411,22 @@ export default function MeetingDetailPage() {
 
   useEffect(() => { void fetchMeeting(); void fetchUsers(); }, [fetchMeeting, fetchUsers]);
   useEffect(() => { if (meeting) void fetchPrevIncomplete(meeting); }, [meeting, fetchPrevIncomplete]);
+
+  // ?call=1 deep link → auto-join the meeting call in the shell dock, once.
+  const meetingCallHandledRef = useRef(false);
+  useEffect(() => {
+    const wantCall = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1";
+    if (!wantCall || meetingCallHandledRef.current || !meeting?.call?.room) return;
+    meetingCallHandledRef.current = true;
+    startGlobalCall({
+      meetingId: id,
+      room: meeting.call.room,
+      subject: meeting.title,
+      displayName: sessionName,
+      audioOnly: false,
+      href: `/meetings/${id}`,
+    });
+  }, [meeting, id, sessionName, startGlobalCall]);
 
   // ── Auto-save notes ────────────────────────────────────
   useEffect(() => {
@@ -558,8 +576,23 @@ export default function MeetingDetailPage() {
           />
         </div>
         <div className="mtgr__head-actions">
-          <button type="button" className="mtgr-btn mtgr-btn--primary" onClick={() => setCallOpen((v) => !v)}>
-            <Video /> {callOpen ? "Hide call" : "Join call"}
+          <button
+            type="button"
+            className="mtgr-btn mtgr-btn--primary"
+            onClick={() => {
+              if (callOpen) { setCallMinimized(false); return; } // already on it → re-expand the dock
+              if (!meeting.call?.room) return;
+              startGlobalCall({
+                meetingId: id,
+                room: meeting.call.room,
+                subject: meeting.title,
+                displayName: sessionName,
+                audioOnly: false,
+                href: `/meetings/${id}`,
+              });
+            }}
+          >
+            <Video /> {callOpen ? "In call" : "Join call"}
           </button>
           {meeting.call?.guestUrl ? (
             <button
@@ -580,17 +613,8 @@ export default function MeetingDetailPage() {
         </div>
       </header>
 
-      {callOpen && meeting.call?.room ? (
-        <div className="px-5 pt-4" style={{ height: "68vh" }}>
-          <CallPanel
-            meetingId={id}
-            room={meeting.call.room}
-            subject={meeting.title}
-            displayName={sessionName}
-            onLeave={() => setCallOpen(false)}
-          />
-        </div>
-      ) : null}
+      {/* The meeting call renders in the shell-level CallDock (persists across
+          navigation) — not inline here. */}
 
       {/* Follow-up alert */}
       {prevIncomplete.length > 0 && (

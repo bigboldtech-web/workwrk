@@ -41,6 +41,7 @@ import { VoiceCapturePopover } from "./voice-capture-popover";
 import { CreateListModal } from "./create-list-modal";
 import { CreateSprintModal } from "./create-sprint-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
+import { CallDock } from "@/components/calls/call-dock";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -83,6 +84,10 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             settings/non-settings fork, so due reminders still fire and pop
             while the user is inside the full-screen Settings takeover. */}
         <ReminderTicker />
+        {/* The call dock lives ABOVE the settings fork too — a call must
+            survive navigating into the full-screen Settings/Account takeover,
+            not just between normal pages. */}
+        <CallDock />
         {settingsMode ? (
           <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
             {children}

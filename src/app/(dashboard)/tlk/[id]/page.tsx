@@ -20,9 +20,9 @@ import {
   Bell, BellOff, Hash, Link2, Loader2, LogOut, MoreHorizontal, Pencil, Phone,
   RefreshCw, Star, UserPlus, Users, Video,
 } from "lucide-react";
-import { CallPanel } from "@/components/calls/call-panel";
 import { TeamAvatar } from "@/components/team/ui";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useOsShell } from "@/components/layout/os/shell-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AddPeopleDialog } from "@/components/chat/add-people-dialog";
 import { conversationTitle, type ChatUserLite } from "@/components/chat/conversation-utils";
@@ -58,14 +58,11 @@ export default function ConversationPage() {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [callOpen, setCallOpen] = useState(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1");
-  // Snapshot of the room taken when the panel OPENED: the 10s meta poll
-  // may re-derive a rotated room name mid-call, and swapping the live
-  // conference's room prop would disconnect everyone (Jitsi fallback
-  // recreates on room change). The latch holds until the panel closes.
-  const [callRoom, setCallRoom] = useState<string | null>(null);
-  const [callAudioOnly, setCallAudioOnly] = useState(false);
+  // The call now lives in the shell-level CallDock so it survives navigation
+  // (a Slack-style floating huddle). This page just starts it and derives
+  // whether THIS conversation is the one currently on the call.
+  const { activeCall, startCall: startGlobalCall } = useOsShell();
+  const callOpen = activeCall?.conversationId === id;
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [addPeopleOpen, setAddPeopleOpen] = useState(false);
@@ -499,12 +496,17 @@ export default function ConversationPage() {
 
   /* ── calls ──────────────────────────────────────────────────── */
   const startCall = (audioOnly: boolean) => {
-    setCallAudioOnly(audioOnly);
-    if (!callOpen) {
-      setCallRoom(meta?.call?.room ?? null);
-      setCallOpen(true);
-      maybePostCard(audioOnly);
-    }
+    const alreadyOnThisCall = activeCall?.conversationId === id;
+    startGlobalCall({
+      conversationId: id,
+      room: meta?.call?.room ?? id,
+      subject: title,
+      displayName: myName,
+      audioOnly,
+      href: `/tlk/${id}`,
+    });
+    // Only announce a NEW call, not a re-open of the one you're already on.
+    if (!alreadyOnThisCall) maybePostCard(audioOnly);
   };
 
   /** Post the TalkTok card unless one is already standing: a LIVE huddle
@@ -523,14 +525,16 @@ export default function ConversationPage() {
   // ?call=1 entries (deep links, sidebar Start TalkTok on a fresh page)
   // initialize callOpen WITHOUT running startCall — once the data is in,
   // latch the room and run the same card logic exactly once.
+  // ?call=1 deep links (and the sidebar "Start TalkTok" on a fresh page)
+  // start the call in the shell dock once the conversation data is in.
   const urlCallHandledRef = useRef(false);
   useEffect(() => {
-    if (!callOpen || urlCallHandledRef.current || !meta || !loadedOnce) return;
+    const wantCall = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("call") === "1";
+    if (!wantCall || urlCallHandledRef.current || !meta || !loadedOnce) return;
     urlCallHandledRef.current = true;
-    setCallRoom((cur) => cur ?? meta.call?.room ?? null);
-    maybePostCard(false);
+    startCall(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [callOpen, meta, loadedOnce]);
+  }, [meta, loadedOnce]);
 
   // Sidebar "Start TalkTok" on the ALREADY-OPEN conversation: a query-only
   // push never remounts this page, so it arrives as an event instead.
@@ -758,19 +762,8 @@ export default function ConversationPage() {
         </div>
       </header>
 
-      {/* Call panel */}
-      {callOpen && meta?.call?.room && (
-        <div className="px-4 pt-3 shrink-0" style={{ height: "48vh" }}>
-          <CallPanel
-            conversationId={id}
-            room={callRoom ?? meta.call.room}
-            subject={title}
-            displayName={myName}
-            audioOnly={callAudioOnly}
-            onLeave={() => { setCallOpen(false); setCallRoom(null); }}
-          />
-        </div>
-      )}
+      {/* The call renders in the shell-level CallDock (persists across
+          navigation) — not inline here, so leaving this page keeps the call. */}
 
       {/* Messages */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto px-4 py-3">

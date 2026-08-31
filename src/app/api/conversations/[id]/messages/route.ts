@@ -302,15 +302,22 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         await prisma.notification.createMany({
           data: fresh.map((t) => ({
             userId: t.userId,
-            title: mentionSet.has(t.userId)
-              ? `${senderName} mentioned you in ${convoLabel}`
-              : t.userId === parentAuthorId
-                ? `${senderName} replied to your message in ${convoLabel}`
-                : membership.conversation.type === "DM"
-                  ? `New message from ${senderName}`
-                  : `New messages in ${convoLabel}`,
+            title: isCallCard
+              ? `${senderName} started a call in ${convoLabel}`
+              : mentionSet.has(t.userId)
+                ? `${senderName} mentioned you in ${convoLabel}`
+                : t.userId === parentAuthorId
+                  ? `${senderName} replied to your message in ${convoLabel}`
+                  : membership.conversation.type === "DM"
+                    ? `New message from ${senderName}`
+                    : `New messages in ${convoLabel}`,
             message: preview,
-            type: mentionSet.has(t.userId) ? "mention" : "chat_message",
+            // A distinct type lets the notifier ring it (Join/Dismiss) rather
+            // than show it as an ordinary message toast. The link stays the
+            // plain conversation URL (so the "one unread row per conversation"
+            // dedup still matches); the notifier appends ?call=1 for the ring's
+            // Join so it auto-joins.
+            type: isCallCard ? "call_incoming" : mentionSet.has(t.userId) ? "mention" : "chat_message",
             link,
           })),
         });

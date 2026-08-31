@@ -25,6 +25,25 @@ export type CreateTaskPreselect = {
   spaceId: string | null;
 };
 
+/** The one call/huddle in progress, hoisted to the shell so it survives page
+ *  navigation (a Slack-style floating dock). Exactly one lives at a time; the
+ *  CallDock renders a single, never-unmounted CallPanel from it. */
+export type ActiveCall = {
+  /** Talk call (conversationId) XOR scheduled-meeting call (meetingId). */
+  conversationId?: string;
+  meetingId?: string;
+  /** Legacy Jitsi room name — CallPanel needs it for the dark-box fallback. */
+  room: string;
+  /** Title shown in the dock header (channel/DM name or meeting subject). */
+  subject: string;
+  displayName: string | null;
+  audioOnly: boolean;
+  /** Collapsed to the compact pill vs the full floating window. */
+  minimized: boolean;
+  /** Where "expand"/clicking the dock takes the user (e.g. /tlk/<id>). */
+  href: string;
+};
+
 export type PresenceStatus = {
   emoji: string | null;
   label: string;
@@ -91,6 +110,15 @@ type ShellState = {
   closeCreateTask: () => void;
   /** Board to preselect in the create-task modal; null = none. */
   createTaskPreselect: CreateTaskPreselect | null;
+
+  // Persistent call/huddle dock — survives navigation (see ActiveCall).
+  activeCall: ActiveCall | null;
+  /** Start (or switch to) a call; opens the floating dock, expanded. */
+  startCall: (call: Omit<ActiveCall, "minimized">) => void;
+  /** Leave the call and close the dock. */
+  endCall: () => void;
+  /** Collapse/expand the dock. Pass a value to force it. */
+  setCallMinimized: (minimized: boolean) => void;
 
   createListOpen: boolean;
   openCreateList: (preselect?: { spaceId?: string; folderId?: string } | null) => void;
@@ -211,6 +239,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
   const [createListPreselect, setCreateListPreselect] = useState<{ spaceId?: string; folderId?: string } | null>(null);
   const [createSprintOpen, setCreateSprintOpen] = useState(false);
@@ -409,6 +438,20 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     setCreateTaskOpen(false);
     setCreateTaskPreselect(null);
   }, []);
+  const startCall = useCallback((call: Omit<ActiveCall, "minimized">) => {
+    // Same target already live → just make sure it's visible (expanded).
+    setActiveCall((prev) =>
+      prev &&
+      prev.conversationId === call.conversationId &&
+      prev.meetingId === call.meetingId
+        ? { ...prev, minimized: false }
+        : { ...call, minimized: false },
+    );
+  }, []);
+  const endCall = useCallback(() => setActiveCall(null), []);
+  const setCallMinimized = useCallback((minimized: boolean) => {
+    setActiveCall((prev) => (prev ? { ...prev, minimized } : prev));
+  }, []);
   const openCreateList = useCallback((preselect?: { spaceId?: string; folderId?: string } | null) => {
     setCreateListPreselect(preselect ?? null);
     setCreateListOpen(true);
@@ -525,6 +568,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
       createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect,
+      activeCall, startCall, endCall, setCallMinimized,
       createListOpen, openCreateList, closeCreateList, createListPreselect,
       createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect,
       templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter,
@@ -542,7 +586,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, railApps, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, lens, setLens, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, activeAppKey, setActiveApp, previewAppKey, setPreviewApp, keepPreview, clearPreviewSoon, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, railApps, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Bell, X, MessageCircle, CheckSquare, Megaphone, Heart, Award,
   Calendar as CalendarIcon, Inbox, Star, ShieldCheck, Sparkles,
-  AlertTriangle, FileText, type LucideIcon,
+  AlertTriangle, FileText, AtSign, Phone, type LucideIcon,
 } from "lucide-react";
 import { C } from "./catalog";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
+import { useToast } from "@/components/ui/toast";
 
 type Notification = {
   id: string;
@@ -266,6 +268,8 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const desktop = useDesktopNotifications();
+  const { toast } = useToast();
+  const router = useRouter();
 
   // Refs keep the polling closure stable while reading live values.
   const prevUnread = useRef<number | null>(null);
@@ -273,9 +277,13 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
   const mutedRef = useRef(muted);
   const enabledRef = useRef(desktop.enabled);
   const notifyRef = useRef(desktop.notify);
+  const toastRef = useRef(toast);
+  const routerRef = useRef(router);
   useEffect(() => { mutedRef.current = muted; }, [muted]);
   useEffect(() => { enabledRef.current = desktop.enabled; }, [desktop.enabled]);
   useEffect(() => { notifyRef.current = desktop.notify; }, [desktop.notify]);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
+  useEffect(() => { routerRef.current = router; }, [router]);
 
   const refresh = useCallback(async () => {
     try {
@@ -285,35 +293,82 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
       const next = typeof j.total === "number" ? j.total : 0;
       setUnread(next);
 
-      // New-item detection: only when the unread count climbs, the tab is
-      // backgrounded, desktop alerts are enabled, and we're not muted. We
-      // fetch the newest unread row to title the popup, de-duped by id.
-      if (
-        prevUnread.current !== null &&
-        next > prevUnread.current &&
-        enabledRef.current &&
-        !mutedRef.current &&
-        typeof document !== "undefined" &&
-        document.hidden
-      ) {
+      // New-item detection: when the unread count climbs and we're not muted,
+      // fetch the newest unread row and alert on it (de-duped by id). Focused
+      // tab → a top-right in-app toast (a call rings with Join/Dismiss, a
+      // message shows a click-to-open card — but NOT for the conversation you
+      // are already reading); backgrounded tab → the OS notification. If we
+      // are hidden and can't post an OS notification (desktop alerts off, the
+      // default), we HOLD the count back so returning to the tab re-detects
+      // and shows a catch-up toast instead of only bumping the badge.
+      let holdBack = false;
+      if (prevUnread.current !== null && next > prevUnread.current && !mutedRef.current) {
         try {
           const nr = await fetch("/api/notifications", { cache: "no-store" });
           if (nr.ok) {
             const payload = (await nr.json()) as NotifResponse;
             const newest = payload.notifications?.find((n) => !n.read);
             if (newest && newest.id !== lastNotifiedId.current) {
-              lastNotifiedId.current = newest.id;
-              notifyRef.current({
-                title: newest.title || "New notification",
-                body: newest.message || undefined,
-                url: newest.link || "/inbox",
-                tag: "workwrk-notification",
-              });
+              const link = newest.link || "/inbox";
+              const base = link.split("?")[0];
+              const hidden = typeof document !== "undefined" && document.hidden;
+              const isCall = newest.type === "call_incoming";
+              const onThisConvo =
+                typeof window !== "undefined" && base.startsWith("/tlk/") && window.location.pathname === base;
+
+              if (hidden) {
+                if (enabledRef.current) {
+                  notifyRef.current({
+                    title: newest.title || "New notification",
+                    body: newest.message || undefined,
+                    url: link,
+                    tag: "workwrk-notification",
+                  });
+                  lastNotifiedId.current = newest.id;
+                } else {
+                  holdBack = true; // couldn't show it; catch up on refocus
+                }
+              } else if (isCall || !onThisConvo) {
+                const lead = newest.type === "mention"
+                  ? <AtSign className="h-4 w-4 text-[var(--os-brand)]" />
+                  : isCall
+                    ? <Phone className="h-4 w-4 text-emerald-500" />
+                    : <MessageCircle className="h-4 w-4 text-zinc-500" />;
+                if (isCall) {
+                  const callLink = link.includes("?") ? link : `${link}?call=1`;
+                  toastRef.current({
+                    type: "neutral",
+                    icon: lead,
+                    title: newest.title || "Incoming call",
+                    description: newest.message || undefined,
+                    durationMs: 30_000,
+                    dedupeKey: `call:${base}`,
+                    actions: [
+                      { label: "Join", primary: true, onClick: () => routerRef.current.push(callLink) },
+                      { label: "Dismiss", onClick: () => {} },
+                    ],
+                  });
+                } else {
+                  toastRef.current({
+                    type: "neutral",
+                    icon: lead,
+                    title: newest.title || "New notification",
+                    description: newest.message || undefined,
+                    durationMs: 6_000,
+                    onClick: () => routerRef.current.push(link),
+                  });
+                }
+                lastNotifiedId.current = newest.id;
+              } else {
+                // Focused on this very conversation → the page itself shows the
+                // message; mark it seen without a redundant toast.
+                lastNotifiedId.current = newest.id;
+              }
             }
           }
         } catch { /* ignore */ }
       }
-      prevUnread.current = next;
+      if (!holdBack) prevUnread.current = next;
     } catch { /* ignore */ }
   }, []);
 
@@ -323,7 +378,7 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
   useEffect(() => {
     const tick = async () => { await refresh(); };
     void tick();
-    const iv = setInterval(() => { void refresh(); }, 25_000);
+    const iv = setInterval(() => { void refresh(); }, 15_000);
     return () => clearInterval(iv);
   }, [refresh]);
 
