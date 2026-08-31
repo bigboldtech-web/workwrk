@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SpaceModulesModal } from "./space-modules-modal";
+import { MoveTargetDialog } from "./move-target-dialog";
+import { refreshSidebar } from "./sidebar-refresh";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
@@ -52,10 +54,13 @@ export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Sp
   const [open, setOpen] = useState(false);
   // Cursor coords when opened via right-click; null = anchored to the "…" button.
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
-  // Modules manager modal — lives on the trigger so it survives the menu closing.
+  // Modules manager + Move modals — live on the trigger so they survive the
+  // menu closing.
   const [modulesOpen, setModulesOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRouter = useRouter();
 
   useImperativeHandle(ref, () => ({
     openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
@@ -108,10 +113,20 @@ export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Sp
           onUpdated={onUpdated}
           onRequestShare={onRequestShare}
           onOpenModules={() => setModulesOpen(true)}
+          onRequestMove={() => setMoveOpen(true)}
         />
       </MorePortal>
       {modulesOpen ? (
         <SpaceModulesModal spaceId={space.id} onClose={() => setModulesOpen(false)} />
+      ) : null}
+      {moveOpen ? (
+        <MoveTargetDialog
+          kind="space"
+          entityId={space.id}
+          entityName={space.name}
+          onClose={() => setMoveOpen(false)}
+          onMoved={() => { onUpdated?.(); refreshSidebar(); triggerRouter.refresh(); }}
+        />
       ) : null}
     </span>
   );
@@ -125,12 +140,14 @@ function SpaceMoreMenu({
   onUpdated,
   onRequestShare,
   onOpenModules,
+  onRequestMove,
 }: {
   space: SpaceRowLike;
   onClose: () => void;
   onUpdated?: () => void;
   onRequestShare?: () => void;
   onOpenModules?: () => void;
+  onRequestMove?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -490,7 +507,7 @@ function SpaceMoreMenu({
         <MenuItem icon={Files} label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
         <MenuItem icon={Save}  label="Save as template"  busy={busy === "save-template"} onClick={saveAsTemplate} />
       </MenuSubmenu>
-      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
+      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => { onClose(); onRequestMove?.(); }} />
 
       <MenuSeparator />
 

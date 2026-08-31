@@ -469,6 +469,124 @@ export async function archiveBoard(boardId: string) {
 }
 
 /**
+ * Deep-clone a Board into the SAME space/folder: a new board (fresh slug,
+ * "(copy)" name, owned by the actor) with its columns (schema), statuses,
+ * settings, views, and all NON-archived items copied verbatim — item cell
+ * values (metadata) stay valid because the field keys (schema) are unchanged.
+ * Fresh ids everywhere; subtasks are re-parented through an old→new map and
+ * inserted parents-first. Recurrence anchors are dropped so we don't spawn a
+ * second series. History, comments, tags and time entries are NOT copied —
+ * they belong to the original. Caller must have already gated edit access.
+ */
+export async function duplicateBoard(
+  sourceId: string,
+  actorId: string,
+  organizationId: string,
+): Promise<{ id: string; slug: string; name: string }> {
+  const src = await prisma.board.findFirst({ where: { id: sourceId, organizationId } });
+  if (!src) throw new Error("Board not found");
+  // itemId==id holds only for the studio-item flavor; an entity-bound board
+  // (Phase 3b) would clone item ids that point at no real entity, so refuse it.
+  if (src.itemType !== "studio-item") {
+    throw new Error("This kind of List can't be duplicated yet.");
+  }
+
+  const [items, views] = await Promise.all([
+    prisma.item.findMany({ where: { boardId: sourceId, archivedAt: null } }),
+    prisma.view.findMany({ where: { boardId: sourceId } }),
+  ]);
+
+  const name = `${src.name} (copy)`;
+  const slug = await uniqueBoardSlug(organizationId, toSlug(name));
+
+  // New id per item, used to re-map subtask parents.
+  const idMap = new Map<string, string>();
+  for (const it of items) idMap.set(it.id, crypto.randomUUID());
+
+  const clonedItems = items.map((it) => {
+    const newId = idMap.get(it.id) as string;
+    return {
+      id: newId,
+      itemId: newId, // satisfies @@unique([itemType, itemId])
+      organizationId,
+      itemType: it.itemType,
+      title: it.title,
+      status: it.status,
+      ownerId: it.ownerId,
+      groupKey: it.groupKey,
+      position: it.position,
+      startAt: it.startAt,
+      dueAt: it.dueAt,
+      priority: it.priority,
+      itemTypeId: it.itemTypeId,
+      workType: it.workType,
+      metadata: it.metadata as Prisma.InputJsonValue,
+      // A subtask whose parent was archived (and thus not cloned) becomes
+      // top-level rather than dangling.
+      parentItemId: it.parentItemId ? idMap.get(it.parentItemId) ?? null : null,
+    };
+  });
+
+  const created = await prisma.$transaction(async (tx) => {
+    const board = await tx.board.create({
+      data: {
+        organizationId,
+        spaceId: src.spaceId,
+        folderId: src.folderId,
+        name,
+        slug,
+        description: src.description,
+        icon: src.icon,
+        color: src.color,
+        itemType: src.itemType,
+        productSlug: src.productSlug,
+        visibility: src.visibility,
+        ownerId: actorId,
+        isDefault: false,
+        schema: src.schema as Prisma.InputJsonValue,
+        // SQL NULL (DbNull), matching updateBoard's "use the default trio"
+        // convention — NOT a stored JSON null.
+        statuses: src.statuses === null ? Prisma.DbNull : (src.statuses as Prisma.InputJsonValue),
+        settings: src.settings as Prisma.InputJsonValue,
+      },
+    });
+
+    if (views.length > 0) {
+      await tx.view.createMany({
+        data: views.map((v) => ({
+          boardId: board.id,
+          name: v.name,
+          type: v.type,
+          isShared: v.isShared,
+          isDefault: v.isDefault,
+          // A personal (owned) view becomes the actor's; shared views stay shared.
+          ownerId: v.ownerId ? actorId : null,
+          displayOrder: v.displayOrder,
+          config: v.config as Prisma.InputJsonValue,
+        })),
+      });
+    }
+
+    // Insert items parents-first so subtask FKs resolve.
+    const rows = clonedItems.map((r) => ({ ...r, boardId: board.id }));
+    const inserted = new Set<string>();
+    let remaining = rows;
+    while (remaining.length > 0) {
+      const ready = remaining.filter((r) => !r.parentItemId || inserted.has(r.parentItemId));
+      const batch = ready.length > 0 ? ready : remaining.map((r) => ({ ...r, parentItemId: null }));
+      await tx.item.createMany({ data: batch, skipDuplicates: true });
+      for (const r of batch) inserted.add(r.id);
+      const doneIds = new Set(batch.map((r) => r.id));
+      remaining = remaining.filter((r) => !doneIds.has(r.id));
+    }
+
+    return board;
+  }, { timeout: 30_000, maxWait: 10_000 }); // room for large boards (many items)
+
+  return { id: created.id, slug: created.slug, name };
+}
+
+/**
  * Resolve board-level read access, composing Space + Board layers.
  *
  *   visibility = ORG       → any org member can read (overrides Space if Space is stricter)

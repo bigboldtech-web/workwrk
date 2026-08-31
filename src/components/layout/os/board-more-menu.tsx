@@ -12,6 +12,8 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { refreshSidebar } from "./sidebar-refresh";
+import { MoveTargetDialog } from "./move-target-dialog";
 import {
   MoreHorizontal, Edit2, Palette, Share2, Archive, Loader2, Star, PanelLeft, PanelTop,
   Link as LinkIcon, Zap, Tag, CircleDot,
@@ -44,9 +46,11 @@ export const BoardMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Bo
   ref,
 ) {
   const [open, setOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
 
   useImperativeHandle(ref, () => ({
     openAtPoint: (x, y) => { setPoint({ x, y }); setOpen(true); },
@@ -95,8 +99,18 @@ export const BoardMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Bo
           onClose={() => setOpen(false)}
           onUpdated={onUpdated}
           onRequestShare={onRequestShare}
+          onRequestMove={() => setMoveOpen(true)}
         />
       </MorePortal>
+      {moveOpen ? (
+        <MoveTargetDialog
+          kind="board"
+          entityId={board.id}
+          entityName={board.name}
+          onClose={() => setMoveOpen(false)}
+          onMoved={() => { onUpdated?.(); refreshSidebar(); router.refresh(); }}
+        />
+      ) : null}
     </span>
   );
 });
@@ -108,11 +122,13 @@ function BoardMoreMenu({
   onClose,
   onUpdated,
   onRequestShare,
+  onRequestMove,
 }: {
   board: BoardRowLike;
   onClose: () => void;
   onUpdated?: () => void;
   onRequestShare?: () => void;
+  onRequestMove?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -210,6 +226,23 @@ function BoardMoreMenu({
       toast("Couldn't copy");
     }
   }, [board.id, toast]);
+
+  const duplicate = useCallback(async () => {
+    setBusy("duplicate");
+    try {
+      const res = await fetch(`/api/boards/${board.id}/duplicate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { toast(data?.error ?? "Couldn't duplicate the List"); return; }
+      toast(`Duplicated “${board.name}”`);
+      onUpdated?.();
+      refreshSidebar();
+      router.refresh();
+      onClose();
+      if (data?.board?.slug) router.push(`/boards/${data.board.slug}`);
+    } finally {
+      setBusy(null);
+    }
+  }, [board.id, board.name, toast, onUpdated, onClose, router]);
 
   const patch = async (body: Record<string, unknown>, kind: string): Promise<boolean> => {
     setBusy(kind);
@@ -402,8 +435,8 @@ function BoardMoreMenu({
       <MenuItem icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
       <MenuItem icon={Files}          label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ kind: "LIST" }); }} />
       <MenuItem icon={Save}           label="Save as template" busy={busy === "save-template"} onClick={saveAsTemplate} />
-      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => toast("Move is coming soon")} />
-      <MenuItem icon={Copy}           label="Duplicate" onClick={() => toast("Duplicate is coming soon")} />
+      <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => { onClose(); onRequestMove?.(); }} />
+      <MenuItem icon={Copy}           label="Duplicate" busy={busy === "duplicate"} onClick={duplicate} />
       <MenuItem icon={Archive}        label="Archive"   busy={busy === "archive"} onClick={archive} />
       <MenuItem icon={Trash2}         label="Delete"    destructive busy={busy === "delete"} onClick={del} />
 
