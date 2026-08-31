@@ -4,6 +4,7 @@ import { getSessionAndModule, getOrgId, getUserId, jsonError, jsonSuccess } from
 import type { Prisma } from "@/generated/prisma";
 import { presignGetUrl } from "@/lib/s3";
 import { stripMarkup } from "@/lib/chat-markup";
+import { publishToConversation, publishToUser } from "@/lib/realtime-bus";
 
 // Messages — cursor-paged reads + sends. This is the hot path (the open
 // pane polls GET every few seconds), so reads are one indexed query and
@@ -243,6 +244,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     }),
   ]);
 
+  // Real-time: nudge every member's open SSE stream to refetch this thread
+  // (trigger-only — the body is re-fetched through the redaction path).
+  publishToConversation(id, { type: "message", conversationId: id });
+
   // A reply changes its parent's reply count — touch the parent so every
   // open pane's updatedAt poll re-delivers it with fresh counts.
   if (parentId) {
@@ -321,6 +326,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             link,
           })),
         });
+        // Real-time: ping each notified user's stream so their bell/ring
+        // updates instantly (trigger-only; they refetch their own rows).
+        for (const t of fresh) publishToUser(t.userId, { type: "notification" });
       }
     }
   } catch (e) {

@@ -9,6 +9,7 @@ import { WebhookReceiver } from "livekit-server-sdk";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { publishToConversation } from "@/lib/realtime-bus";
 
 type RosterEntry = { identity: string; name: string; joinedAt: string };
 
@@ -36,6 +37,9 @@ export async function POST(req: NextRequest) {
   // erase each other's writes. Lookup caps on the same 12h deadness
   // rule the mint uses, so a ghost row never absorbs a live call's
   // events invisibly.
+  // Set when this join is the FIRST participant (roster 0→1) — the moment the
+  // call becomes ringable — so we can push a real-time "call started" after commit.
+  let callStartedConvo: string | null = null;
   await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<{ id: string; participants: unknown; startedAt: Date; conversationId: string | null }[]>`
       SELECT "id", "participants", "startedAt", "conversationId" FROM "CallSession"
@@ -57,6 +61,7 @@ export async function POST(req: NextRequest) {
         joinedAt: new Date().toISOString(),
       };
       const next = [...roster.filter((x) => x.identity !== p.identity), p];
+      if (roster.length === 0 && session.conversationId) callStartedConvo = session.conversationId;
       await tx.callSession.update({
         where: { id: session.id },
         data: { participants: next as unknown as Prisma.InputJsonValue, lastSeenAt: new Date() },
@@ -76,6 +81,12 @@ export async function POST(req: NextRequest) {
       await tx.callSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
     }
   });
+
+  // Real-time: the first joiner made the call ringable — push it so members'
+  // incoming-call watchers ring within a second instead of on the 5s poll.
+  if (callStartedConvo) {
+    publishToConversation(callStartedConvo, { type: "call", conversationId: callStartedConvo });
+  }
 
   // TalkTok card lifecycle (Slack's huddle cards): joins accumulate the
   // participant roll on the conversation's latest open card; the finish

@@ -30,7 +30,9 @@ import { MessageFeed, type FeedMessage } from "@/components/chat/message-feed";
 import { ChatComposer, type ComposerPayload } from "@/components/chat/chat-composer";
 import { ThreadPanel } from "@/components/chat/thread-panel";
 
-const POLL_MS = 4_000;
+// Backstop interval — SSE (workwrk:convo:<id>) triggers an INSTANT refetch, so
+// the poll only needs to self-heal a dropped stream, not carry the experience.
+const POLL_MS = 20_000;
 
 type ConversationMeta = {
   id: string;
@@ -247,7 +249,13 @@ export default function ConversationPage() {
       finally { polling.current = false; }
     };
     const t = setInterval(() => { void tick(); }, POLL_MS);
-    return () => clearInterval(t);
+    // Real-time: the SSE client fires this per-conversation event → refetch now.
+    const onRealtime = () => void tick();
+    window.addEventListener(`workwrk:convo:${id}`, onRealtime);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener(`workwrk:convo:${id}`, onRealtime);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, meId, markRead]);
 

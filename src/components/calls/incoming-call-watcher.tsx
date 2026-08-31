@@ -14,7 +14,10 @@ import { useSession } from "next-auth/react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useToast } from "@/components/ui/toast";
 
-const POLL_MS = 5000;
+// Backstop — SSE (workwrk:call-incoming) triggers an instant check when a call
+// starts. Kept fairly tight (15s) because a missed call ring is costly if the
+// stream ever drops; the instant SSE path is ~1s.
+const POLL_MS = 15_000;
 
 type IncomingCall = {
   conversationId: string;
@@ -99,7 +102,14 @@ export function IncomingCallWatcher() {
     };
     void tick();
     const iv = setInterval(() => void tick(), POLL_MS);
-    return () => { alive = false; clearInterval(iv); };
+    // Real-time: a call just started somewhere → check immediately.
+    const onRealtime = () => void tick();
+    window.addEventListener("workwrk:call-incoming", onRealtime);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+      window.removeEventListener("workwrk:call-incoming", onRealtime);
+    };
   }, []);
 
   return null;

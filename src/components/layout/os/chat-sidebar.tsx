@@ -24,7 +24,7 @@ import {
   conversationTitle, conversationAvatarUser, type ConversationListRow,
 } from "@/components/chat/conversation-utils";
 
-const LIST_POLL_MS = 20_000;
+const LIST_POLL_MS = 45_000; // backstop; SSE (workwrk:chat-changed) drives instant updates
 
 type ChannelRow = { id: string; name: string | null; memberCount: number; isMember: boolean };
 

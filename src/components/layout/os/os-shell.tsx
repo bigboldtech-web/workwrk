@@ -43,6 +43,7 @@ import { CreateSprintModal } from "./create-sprint-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 import { CallDock } from "@/components/calls/call-dock";
 import { IncomingCallWatcher } from "@/components/calls/incoming-call-watcher";
+import { RealtimeClient } from "./realtime-client";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -91,6 +92,8 @@ export function OsShell({ children }: { children: React.ReactNode }) {
         <CallDock />
         {/* Real-time incoming-call ring (few-second latency), everywhere. */}
         <IncomingCallWatcher />
+        {/* One SSE connection per tab → instant chat / notifications / calls. */}
+        <RealtimeClient />
         {settingsMode ? (
           <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
             {children}

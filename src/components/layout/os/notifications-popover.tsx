@@ -364,19 +364,23 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
   useEffect(() => {
     const tick = async () => { await refresh(); };
     void tick();
-    const iv = setInterval(() => { void refresh(); }, 15_000);
+    // Backstop — SSE (workwrk:notif-changed) refreshes instantly on a new row.
+    const iv = setInterval(() => { void refresh(); }, 45_000);
     return () => clearInterval(iv);
   }, [refresh]);
 
-  // Re-check the count when the user returns to the tab.
+  // Re-check the count on tab return AND on a real-time notification push.
   useEffect(() => {
     const onFocus = () => { void refresh(); };
     const onVis = () => { if (!document.hidden) void refresh(); };
+    const onRealtime = () => { void refresh(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("workwrk:notif-changed", onRealtime);
     return () => {
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("workwrk:notif-changed", onRealtime);
     };
   }, [refresh]);
 
