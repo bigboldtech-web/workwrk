@@ -20,6 +20,7 @@ import {
   type FunctionContext,
 } from "./functions";
 import { CELL_ERRORS, cellError, type CellValue } from "./types";
+import type { RangeValue } from "./coerce";
 
 const DIV0 = cellError("#DIV/0!");
 const VALUE = cellError("#VALUE!");
@@ -33,7 +34,7 @@ const ERROR = cellError("#ERROR!");
 const NOW_SERIAL = serialFromParts(2026, 8, 22, 13, 30, 0);
 const ctx: FunctionContext = { now: NOW_SERIAL };
 
-function call(name: string, ...args: FunctionArg[]): CellValue {
+function call(name: string, ...args: FunctionArg[]): CellValue | RangeValue {
   return callFunctionWith(name, args, ctx);
 }
 
@@ -118,6 +119,11 @@ describe("registry", () => {
       "ISNA",
       "ISEVEN",
       "ISODD",
+      "SEQUENCE",
+      "UNIQUE",
+      "SORT",
+      "FILTER",
+      "ARRAYFORMULA",
     ];
     expect(functionNames()).toEqual([...expected].sort());
     for (const name of expected) expect(isFunctionName(name)).toBe(true);
@@ -973,5 +979,45 @@ describe("type tests", () => {
     expect(call("ISODD", 3)).toBe(true);
     expect(call("ISODD", -3)).toBe(true);
     expect(call("ISEVEN", "x")).toBe(VALUE);
+  });
+});
+
+describe("dynamic arrays (spill)", () => {
+  it("SEQUENCE builds a counting grid", () => {
+    expect(call("SEQUENCE", 3)).toEqual(rangeValue([[1], [2], [3]]));
+    expect(call("SEQUENCE", 2, 3)).toEqual(rangeValue([[1, 2, 3], [4, 5, 6]]));
+    expect(call("SEQUENCE", 2, 2, 10, 5)).toEqual(rangeValue([[10, 15], [20, 25]]));
+    expect(call("SEQUENCE", 0)).toBe(VALUE);
+    expect(call("SEQUENCE", 1000, 1000)).toBe(NUM); // cell cap
+  });
+
+  it("UNIQUE keeps distinct rows in first-seen order", () => {
+    expect(call("UNIQUE", columnRange(["a", "b", "a", "c", "b"]))).toEqual(
+      rangeValue([["a"], ["b"], ["c"]]),
+    );
+    expect(call("UNIQUE", rangeValue([[1, 2], [1, 2], [3, 4]]))).toEqual(
+      rangeValue([[1, 2], [3, 4]]),
+    );
+  });
+
+  it("SORT orders rows by a column", () => {
+    expect(call("SORT", columnRange([3, 1, 2]))).toEqual(rangeValue([[1], [2], [3]]));
+    expect(call("SORT", columnRange([3, 1, 2]), 1, false)).toEqual(rangeValue([[3], [2], [1]]));
+    expect(call("SORT", rangeValue([["b", 2], ["a", 1]]), 1)).toEqual(rangeValue([["a", 1], ["b", 2]]));
+    expect(call("SORT", columnRange([1, 2]), 5)).toBe(VALUE); // column out of range
+  });
+
+  it("FILTER keeps rows whose condition column is truthy", () => {
+    expect(call("FILTER", columnRange(["x", "y", "z"]), columnRange([true, false, true]))).toEqual(
+      rangeValue([["x"], ["z"]]),
+    );
+    expect(call("FILTER", columnRange(["x", "y"]), columnRange([1, 0]))).toEqual(rangeValue([["x"]]));
+    expect(call("FILTER", columnRange(["x"]), columnRange([false]))).toBe(NA);
+    expect(call("FILTER", columnRange(["x"]), columnRange([false]), "none")).toBe("none");
+    expect(call("FILTER", columnRange(["x", "y"]), columnRange([true]))).toBe(VALUE); // height mismatch
+  });
+
+  it("ARRAYFORMULA spills a range through", () => {
+    expect(call("ARRAYFORMULA", columnRange([1, 2, 3]))).toEqual(rangeValue([[1], [2], [3]]));
   });
 });

@@ -52,6 +52,7 @@ import {
   partsFromSerial,
   rangeCells,
   rangeHeight,
+  rangeValue,
   rangeWidth,
   roundHalfAwayFromZero,
   serialFromParts,
@@ -98,7 +99,10 @@ export interface SheetFunction {
   /** For the formula-bar autocomplete of the UI wave. */
   readonly signature: string;
   readonly summary: string;
-  readonly call: (args: readonly ArgThunk[], ctx: FunctionContext) => CellValue;
+  /** A function may return a RangeValue (a 2D array); at the TOP LEVEL of a
+   *  formula that array spills into neighbouring cells, and anywhere else it
+   *  narrows to #VALUE! (the engine has no implicit broadcast). */
+  readonly call: (args: readonly ArgThunk[], ctx: FunctionContext) => CellValue | RangeValue;
 }
 
 /**
@@ -130,7 +134,7 @@ interface Spec {
 
 function fn(
   spec: Spec,
-  impl: (args: readonly FunctionArg[], ctx: FunctionContext) => CellValue,
+  impl: (args: readonly FunctionArg[], ctx: FunctionContext) => CellValue | RangeValue,
 ): SheetFunction {
   const policy = spec.errors ?? "all";
   return {
@@ -163,7 +167,7 @@ function fn(
 
 function lazyFn(
   spec: Spec,
-  impl: (args: readonly ArgThunk[], ctx: FunctionContext) => CellValue,
+  impl: (args: readonly ArgThunk[], ctx: FunctionContext) => CellValue | RangeValue,
 ): SheetFunction {
   return {
     name: spec.name,
@@ -1872,6 +1876,142 @@ const ISODD_FN = fn(
   },
 );
 
+// --- Dynamic arrays (spill) -----------------------------------------------
+//
+// These RETURN a RangeValue. At the top level of a formula the graph spills it
+// into neighbouring cells; nested anywhere else it narrows to #VALUE! (no
+// implicit broadcast). A hard cell cap keeps a runaway SEQUENCE from spilling
+// the sheet away.
+
+const MAX_SPILL_CELLS = 50_000;
+
+/** Stable signature of a row, for UNIQUE's de-dup. */
+function cellSig(v: CellValue): string {
+  if (v === null || v === undefined) return "∅";
+  if (typeof v === "number") return "n" + v;
+  if (typeof v === "boolean") return "b" + (v ? 1 : 0);
+  if (typeof v === "string") return "s" + v;
+  if (isErrorValue(v)) return "e" + v.err;
+  return "?";
+}
+function rowSig(row: readonly CellValue[]): string {
+  return row.map(cellSig).join("");
+}
+
+const SEQUENCE_FN = fn(
+  {
+    name: "SEQUENCE",
+    min: 1,
+    max: 4,
+    signature: "SEQUENCE(rows, [columns], [start], [step])",
+    summary: "A rows×columns array counting from start (default 1) by step (default 1).",
+  },
+  (args) => {
+    const rows = argInteger(args[0]);
+    if (isErrorValue(rows)) return rows;
+    const cols = args.length > 1 ? argInteger(args[1]) : 1;
+    if (isErrorValue(cols)) return cols;
+    const start = args.length > 2 ? argNumber(args[2]) : 1;
+    if (isErrorValue(start)) return start;
+    const step = args.length > 3 ? argNumber(args[3]) : 1;
+    if (isErrorValue(step)) return step;
+    if (rows < 1 || cols < 1) return cellError("#VALUE!");
+    if (rows * cols > MAX_SPILL_CELLS) return cellError("#NUM!");
+    const grid: CellValue[][] = [];
+    let n = start;
+    for (let r = 0; r < rows; r++) {
+      const row: CellValue[] = [];
+      for (let c = 0; c < cols; c++) { row.push(n); n += step; }
+      grid.push(row);
+    }
+    return rangeValue(grid);
+  },
+);
+
+const UNIQUE_FN = fn(
+  {
+    name: "UNIQUE",
+    min: 1,
+    max: 1,
+    signature: "UNIQUE(range)",
+    summary: "The distinct rows of a range, in first-seen order.",
+    errors: "scalars",
+  },
+  (args) => {
+    const range = toRange(args[0]);
+    const seen = new Set<string>();
+    const out: CellValue[][] = [];
+    for (const row of range.rows) {
+      const sig = rowSig(row);
+      if (!seen.has(sig)) { seen.add(sig); out.push([...row]); }
+    }
+    return out.length > 0 ? rangeValue(out) : cellError("#N/A");
+  },
+);
+
+const SORT_FN = fn(
+  {
+    name: "SORT",
+    min: 1,
+    max: 3,
+    signature: "SORT(range, [sort_column], [is_ascending])",
+    summary: "The rows of a range sorted by a column (1-based, default 1).",
+    errors: "scalars",
+  },
+  (args) => {
+    const range = toRange(args[0]);
+    const col = args.length > 1 ? argInteger(args[1]) : 1;
+    if (isErrorValue(col)) return col;
+    const asc = args.length > 2 ? argBoolean(args[2]) : true;
+    if (isErrorValue(asc)) return asc;
+    if (col < 1 || col > rangeWidth(range)) return cellError("#VALUE!");
+    const dir = asc ? 1 : -1;
+    const rows = range.rows.map((r) => [...r]);
+    // Stable sort; incomparable/cross-type pairs keep their order.
+    rows.sort((a, b) => {
+      const cmp = compareValues(a[col - 1], b[col - 1]);
+      return cmp === null ? 0 : cmp * dir;
+    });
+    return rangeValue(rows);
+  },
+);
+
+const FILTER_FN = fn(
+  {
+    name: "FILTER",
+    min: 2,
+    max: 3,
+    signature: "FILTER(range, condition, [if_empty])",
+    summary: "The rows of a range where the condition column is TRUE (or non-zero).",
+    errors: "scalars",
+  },
+  (args) => {
+    const range = toRange(args[0]);
+    const condition = toRange(args[1]);
+    const height = rangeHeight(range);
+    if (rangeHeight(condition) !== height) return cellError("#VALUE!");
+    const out: CellValue[][] = [];
+    for (let r = 0; r < height; r++) {
+      const flag = condition.rows[r][0];
+      if (flag === true || (typeof flag === "number" && flag !== 0)) out.push([...range.rows[r]]);
+    }
+    if (out.length === 0) return args.length > 2 ? toScalar(args[2]) : cellError("#N/A");
+    return rangeValue(out);
+  },
+);
+
+const ARRAYFORMULA_FN = fn(
+  {
+    name: "ARRAYFORMULA",
+    min: 1,
+    max: 1,
+    signature: "ARRAYFORMULA(range)",
+    summary: "Spills a range into neighbouring cells.",
+    errors: "scalars",
+  },
+  (args) => (isRangeValue(args[0]) ? args[0] : toScalar(args[0])),
+);
+
 const DEFINITIONS: readonly SheetFunction[] = [
   SUM_FN,
   AVERAGE_FN,
@@ -1957,6 +2097,12 @@ const DEFINITIONS: readonly SheetFunction[] = [
   ISNA_FN,
   ISEVEN_FN,
   ISODD_FN,
+  // Dynamic arrays (spill)
+  SEQUENCE_FN,
+  UNIQUE_FN,
+  SORT_FN,
+  FILTER_FN,
+  ARRAYFORMULA_FN,
 ];
 
 /**
@@ -2009,6 +2155,11 @@ export const RANGE_ARGUMENTS: ReadonlyMap<string, true | readonly number[]> = ne
   ["COUNTIFS", COUNTIFS_RANGE_SLOTS],
   ["SUMIFS", SUMIFS_RANGE_SLOTS],
   ["AVERAGEIFS", SUMIFS_RANGE_SLOTS],
+  // Dynamic arrays: their source (and FILTER's condition) are whole ranges.
+  ["UNIQUE", [0]],
+  ["SORT", [0]],
+  ["FILTER", [0, 1]],
+  ["ARRAYFORMULA", [0]],
 ]);
 
 export const FUNCTIONS: ReadonlyMap<string, SheetFunction> = new Map(
@@ -2036,7 +2187,7 @@ export function callFunction(
   name: string,
   args: readonly ArgThunk[],
   ctx: FunctionContext,
-): CellValue {
+): CellValue | RangeValue {
   const entry = getFunction(name);
   if (!entry) return cellError("#NAME?");
   return entry.call(args, ctx);
@@ -2047,7 +2198,7 @@ export function callFunctionWith(
   name: string,
   values: readonly FunctionArg[],
   ctx: FunctionContext,
-): CellValue {
+): CellValue | RangeValue {
   return callFunction(
     name,
     values.map((value) => () => value),

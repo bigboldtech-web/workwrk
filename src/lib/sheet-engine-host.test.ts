@@ -589,3 +589,56 @@ describe("aggregate caching stays invisible", () => {
     expect(engine.value("sumtxt", "r0")).toBe(0);
   });
 });
+
+describe("dynamic arrays: spill maps to the right cells", () => {
+  const make = () =>
+    createTableEngine({
+      columns: [col("a", "number"), col("out", "short_text")],
+      rows: [row("r1", {}), row("r2", {}), row("r3", {}), row("r4", {})],
+    });
+
+  it("a =SEQUENCE anchor spills down into the rows below", () => {
+    const engine = make();
+    engine.setCell("out", "r1", "=SEQUENCE(3)");
+    expect(engine.value("out", "r1")).toBe(1);
+    expect(engine.value("out", "r2")).toBe(2);
+    expect(engine.value("out", "r3")).toBe(3);
+    // The overflow rows are spilled, not formulas of their own.
+    expect(engine.isFormulaCell("out", "r2")).toBe(false);
+    expect(engine.isSpilledCell("out", "r2")).toBe(true);
+    expect(engine.isSpilledCell("out", "r1")).toBe(false);
+    // r4 is past the array — untouched.
+    expect(engine.isSpilledCell("out", "r4")).toBe(false);
+    expect(engine.value("out", "r4")).toBeNull();
+  });
+
+  it("a literal in the spill range yields #SPILL! and never overwrites it", () => {
+    const engine = make();
+    engine.setCell("out", "r2", "keep me");
+    engine.setCell("out", "r1", "=SEQUENCE(3)");
+    expect(engine.value("out", "r1")).toBe("#SPILL!");
+    expect(engine.value("out", "r2")).toBe("keep me");
+    expect(engine.isSpilledCell("out", "r2")).toBe(false);
+  });
+
+  it("clearing the blocker lets the array recover", () => {
+    const engine = make();
+    engine.setCell("out", "r2", "block");
+    engine.setCell("out", "r1", "=SEQUENCE(3)");
+    expect(engine.value("out", "r1")).toBe("#SPILL!");
+    engine.setCell("out", "r2", null);
+    expect(engine.value("out", "r1")).toBe(1);
+    expect(engine.value("out", "r2")).toBe(2);
+    expect(engine.value("out", "r3")).toBe(3);
+  });
+
+  it("deleting the anchor formula clears the whole footprint", () => {
+    const engine = make();
+    engine.setCell("out", "r1", "=SEQUENCE(3)");
+    expect(engine.isSpilledCell("out", "r3")).toBe(true);
+    engine.setCell("out", "r1", null);
+    expect(engine.isSpilledCell("out", "r2")).toBe(false);
+    expect(engine.isSpilledCell("out", "r3")).toBe(false);
+    expect(engine.value("out", "r2")).toBeNull();
+  });
+});

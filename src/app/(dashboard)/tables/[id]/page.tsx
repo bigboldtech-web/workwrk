@@ -3778,7 +3778,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     // the in-grid ideal, but "=A1+B2" pasted into Excel would resolve against
     // EXCEL's A1 — cross-app source transfer is a later feature, and the
     // display value at least round-trips as the literal the user saw.
-    if (col.type === "formula" || isFormulaCell(v)) {
+    // A spilled cell (from =SEQUENCE/=UNIQUE/=SORT/=FILTER…) has an empty
+    // store but a computed value the engine holds; render THAT, not "".
+    if (col.type === "formula" || isFormulaCell(v) || engineHost.isSpilledCell(col.id, r.id)) {
       // Streaming honesty gate: copy copies what the user sees, and during
       // a stream that is the pending mark — never a stale computed value.
       if (streamProgress) return "…";
@@ -3837,6 +3839,8 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     if (isFormulaCell(v)) return false;
     const c = colByIdForEmpty.get(colId);
     if (c?.type === "formula") return false;
+    // A spilled array value is content, so Cmd+Arrow stops on it.
+    if (engineHost.isSpilledCell(colId, r.id)) return false;
     if (c && (c.type === "lookup" || c.type === "rollup")) return cellText(c, r) === "";
     if (Array.isArray(v)) return v.length === 0;
     return v == null || v === "";
@@ -4366,6 +4370,10 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     const rawStored = r.values[colId];
     const rawFormula = isFormulaCell(rawStored);
     const hasFormula = rawFormula || engineHost.isFormulaCell(colId, rowId);
+    // A spilled cell borrows its value from a neighbouring array formula and
+    // has no content of its own — read-only, like Sheets/Excel. To change it,
+    // edit the array's anchor (top-left) cell.
+    if (!hasFormula && engineHost.isSpilledCell(colId, rowId)) return null;
     const formulaSeed = opts.seed != null && opts.seed.trimStart().startsWith("=");
     if (hasFormula || formulaSeed) {
       // cellSource returns "=SRC" (with the "=") for any computed cell. ANY
@@ -4466,15 +4474,18 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const src = engineHost.isFormulaCell(activeCell.colId, activeCell.rowId)
         ? String(engineHost.cellSource(activeCell.colId, activeCell.rowId) ?? "=")
         : null;
+      const spilledCell = engineHost.isSpilledCell(activeCell.colId, activeCell.rowId);
       barCell = {
         address: `${columnLetter(colIndex)}${rowNumber}`,
         source: src ?? cellText(activeColDef, activeCellRow),
-        readOnly: activeColDef.type === "formula" || computedCol || pickerCol,
+        readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell,
         readOnlyReason: activeColDef.type === "formula"
           ? "This column computes its formula — edit it from the column header (Σ)"
           : computedCol
             ? "Computed column — configure it from the column header"
-            : "This column edits through its picker in the grid",
+            : spilledCell
+              ? "Spilled from an array formula — edit the array's top-left cell"
+              : "This column edits through its picker in the grid",
       };
     }
   }

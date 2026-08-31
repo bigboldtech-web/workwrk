@@ -97,7 +97,7 @@ export interface FunctionContext {
 export type FunctionImpl = (
   args: readonly FunctionArg[],
   ctx: FunctionContext,
-) => CellValue;
+) => CellValue | RangeValue;
 
 export interface FunctionEntry {
   call: FunctionImpl;
@@ -602,15 +602,22 @@ function evalNode(node: Ast, ctx: EvalContext): CellValue {
           evalNode(node.right, ctx),
           ctx,
         );
-      case "call":
-        return evalCall(node.name, node.args, ctx);
+      case "call": {
+        const value = evalCall(node.name, node.args, ctx);
+        // Scalar context (an operand or a nested arg): a 1×1 array unwraps,
+        // anything larger is #VALUE!. Only a TOP-LEVEL array spills (see
+        // evaluateSpill); the engine has no implicit broadcast.
+        if (!isRangeValue(value)) return value;
+        const cells = value.rows.flat();
+        return cells.length === 1 ? cells[0] : cellError("#VALUE!");
+      }
     }
   } finally {
     ctx.depth--;
   }
 }
 
-function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue {
+function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue | RangeValue {
   const entry = normalizeFunction(ctx.functions.get(name));
   if (!entry) return NAME_ERROR;
   // #N/A, not #VALUE!: that is what Sheets reports for a wrong argument
@@ -671,7 +678,9 @@ function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue {
     origin: ctx.origin,
     coercions: ctx.coercions,
   });
-  if (cache && callKey) cache.writeCall(callKey, rects, result);
+  // A range (array) result is never memoized — the per-pass cache stores
+  // scalars, and a spill result is materialised by the graph, not cached.
+  if (cache && callKey && !isRangeValue(result)) cache.writeCall(callKey, rects, result);
   return result;
 }
 
@@ -710,6 +719,23 @@ function makeContext(options: EvaluateOptions): EvalContext {
 export function evaluate(ast: Ast, options: EvaluateOptions): CellValue {
   try {
     return evalNode(ast, makeContext(options));
+  } catch {
+    return INTERNAL_ERROR;
+  }
+}
+
+/**
+ * Like `evaluate`, but a TOP-LEVEL function call may return a `RangeValue` (a
+ * 2D array) instead of collapsing it to a scalar — the graph spills that array
+ * into neighbouring cells. Every other shape (a ref, an operator, a nested
+ * call) is still scalar. Used by the recalc graph; the one-shot `evaluate`
+ * stays scalar for previews/validation.
+ */
+export function evaluateSpill(ast: Ast, options: EvaluateOptions): CellValue | RangeValue {
+  try {
+    const ctx = makeContext(options);
+    if (ast.type === "call") return evalCall(ast.name, ast.args, ctx);
+    return evalNode(ast, ctx);
   } catch {
     return INTERNAL_ERROR;
   }

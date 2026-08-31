@@ -24,11 +24,13 @@
 // next insert.
 
 import {
-  evaluate,
+  evaluateSpill,
+  isRangeValue,
   walkRefs,
   type CellPoint,
   type Coercions,
   type FunctionLookup,
+  type RangeValue,
   type RefContext,
   type SheetAccess,
 } from "./evaluate";
@@ -112,6 +114,11 @@ interface FormulaRecord {
 
 const CYCLE_ERROR = cellError("#CYCLE!");
 const FORMULA_ERROR = cellError("#ERROR!");
+const SPILL_ERROR = cellError("#SPILL!");
+
+/** How many times a recalc will chase spill-induced changes before giving up.
+ *  Only an array-of-arrays feedback loop reaches this; a bound beats a hang. */
+const SPILL_PASS_LIMIT = 64;
 
 function sameValue(a: CellValue | undefined, b: CellValue | undefined): boolean {
   if (isErrorValue(a) && isErrorValue(b)) return a.err === b.err;
@@ -264,6 +271,29 @@ export class SheetGraph {
   private readonly columnDependents = new Map<number, Set<CellKey>>();
   private readonly scanDependents = new Set<CellKey>();
 
+  // --- Dynamic-array spill state ------------------------------------------
+  // A formula like `=SEQUENCE(3)` computes to a 3x1 array. The anchor cell
+  // keeps the top-left value; the rest of the array SPILLS into the cells
+  // below/right. Spilled cells are never stored — a reload recomputes the
+  // anchor and re-materialises them — so they live only in these maps.
+  /** Non-anchor cells a spill currently occupies, keyed by the cell. */
+  private readonly spillCells = new Map<CellKey, { anchor: CellKey; value: CellValue }>();
+  /** Per anchor, the cells its last spill claimed, so a recompute or a
+   *  formula edit/removal can clear the old footprint exactly. */
+  private readonly spillOwned = new Map<CellKey, CellKey[]>();
+  /** Formula cells to recompute because a spilled cell they read changed
+   *  value mid-pass. Drained by `run`'s fixpoint loop; spilled cells are not
+   *  graph nodes, so their dependents can only be reached this way. */
+  private readonly spillReseeds = new Set<CellKey>();
+  /** Spilled cells whose displayed value changed in the current pass, so the
+   *  grid can repaint them. Reset at the top of every `runPass`. */
+  private spillChanged = new Set<CellKey>();
+  /** When an array is #SPILL!-blocked it spills nothing, but it still WANTS
+   *  those cells. Anchor → the cells it wanted, plus the reverse index, so
+   *  clearing whatever blocked it re-tries the anchor and the array recovers. */
+  private readonly spillBlocked = new Map<CellKey, CellKey[]>();
+  private readonly blockedBy = new Map<CellKey, Set<CellKey>>();
+
   constructor(options: SheetGraphOptions) {
     this.base = options.sheet;
     this.functions = options.functions;
@@ -277,12 +307,18 @@ export class SheetGraph {
     const base = this.base;
     const values = this.values;
     const formulas = this.formulas;
+    const spillCells = this.spillCells;
     this.view = {
       getCell: (row, col) => {
         const key = cellKey(row, col);
-        if (!formulas.has(key)) return base.getCell(row, col);
-        const value = values.get(key);
-        return value === undefined ? null : value;
+        if (formulas.has(key)) {
+          const value = values.get(key);
+          return value === undefined ? null : value;
+        }
+        // A spilled cell has a computed value but no formula of its own.
+        const spilled = spillCells.get(key);
+        if (spilled) return spilled.value;
+        return base.getCell(row, col);
       },
       rowCount: () => base.rowCount(),
       columnCount: () => base.columnCount(),
@@ -296,6 +332,10 @@ export class SheetGraph {
 
   setFormula(row: number, col: number, formula: string | Ast): void {
     const key = cellKey(row, col);
+    // This cell's own array (if it had one) is about to be redefined, and if
+    // a neighbour's array was spilling here it must re-evaluate to a #SPILL!.
+    this.clearSpillFootprint(key);
+    this.dirtyAnchorOf(key);
     this.unindex(key);
 
     let ast: Ast | null = null;
@@ -334,11 +374,64 @@ export class SheetGraph {
     // reading it is now stale. `setFormula` gets this for free by dirtying the
     // cell itself; a removal has to say so before the record disappears.
     for (const dependent of this.directDependents(key)) this.dirty.add(dependent);
+    this.clearSpillFootprint(key);
     this.unindex(key);
     this.formulas.delete(key);
     this.values.delete(key);
     this.dirty.delete(key);
     return true;
+  }
+
+  /** Drop the cells an anchor's last spill occupied and stale their readers.
+   *  Used off the recalc path (formula edit/removal); on the recalc path
+   *  `applySpill` clears the old footprint itself. */
+  private clearSpillFootprint(anchorKey: CellKey): void {
+    this.unregisterBlocked(anchorKey);
+    const owned = this.spillOwned.get(anchorKey);
+    if (!owned) return;
+    for (const ownedKey of owned) {
+      this.spillCells.delete(ownedKey);
+      for (const dependent of this.directDependents(ownedKey)) this.dirty.add(dependent);
+      // Freeing this cell may let a #SPILL!-blocked array finally fit.
+      for (const anchor of this.blockedBy.get(ownedKey) ?? []) this.dirty.add(anchor);
+    }
+    this.spillOwned.delete(anchorKey);
+  }
+
+  /** Queue for recompute any array whose footprint `key` touches: the one
+   *  currently spilling into it (a write there collides → #SPILL!) and any
+   *  that WANTED it but was blocked (clearing the blocker lets it recover). */
+  private dirtyAnchorOf(key: CellKey): void {
+    const spilled = this.spillCells.get(key);
+    if (spilled && this.formulas.has(spilled.anchor)) this.dirty.add(spilled.anchor);
+    for (const anchor of this.blockedBy.get(key) ?? []) {
+      if (this.formulas.has(anchor)) this.dirty.add(anchor);
+    }
+  }
+
+  /** Drop the record that `anchorKey`'s blocked array wanted certain cells. */
+  private unregisterBlocked(anchorKey: CellKey): void {
+    const targets = this.spillBlocked.get(anchorKey);
+    if (!targets) return;
+    for (const target of targets) {
+      const set = this.blockedBy.get(target);
+      if (!set) continue;
+      set.delete(anchorKey);
+      if (set.size === 0) this.blockedBy.delete(target);
+    }
+    this.spillBlocked.delete(anchorKey);
+  }
+
+  private registerBlocked(anchorKey: CellKey, targets: CellKey[]): void {
+    this.spillBlocked.set(anchorKey, targets);
+    for (const target of targets) {
+      let set = this.blockedBy.get(target);
+      if (!set) {
+        set = new Set<CellKey>();
+        this.blockedBy.set(target, set);
+      }
+      set.add(anchorKey);
+    }
   }
 
   hasFormula(row: number, col: number): boolean {
@@ -376,6 +469,14 @@ export class SheetGraph {
 
   getValue(row: number, col: number): CellValue {
     return this.view.getCell(row, col);
+  }
+
+  /** True when this cell shows a value spilled from a neighbouring array
+   *  formula rather than its own content. The grid renders it read-only: a
+   *  spilled cell has no stored value of its own and typing into it would
+   *  collide the array (→ #SPILL!). */
+  isSpilled(row: number, col: number): boolean {
+    return this.spillCells.has(cellKey(row, col));
   }
 
   /**
@@ -448,7 +549,13 @@ export class SheetGraph {
    */
   recalculate(changed: Iterable<CellPoint> = []): RecalcResult {
     const seeds: CellKey[] = [];
-    for (const point of changed) seeds.push(cellKey(point.row, point.col));
+    for (const point of changed) {
+      const key = cellKey(point.row, point.col);
+      seeds.push(key);
+      // A literal written onto a cell a neighbour spills into must re-evaluate
+      // that neighbour so its array collides (→ #SPILL!).
+      this.dirtyAnchorOf(key);
+    }
     for (const key of this.dirty) seeds.push(key);
     return this.run(this.affected(seeds));
   }
@@ -472,7 +579,27 @@ export class SheetGraph {
     return out;
   }
 
+  /**
+   * Recompute the affected formulas, then keep going while any spill changed
+   * a cell some OTHER formula reads. Spilled cells are not graph nodes, so a
+   * single static pass cannot see those edges — the fixpoint reseeds their
+   * readers. `SPILL_PASS_LIMIT` bounds a pathological array-of-arrays loop.
+   */
   private run(affected: Set<CellKey>): RecalcResult {
+    this.spillReseeds.clear();
+    let result = this.runPass(affected);
+    let guard = 0;
+    while (this.spillReseeds.size > 0 && guard++ < SPILL_PASS_LIMIT) {
+      const seeds = [...this.spillReseeds];
+      this.spillReseeds.clear();
+      result = mergeRecalc(result, this.runPass(this.affected(seeds)));
+    }
+    this.spillReseeds.clear();
+    return result;
+  }
+
+  private runPass(affected: Set<CellKey>): RecalcResult {
+    this.spillChanged = new Set<CellKey>();
     // One cache per pass, NEVER longer: values move between passes, and a
     // surviving cache would serve the world from before the edit. Within
     // the pass, `settle` invalidates on every value that actually changed,
@@ -499,7 +626,10 @@ export class SheetGraph {
     const cycles: CellPoint[][] = [];
     const done = new Set<CellKey>();
 
-    const settle = (key: CellKey, value: CellValue) => {
+    const settle = (key: CellKey, result: CellValue | RangeValue) => {
+      // An array result spills into neighbouring cells; the anchor keeps the
+      // scalar this returns (or #SPILL! if the spill is blocked).
+      const value = this.applySpill(key, result, cache);
       const previous = this.values.get(key);
       if (!sameValue(previous, value)) cache.invalidate(keyRow(key), keyCol(key));
       this.values.set(key, value);
@@ -556,14 +686,21 @@ export class SheetGraph {
       }
     }
 
+    // Spilled cells are not graph nodes, but they repainted this pass, so the
+    // grid must hear about them alongside the formula cells.
+    for (const key of this.spillChanged) {
+      computed.push(keyPoint(key));
+      changed.push(keyPoint(key));
+    }
+
     return { computed, changed, cycles: cycles.sort((a, b) => order(a[0], b[0])) };
   }
 
-  private compute(key: CellKey, cache: PassCache): CellValue {
+  private compute(key: CellKey, cache: PassCache): CellValue | RangeValue {
     const record = this.formulas.get(key);
     if (!record) return FORMULA_ERROR;
     if (!record.ast) return FORMULA_ERROR;
-    return evaluate(record.ast, {
+    return evaluateSpill(record.ast, {
       sheet: this.view,
       origin: { row: record.row, col: record.col },
       functions: this.functions,
@@ -572,6 +709,126 @@ export class SheetGraph {
       maxRangeCells: this.maxRangeCells,
       cache,
     });
+  }
+
+  // --- Dynamic-array spill --------------------------------------------------
+
+  /**
+   * Materialise a formula's result and return the ANCHOR's scalar. A scalar
+   * occupies only the anchor. An array spills: the anchor keeps the top-left
+   * value and the rest lands in the cells below and to the right, unless
+   * something already sits there, in which case the anchor is #SPILL! and
+   * nothing spills. Every cell whose displayed value moved is queued for
+   * repaint (`spillChanged`) and its readers for recompute (`spillReseeds`).
+   *
+   * Spilled cells are never persisted; `applySpill` is the single writer of
+   * `spillCells`/`spillOwned`, so a recompute always clears the old footprint
+   * before laying the new one — no cell can be orphaned.
+   */
+  private applySpill(
+    anchorKey: CellKey,
+    result: CellValue | RangeValue,
+    cache: PassCache,
+  ): CellValue {
+    // 1. Lift the old footprint out of the overlay, remembering what it showed,
+    //    and forget any region a previous blocked attempt had reserved.
+    this.unregisterBlocked(anchorKey);
+    const previousOwned = this.spillOwned.get(anchorKey) ?? [];
+    const oldShown = new Map<CellKey, CellValue>();
+    for (const key of previousOwned) {
+      const cell = this.spillCells.get(key);
+      if (cell) oldShown.set(key, cell.value);
+      this.spillCells.delete(key);
+    }
+    this.spillOwned.delete(anchorKey);
+
+    // 2. Decide the anchor value and the new footprint.
+    let anchorValue: CellValue;
+    const newOwned = new Map<CellKey, CellValue>();
+    if (!isRangeValue(result)) {
+      anchorValue = result;
+    } else {
+      const rows = result.rows;
+      const height = rows.length;
+      let width = 0;
+      for (const row of rows) if (row.length > width) width = row.length;
+      if (height <= 1 && width <= 1) {
+        // A 1x1 array is indistinguishable from its scalar — no footprint.
+        anchorValue = height === 1 && width === 1 ? rows[0][0] ?? null : null;
+      } else {
+        const anchorRow = keyRow(anchorKey);
+        const anchorCol = keyCol(anchorKey);
+        if (anchorCol + width - 1 > MAX_COLUMN_INDEX) {
+          // A spill running past the last column has nowhere to land: the key
+          // packing would wrap it into column 0 of a later row and shadow a
+          // real cell. Off-sheet is #SPILL!, as Excel refuses a spill that
+          // would leave the grid. Nothing to register — the edge never moves.
+          anchorValue = SPILL_ERROR;
+        } else {
+          const intended: CellKey[] = [];
+          for (let r = 0; r < height; r++) {
+            for (let c = 0; c < width; c++) {
+              if (r === 0 && c === 0) continue;
+              intended.push(cellKey(anchorRow + r, anchorCol + c));
+            }
+          }
+          const blocked = intended.some((target) => this.isBlocked(target, anchorKey));
+          if (blocked) {
+            // Spill nothing, but remember the region so clearing the blocker
+            // lets the array recover instead of staying stuck on #SPILL!.
+            anchorValue = SPILL_ERROR;
+            this.registerBlocked(anchorKey, intended);
+          } else {
+            anchorValue = rows[0]?.[0] ?? null;
+            for (let r = 0; r < height; r++) {
+              for (let c = 0; c < width; c++) {
+                if (r === 0 && c === 0) continue;
+                const targetKey = cellKey(anchorRow + r, anchorCol + c);
+                const value = rows[r]?.[c] ?? null;
+                this.spillCells.set(targetKey, { anchor: anchorKey, value });
+                newOwned.set(targetKey, value);
+              }
+            }
+            this.spillOwned.set(anchorKey, [...newOwned.keys()]);
+          }
+        }
+      }
+    }
+
+    // 3. Repaint + reseed every cell whose displayed value actually moved.
+    //    Comparing shown-before to shown-after handles a cell that stays owned
+    //    with an unchanged value (no work) and a cell that revealed its literal
+    //    again (its readers are stale) with the same code.
+    const touched = new Set<CellKey>([...oldShown.keys(), ...newOwned.keys()]);
+    for (const key of touched) {
+      const before = oldShown.has(key)
+        ? (oldShown.get(key) as CellValue)
+        : this.base.getCell(keyRow(key), keyCol(key));
+      const after = newOwned.has(key)
+        ? (newOwned.get(key) as CellValue)
+        : this.base.getCell(keyRow(key), keyCol(key));
+      if (sameValue(before, after)) continue;
+      cache.invalidate(keyRow(key), keyCol(key));
+      this.spillChanged.add(key);
+      for (const dependent of this.directDependents(key)) this.spillReseeds.add(dependent);
+      // A blocked array that WANTED this cell must re-evaluate: if this spill
+      // just vacated it, that array can now fit; if it just took it, that
+      // array must confirm it is still blocked. Readers of a spilled cell only
+      // reach it through `directDependents`; a blocked anchor does not read it,
+      // so without this it would stay stuck on #SPILL! forever.
+      for (const anchor of this.blockedBy.get(key) ?? []) this.spillReseeds.add(anchor);
+    }
+
+    return anchorValue;
+  }
+
+  /** Whether a spill target is occupied by anything but this anchor's array. */
+  private isBlocked(targetKey: CellKey, anchorKey: CellKey): boolean {
+    if (this.formulas.has(targetKey)) return true;
+    const spilled = this.spillCells.get(targetKey);
+    if (spilled && spilled.anchor !== anchorKey) return true;
+    const base = this.base.getCell(keyRow(targetKey), keyCol(targetKey));
+    return base !== null && base !== "";
   }
 
   // --- Dependency extraction ----------------------------------------------
@@ -795,4 +1052,20 @@ function isCyclicComponent(
 
 function order(a: CellPoint, b: CellPoint): number {
   return cellKey(a.row, a.col) - cellKey(b.row, b.col);
+}
+
+/** Fold a follow-up spill pass into the running result. `computed`/`changed`
+ *  are de-duplicated by cell (a later pass supersedes an earlier one); cycles
+ *  concatenate, since a cycle found in any pass is real. */
+function mergeRecalc(a: RecalcResult, b: RecalcResult): RecalcResult {
+  const dedupe = (points: CellPoint[]): CellPoint[] => {
+    const seen = new Map<CellKey, CellPoint>();
+    for (const point of points) seen.set(cellKey(point.row, point.col), point);
+    return [...seen.values()];
+  };
+  return {
+    computed: dedupe([...a.computed, ...b.computed]),
+    changed: dedupe([...a.changed, ...b.changed]),
+    cycles: [...a.cycles, ...b.cycles],
+  };
 }

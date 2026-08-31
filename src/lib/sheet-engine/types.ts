@@ -21,6 +21,8 @@ export const CELL_ERRORS = [
   "#N/A",
   "#NUM!",
   "#ERROR!",
+  // A dynamic-array formula whose spill range is blocked by existing content.
+  "#SPILL!",
 ] as const;
 
 export type CellError = (typeof CELL_ERRORS)[number];
