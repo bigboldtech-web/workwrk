@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import {
   Bell, X, MessageCircle, CheckSquare, Megaphone, Heart, Award,
   Calendar as CalendarIcon, Inbox, Star, ShieldCheck, Sparkles,
-  AlertTriangle, FileText, AtSign, Phone, type LucideIcon,
+  AlertTriangle, FileText, AtSign, type LucideIcon,
 } from "lucide-react";
 import { C } from "./catalog";
 import { useDesktopNotifications } from "@/hooks/use-desktop-notifications";
@@ -328,36 +328,22 @@ export function NotificationsBell({ muted = false }: { muted?: boolean }) {
                 } else {
                   holdBack = true; // couldn't show it; catch up on refocus
                 }
-              } else if (isCall || !onThisConvo) {
+              } else if (isCall) {
+                // Live calls ring in real time via IncomingCallWatcher — don't
+                // double up here; just mark this row seen.
+                lastNotifiedId.current = newest.id;
+              } else if (!onThisConvo) {
                 const lead = newest.type === "mention"
                   ? <AtSign className="h-4 w-4 text-[var(--os-brand)]" />
-                  : isCall
-                    ? <Phone className="h-4 w-4 text-emerald-500" />
-                    : <MessageCircle className="h-4 w-4 text-zinc-500" />;
-                if (isCall) {
-                  const callLink = link.includes("?") ? link : `${link}?call=1`;
-                  toastRef.current({
-                    type: "neutral",
-                    icon: lead,
-                    title: newest.title || "Incoming call",
-                    description: newest.message || undefined,
-                    durationMs: 30_000,
-                    dedupeKey: `call:${base}`,
-                    actions: [
-                      { label: "Join", primary: true, onClick: () => routerRef.current.push(callLink) },
-                      { label: "Dismiss", onClick: () => {} },
-                    ],
-                  });
-                } else {
-                  toastRef.current({
-                    type: "neutral",
-                    icon: lead,
-                    title: newest.title || "New notification",
-                    description: newest.message || undefined,
-                    durationMs: 6_000,
-                    onClick: () => routerRef.current.push(link),
-                  });
-                }
+                  : <MessageCircle className="h-4 w-4 text-zinc-500" />;
+                toastRef.current({
+                  type: "neutral",
+                  icon: lead,
+                  title: newest.title || "New notification",
+                  description: newest.message || undefined,
+                  durationMs: 6_000,
+                  onClick: () => routerRef.current.push(link),
+                });
                 lastNotifiedId.current = newest.id;
               } else {
                 // Focused on this very conversation → the page itself shows the

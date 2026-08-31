@@ -42,6 +42,7 @@ import { CreateListModal } from "./create-list-modal";
 import { CreateSprintModal } from "./create-sprint-modal";
 import { TemplateCenter } from "@/components/templates/template-center";
 import { CallDock } from "@/components/calls/call-dock";
+import { IncomingCallWatcher } from "@/components/calls/incoming-call-watcher";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -88,6 +89,8 @@ export function OsShell({ children }: { children: React.ReactNode }) {
             survive navigating into the full-screen Settings/Account takeover,
             not just between normal pages. */}
         <CallDock />
+        {/* Real-time incoming-call ring (few-second latency), everywhere. */}
+        <IncomingCallWatcher />
         {settingsMode ? (
           <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
             {children}

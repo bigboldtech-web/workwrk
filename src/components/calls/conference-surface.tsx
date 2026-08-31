@@ -9,12 +9,17 @@
 // until their owner lowers them (or leaves, which drops their packets).
 // Pure client + data channel: zero server involvement, works for guests.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   LiveKitRoom, VideoConference, useConnectionState, useDataChannel, useLocalParticipant,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Hand } from "lucide-react";
+
+/** Mic state surfaced OUT of the LiveKit room so the persistent CallDock can
+ *  offer a mute button in its header — usable even while the call is minimized
+ *  (the VideoConference control bar is hidden then). */
+export type CallMicState = { ready: boolean; micOn: boolean; toggle: () => void };
 
 const REACT_TOPIC = "wk-react";
 const EMOJI = ["👍", "❤️", "😂", "🎉", "👏"];
@@ -22,22 +27,40 @@ const FLOAT_MS = 2600;
 
 type ReactMsg = { kind: "emoji"; emoji: string } | { kind: "hand"; raised: boolean; name: string };
 
-export function ConferenceSurface({ url, token, video, onDisconnected, trailingControls }: {
+export function ConferenceSurface({ url, token, video, onDisconnected, trailingControls, onMic }: {
   url: string;
   token: string;
   video: boolean;
   onDisconnected?: () => void;
   /** Extra member-only controls (e.g. the record button) rendered in the reaction bar. */
   trailingControls?: React.ReactNode;
+  /** Reports the local mic state/toggle up to the dock (see CallMicState). */
+  onMic?: (state: CallMicState) => void;
 }) {
   return (
     <div className="relative h-full w-full" data-lk-theme="default">
       <LiveKitRoom serverUrl={url} token={token} connect audio video={video} onDisconnected={onDisconnected} style={{ height: "100%" }}>
         <VideoConference />
         <ReactionLayer trailingControls={trailingControls} />
+        {onMic ? <MicBridge onMic={onMic} /> : null}
       </LiveKitRoom>
     </div>
   );
+}
+
+/** Lives inside LiveKitRoom so it can read/toggle the local mic, and reports
+ *  that up to the dock. Renders nothing. */
+function MicBridge({ onMic }: { onMic: (state: CallMicState) => void }) {
+  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
+  const ready = useConnectionState() === "connected";
+  useEffect(() => {
+    onMic({
+      ready,
+      micOn: !!isMicrophoneEnabled,
+      toggle: () => { void localParticipant?.setMicrophoneEnabled(!isMicrophoneEnabled); },
+    });
+  }, [onMic, ready, isMicrophoneEnabled, localParticipant]);
+  return null;
 }
 
 function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNode }) {

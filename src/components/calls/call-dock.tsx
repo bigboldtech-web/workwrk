@@ -15,9 +15,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Maximize2, Minus, PhoneOff } from "lucide-react";
+import { ExternalLink, Maximize2, Mic, MicOff, Minus, PhoneOff } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { CallPanel } from "@/components/calls/call-panel";
+import type { CallMicState } from "@/components/calls/conference-surface";
 
 const EXPANDED = { w: 360, h: 440 };
 const MINI_W = 300;
@@ -32,6 +33,17 @@ export function CallDock() {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Local mic state, bridged out of the LiveKit room so the header can mute
+  // even while minimized (the in-video control bar is hidden then).
+  const [mic, setMic] = useState<CallMicState | null>(null);
+  // Drop a stale mic toggle when the call switches (React's adjust-state-on-
+  // prop-change pattern — the bridge re-reports for the new call).
+  const callKey = `${activeCall?.conversationId ?? ""}:${activeCall?.meetingId ?? ""}`;
+  const [prevCallKey, setPrevCallKey] = useState(callKey);
+  if (callKey !== prevCallKey) {
+    setPrevCallKey(callKey);
+    setMic(null);
+  }
 
   const minimized = activeCall?.minimized ?? false;
   const w = minimized ? MINI_W : EXPANDED.w;
@@ -94,6 +106,17 @@ export function CallDock() {
       >
         <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-100">{activeCall.subject}</span>
+        {mic?.ready ? (
+          <button
+            type="button"
+            title={mic.micOn ? "Mute" : "Unmute"}
+            className={mic.micOn ? btn : "flex h-6 w-6 shrink-0 items-center justify-center rounded bg-red-500/20 text-red-300 hover:bg-red-500/30"}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => mic.toggle()}
+          >
+            {mic.micOn ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+          </button>
+        ) : null}
         {activeCall.href ? (
           <button
             type="button"
@@ -136,6 +159,7 @@ export function CallDock() {
           displayName={activeCall.displayName}
           audioOnly={activeCall.audioOnly}
           onLeave={endCall}
+          onMic={setMic}
         />
       </div>
     </div>
