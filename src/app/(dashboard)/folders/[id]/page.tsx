@@ -14,7 +14,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Folder as FolderIcon, FileText, Zap, Sparkles, ChevronDown, Lock,
+  Folder as FolderIcon, FileText, Zap, ChevronDown, Lock,
   List as ListIcon,
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -23,6 +23,7 @@ import { getSpaceForReader, canEditSpace } from "@/lib/space";
 import { FolderViewTabs } from "./folder-view-tabs";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
+import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
 import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
 import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-overview-create";
 import { SpaceListItemsTable } from "../../spaces/[slug]/space-list-items";
@@ -184,11 +185,7 @@ export default async function FolderPage(props: {
             <Zap className="w-3.5 h-3.5 text-amber-500" />
             Automate
           </Link>
-          <button type="button" disabled title="Ask AI is coming soon" className="text-sm text-zinc-400 flex items-center gap-1.5 px-2 py-1 rounded cursor-not-allowed">
-            <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
-            Ask
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
-          </button>
+          <AskSidekickButton prompt={`Help me with the ${folder.name} folder.`} />
         </div>
       </div>
 

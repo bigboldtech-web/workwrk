@@ -17,7 +17,7 @@ import {
   Star, MessageSquare, ChevronRight, Pin, PinOff, Clock, Sparkles,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { OsEmptyView, askSidekick } from "@/components/layout/os/empty-view";
 import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -101,11 +101,11 @@ export default function FavoritesPage() {
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Star} iconGradient={GRAD.redPink} title="Couldn't load favorites" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        <OsEmptyView Icon={Star} iconGradient={GRAD.redPink} title="Couldn't load favorites" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
       ) : rows === null ? (
         <div className="fav__loading">Loading favorites…</div>
       ) : rows.length === 0 ? (
-        <OsEmptyView Icon={Star} iconGradient={GRAD.yellowOrange} title="No favorites yet" subtitle="Pin a Sidekick chat or star a board item to keep it one click away. Cross-module starring is shipping soon." chips={["Pinned chats", "Recent", "Quick access"]} cta="Open Sidekick" />
+        <OsEmptyView Icon={Star} iconGradient={GRAD.yellowOrange} title="No favorites yet" subtitle="Pin a Sidekick chat or star a board item to keep it one click away. Cross-module starring is shipping soon." chips={["Pinned chats", "Recent", "Quick access"]} cta="Open Sidekick" onCta={() => askSidekick()} />
       ) : (
         <div className="fav">
           <section className="fav__section">

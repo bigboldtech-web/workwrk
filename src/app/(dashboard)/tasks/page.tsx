@@ -431,7 +431,7 @@ function PersonalListCard() {
           <CheckSquare className="w-5 h-5 text-zinc-400" />
         </span>
         <p className="text-[13px] text-zinc-600 mb-3 max-w-[260px]">
-          Personal List is a home for your tasks. <Link href="#" className="underline">Learn more</Link>
+          Personal List is a home for your tasks.
         </p>
         <button
           type="button"
@@ -515,7 +515,7 @@ function RemindersCard({ dismissed, onDismiss }: { dismissed: boolean; onDismiss
         <div className="text-[12.5px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded-md px-3 py-2 mb-3 flex items-start gap-2">
           <span className="flex-1">
             Note: You can still create legacy Reminders here, but Reminders created elsewhere will now go to Inbox.{" "}
-            <Link href="#" className="underline">Learn more</Link>
+
           </span>
           <button
             type="button"
@@ -530,7 +530,7 @@ function RemindersCard({ dismissed, onDismiss }: { dismissed: boolean; onDismiss
       <div className="flex flex-col items-center justify-center text-center py-4">
         <Bell className="w-6 h-6 text-zinc-300 mb-2" />
         <p className="text-[13px] text-zinc-500 mb-3">
-          Added Reminders will show here. <Link href="#" className="underline">Learn more</Link>
+          Added Reminders will show here.
         </p>
         <button
           type="button"
@@ -600,7 +600,7 @@ function PrioritiesCard() {
         </span>
         <p className="text-[13px] text-zinc-600 mb-3 max-w-[280px]">
           Priorities keep your most important tasks in one list.{" "}
-          <Link href="#" className="underline">Learn more</Link>
+
         </p>
         <button
           type="button"
@@ -737,7 +737,7 @@ function MyWorkCard() {
         </span>
         <p className="text-[13px] text-zinc-600 mb-3 max-w-[320px]">
           Tasks and Reminders assigned to you will appear here.{" "}
-          <Link href="#" className="underline">Learn more</Link>
+
         </p>
         <button
           type="button"

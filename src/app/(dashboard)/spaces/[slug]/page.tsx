@@ -9,12 +9,13 @@
 import { notFound, redirect } from "next/navigation";
 import { SpaceFilesCard } from "@/components/spaces/space-files-card";
 import { SpaceBookmarks, type SpaceBookmark } from "@/components/spaces/space-bookmarks";
+import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   Folder as FolderIcon, Lock,
-  Sparkles, Users as UsersIcon, User as UserIconSmall,
+  Users as UsersIcon, User as UserIconSmall,
   FileText,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
   ChevronLeft, ChevronRight, ChevronDown, X,
@@ -596,16 +597,7 @@ export default async function SpacePage(props: {
             <Zap className="w-3.5 h-3.5 text-amber-500" />
             Automate
           </Link>
-          <button
-            type="button"
-            disabled
-            title="Ask AI is coming soon"
-            className="text-sm text-zinc-400 flex items-center gap-1.5 px-2 py-1 rounded cursor-not-allowed"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
-            Ask
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
-          </button>
+          <AskSidekickButton prompt={`Help me with the ${space.name} space.`} />
           <SpaceShareButton
             spaceId={space.id}
             spaceName={space.name}

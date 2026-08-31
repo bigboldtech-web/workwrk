@@ -172,7 +172,7 @@ export default function ActivityPage() {
       </div>
 
       {loadError ? (
-        <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
       ) : rows === null ? (
         <div className="actfeed__loading">Loading activity…</div>
       ) : rows.length === 0 ? (

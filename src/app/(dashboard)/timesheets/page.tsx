@@ -162,11 +162,11 @@ export default function TimesheetsPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : sheets === null ? (
           <div className="tsh__loading">Loading…</div>
         ) : filtered.length === 0 ? (
-          <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets in this view" subtitle="Start a new week's timesheet to begin logging time entries." cta="Start this week" />
+          <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets in this view" subtitle="Start a new week's timesheet to begin logging time entries." cta="Start this week" onCta={() => void startCurrentWeek()} />
         ) : (
           <div className="tsh__list">
             {filtered.map((t) => {

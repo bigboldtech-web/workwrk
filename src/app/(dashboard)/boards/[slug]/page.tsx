@@ -10,11 +10,12 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, Sparkles, ChevronDown, ListChecks, Zap, IterationCw,
+  Lock, ChevronDown, ListChecks, Zap, IterationCw,
 } from "lucide-react";
 import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { BoardShareButton } from "@/components/layout/os/board-share-button";
+import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { ensureCoreListViews } from "@/lib/board";
@@ -148,16 +149,10 @@ export default async function BoardPage(props: {
           <Zap className="w-3.5 h-3.5 text-amber-500" />
           Automate
         </Link>
-        <button
-          type="button"
-          disabled
-          title="Ask AI is coming soon"
-          className="text-[13.5px] text-zinc-400 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md cursor-not-allowed"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
-          Ask
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 rounded px-1 py-0.5">Soon</span>
-        </button>
+        <AskSidekickButton
+          prompt="Help me with this board."
+          className="text-[13.5px] text-zinc-600 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100 hover:text-zinc-900"
+        />
         <BoardShareButton
           boardId={board.id}
           boardName={board.name}

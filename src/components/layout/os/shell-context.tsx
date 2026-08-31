@@ -421,6 +421,16 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     }
     setSidekickOpen(true);
   }, []);
+  // Lets any component open the Sidekick without threading this context through
+  // it (the empty-state "Ask Sidekick" buttons, header "Ask AI", etc.).
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const prompt = (e as CustomEvent<{ prompt?: string }>).detail?.prompt;
+      openSidekick(typeof prompt === "string" ? prompt : undefined);
+    };
+    window.addEventListener("workwrk:os:ask-sidekick", onAsk);
+    return () => window.removeEventListener("workwrk:os:ask-sidekick", onAsk);
+  }, [openSidekick]);
   const closeSidekick = useCallback(() => setSidekickOpen(false), []);
   const toggleSidekick = useCallback(() => setSidekickOpen((v) => !v), []);
   const consumeSidekickInitialPrompt = useCallback(() => {

@@ -188,7 +188,7 @@ export default function ToolsPage() {
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={loadError} cta="Retry" />
+          <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : rows === null ? (
           <div className="tls__loading">Loading…</div>
         ) : stats.total === 0 ? (
@@ -199,6 +199,7 @@ export default function ToolsPage() {
             subtitle="Build the team's tool catalog. Add Figma, Notion, GitHub — share credentials with specific people, audit access."
             chips={["Productivity", "Design", "Engineering", "Marketing"]}
             cta="Add tool"
+            onCta={quickAdd}
           />
         ) : grouped.length === 0 ? (
           <div className="tls__no-match"><Search /> No tools match.</div>

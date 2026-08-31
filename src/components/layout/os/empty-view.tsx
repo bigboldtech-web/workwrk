@@ -4,6 +4,13 @@ import type { LucideIcon } from "lucide-react";
 import { Plus } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 
+/** Open the AI Sidekick from anywhere without threading useOsShell through a
+ *  presentational component — the shell listens for this event. */
+export function askSidekick(prompt?: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("workwrk:os:ask-sidekick", { detail: { prompt } }));
+}
+
 export function OsEmptyView({
   Icon,
   iconGradient,
@@ -12,6 +19,7 @@ export function OsEmptyView({
   chips = [],
   cta,
   onCta,
+  ctaHref,
   hideCta = false,
 }: {
   Icon: LucideIcon;
@@ -20,12 +28,16 @@ export function OsEmptyView({
   subtitle: string;
   chips?: string[];
   cta?: string;
-  /** Click handler for the CTA. When omitted the button still renders
-   *  (legacy behavior) but does nothing — pass this to make it live. */
+  /** Click handler for the CTA. */
   onCta?: () => void;
-  /** Hide the CTA entirely (e.g. read-only surfaces). */
+  /** Navigation target for the CTA (rendered as a link). */
+  ctaHref?: string;
+  /** Force-hide the CTA (e.g. read-only surfaces). */
   hideCta?: boolean;
 }) {
+  // A CTA renders ONLY when it actually does something — no more buttons that
+  // look real but silently do nothing.
+  const showCta = !hideCta && !!cta && (!!onCta || !!ctaHref);
   return (
     <div className="os-empty">
       <div className="os-empty__art" style={{ background: iconGradient }}>
@@ -40,12 +52,19 @@ export function OsEmptyView({
           ))}
         </div>
       ) : null}
-      {hideCta ? null : (
-        <button type="button" className="os-empty__cta" onClick={onCta}>
-          <Plus />
-          <span>{cta ?? "Get started"}</span>
-        </button>
-      )}
+      {showCta ? (
+        ctaHref ? (
+          <a href={ctaHref} className="os-empty__cta">
+            <Plus />
+            <span>{cta}</span>
+          </a>
+        ) : (
+          <button type="button" className="os-empty__cta" onClick={onCta}>
+            <Plus />
+            <span>{cta}</span>
+          </button>
+        )
+      ) : null}
     </div>
   );
 }
@@ -55,11 +74,14 @@ export function OsAiPreviewView({
   iconGradient,
   title,
   subtitle,
+  prompt,
 }: {
   Icon: LucideIcon;
   iconGradient: string;
   title: string;
   subtitle: string;
+  /** Optional starter question sent to the Sidekick when opened. */
+  prompt?: string;
 }) {
   return (
     <div className="os-empty">
@@ -68,7 +90,7 @@ export function OsAiPreviewView({
       </div>
       <h2 className="os-empty__title">{title}</h2>
       <p className="os-empty__sub">{subtitle}</p>
-      <button type="button" className="os-empty__cta">
+      <button type="button" className="os-empty__cta" onClick={() => askSidekick(prompt)}>
         <BloomMark size={14} />
         <span>Ask Sidekick</span>
       </button>
