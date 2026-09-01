@@ -12,8 +12,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Plus, X, Table2 } from "lucide-react";
+import { Plus, X, Table2, BarChart3, LineChart, PieChart, Grid3x3 } from "lucide-react";
 import { computePivot, type PivotAgg } from "@/lib/sheet-pivot";
+import { PivotChart, type ChartType } from "./pivot-chart";
 
 interface Col {
   id: string;
@@ -61,6 +62,8 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
   const [colField, setColField] = useState<string>("");
   const [valueField, setValueField] = useState<string>(() => columns[1]?.id ?? columns[0]?.id ?? "");
   const [agg, setAgg] = useState<PivotAgg>("sum");
+  const [view, setView] = useState<"table" | "chart">("table");
+  const [chartType, setChartType] = useState<ChartType>("bar");
 
   const result = useMemo(
     () =>
@@ -146,10 +149,25 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
 
       {/* Result */}
       <div className="flex-1 min-w-0 overflow-auto p-5">
+        {!result.empty ? (
+          <div className="flex items-center gap-1 mb-3">
+            <ViewBtn active={view === "table"} onClick={() => setView("table")} icon={Grid3x3} label="Table" />
+            <ViewBtn active={view === "chart"} onClick={() => setView("chart")} icon={BarChart3} label="Chart" />
+            {view === "chart" ? (
+              <span className="ml-3 inline-flex items-center gap-0.5">
+                <ViewBtn active={chartType === "bar"} onClick={() => setChartType("bar")} icon={BarChart3} label="Bar" iconOnly />
+                <ViewBtn active={chartType === "line"} onClick={() => setChartType("line")} icon={LineChart} label="Line" iconOnly />
+                <ViewBtn active={chartType === "pie"} onClick={() => setChartType("pie")} icon={PieChart} label="Pie" iconOnly />
+              </span>
+            ) : null}
+          </div>
+        ) : null}
         {result.empty ? (
           <div className="h-full flex items-center justify-center text-[13px] text-zinc-400">
             Pick a Row field {agg === "count" ? "" : "and a Value"} to build the pivot.
           </div>
+        ) : view === "chart" ? (
+          <PivotChart result={result} type={chartType} />
         ) : (
           <table className="text-[13px] border-collapse">
             <thead>
@@ -206,6 +224,27 @@ function Section({ title, children, onAdd, canAdd }: { title: string; children: 
 
 function Empty() {
   return <div className="text-[12.5px] text-zinc-400 px-0.5">None</div>;
+}
+
+function ViewBtn({ active, onClick, icon: Icon, label, iconOnly }: {
+  active: boolean;
+  onClick: () => void;
+  icon: typeof Table2;
+  label: string;
+  iconOnly?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={`h-8 inline-flex items-center gap-1.5 rounded-md text-[13px] ${iconOnly ? "w-8 justify-center" : "px-2.5"} ${active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {iconOnly ? null : label}
+    </button>
+  );
 }
 
 function FieldRow({ value, columns, currentLabel, onChange, onRemove }: {
