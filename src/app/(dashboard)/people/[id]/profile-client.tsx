@@ -367,20 +367,22 @@ function AlignmentSection({
                     const rec = kpi.currentRecord;
                     const recMeta = rec ? RECORD_STATUS_META[rec.status] : null;
                     return (
-                      <div key={kpi.id} className="flex items-center gap-2 px-4 py-2 border-b border-zinc-100 last:border-b-0">
+                      <div key={kpi.id} className="flex items-start gap-2 px-4 py-2 border-b border-zinc-100 last:border-b-0">
                         {kpi.isNorthStar ? (
-                          <Star size={12} className="text-amber-500 shrink-0" fill="currentColor" aria-label="North-star KPI" />
+                          <Star size={12} className="mt-1 text-amber-500 shrink-0" fill="currentColor" aria-label="North-star KPI" />
                         ) : (
-                          <Gauge size={12} className="text-zinc-300 shrink-0" />
+                          <Gauge size={12} className="mt-1 text-zinc-300 shrink-0" />
                         )}
-                        <span className="text-[14px] text-zinc-800 truncate" title={kpi.description ?? undefined}>
-                          {kpi.name}
+                        <span className="min-w-0 flex-1 flex flex-col">
+                          <span className="text-[14px] text-zinc-800 truncate" title={kpi.description ?? undefined}>{kpi.name}</span>
+                          {kpi.description ? (
+                            <span className="text-[12px] text-zinc-500 leading-snug whitespace-pre-wrap break-words">{kpi.description}</span>
+                          ) : null}
                         </span>
                         <DirectionIcon direction={kpi.direction} />
                         {kpi.ownership === "SHARED" ? (
                           <StatusChip color="#71717A" label="Shared" title="Shared gauge: influenced, reviewed but not graded" />
                         ) : null}
-                        <div className="flex-1" />
                         <span
                           className="inline-flex h-2 w-2 rounded-full shrink-0"
                           style={{ background: health.color }}
