@@ -307,6 +307,10 @@ model DataTable {
   // { id, name, type: grid|kanban|calendar|gallery, config }. Empty =
   // a single implicit Grid view.
   views          Json           @default("[]")
+  // 🆕 Sheet-level settings bucket. Currently holds named ranges:
+  //   { namedRanges: [{ name, ref }] } — a name usable in formulas as a
+  //   reference (e.g. SUM(Revenue)). Extensible for future table settings.
+  settings       Json           @default("{}")
   // Public tables are readable without auth via /embed/tables/[id] —
   // mirrors how Forms expose a public responder. Org members still see
   // the full editor; outside viewers get a read-only grid.

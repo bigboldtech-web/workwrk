@@ -642,3 +642,60 @@ describe("dynamic arrays: spill maps to the right cells", () => {
     expect(engine.value("out", "r2")).toBeNull();
   });
 });
+
+describe("named ranges", () => {
+  const make = (named?: { name: string; ref: string }[]) =>
+    createTableEngine({
+      columns: [col("a", "number"), col("out", "short_text")],
+      rows: [row("r1", { a: 1 }), row("r2", { a: 2 }), row("r3", { a: 3 })],
+      namedRanges: named,
+    });
+
+  it("resolves a named range as a formula argument", () => {
+    const e = make([{ name: "Revenue", ref: "A1:A3" }]);
+    e.setCell("out", "r1", "=SUM(Revenue)");
+    expect(e.value("out", "r1")).toBe(6);
+  });
+
+  it("recomputes when a cell inside the named range changes", () => {
+    const e = make([{ name: "Revenue", ref: "A1:A3" }]);
+    e.setCell("out", "r1", "=SUM(Revenue)");
+    expect(e.value("out", "r1")).toBe(6);
+    e.setCell("a", "r2", 20);
+    expect(e.value("out", "r1")).toBe(24);
+  });
+
+  it("defining a name lights up formulas that were waiting on it", () => {
+    const e = make([]);
+    e.setCell("out", "r1", "=SUM(Revenue)");
+    expect(e.value("out", "r1")).toBe("#NAME?");
+    expect(e.setNamedRange("Revenue", "A1:A3")).toBeNull();
+    expect(e.value("out", "r1")).toBe(6);
+  });
+
+  it("removing a name breaks its formulas back to #NAME?", () => {
+    const e = make([{ name: "Revenue", ref: "A1:A3" }]);
+    e.setCell("out", "r1", "=SUM(Revenue)");
+    expect(e.value("out", "r1")).toBe(6);
+    e.removeNamedRange("Revenue");
+    expect(e.value("out", "r1")).toBe("#NAME?");
+  });
+
+  it("rejects ref-shaped names, accepts real ones", () => {
+    const e = make([]);
+    expect(e.setNamedRange("A1", "A1:A3")).toContain("reference");
+    expect(e.setNamedRange("TAX", "A1:A3")).toContain("reference"); // 3-letter column label
+    expect(e.setNamedRange("has space", "A1:A3")).toBeTruthy();
+    expect(e.setNamedRange("Revenue", "A1:A3")).toBeNull();
+  });
+
+  it("rejects an invalid target reference", () => {
+    const e = make([]);
+    expect(e.setNamedRange("Revenue", "not a ref!")).toBeTruthy();
+  });
+
+  it("lists named ranges sorted by name", () => {
+    const e = make([{ name: "Zeta", ref: "A1" }, { name: "Alpha", ref: "A2" }]);
+    expect(e.listNamedRanges().map((r) => r.name)).toEqual(["Alpha", "Zeta"]);
+  });
+});

@@ -324,6 +324,7 @@ export class SheetGraph {
       columnCount: () => base.columnCount(),
       resolveHeader: (name) => base.resolveHeader(name),
       resolveName: base.resolveName ? (name) => base.resolveName!(name) : undefined,
+      resolveNameRef: base.resolveNameRef ? (name) => base.resolveNameRef!(name) : undefined,
       clock: base.clock ? () => base.clock!() : undefined,
     };
   }
@@ -851,7 +852,7 @@ export class SheetGraph {
         if ("key" in shape) cells.add(shape.key);
         else rects.push(shape.rect);
       },
-      { functions: this.functions },
+      { functions: this.functions, resolveNameRef: this.base.resolveNameRef?.bind(this.base) },
     );
     return { cells: [...cells].sort((a, b) => a - b), rects };
   }

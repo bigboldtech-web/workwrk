@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, Star, Link2, Check,
+  Globe, Lock, Sigma, Star, Link2, Check, Tag,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown, ChevronUp,
   ArrowDownAZ, ArrowUpZA, X, Pencil, MoreVertical,
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
@@ -44,7 +44,7 @@ import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { MenuList, MenuItem } from "@/components/ui/menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MorePortal } from "@/components/layout/os/more-portal";
-import { createTableEngine, columnLetter, type StructureResult, type TableEngine } from "@/lib/sheet-engine-host";
+import { createTableEngine, columnLetter, type StructureResult, type TableEngine, type NamedRangeDef } from "@/lib/sheet-engine-host";
 import { createSerialQueue } from "@/lib/sheet-serial-queue";
 import { streamRows } from "@/lib/sheet-stream";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
@@ -62,6 +62,7 @@ import { RelationConfigModal } from "@/components/tables/relation-config-modal";
 import { SheetGrid, SHEET_ROW_H, type SheetSort } from "@/components/tables/sheet-grid";
 import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
+import { NamedRangesDialog } from "@/components/tables/named-ranges-dialog";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 // The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
@@ -96,7 +97,17 @@ type ViewType = "grid" | "kanban" | "calendar" | "gallery";
  *  either; the menu's Unfreeze is the way back). */
 type SheetFreeze = { rows?: number; cols?: number };
 type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; freeze?: SheetFreeze } };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean };
+type TableSettings = { namedRanges?: NamedRangeDef[] };
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null };
+
+/** Named ranges out of a table's settings blob, defensively. */
+function readNamedRanges(settings: TableSettings | null | undefined): NamedRangeDef[] {
+  const list = settings?.namedRanges;
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (r): r is NamedRangeDef => !!r && typeof r.name === "string" && typeof r.ref === "string",
+  );
+}
 
 /** A freeze is only meaningful while at least ONE row and ONE column can
  *  still scroll — a sheet that is entirely frozen band is a sheet that
@@ -767,11 +778,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
    * re-read a host whose identity did not change. */
   const engineHostRef = useRef<TableEngine | null>(null);
   const [engineVersion, setEngineVersion] = useState(0);
+  const [namedRangesOpen, setNamedRangesOpen] = useState(false);
   /** Re-render + re-derive after an in-place host mutation. */
   const bumpEngine = useCallback(() => setEngineVersion((v) => v + 1), []);
   /** Swap in a brand-new host built from canonical page state. */
   const rebuildEngine = useCallback((columns: readonly Column[], rowList: readonly ApiRow[]) => {
-    engineHostRef.current = createTableEngine({ columns, rows: rowList });
+    engineHostRef.current = createTableEngine({
+      columns,
+      rows: rowList,
+      namedRanges: readNamedRanges(tableRef.current?.settings),
+    });
     setEngineVersion((v) => v + 1);
   }, []);
 
@@ -2865,7 +2881,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   // read from; writing a ref during render is React's sanctioned lazy-init
   // pattern, and it runs exactly once.
   if (engineHostRef.current === null) {
-    engineHostRef.current = createTableEngine({ columns: table?.columns ?? [], rows: rows ?? [] });
+    engineHostRef.current = createTableEngine({
+      columns: table?.columns ?? [],
+      rows: rows ?? [],
+      namedRanges: readNamedRanges(table?.settings),
+    });
   }
   const engineHost = engineHostRef.current;
 
@@ -4781,6 +4801,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 formatted values + a raw-values option"). */}
             <button type="button" onClick={(e) => { exportCsv(true); closeDetails(e); }}><Download /> Export CSV (formatted)</button>
             <button type="button" onClick={(e) => { exportCsv(false); closeDetails(e); }}><Download /> Export CSV (raw values)</button>
+            <button type="button" onClick={(e) => { closeDetails(e); setNamedRangesOpen(true); }}><Tag /> Named ranges…</button>
           </div>
         </details>
       </div>
@@ -5236,6 +5257,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onClose={() => setConfigColId(null)}
         />
       )}
+
+      <NamedRangesDialog
+        open={namedRangesOpen}
+        onOpenChange={setNamedRangesOpen}
+        host={engineHost}
+        onChanged={(ranges) => {
+          // The host has already re-derived + recomputed; repaint, then mirror
+          // the definitions to state + persist them to DataTable.settings.
+          bumpEngine();
+          const cur = tableRef.current;
+          const nextSettings = { ...(cur?.settings ?? {}), namedRanges: ranges };
+          if (cur) tableRef.current = { ...cur, settings: nextSettings };
+          setTable((prev) => (prev ? { ...prev, settings: nextSettings } : prev));
+          void patchTable({ settings: nextSettings });
+        }}
+      />
     </div>
   );
 }

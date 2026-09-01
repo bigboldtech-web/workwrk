@@ -63,6 +63,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (Array.isArray(body.columns)) data.columns = body.columns;
   if (Array.isArray(body.views)) data.views = body.views;
   if (typeof body.isPublic === "boolean") data.isPublic = body.isPublic;
+  // Sheet settings bucket (named ranges, etc.) — a plain object, replaced whole.
+  if (body.settings && typeof body.settings === "object" && !Array.isArray(body.settings)) {
+    data.settings = body.settings;
+  }
 
   const updated = await prisma.dataTable.update({ where: { id }, data });
   return jsonSuccess(updated);

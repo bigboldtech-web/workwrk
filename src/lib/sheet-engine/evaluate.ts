@@ -83,6 +83,12 @@ export interface SheetAccess {
   resolveHeader(name: string): number | null;
   /** Named ranges and constants. Absent means every bare name is #NAME?. */
   resolveName?(name: string): CellValue | undefined;
+  /** A named RANGE — a bare name (e.g. `Revenue`) that stands for a cell,
+   *  range or column reference. Resolved BEFORE `resolveName` (a scalar
+   *  constant): a name that maps to a ref reads exactly like typing that ref,
+   *  so it narrows to one cell in an operand and reads the whole range as a
+   *  function argument. null = not a named range (fall through to resolveName). */
+  resolveNameRef?(name: string): Ref | null;
   /** Injected clock so TODAY/NOW are deterministic under test. */
   clock?(): Date;
 }
@@ -578,6 +584,10 @@ function evalNode(node: Ast, ctx: EvalContext): CellValue {
       case "ref":
         return refToScalar(node.ref, ctx);
       case "name": {
+        // A named RANGE resolves to a ref and reads like one (narrowed to a
+        // cell in this operand context). A named scalar constant falls through.
+        const nameRef = ctx.sheet.resolveNameRef?.(node.name);
+        if (nameRef) return refToScalar(nameRef, ctx);
         const resolved = ctx.sheet.resolveName?.(node.name);
         return resolved === undefined ? NAME_ERROR : resolved;
       }
@@ -642,8 +652,16 @@ function evalCall(name: string, args: Ast[], ctx: EvalContext): CellValue | Rang
     const arg = args[i];
     const context = argumentContext(name, entry, i);
     let value: FunctionArg;
-    if (arg.type === "ref") {
-      const resolved = refToArg(arg.ref, ctx, context);
+    // A ref argument — including a named range that resolves to a ref — is read
+    // as its whole rectangle (what an aggregate like SUM(Revenue) needs).
+    const argRef =
+      arg.type === "ref"
+        ? arg.ref
+        : arg.type === "name"
+          ? ctx.sheet.resolveNameRef?.(arg.name) ?? null
+          : null;
+    if (argRef) {
+      const resolved = refToArg(argRef, ctx, context);
       value = resolved.value;
       if (keyed) {
         keys.push(resolved.key);
@@ -761,9 +779,10 @@ export function evaluateFormula(
 export function walkRefs(
   ast: Ast,
   visit: (found: RefVisit) => void,
-  options?: { functions?: FunctionLookup },
+  options?: { functions?: FunctionLookup; resolveNameRef?: (name: string) => Ref | null },
 ): void {
   const lookup = options?.functions;
+  const resolveNameRef = options?.resolveNameRef;
   const walk = (
     node: Ast,
     context: RefContext,
@@ -775,6 +794,16 @@ export function walkRefs(
       case "ref":
         visit({ ref: node.ref, node, context, argument });
         return;
+      case "name": {
+        // A named range depends on the cells it covers. Resolve it to a ref and
+        // report that ref against the NAME's source span (synthetic RefNode) so
+        // the dependency graph tracks it exactly like an inline ref.
+        const ref = resolveNameRef?.(node.name);
+        if (ref) {
+          visit({ ref, node: { type: "ref", ref, start: node.start, end: node.end }, context, argument });
+        }
+        return;
+      }
       case "unary":
       case "percent":
         walk(node.operand, "scalar", false, depth + 1);
@@ -807,7 +836,11 @@ export function walkRefs(
 export function createGridSheet(
   grid: readonly (readonly CellValue[])[],
   headers?: readonly string[],
-  extras?: { resolveName?: (name: string) => CellValue | undefined; clock?: () => Date },
+  extras?: {
+    resolveName?: (name: string) => CellValue | undefined;
+    resolveNameRef?: (name: string) => Ref | null;
+    clock?: () => Date;
+  },
 ): SheetAccess {
   const widest = grid.reduce((max, row) => Math.max(max, row.length), 0);
   const columns = Math.max(widest, headers?.length ?? 0);
@@ -827,6 +860,7 @@ export function createGridSheet(
     columnCount: () => columns,
     resolveHeader: (name) => byHeader.get(name.trim().toUpperCase()) ?? null,
     resolveName: extras?.resolveName,
+    resolveNameRef: extras?.resolveNameRef,
     clock: extras?.clock,
   };
 }
