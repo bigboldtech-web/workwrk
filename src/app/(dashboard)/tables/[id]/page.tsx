@@ -49,7 +49,7 @@ import { createSerialQueue } from "@/lib/sheet-serial-queue";
 import { streamRows } from "@/lib/sheet-stream";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
-import { formatCellValue, isNegativeStyled, matchRule, numericRange, colorScaleColor, dataBarBackground, type ColumnFormat, type ConditionalRule, type CondFormatV2 } from "@/lib/sheet-format";
+import { formatCellValue, isNegativeStyled, matchRule, numericRange, colorScaleColor, dataBarBackground, iconSetIcon, type ColumnFormat, type ConditionalRule, type CondFormatV2 } from "@/lib/sheet-format";
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
@@ -506,11 +506,15 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
   onClose: () => void;
   onSave: (patch: { rules: ConditionalRule[]; condFormat?: CondFormatV2 }) => void;
 }) {
-  const initialMode: "single" | "color_scale" | "data_bar" =
+  const initialMode: "single" | "color_scale" | "data_bar" | "icon_set" =
     column.condFormat?.type === "color_scale" ? "color_scale"
     : column.condFormat?.type === "data_bar" ? "data_bar"
+    : column.condFormat?.type === "icon_set" ? "icon_set"
     : "single";
   const [mode, setMode] = useState(initialMode);
+  const [iconSet, setIconSet] = useState<"arrows" | "traffic">(
+    column.condFormat?.type === "icon_set" ? column.condFormat.set : "arrows",
+  );
   const [rules, setRules] = useState<ConditionalRule[]>(() => (column.rules ?? []).map((r) => ({ ...r })));
   const cs = column.condFormat?.type === "color_scale" ? column.condFormat : null;
   const [scaleMin, setScaleMin] = useState(cs?.min ?? SCALE_DEFAULT.min);
@@ -530,8 +534,10 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
       onSave({ rules: rules.filter((r) => !needsValue(r.when) || String(r.value ?? "").trim() !== ""), condFormat: undefined });
     } else if (mode === "color_scale") {
       onSave({ rules: [], condFormat: { type: "color_scale", min: scaleMin, mid: useMid ? scaleMid : null, max: scaleMax } });
-    } else {
+    } else if (mode === "data_bar") {
       onSave({ rules: [], condFormat: { type: "data_bar", color: barColor } });
+    } else {
+      onSave({ rules: [], condFormat: { type: "icon_set", set: iconSet } });
     }
   };
 
@@ -539,6 +545,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
     { key: "single", label: "Single color" },
     { key: "color_scale", label: "Color scale" },
     { key: "data_bar", label: "Data bar" },
+    { key: "icon_set", label: "Icon set" },
   ];
   const swatch = (val: string, set: (v: string) => void, label: string) => (
     <label className="flex items-center gap-1.5 text-[12.5px] text-zinc-600">
@@ -641,6 +648,31 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
             <div className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2" aria-label="Data bar preview">
               {[0.9, 0.55, 0.3].map((w, i) => (
                 <div key={i} className="h-5 rounded-sm" style={{ background: `linear-gradient(to right, ${barColor}55 0%, ${barColor}55 ${w * 100}%, transparent ${w * 100}%)` }} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {mode === "icon_set" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-[13px] text-zinc-500">Each cell gets an icon by where its value sits in the column — top third, middle, bottom.</p>
+            <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-[13px]">
+              {(["arrows", "traffic"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setIconSet(s)}
+                  className={`h-8 px-3 ${iconSet === s ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                >
+                  {s === "arrows" ? "Arrows" : "Traffic light"}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-4 rounded-md border border-zinc-200 p-3">
+              {[{ t: "High", c: "#22c55e", a: "▲" }, { t: "Mid", c: "#f59e0b", a: "▬" }, { t: "Low", c: "#ef4444", a: "▼" }].map((x) => (
+                <span key={x.t} className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+                  <span style={{ color: x.c, fontSize: 11 }}>{iconSet === "arrows" ? x.a : "●"}</span> {x.t}
+                </span>
               ))}
             </div>
           </div>
@@ -3728,7 +3760,35 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
 
   // ── Sheet kernel plumbing (Tables Phase 1) ──────────────────────
 
+  // Conditional formatting v2 — icon set: a value's tertile prefixes the cell
+  // with a coloured glyph. Wraps renderCellContent (below) so it rides on top of
+  // every column type, and only the DISPLAY — never the copied/stored value.
   const displayCell = (rowId: string, colId: string): React.ReactNode => {
+    const content = renderCellContent(rowId, colId);
+    const c = table.columns.find((x) => x.id === colId);
+    if (c?.condFormat?.type !== "icon_set") return content;
+    const range = condRanges.get(colId);
+    const r = rowById.get(rowId);
+    if (!range || !r) return content;
+    const cv = r.values[colId];
+    const isFormulaC = c.type === "formula" || isFormulaCell(cv);
+    if (streamProgress && isFormulaC) return content;
+    const raw = isFormulaC ? engineHost.value(colId, r.id) : cv;
+    const num = typeof raw === "number" ? raw
+      : typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw)) ? Number(raw)
+      : null;
+    if (num === null) return content;
+    const icon = iconSetIcon(num, range.lo, range.hi, c.condFormat.set);
+    if (!icon) return content;
+    return (
+      <span className="inline-flex min-w-0 items-center gap-1.5">
+        <span aria-hidden style={{ color: icon.color, fontSize: "10px", lineHeight: 1 }}>{icon.char}</span>
+        <span className="min-w-0">{content}</span>
+      </span>
+    );
+  };
+
+  const renderCellContent = (rowId: string, colId: string): React.ReactNode => {
     const r = rowById.get(rowId);
     const c = table.columns.find((x) => x.id === colId);
     if (!r || !c) return null;

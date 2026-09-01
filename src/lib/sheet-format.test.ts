@@ -8,6 +8,7 @@ import {
   numericRange,
   colorScaleColor,
   dataBarBackground,
+  iconSetIcon,
   type ColumnFormat,
   type ConditionalRule,
 } from "./sheet-format";
@@ -343,5 +344,16 @@ describe("conditional formatting v2 helpers", () => {
     expect(dataBarBackground(10, 0, 10, cfg)).toContain(" 100%");
     expect(dataBarBackground(5, 0, 10, cfg)).toContain("5B9BD555 50%");
     expect(dataBarBackground(NaN, 0, 10, cfg)).toBeNull();
+  });
+});
+
+describe("iconSetIcon", () => {
+  it("maps a value's tertile to a coloured glyph", () => {
+    // range 0..9: lo third [0,3), mid [3,6), hi [6,9]
+    expect(iconSetIcon(8, 0, 9, "arrows")).toEqual({ char: "▲", color: "#22c55e" });
+    expect(iconSetIcon(4, 0, 9, "arrows")).toEqual({ char: "▬", color: "#f59e0b" });
+    expect(iconSetIcon(1, 0, 9, "arrows")).toEqual({ char: "▼", color: "#ef4444" });
+    expect(iconSetIcon(8, 0, 9, "traffic")).toEqual({ char: "●", color: "#22c55e" });
+    expect(iconSetIcon(NaN, 0, 9, "arrows")).toBeNull();
   });
 });

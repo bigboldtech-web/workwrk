@@ -35,7 +35,26 @@ export interface ConditionalRule {
  * Stored per column as `Column.condFormat`. */
 export type CondFormatV2 =
   | { type: "color_scale"; min: string; mid?: string | null; max: string }
-  | { type: "data_bar"; color: string };
+  | { type: "data_bar"; color: string }
+  | { type: "icon_set"; set: "arrows" | "traffic" };
+
+/** The icon (glyph + colour) for one value's tertile within [lo, hi]: top
+ *  third green, middle amber, bottom red. Rendered as a small prefix in the
+ *  cell — never in the copied/stored value. null for a non-numeric value. */
+export function iconSetIcon(
+  value: number,
+  lo: number,
+  hi: number,
+  set: "arrows" | "traffic",
+): { char: string; color: string } | null {
+  if (!Number.isFinite(value)) return null;
+  const span = hi - lo;
+  const t = span === 0 ? 0.5 : (value - lo) / span;
+  const tier = t >= 2 / 3 ? "hi" : t >= 1 / 3 ? "mid" : "lo";
+  const color = tier === "hi" ? "#22c55e" : tier === "mid" ? "#f59e0b" : "#ef4444";
+  const char = set === "arrows" ? (tier === "hi" ? "▲" : tier === "mid" ? "▬" : "▼") : "●";
+  return { char, color };
+}
 
 function hexToRgb(hex: string): [number, number, number] | null {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
