@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   const tables = await prisma.dataTable.findMany({
     where,
     orderBy: { updatedAt: "desc" },
-    include: { _count: { select: { rows: true } } },
+    include: { _count: { select: { rows: { where: { deletedAt: null } } } } },
   });
 
   // Phase 32 — gate by Space visibility. Unscoped tables (spaceId=null)

@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   if (!table) return jsonError("not found", 404);
 
   const rows = await prisma.dataTableRow.findMany({
-    where: { tableId: id },
+    where: { tableId: id, deletedAt: null },
     // Same composite order as the app grid's keyset route, so a table with
     // duplicate positions renders identically in the embed. The embed keeps
     // a 5k cap for now (no streaming client here) — recorded follow-up.

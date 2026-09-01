@@ -63,6 +63,7 @@ import { SheetGrid, SHEET_ROW_H, type SheetSort } from "@/components/tables/shee
 import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { NamedRangesDialog } from "@/components/tables/named-ranges-dialog";
+import { TableTrashDialog } from "@/components/tables/table-trash-dialog";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 // The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
@@ -779,6 +780,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const engineHostRef = useRef<TableEngine | null>(null);
   const [engineVersion, setEngineVersion] = useState(0);
   const [namedRangesOpen, setNamedRangesOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   /** Re-render + re-derive after an in-place host mutation. */
   const bumpEngine = useCallback(() => setEngineVersion((v) => v + 1), []);
   /** Swap in a brand-new host built from canonical page state. */
@@ -4802,6 +4804,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             <button type="button" onClick={(e) => { exportCsv(true); closeDetails(e); }}><Download /> Export CSV (formatted)</button>
             <button type="button" onClick={(e) => { exportCsv(false); closeDetails(e); }}><Download /> Export CSV (raw values)</button>
             <button type="button" onClick={(e) => { closeDetails(e); setNamedRangesOpen(true); }}><Tag /> Named ranges…</button>
+            <button type="button" onClick={(e) => { closeDetails(e); setTrashOpen(true); }}><Trash2 /> Trash…</button>
           </div>
         </details>
       </div>
@@ -5257,6 +5260,14 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           onClose={() => setConfigColId(null)}
         />
       )}
+
+      <TableTrashDialog
+        open={trashOpen}
+        onOpenChange={setTrashOpen}
+        tableId={tableId}
+        columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
+        onChanged={() => { void load(); }}
+      />
 
       <NamedRangesDialog
         open={namedRangesOpen}

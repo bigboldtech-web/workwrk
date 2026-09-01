@@ -341,11 +341,17 @@ model DataTableRow {
   values         Json         @default("{}")
   position       Int          @default(0)
   createdById    String?
+  // 🆕 Row trash — a deleted row is soft-deleted (this stamped) and hidden
+  // from every read, recoverable from Trash for 60 days, then purged by cron.
+  // "never lose user data": a delete is undoable long after the session ends.
+  deletedAt      DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@index([tableId, position])
   @@index([organizationId])
+  // Trash listing + the purge cron both scan by deletion time.
+  @@index([tableId, deletedAt])
 }
 
 enum Plan {

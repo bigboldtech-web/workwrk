@@ -177,7 +177,7 @@ async function hydrate(
           where: { organizationId: orgId, id: { in: ids } },
           select: {
             id: true, name: true, description: true, spaceId: true,
-            _count: { select: { rows: true } },
+            _count: { select: { rows: { where: { deletedAt: null } } } },
           },
         });
         for (const t of tables) {

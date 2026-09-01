@@ -303,7 +303,7 @@ export default async function SpacePage(props: {
       take: 6,
       select: {
         id: true, name: true, description: true,
-        _count: { select: { rows: true } },
+        _count: { select: { rows: { where: { deletedAt: null } } } },
       },
     }),
     boardIds.length > 0

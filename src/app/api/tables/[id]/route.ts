@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
   const table = await prisma.dataTable.findFirst({
     where: { id, organizationId: orgId },
-    include: { _count: { select: { rows: true } } },
+    include: { _count: { select: { rows: { where: { deletedAt: null } } } } },
   });
   if (!table) return jsonError("not found", 404);
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel;

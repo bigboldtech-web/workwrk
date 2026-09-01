@@ -67,15 +67,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
   // Keyset WHERE resumes strictly after (position, id) in the same composite
   // order the query sorts by, so chunks never skip or repeat rows.
+  // deletedAt: null EVERYWHERE a row is read — a trashed row is invisible to
+  // the grid until it is restored.
   const where: Prisma.DataTableRowWhereInput = cursor
     ? {
         tableId: id,
+        deletedAt: null,
         OR: [
           { position: { gt: cursor.position } },
           { position: cursor.position, id: { gt: cursor.id } },
         ],
       }
-    : { tableId: id };
+    : { tableId: id, deletedAt: null };
 
   const [rows, total] = await Promise.all([
     prisma.dataTableRow.findMany({
@@ -92,7 +95,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     // total is COUNTed once, on the cursor-less request only, to drive the
     // client's loading progress. It may lag concurrent writes, which is
     // fine: completion is signalled by nextCursor null, never by the count.
-    cursor ? Promise.resolve(null) : prisma.dataTableRow.count({ where: { tableId: id } }),
+    cursor ? Promise.resolve(null) : prisma.dataTableRow.count({ where: { tableId: id, deletedAt: null } }),
   ]);
 
   // A full chunk MIGHT have more behind it: emit a cursor and let the next
@@ -154,7 +157,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!rowId) return jsonError("row id required");
 
   const existing = await prisma.dataTableRow.findFirst({
-    where: { id: rowId, tableId: id },
+    where: { id: rowId, tableId: id, deletedAt: null },
     select: { id: true, values: true },
   });
   if (!existing) return jsonError("row not found", 404);
@@ -213,9 +216,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const rowId = typeof body.id === "string" ? body.id : null;
   if (!rowId) return jsonError("row id required");
 
-  const existing = await prisma.dataTableRow.findFirst({ where: { id: rowId, tableId: id } });
+  const existing = await prisma.dataTableRow.findFirst({ where: { id: rowId, tableId: id, deletedAt: null } });
   if (!existing) return jsonError("row not found", 404);
 
-  await prisma.dataTableRow.delete({ where: { id: rowId } });
+  // Soft-delete: recoverable from Trash for 60 days (see the trash route).
+  await prisma.dataTableRow.update({ where: { id: rowId }, data: { deletedAt: new Date() } });
   return jsonSuccess({ deleted: true });
 }

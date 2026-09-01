@@ -1661,7 +1661,7 @@ const listDataTables: ToolDefinition = {
       where: { organizationId: ctx.orgId },
       orderBy: { updatedAt: "desc" },
       take: 50,
-      select: { id: true, name: true, _count: { select: { rows: true } } },
+      select: { id: true, name: true, _count: { select: { rows: { where: { deletedAt: null } } } } },
     });
     return { tables: tables.map((t: typeof tables[number]) => ({ id: t.id, name: t.name, rowCount: t._count.rows })) };
   },

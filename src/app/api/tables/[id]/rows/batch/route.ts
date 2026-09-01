@@ -204,7 +204,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     let missingIds: string[] = [];
     if (updates.length > 0) {
       const existing = await tx.dataTableRow.findMany({
-        where: { tableId: id, id: { in: [...new Set(updates.map((u) => u.id))] } },
+        // deletedAt: null — a trashed row is "missing" to an update, so the
+        // client is told to evict it rather than silently reviving it.
+        where: { tableId: id, id: { in: [...new Set(updates.map((u) => u.id))] }, deletedAt: null },
         select: { id: true, values: true },
       });
       // Immutable DB snapshot, separate from `merged`: every expect must be
@@ -276,7 +278,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     let deleted = 0;
     if (deletes.length > 0) {
-      const res = await tx.dataTableRow.deleteMany({ where: { tableId: id, id: { in: deletes } } });
+      // Soft-delete: bulk-deleted rows go to Trash (recoverable 60 days), same
+      // as a single-row delete. Already-trashed ids are skipped by deletedAt.
+      const res = await tx.dataTableRow.updateMany({
+        where: { tableId: id, id: { in: deletes }, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
       deleted = res.count;
     }
 
