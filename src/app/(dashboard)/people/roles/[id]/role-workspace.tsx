@@ -957,11 +957,11 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                     const line = healthyLine(p);
                     const shared = p.ownership === "SHARED";
                     return (
-                      <li key={p.id} className="flex items-center gap-2.5 px-3 py-2 border-b border-zinc-100 last:border-b-0">
+                      <li key={p.id} className="flex items-start gap-2.5 px-3 py-2 border-b border-zinc-100 last:border-b-0">
                         {p.isNorthStar ? (
-                          <Star className="w-3.5 h-3.5 text-amber-400 shrink-0" style={{ fill: "currentColor" }} aria-label="North-star gauge" />
+                          <Star className="w-3.5 h-3.5 mt-0.5 text-amber-400 shrink-0" style={{ fill: "currentColor" }} aria-label="North-star gauge" />
                         ) : (
-                          <Gauge className="w-3.5 h-3.5 text-zinc-300 shrink-0" />
+                          <Gauge className="w-3.5 h-3.5 mt-0.5 text-zinc-300 shrink-0" />
                         )}
                         <span className="min-w-0 flex-1">
                           <span className="block text-[13.5px] text-zinc-800 truncate" title={p.name}>{p.name}</span>
@@ -972,8 +972,11 @@ function AlignmentCard({ bundle, canEdit }: { bundle: RoleBundle; canEdit: boole
                               p.baselineValue != null ? `baseline ${p.baselineValue}` : null,
                             ].filter(Boolean).join(" · ") || " "}
                           </span>
+                          {p.description ? (
+                            <p className="text-[12px] text-zinc-500 leading-snug mt-1 whitespace-pre-wrap break-words">{p.description}</p>
+                          ) : null}
                         </span>
-                        <DirIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" aria-label={DIRECTION_META[dir].hint} />
+                        <DirIcon className="w-3.5 h-3.5 mt-0.5 text-zinc-400 shrink-0" aria-label={DIRECTION_META[dir].hint} />
                         {line ? (
                           <span className="text-[13px] font-mono text-zinc-700 shrink-0" title={`Healthy line — ${DIRECTION_META[dir].hint.toLowerCase()}`}>{line}</span>
                         ) : (
