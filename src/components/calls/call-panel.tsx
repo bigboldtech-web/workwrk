@@ -12,12 +12,12 @@
 
 import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { ConferenceSurface, type CallMicState } from "@/components/calls/conference-surface";
+import { ConferenceSurface, type CallDockState } from "@/components/calls/conference-surface";
 import { MeetingCall } from "@/components/meetings/meeting-call";
 
 type Grant = { url: string; token: string; room: string };
 
-export function CallPanel({ conversationId, meetingId, room, subject, displayName, audioOnly, onLeave, onMic }: {
+export function CallPanel({ conversationId, meetingId, room, subject, displayName, audioOnly, onLeave, onState }: {
   conversationId?: string;
   meetingId?: string;
   /** Legacy Jitsi room name — the fallback while the calls box is dark. */
@@ -26,8 +26,8 @@ export function CallPanel({ conversationId, meetingId, room, subject, displayNam
   displayName?: string | null;
   audioOnly?: boolean;
   onLeave?: () => void;
-  /** Surfaces mic state/toggle to the dock (LiveKit path only). */
-  onMic?: (state: CallMicState) => void;
+  /** Surfaces live mic/camera/roster to the dock (LiveKit path only). */
+  onState?: (state: CallDockState) => void;
 }) {
   // One state object per token request: id changes make a NEW request,
   // and stale results are dropped by the effect's active flag — no
@@ -79,7 +79,7 @@ export function CallPanel({ conversationId, meetingId, room, subject, displayNam
 
   return (
     <div className="h-full w-full overflow-hidden rounded-xl border border-zinc-200 bg-zinc-900">
-      <ConferenceSurface url={grant.url} token={grant.token} video={!audioOnly} onDisconnected={() => onLeave?.()} onMic={onMic} />
+      <ConferenceSurface url={grant.url} token={grant.token} video={!audioOnly} onDisconnected={() => onLeave?.()} onState={onState} />
     </div>
   );
 }

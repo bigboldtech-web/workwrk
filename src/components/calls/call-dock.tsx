@@ -12,18 +12,73 @@
 // the call. Position defaults to a bottom-right CSS anchor and only becomes an
 // absolute coordinate once the user drags (so nothing reads the window on
 // mount), then is clamped into view at render.
+//
+// The header carries its own mic/camera/roster/duration, bridged out of the
+// LiveKit room (see CallDockState), so a minimized huddle still tells you who
+// you're with, how long you've been on, and lets you mute or cut video without
+// re-opening — the in-video control bar is hidden while collapsed.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ExternalLink, Maximize2, Mic, MicOff, Minus, PhoneOff } from "lucide-react";
+import { ExternalLink, Maximize2, Mic, MicOff, Minus, PhoneOff, Video, VideoOff } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { CallPanel } from "@/components/calls/call-panel";
-import type { CallMicState } from "@/components/calls/conference-surface";
+import type { CallDockParticipant, CallDockState } from "@/components/calls/conference-surface";
 
 const EXPANDED = { w: 360, h: 440 };
-const MINI_W = 300;
-const MINI_H = 44;
+const MINI_W = 340;
+const MINI_H = 46;
 const MARGIN = 12;
+
+/** Initials for the avatar chip: first letters of the first two words, else
+ *  the first two characters — the same rule the rest of the app reads names
+ *  by, kept local so the dock has no cross-import. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  const one = parts[0] ?? "";
+  return (one.slice(0, 2) || "?").toUpperCase();
+}
+
+/** Deterministic hue per identity so a given person keeps one colour. */
+function hueOf(identity: string): number {
+  let h = 0;
+  for (let i = 0; i < identity.length; i++) h = (h * 31 + identity.charCodeAt(i)) % 360;
+  return h;
+}
+
+function Avatar({ p, className = "" }: { p: CallDockParticipant; className?: string }) {
+  return (
+    <span
+      title={p.name}
+      className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-zinc-800 ${className}`}
+      style={{ backgroundColor: `hsl(${hueOf(p.identity)} 52% 42%)` }}
+    >
+      {initialsOf(p.name)}
+    </span>
+  );
+}
+
+function fmtElapsed(total: number): string {
+  const s = total % 60;
+  const m = Math.floor(total / 60) % 60;
+  const h = Math.floor(total / 3600);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/** Isolated so its 1Hz tick re-renders ONLY the duration text — never the
+ *  CallPanel/LiveKit subtree above it. Remounted via a `key={callKey}` so a new
+ *  call resets to 0:00 with no in-effect setState. */
+function CallTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  return <span className="shrink-0 font-mono text-[11px] tabular-nums text-zinc-400">{fmtElapsed(elapsed)}</span>;
+}
 
 export function CallDock() {
   const { activeCall, endCall, setCallMinimized } = useOsShell();
@@ -33,16 +88,18 @@ export function CallDock() {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
-  // Local mic state, bridged out of the LiveKit room so the header can mute
-  // even while minimized (the in-video control bar is hidden then).
-  const [mic, setMic] = useState<CallMicState | null>(null);
-  // Drop a stale mic toggle when the call switches (React's adjust-state-on-
+  // Live room state (mic/camera/roster), bridged out of the LiveKit room so the
+  // header works even while minimized (the in-video control bar is hidden then).
+  const [dock, setDock] = useState<CallDockState | null>(null);
+  // Drop stale room state when the call switches (React's adjust-state-on-
   // prop-change pattern — the bridge re-reports for the new call).
   const callKey = `${activeCall?.conversationId ?? ""}:${activeCall?.meetingId ?? ""}`;
   const [prevCallKey, setPrevCallKey] = useState(callKey);
   if (callKey !== prevCallKey) {
+    // Adjust-state-on-prop-change (not an effect): a new call drops the stale
+    // room state; the timer resets on its own via key={callKey} remount.
     setPrevCallKey(callKey);
-    setMic(null);
+    setDock(null);
   }
 
   const minimized = activeCall?.minimized ?? false;
@@ -90,6 +147,18 @@ export function CallDock() {
     : { right: 20, bottom: 20, width: w, height: h };
 
   const btn = "flex h-6 w-6 shrink-0 items-center justify-center rounded text-zinc-300 hover:bg-zinc-700 hover:text-white";
+  const activeBtn = "flex h-6 w-6 shrink-0 items-center justify-center rounded bg-red-500/20 text-red-300 hover:bg-red-500/30";
+
+  const people = dock?.participants ?? [];
+  const others = people.filter((p) => !p.isLocal);
+  const faces = people.slice(0, 3);
+  // Minimized has no room for the subject, so it shows who you're with instead.
+  const roster =
+    people.length <= 1
+      ? "Waiting for others…"
+      : others.length === 1
+        ? others[0].name
+        : `${people.length} people`;
 
   return (
     <div
@@ -104,26 +173,62 @@ export function CallDock() {
         onPointerCancel={endDrag}
         className="flex shrink-0 cursor-grab touch-none select-none items-center gap-1.5 bg-zinc-800 px-2.5 py-2 active:cursor-grabbing"
       >
-        <span className="h-2 w-2 shrink-0 rounded-full bg-green-500" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-100">{activeCall.subject}</span>
-        {mic?.ready ? (
-          <button
-            type="button"
-            title={mic.micOn ? "Mute" : "Unmute"}
-            className={mic.micOn ? btn : "flex h-6 w-6 shrink-0 items-center justify-center rounded bg-red-500/20 text-red-300 hover:bg-red-500/30"}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => mic.toggle()}
-          >
-            {mic.micOn ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
-          </button>
+        <span className="relative flex h-2 w-2 shrink-0" aria-hidden>
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-500 opacity-60" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
+        </span>
+
+        {/* Roster faces — who you're on the call with, visible even minimized. */}
+        {faces.length > 0 ? (
+          <span className="flex shrink-0 items-center">
+            {faces.map((p, i) => (
+              <Avatar key={p.identity} p={p} className={i > 0 ? "-ml-2" : ""} />
+            ))}
+            {people.length > 3 ? (
+              <span className="-ml-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-600 text-[10px] font-semibold text-zinc-100 ring-2 ring-zinc-800">
+                +{people.length - 3}
+              </span>
+            ) : null}
+          </span>
         ) : null}
-        {activeCall.href ? (
+
+        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-100">
+          {minimized ? roster : activeCall.subject}
+        </span>
+
+        {/* Duration — remounts per call, ticks in isolation. */}
+        <CallTimer key={callKey} />
+
+        {dock?.ready ? (
+          <>
+            <button
+              type="button"
+              title={dock.micOn ? "Mute" : "Unmute"}
+              className={dock.micOn ? btn : activeBtn}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => dock.toggleMic()}
+            >
+              {dock.micOn ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              type="button"
+              title={dock.cameraOn ? "Turn camera off" : "Turn camera on"}
+              className={dock.cameraOn ? btn : activeBtn}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => dock.toggleCamera()}
+            >
+              {dock.cameraOn ? <Video className="h-3.5 w-3.5" /> : <VideoOff className="h-3.5 w-3.5" />}
+            </button>
+          </>
+        ) : null}
+
+        {activeCall.href && !minimized ? (
           <button
             type="button"
             title="Open conversation"
             className={btn}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={() => router.push(activeCall.href)}
+            onClick={() => router.push(activeCall.href!)}
           >
             <ExternalLink className="h-3.5 w-3.5" />
           </button>
@@ -159,7 +264,7 @@ export function CallDock() {
           displayName={activeCall.displayName}
           audioOnly={activeCall.audioOnly}
           onLeave={endCall}
-          onMic={setMic}
+          onState={setDock}
         />
       </div>
     </div>

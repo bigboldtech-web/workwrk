@@ -11,15 +11,27 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  LiveKitRoom, VideoConference, useConnectionState, useDataChannel, useLocalParticipant,
+  LiveKitRoom, VideoConference, useConnectionState, useDataChannel, useLocalParticipant, useParticipants,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
 import { Hand } from "lucide-react";
 
-/** Mic state surfaced OUT of the LiveKit room so the persistent CallDock can
- *  offer a mute button in its header — usable even while the call is minimized
- *  (the VideoConference control bar is hidden then). */
-export type CallMicState = { ready: boolean; micOn: boolean; toggle: () => void };
+/** One person on the call, surfaced to the dock so it can show "who am I in
+ *  this call with" even while minimized (the video tiles are hidden then). */
+export type CallDockParticipant = { identity: string; name: string; isLocal: boolean };
+
+/** Live call state surfaced OUT of the LiveKit room so the persistent CallDock
+ *  can drive its own header controls — mic, camera and roster — usable even
+ *  while the call is minimized (the VideoConference control bar is hidden
+ *  then). Bridged up because the dock lives OUTSIDE <LiveKitRoom>. */
+export type CallDockState = {
+  ready: boolean;
+  micOn: boolean;
+  toggleMic: () => void;
+  cameraOn: boolean;
+  toggleCamera: () => void;
+  participants: CallDockParticipant[];
+};
 
 const REACT_TOPIC = "wk-react";
 const EMOJI = ["👍", "❤️", "😂", "🎉", "👏"];
@@ -27,39 +39,55 @@ const FLOAT_MS = 2600;
 
 type ReactMsg = { kind: "emoji"; emoji: string } | { kind: "hand"; raised: boolean; name: string };
 
-export function ConferenceSurface({ url, token, video, onDisconnected, trailingControls, onMic }: {
+export function ConferenceSurface({ url, token, video, onDisconnected, trailingControls, onState }: {
   url: string;
   token: string;
   video: boolean;
   onDisconnected?: () => void;
   /** Extra member-only controls (e.g. the record button) rendered in the reaction bar. */
   trailingControls?: React.ReactNode;
-  /** Reports the local mic state/toggle up to the dock (see CallMicState). */
-  onMic?: (state: CallMicState) => void;
+  /** Reports live mic/camera/roster up to the dock (see CallDockState). */
+  onState?: (state: CallDockState) => void;
 }) {
   return (
     <div className="relative h-full w-full" data-lk-theme="default">
       <LiveKitRoom serverUrl={url} token={token} connect audio video={video} onDisconnected={onDisconnected} style={{ height: "100%" }}>
         <VideoConference />
         <ReactionLayer trailingControls={trailingControls} />
-        {onMic ? <MicBridge onMic={onMic} /> : null}
+        {onState ? <RoomBridge onState={onState} /> : null}
       </LiveKitRoom>
     </div>
   );
 }
 
-/** Lives inside LiveKitRoom so it can read/toggle the local mic, and reports
- *  that up to the dock. Renders nothing. */
-function MicBridge({ onMic }: { onMic: (state: CallMicState) => void }) {
-  const { localParticipant, isMicrophoneEnabled } = useLocalParticipant();
+/** Lives inside LiveKitRoom so it can read the live mic/camera/roster and
+ *  report them up to the dock. Renders nothing. A signature gate keeps the
+ *  ~10Hz speaking-level churn of `useParticipants` from spamming the dock: it
+ *  only reports up when connection, mic, camera or the roster identities
+ *  actually change. */
+function RoomBridge({ onState }: { onState: (state: CallDockState) => void }) {
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
+  const participants = useParticipants();
   const ready = useConnectionState() === "connected";
+  const lastSig = useRef<string>("");
   useEffect(() => {
-    onMic({
+    const people: CallDockParticipant[] = participants.map((p) => ({
+      identity: p.identity,
+      name: p.name || p.identity || "Guest",
+      isLocal: p.isLocal,
+    }));
+    const sig = `${ready}|${isMicrophoneEnabled}|${isCameraEnabled}|${people.map((p) => `${p.identity}~${p.name}`).join(",")}`;
+    if (sig === lastSig.current) return;
+    lastSig.current = sig;
+    onState({
       ready,
       micOn: !!isMicrophoneEnabled,
-      toggle: () => { void localParticipant?.setMicrophoneEnabled(!isMicrophoneEnabled); },
+      toggleMic: () => { void localParticipant?.setMicrophoneEnabled(!isMicrophoneEnabled); },
+      cameraOn: !!isCameraEnabled,
+      toggleCamera: () => { void localParticipant?.setCameraEnabled(!isCameraEnabled); },
+      participants: people,
     });
-  }, [onMic, ready, isMicrophoneEnabled, localParticipant]);
+  }, [participants, ready, isMicrophoneEnabled, isCameraEnabled, localParticipant, onState]);
   return null;
 }
 
