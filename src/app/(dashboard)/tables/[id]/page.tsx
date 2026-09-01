@@ -49,7 +49,7 @@ import { createSerialQueue } from "@/lib/sheet-serial-queue";
 import { streamRows } from "@/lib/sheet-stream";
 import { isFormulaCell, FORMULA_KEY } from "@/lib/sheet-engine";
 import { createUndoStack, type UndoCommand } from "@/lib/sheet-undo";
-import { formatCellValue, isNegativeStyled, matchRule, type ColumnFormat, type ConditionalRule } from "@/lib/sheet-format";
+import { formatCellValue, isNegativeStyled, matchRule, numericRange, colorScaleColor, dataBarBackground, type ColumnFormat, type ConditionalRule, type CondFormatV2 } from "@/lib/sheet-format";
 import { adjustDecimals, formatPatchFor, kindForColType, NUMBER_FORMAT_CHOICES, type NumberFormatKind } from "@/lib/sheet-format-actions";
 import { CELL_STYLE_KEY, isReservedKey, readCellStyle, ROW_HEIGHT_KEY, styleToCss, withCellStyle, type CellStyle } from "@/lib/sheet-cell-style";
 import { createUntitledSheet, NEW_SHEET_COLUMNS, NEW_SHEET_ROWS, UNTITLED_SHEET_NAME } from "@/lib/sheet-new";
@@ -87,6 +87,7 @@ type Column = {
   // Raw cell values NEVER change shape — sort/formulas/clipboard read raw.
   format?: ColumnFormat;      // column-level number/date formatting
   rules?: ConditionalRule[];  // conditional formatting v1 (value → cell bg)
+  condFormat?: CondFormatV2;  // conditional formatting v2 (color scale / data bar)
   validation?: DataValidation; // data validation (reject-mode): list / number / text-length
 };
 
@@ -490,73 +491,165 @@ const RULE_LABELS: Record<ConditionalRule["when"], string> = {
 const RULE_ORDER: ConditionalRule["when"][] = ["gt", "lt", "gte", "lte", "eq", "neq", "contains", "empty", "nonempty"];
 const RULE_COLORS = ["#FBD9DE", "#FFE4C2", "#FFF2B3", "#CCF4E3", "#D6E8FF", "#E7DAF7"];
 
-/** Conditional formatting editor — re-exposes col.rules (the render path in
- *  cellStyleFor always kept painting; this restores creating/editing them).
- *  Local draft; commits the whole rule list on Save through one undo step. */
+const SCALE_DEFAULT = { min: "#F8696B", mid: "#FFEB84", max: "#63BE7B" };
+const BAR_DEFAULT = "#5B9BD5";
+
+/** Conditional formatting editor. Three modes, one active at a time:
+ *  - Single color: per-cell value rules (v1, `column.rules`).
+ *  - Color scale: a heat-map gradient across the column's range (v2).
+ *  - Data bar: an in-cell bar sized by the value (v2).
+ *  Saving a v2 mode clears the v1 rules and vice-versa, so a column reads one
+ *  way. Local draft; commits through one undo step. */
 function ConditionalRulesDialog({ column, onClose, onSave }: {
   column: Column;
   onClose: () => void;
-  onSave: (rules: ConditionalRule[]) => void;
+  onSave: (patch: { rules: ConditionalRule[]; condFormat?: CondFormatV2 }) => void;
 }) {
+  const initialMode: "single" | "color_scale" | "data_bar" =
+    column.condFormat?.type === "color_scale" ? "color_scale"
+    : column.condFormat?.type === "data_bar" ? "data_bar"
+    : "single";
+  const [mode, setMode] = useState(initialMode);
   const [rules, setRules] = useState<ConditionalRule[]>(() => (column.rules ?? []).map((r) => ({ ...r })));
+  const cs = column.condFormat?.type === "color_scale" ? column.condFormat : null;
+  const [scaleMin, setScaleMin] = useState(cs?.min ?? SCALE_DEFAULT.min);
+  const [scaleMid, setScaleMid] = useState(cs?.mid ?? SCALE_DEFAULT.mid);
+  const [useMid, setUseMid] = useState<boolean>(cs ? cs.mid != null : true);
+  const [scaleMax, setScaleMax] = useState(cs?.max ?? SCALE_DEFAULT.max);
+  const barCf = column.condFormat?.type === "data_bar" ? column.condFormat : null;
+  const [barColor, setBarColor] = useState(barCf?.color ?? BAR_DEFAULT);
+
   const addRule = () => setRules((prev) => [...prev, { when: "gt", value: "", bg: RULE_COLORS[prev.length % RULE_COLORS.length] }]);
   const update = (i: number, patch: Partial<ConditionalRule>) => setRules((prev) => prev.map((r, x) => (x === i ? { ...r, ...patch } : r)));
   const remove = (i: number) => setRules((prev) => prev.filter((_, x) => x !== i));
   const needsValue = (w: ConditionalRule["when"]) => w !== "empty" && w !== "nonempty";
+
+  const save = () => {
+    if (mode === "single") {
+      onSave({ rules: rules.filter((r) => !needsValue(r.when) || String(r.value ?? "").trim() !== ""), condFormat: undefined });
+    } else if (mode === "color_scale") {
+      onSave({ rules: [], condFormat: { type: "color_scale", min: scaleMin, mid: useMid ? scaleMid : null, max: scaleMax } });
+    } else {
+      onSave({ rules: [], condFormat: { type: "data_bar", color: barColor } });
+    }
+  };
+
+  const TABS: { key: typeof mode; label: string }[] = [
+    { key: "single", label: "Single color" },
+    { key: "color_scale", label: "Color scale" },
+    { key: "data_bar", label: "Data bar" },
+  ];
+  const swatch = (val: string, set: (v: string) => void, label: string) => (
+    <label className="flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+      <input type="color" value={val} onChange={(e) => set(e.target.value)} className="h-7 w-8 rounded border border-zinc-200 bg-white p-0.5" aria-label={label} />
+      {label}
+    </label>
+  );
+
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Conditional formatting — {column.label}</DialogTitle>
         </DialogHeader>
-        <p className="text-[13px] text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
-        <div className="flex flex-col gap-2 max-h-[46vh] overflow-y-auto">
-          {rules.length === 0 ? (
-            <p className="py-4 text-center text-[13px] text-zinc-400">No rules yet.</p>
-          ) : rules.map((r, i) => (
-            <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
-              <select
-                value={r.when}
-                onChange={(e) => update(i, { when: e.target.value as ConditionalRule["when"] })}
-                className="h-8 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
-              >
-                {RULE_ORDER.map((w) => <option key={w} value={w}>{RULE_LABELS[w]}</option>)}
-              </select>
-              {needsValue(r.when) && (
-                <input
-                  type="text"
-                  value={r.value == null ? "" : String(r.value)}
-                  onChange={(e) => update(i, { value: e.target.value })}
-                  placeholder="value"
-                  className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
-                />
-              )}
-              <div className="flex items-center gap-1">
-                {RULE_COLORS.map((hex) => (
-                  <button
-                    key={hex}
-                    type="button"
-                    onClick={() => update(i, { bg: hex })}
-                    aria-label={`Colour ${hex}`}
-                    className={`h-5 w-5 rounded-full border ${r.bg === hex ? "ring-2 ring-[var(--os-brand)] ring-offset-1" : "border-zinc-300"}`}
-                    style={{ background: hex }}
-                  />
-                ))}
-              </div>
-              <button type="button" onClick={() => remove(i)} className="ml-auto text-zinc-400 hover:text-red-600" aria-label="Remove rule">
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
+
+        <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-[13px] mb-3">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setMode(t.key)}
+              className={`h-8 px-3 ${mode === t.key ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+            >
+              {t.label}
+            </button>
           ))}
         </div>
-        <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-[13px] text-zinc-600 hover:bg-zinc-50">
-          <Plus className="h-3.5 w-3.5" /> Add rule
-        </button>
-        <div className="mt-3 flex justify-end gap-2">
+
+        {mode === "single" ? (
+          <>
+            <p className="text-[13px] text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
+            <div className="flex flex-col gap-2 max-h-[42vh] overflow-y-auto">
+              {rules.length === 0 ? (
+                <p className="py-4 text-center text-[13px] text-zinc-400">No rules yet.</p>
+              ) : rules.map((r, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
+                  <select
+                    value={r.when}
+                    onChange={(e) => update(i, { when: e.target.value as ConditionalRule["when"] })}
+                    className="h-8 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                  >
+                    {RULE_ORDER.map((w) => <option key={w} value={w}>{RULE_LABELS[w]}</option>)}
+                  </select>
+                  {needsValue(r.when) && (
+                    <input
+                      type="text"
+                      value={r.value == null ? "" : String(r.value)}
+                      onChange={(e) => update(i, { value: e.target.value })}
+                      placeholder="value"
+                      className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                    />
+                  )}
+                  <div className="flex items-center gap-1">
+                    {RULE_COLORS.map((hex) => (
+                      <button
+                        key={hex}
+                        type="button"
+                        onClick={() => update(i, { bg: hex })}
+                        aria-label={`Colour ${hex}`}
+                        className={`h-5 w-5 rounded-full border ${r.bg === hex ? "ring-2 ring-[var(--os-brand)] ring-offset-1" : "border-zinc-300"}`}
+                        style={{ background: hex }}
+                      />
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => remove(i)} className="ml-auto text-zinc-400 hover:text-red-600" aria-label="Remove rule">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-[13px] text-zinc-600 hover:bg-zinc-50">
+              <Plus className="h-3.5 w-3.5" /> Add rule
+            </button>
+          </>
+        ) : null}
+
+        {mode === "color_scale" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-[13px] text-zinc-500">A heat-map across this column&rsquo;s numbers — lowest gets the min colour, highest the max.</p>
+            <div className="flex items-center gap-4">
+              {swatch(scaleMin, setScaleMin, "Min")}
+              <label className="flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+                <input type="checkbox" checked={useMid} onChange={(e) => setUseMid(e.target.checked)} /> Midpoint
+              </label>
+              {useMid ? swatch(scaleMid, setScaleMid, "Mid") : null}
+              {swatch(scaleMax, setScaleMax, "Max")}
+            </div>
+            <div
+              className="h-6 rounded-md border border-zinc-200"
+              style={{ background: `linear-gradient(to right, ${scaleMin}, ${useMid ? `${scaleMid}, ` : ""}${scaleMax})` }}
+              aria-label="Colour scale preview"
+            />
+          </div>
+        ) : null}
+
+        {mode === "data_bar" ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-[13px] text-zinc-500">Each cell shows a bar sized by its value relative to the column.</p>
+            {swatch(barColor, setBarColor, "Bar colour")}
+            <div className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2" aria-label="Data bar preview">
+              {[0.9, 0.55, 0.3].map((w, i) => (
+                <div key={i} className="h-5 rounded-sm" style={{ background: `linear-gradient(to right, ${barColor}55 0%, ${barColor}55 ${w * 100}%, transparent ${w * 100}%)` }} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-4 flex justify-end gap-2">
           <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
           <button
             type="button"
-            onClick={() => onSave(rules.filter((r) => !needsValue(r.when) || String(r.value ?? "").trim() !== ""))}
+            onClick={save}
             className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"
           >
             Save
@@ -3039,6 +3132,27 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     });
   }, [filteredRows, sortState, table?.columns, engineHost, relationalValue, engineVersion]);
 
+  // Conditional-formatting v2: each color-scale / data-bar column's numeric
+  // min/max over ALL rows (formula cells via the engine), so cellStyleFor can
+  // paint each cell relative to the column. Recomputes when values change.
+  const condRanges = useMemo(() => {
+    void engineVersion;
+    const out = new Map<string, { lo: number; hi: number }>();
+    const cols = table?.columns ?? [];
+    const list = rows ?? [];
+    for (const c of cols) {
+      if (!c.condFormat) continue;
+      const isFormulaCol = c.type === "formula";
+      const values = list.map((r) => {
+        const v = r.values[c.id];
+        return isFormulaCol || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
+      });
+      const range = numericRange(values);
+      if (range) out.set(c.id, range);
+    }
+    return out;
+  }, [table?.columns, rows, engineHost, engineVersion]);
+
   /* ── Selection stats (Sheets' bottom-right readout) ──────────────
    * Values for the selected rectangle: literals from row.values, computed
    * cells (formula/lookup/rollup columns, or a raw {"=": src} cell)
@@ -3746,6 +3860,28 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         const raw = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
         const bg = matchRule(raw, c.rules);
         if (bg) css.backgroundColor = /^#[0-9a-fA-F]{6}$/.test(bg) ? `${bg}2E` : bg;
+      }
+    }
+    // Conditional formatting v2 — color scale (heat-map) or data bar, painted
+    // relative to the column's numeric range. Wins over a v1 rule if both set.
+    if (c?.condFormat) {
+      const range = condRanges.get(c.id);
+      const cv = r.values[c.id];
+      const isFormulaC = c.type === "formula" || isFormulaCell(cv);
+      if (range && !(streamProgress && isFormulaC)) {
+        const raw = isFormulaC ? engineHost.value(c.id, r.id) : cv;
+        const num = typeof raw === "number" ? raw
+          : typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw)) ? Number(raw)
+          : null;
+        if (num !== null && Number.isFinite(num)) {
+          if (c.condFormat.type === "color_scale") {
+            const col = colorScaleColor(num, range.lo, range.hi, c.condFormat);
+            if (col) css.backgroundColor = col;
+          } else if (c.condFormat.type === "data_bar") {
+            const bar = dataBarBackground(num, range.lo, range.hi, c.condFormat);
+            if (bar) css.backgroundImage = bar;
+          }
+        }
       }
     }
     // Find & Replace tint, merged LAST on purpose: find is a transient
@@ -5202,8 +5338,11 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
           <ConditionalRulesDialog
             column={col}
             onClose={() => setRulesColId(null)}
-            onSave={(rules) => {
-              applyColumnPatches([{ colId: col.id, before: { rules: col.rules }, after: { rules } }], `conditional formatting on "${col.label}"`);
+            onSave={({ rules, condFormat }) => {
+              applyColumnPatches(
+                [{ colId: col.id, before: { rules: col.rules, condFormat: col.condFormat }, after: { rules, condFormat } }],
+                `conditional formatting on "${col.label}"`,
+              );
               setRulesColId(null);
             }}
           />

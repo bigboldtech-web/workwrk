@@ -4,6 +4,10 @@ import {
   formatCellValue,
   isNegativeStyled,
   matchRule,
+  lerpHex,
+  numericRange,
+  colorScaleColor,
+  dataBarBackground,
   type ColumnFormat,
   type ConditionalRule,
 } from "./sheet-format";
@@ -303,5 +307,41 @@ describe("matchRule", () => {
     expect(matchRule(5, undefined)).toBeNull();
     expect(matchRule(5, [])).toBeNull();
     expect(matchRule(5, "nope" as unknown as ConditionalRule[])).toBeNull();
+  });
+});
+
+describe("conditional formatting v2 helpers", () => {
+  it("lerpHex blends and clamps", () => {
+    expect(lerpHex("#000000", "#ffffff", 0)).toBe("#000000");
+    expect(lerpHex("#000000", "#ffffff", 1)).toBe("#ffffff");
+    expect(lerpHex("#000000", "#ffffff", 0.5)).toBe("#808080");
+    expect(lerpHex("#000000", "#ffffff", 2)).toBe("#ffffff"); // clamped
+    expect(lerpHex("bad", "#ffffff", 0.5)).toBe("bad"); // unparseable → a
+  });
+
+  it("numericRange skips non-numbers, counts numeric text", () => {
+    expect(numericRange([1, 2, 3])).toEqual({ lo: 1, hi: 3 });
+    expect(numericRange([5, "10", null, "x", "", 2])).toEqual({ lo: 2, hi: 10 });
+    expect(numericRange(["a", null, ""])).toBeNull();
+    expect(numericRange([])).toBeNull();
+  });
+
+  it("colorScaleColor maps a value across 2 and 3 stops", () => {
+    const two = { type: "color_scale" as const, min: "#000000", max: "#ffffff" };
+    expect(colorScaleColor(0, 0, 10, two)).toBe("#000000");
+    expect(colorScaleColor(10, 0, 10, two)).toBe("#ffffff");
+    expect(colorScaleColor(5, 0, 10, two)).toBe("#808080");
+    const three = { type: "color_scale" as const, min: "#000000", mid: "#ff0000", max: "#ffffff" };
+    expect(colorScaleColor(5, 0, 10, three)).toBe("#ff0000"); // exact midpoint
+    expect(colorScaleColor(2.5, 0, 10, three)).toBe("#800000"); // between min and mid
+    expect(colorScaleColor(NaN, 0, 10, two)).toBeNull();
+  });
+
+  it("dataBarBackground sizes the bar to the value", () => {
+    const cfg = { type: "data_bar" as const, color: "#5B9BD5" };
+    expect(dataBarBackground(0, 0, 10, cfg)).toContain(" 0%");
+    expect(dataBarBackground(10, 0, 10, cfg)).toContain(" 100%");
+    expect(dataBarBackground(5, 0, 10, cfg)).toContain("5B9BD555 50%");
+    expect(dataBarBackground(NaN, 0, 10, cfg)).toBeNull();
   });
 });

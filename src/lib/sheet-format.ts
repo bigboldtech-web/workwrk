@@ -27,6 +27,90 @@ export interface ConditionalRule {
   bg: string;
 }
 
+/* ── Conditional formatting v2: range-aware visualisations ──────────
+ * Unlike a single-color RULE (value → one bg), these read the whole
+ * column's numeric range and paint each cell RELATIVE to the others:
+ * a colour scale (heat-map gradient) or an in-cell data bar. Both are
+ * pure CSS the grid's cellStyle already paints — no cell-content change.
+ * Stored per column as `Column.condFormat`. */
+export type CondFormatV2 =
+  | { type: "color_scale"; min: string; mid?: string | null; max: string }
+  | { type: "data_bar"; color: string };
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function rgbToHex(r: number, g: number, b: number): string {
+  const h = (x: number) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0");
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+/** Linearly blend two hex colours; t is clamped to 0..1. Returns `a` if either
+ *  colour is unparseable, so a bad stored config degrades to a flat tint. */
+export function lerpHex(a: string, b: string, t: number): string {
+  const ra = hexToRgb(a);
+  const rb = hexToRgb(b);
+  if (!ra || !rb) return a;
+  const u = Math.max(0, Math.min(1, t));
+  return rgbToHex(ra[0] + (rb[0] - ra[0]) * u, ra[1] + (rb[1] - ra[1]) * u, ra[2] + (rb[2] - ra[2]) * u);
+}
+
+/** The min/max of the numeric values in a column, or null when none are
+ *  numeric (numeric text like "5" counts; blanks and junk are skipped). */
+export function numericRange(values: Iterable<unknown>): { lo: number; hi: number } | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  let any = false;
+  for (const v of values) {
+    const n =
+      typeof v === "number"
+        ? v
+        : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))
+          ? Number(v)
+          : null;
+    if (n === null || !Number.isFinite(n)) continue;
+    any = true;
+    if (n < lo) lo = n;
+    if (n > hi) hi = n;
+  }
+  return any ? { lo, hi } : null;
+}
+
+/** The heat-map colour for one value within [lo, hi]. 2-stop (min→max) or
+ *  3-stop (min→mid→max). null for a non-numeric value. */
+export function colorScaleColor(
+  value: number,
+  lo: number,
+  hi: number,
+  cfg: Extract<CondFormatV2, { type: "color_scale" }>,
+): string | null {
+  if (!Number.isFinite(value)) return null;
+  const span = hi - lo;
+  const t = span === 0 ? 0.5 : (value - lo) / span;
+  if (cfg.mid) {
+    return t <= 0.5 ? lerpHex(cfg.min, cfg.mid, t * 2) : lerpHex(cfg.mid, cfg.max, (t - 0.5) * 2);
+  }
+  return lerpHex(cfg.min, cfg.max, t);
+}
+
+/** A `background-image` linear-gradient rendering an in-cell data bar whose
+ *  width is the value's position in [lo, hi]. null for a non-numeric value. */
+export function dataBarBackground(
+  value: number,
+  lo: number,
+  hi: number,
+  cfg: Extract<CondFormatV2, { type: "data_bar" }>,
+): string | null {
+  if (!Number.isFinite(value)) return null;
+  const span = hi - lo;
+  const t = span === 0 ? (value >= lo ? 1 : 0) : Math.max(0, Math.min(1, (value - lo) / span));
+  const pct = Math.round(t * 1000) / 10;
+  const fill = /^#[0-9a-fA-F]{6}$/.test(cfg.color) ? `${cfg.color}55` : cfg.color;
+  return `linear-gradient(to right, ${fill} 0%, ${fill} ${pct}%, transparent ${pct}%, transparent 100%)`;
+}
+
 /* ── Intl formatter cache ─────────────────────────────────────────
  * formatCellValue runs once per visible cell per render, and
  * Intl.NumberFormat construction is expensive. One formatter per
