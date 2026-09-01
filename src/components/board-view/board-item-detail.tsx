@@ -629,7 +629,7 @@ function AlignmentField({ item, canEdit, onPatch }: { item: BoardItemRow; canEdi
       {open ? (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="absolute z-20 mt-1 right-0 w-[300px] rounded-xl border border-zinc-200 bg-white shadow-2xl p-2">
+          <div className="absolute z-20 mt-1 left-0 w-[300px] max-w-[calc(100vw-2rem)] rounded-xl border border-zinc-200 bg-white shadow-2xl p-2">
             <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-zinc-200 focus-within:border-[var(--os-brand)] mb-2">
               <Search className="w-3.5 h-3.5 text-zinc-400" />
               <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-[14px] bg-transparent outline-none placeholder:text-zinc-400" />
