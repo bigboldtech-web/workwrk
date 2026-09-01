@@ -41,6 +41,7 @@ The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 | Retry failed automation runs | `*/10 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/automation-retry` |
 | Hard-delete cancelled orgs (30-day grace) | `30 3 * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/org-hard-delete` |
 | Personal reminders fire (closed-app) | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/reminders` |
+| Purge table rows in Trash > 60 days | `45 3 * * *` (3:45 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/table-row-purge` |
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.
