@@ -13,7 +13,11 @@ export type FolderVisibility = "PRIVATE" | "WORKSPACE" | "ORG";
 const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
 
 /** Can this viewer see a folder? A PRIVATE folder is visible only to its owner
- *  and org admins; WORKSPACE/ORG folders are gated by the Space, not here. */
+ *  and org admins; WORKSPACE/ORG folders are gated by the Space, not here.
+ *  NOTE: this is the coarse SPACE-member view. A folder-only grantee (a
+ *  FolderMember on a PRIVATE folder) is handled separately by
+ *  `folderAccessForSpace` — this predicate would hide such a folder, so the
+ *  scoped path never routes through it. */
 export function folderVisibleTo(
   folder: { visibility: string | null; ownerId: string | null },
   userId: string | null | undefined,
@@ -22,6 +26,148 @@ export function folderVisibleTo(
   if (folder.visibility !== "PRIVATE") return true;
   if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
   return !!userId && folder.ownerId === userId;
+}
+
+// ── Granular folder access ─────────────────────────────────────────
+//
+// Access is ADDITIVE and INHERITED downward: a Space grant sees every folder;
+// a FolderMember grant lets a NON-space-member reach exactly that folder (and
+// its subtree) and nothing else. These helpers answer, for the sidebar tree
+// and the space listing, "how much of this Space can the viewer see?".
+
+/** How much of a Space a viewer can see.
+ *  - "full": org admin, ORG-visibility, or a SpaceMember → the whole Space.
+ *  - "scoped": no Space grant but one+ FolderMember grants → ONLY those
+ *    folders (and their subtrees). The Space appears as a bare container.
+ *  - "none": neither → the Space is invisible to them. */
+export type FolderAccessMode =
+  | { mode: "full" }
+  | { mode: "scoped"; folderIds: Set<string> }
+  | { mode: "none" };
+
+export async function folderAccessForSpace(
+  spaceId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<FolderAccessMode> {
+  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return { mode: "full" };
+  const [space, spaceMember, folderGrants] = await Promise.all([
+    prisma.space.findUnique({ where: { id: spaceId }, select: { visibility: true } }),
+    prisma.spaceMember.findUnique({
+      where: { spaceId_userId: { spaceId, userId } },
+      select: { role: true },
+    }),
+    prisma.folderMember.findMany({
+      where: { userId, folder: { spaceId, archivedAt: null } },
+      select: { folderId: true },
+    }),
+  ]);
+  if (!space) return { mode: "none" };
+  if (space.visibility === "ORG" || spaceMember) return { mode: "full" };
+  if (folderGrants.length > 0) {
+    return { mode: "scoped", folderIds: new Set(folderGrants.map((g) => g.folderId)) };
+  }
+  return { mode: "none" };
+}
+
+/** Spaces the viewer can reach ONLY via a folder grant (not space membership).
+ *  Unioned into the sidebar's space list so a folder-only grantee still sees
+ *  the Space container holding their folder. Org admins/space members are
+ *  covered by the ordinary space queries and need not be included here. */
+export async function spaceIdsWithFolderGrant(userId: string): Promise<Set<string>> {
+  const grants = await prisma.folderMember.findMany({
+    where: { userId, folder: { archivedAt: null } },
+    select: { folder: { select: { spaceId: true } } },
+  });
+  return new Set(grants.map((g) => g.folder.spaceId));
+}
+
+/** A viewer's own FolderMember role on a folder, or null. */
+export async function folderMemberRole(
+  folderId: string,
+  userId: string,
+): Promise<"OWNER" | "ADMIN" | "MEMBER" | "GUEST" | null> {
+  const row = await prisma.folderMember.findUnique({
+    where: { folderId_userId: { folderId, userId } },
+    select: { role: true },
+  });
+  return (row?.role as "OWNER" | "ADMIN" | "MEMBER" | "GUEST" | undefined) ?? null;
+}
+
+// ── Folder member CRUD (mirror of the Space member helpers) ─────────
+
+export type FolderRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
+
+export async function listFolderMembers(folderId: string) {
+  return prisma.folderMember.findMany({
+    where: { folderId },
+    include: {
+      user: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+}
+
+export async function addFolderMember(
+  folderId: string,
+  userId: string,
+  role: FolderRole,
+  invitedBy?: string,
+) {
+  return prisma.folderMember.upsert({
+    where: { folderId_userId: { folderId, userId } },
+    create: { folderId, userId, role, invitedBy: invitedBy ?? null },
+    update: { role },
+  });
+}
+
+export async function removeFolderMember(folderId: string, userId: string) {
+  return prisma.folderMember.delete({
+    where: { folderId_userId: { folderId, userId } },
+  });
+}
+
+/** Boolean read check for a single folder, mirroring the central resolver's
+ *  folder logic (org admin · direct/ancestor FolderMember · owner · else the
+ *  parent Space unless the folder is PRIVATE). Kept as a self-contained
+ *  boolean (no ViewerContext) so the Doc gate can call it without an orgId;
+ *  the caller is responsible for the org scope. */
+export async function folderReadable(
+  folderId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<boolean> {
+  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
+  const folder = await prisma.folder.findUnique({
+    where: { id: folderId },
+    select: {
+      spaceId: true, ownerId: true, visibility: true, parentFolderId: true,
+      members: { where: { userId }, select: { id: true } },
+    },
+  });
+  if (!folder) return false;
+  if (folder.members.length > 0 || folder.ownerId === userId) return true;
+
+  // A grant on any ancestor folder covers this one.
+  let cursor = folder.parentFolderId;
+  for (let hops = 0; cursor && hops < 8; hops++) {
+    const parent = await prisma.folder.findUnique({
+      where: { id: cursor },
+      select: { parentFolderId: true, members: { where: { userId }, select: { id: true } } },
+    });
+    if (!parent) break;
+    if (parent.members.length > 0) return true;
+    cursor = parent.parentFolderId;
+  }
+
+  // A PRIVATE folder is never covered by mere space read.
+  if (folder.visibility === "PRIVATE") return false;
+  const space = await prisma.space.findUnique({
+    where: { id: folder.spaceId },
+    select: { visibility: true, members: { where: { userId }, select: { id: true } } },
+  });
+  if (!space) return false;
+  return space.visibility === "ORG" || space.members.length > 0;
 }
 
 export interface FolderSummary {

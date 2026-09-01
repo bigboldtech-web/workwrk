@@ -19,7 +19,7 @@ export default async function SpacesIndexPage() {
   if (!u.id || !u.organizationId) redirect("/login");
 
   const [spaces, prefs] = await Promise.all([
-    listSpacesForUser(u.id, u.organizationId, { accessLevel: u.accessLevel }),
+    listSpacesForUser(u.id, u.organizationId, { accessLevel: u.accessLevel, includeFolderContainers: true }),
     getEffectivePreferences(u.id, u.organizationId),
   ]);
   const starredIds = new Set(prefs?.home?.favoriteSpaceIds ?? []);

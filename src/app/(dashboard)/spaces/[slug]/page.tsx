@@ -213,7 +213,18 @@ export default async function SpacePage(props: {
     where: { spaceId_userId: { spaceId: space.id, userId: u.id } },
     select: { role: true },
   });
-  if (!isAdmin && space.visibility !== "ORG" && !membership) notFound();
+  if (!isAdmin && space.visibility !== "ORG" && !membership) {
+    // A folder-only grantee has no Space overview of their own — the Space is
+    // just a sidebar container for them, so send them to the folder they were
+    // actually granted (their earliest grant, matching sidebar order).
+    const grant = await prisma.folderMember.findFirst({
+      where: { userId: u.id, folder: { spaceId: space.id, archivedAt: null } },
+      orderBy: { createdAt: "asc" },
+      select: { folderId: true },
+    });
+    if (grant) redirect(`/folders/${grant.folderId}`);
+    notFound();
+  }
   const isSpaceOwner = membership?.role === "OWNER";
   // Drop PRIVATE folders (and their boards) the viewer can't see.
   const visibleFolders = space.folders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));

@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { folderVisibleTo } from "@/lib/folder";
-import { getSpaceForReader, canEditSpace } from "@/lib/space";
+import { resolveAccess, meets, type ViewerContext } from "@/lib/access";
 import { FolderViewTabs } from "./folder-view-tabs";
 import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { ShareBoardButton } from "@/components/layout/os/share-board-button";
@@ -63,12 +63,14 @@ export default async function FolderPage(props: {
   });
   if (!folder) notFound();
 
-  // Gate: viewer must be able to read the parent Space, and see this folder
-  // (PRIVATE folders are owner/admin only).
-  const readableSpace = await getSpaceForReader(folder.spaceId, u.id, u.accessLevel);
-  if (!readableSpace) notFound();
-  if (!folderVisibleTo(folder, u.id, u.accessLevel)) notFound();
-  const canEdit = await canEditSpace(folder.spaceId, u.id, u.accessLevel);
+  // Gate through the central resolver: space members (and org admins) read via
+  // the Space; a folder-only grantee reads via their FolderMember row even
+  // without Space membership; PRIVATE folders need an explicit grant. Edit =
+  // folder owner/admin, the parent Space's admins, or an org admin.
+  const viewer: ViewerContext = { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" };
+  const decision = await resolveAccess(viewer, { type: "folder", id: folder.id });
+  if (decision.permission === "none") notFound();
+  const canEdit = meets(decision, "edit");
 
   // Descendant folder set: everything nested under this folder, so "what's
   // inside" includes lists in sub-folders too (BFS over the space's folders).

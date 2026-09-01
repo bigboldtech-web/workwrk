@@ -28,7 +28,9 @@ export type Permission = "read" | "edit" | "admin";
 
 export type ResourceRef =
   | { type: "space";          id: string }
+  | { type: "folder";         id: string }   // a Folder inside a Space
   | { type: "board";          id: string }
+  | { type: "doc";            id: string }   // a Doc / note
   | { type: "item";           id: string }   // a Board Item row
   | { type: "user";           id: string }   // another user's profile / aggregates
   | { type: "weekly-review";  id: string }
@@ -75,6 +77,19 @@ export function isDirectorOrAbove(viewer: ViewerContext): boolean {
 }
 export function isManagerOrAbove(viewer: ViewerContext): boolean {
   return MANAGER_LEVELS.has(String(viewer.accessLevel));
+}
+
+/** Map a Space/Folder/Board membership role to a decision: OWNER/ADMIN edit,
+ *  MEMBER/GUEST read, anything else (no row) → null so the caller falls through
+ *  to the next access source. */
+function roleToDecision(role: string | null | undefined, reason: string): AccessDecision | null {
+  if (role === "OWNER" || role === "ADMIN") {
+    return { permission: "edit", reason: `${reason} (${role.toLowerCase()})` };
+  }
+  if (role === "MEMBER" || role === "GUEST") {
+    return { permission: "read", reason: `${reason} (${role.toLowerCase()})` };
+  }
+  return null;
 }
 
 // ── Module-level gate ─────────────────────────────────────────────
@@ -134,26 +149,119 @@ async function resolveSpace(viewer: ViewerContext, spaceId: string): Promise<Acc
   return { permission: "none", reason: "not a member of this space" };
 }
 
+// ── Folder ────────────────────────────────────────────────────────
+//
+// Access is additive + inherited DOWNWARD: a grant on a Folder (or any of its
+// ancestor folders, or the parent Space) grants the folder; a grant lower down
+// never leaks upward. A folder-only grantee reaches this folder without any
+// Space membership — this is what lets "share one folder" work.
+async function resolveFolder(viewer: ViewerContext, folderId: string): Promise<AccessDecision> {
+  const folder = await prisma.folder.findUnique({
+    where: { id: folderId },
+    select: {
+      organizationId: true, spaceId: true, ownerId: true,
+      visibility: true, parentFolderId: true,
+      members: { where: { userId: viewer.userId }, select: { role: true } },
+    },
+  });
+  if (!folder || folder.organizationId !== viewer.organizationId) {
+    return { permission: "none", reason: "folder not found in your org" };
+  }
+  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
+
+  const grant = roleToDecision(folder.members[0]?.role, "folder member");
+  if (grant) return grant;
+  if (folder.ownerId === viewer.userId) return { permission: "edit", reason: "folder owner" };
+
+  // A grant on any ANCESTOR folder covers this one (inheritance downward).
+  let cursor = folder.parentFolderId;
+  for (let hops = 0; cursor && hops < 8; hops++) {
+    const parent = await prisma.folder.findUnique({
+      where: { id: cursor },
+      select: { parentFolderId: true, members: { where: { userId: viewer.userId }, select: { role: true } } },
+    });
+    if (!parent) break;
+    const inherited = roleToDecision(parent.members[0]?.role, "inherited folder grant");
+    if (inherited) return inherited;
+    cursor = parent.parentFolderId;
+  }
+
+  // A PRIVATE folder is reachable ONLY by an explicit folder/owner grant or an
+  // org admin — all handled above. Mere space membership, even OWNER/ADMIN,
+  // does NOT pierce it, matching folderVisibleTo and the sidebar/space-page
+  // prune. (Whoever reaches this line is not org admin, owner, or a grant
+  // holder, so PRIVATE = deny outright.)
+  if (folder.visibility === "PRIVATE") {
+    return { permission: "none", reason: "folder is private" };
+  }
+  // Otherwise inherit from the Space.
+  return resolveSpace(viewer, folder.spaceId);
+}
+
 async function resolveBoard(viewer: ViewerContext, boardId: string): Promise<AccessDecision> {
   const board = await prisma.board.findUnique({
     where: { id: boardId },
-    select: { spaceId: true, organizationId: true, visibility: true },
+    select: { spaceId: true, folderId: true, organizationId: true, visibility: true },
   });
   if (!board || board.organizationId !== viewer.organizationId) {
     return { permission: "none", reason: "board not found in your org" };
   }
   if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
-  if (!board.spaceId) {
+  if (!board.spaceId && !board.folderId) {
     return { permission: "none", reason: "board not attached to a space" };
   }
-  // Inherit from parent space, but boards can be narrower (PRIVATE
-  // overrides a WORKSPACE space). Phase 6b can add BoardACL.
-  const spaceDecision = await resolveSpace(viewer, board.spaceId);
-  if (spaceDecision.permission === "none") return spaceDecision;
-  if (board.visibility === "PRIVATE" && spaceDecision.permission === "read") {
+  // A board in a Folder inherits the FOLDER's decision — which itself handles
+  // PRIVATE folders, folder grants (so a shared folder's boards open) and the
+  // space cascade. A board directly under a Space (no folder) inherits the
+  // Space. This is the single gate: routing folder boards through resolveSpace
+  // would wrongly reveal a board inside a PRIVATE folder to space members.
+  const decision = board.folderId
+    ? await resolveFolder(viewer, board.folderId)
+    : await resolveSpace(viewer, board.spaceId as string);
+  if (decision.permission === "none") return decision;
+  // Boards can be narrower than their container (PRIVATE overrides a WORKSPACE).
+  if (board.visibility === "PRIVATE" && decision.permission === "read") {
     return { permission: "none", reason: "board is private to its owners" };
   }
-  return spaceDecision;
+  return decision;
+}
+
+// ── Doc / note ────────────────────────────────────────────────────
+//
+// A doc inherits its container: a FOLDER doc from its folder, a SPACE doc from
+// its space, a TASK doc from its item. A standalone note (no container) stays
+// org-visible, preserving the pre-ACL behaviour for personal notes.
+async function resolveDoc(viewer: ViewerContext, docId: string): Promise<AccessDecision> {
+  const doc = await prisma.doc.findUnique({
+    where: { id: docId },
+    select: { organizationId: true, entityType: true, entityId: true, createdById: true },
+  });
+  if (!doc || doc.organizationId !== viewer.organizationId) {
+    return { permission: "none", reason: "doc not found in your org" };
+  }
+  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
+  if (doc.entityId) {
+    // A personal NOTEPAD note is owner-only — even org admins get no read-around
+    // (entityId is the owner's userId). Checked BEFORE createdById because a
+    // note captured on someone's behalf still belongs to entityId, not the
+    // creator. Mirrors docAccessible's NOTEPAD rule.
+    if (doc.entityType === "NOTEPAD") {
+      return doc.entityId === viewer.userId
+        ? { permission: "edit", reason: "your notepad" }
+        : { permission: "none", reason: "someone else's notepad" };
+    }
+    if (doc.createdById === viewer.userId) return { permission: "edit", reason: "you created this doc" };
+    if (doc.entityType === "FOLDER") return resolveFolder(viewer, doc.entityId);
+    if (doc.entityType === "SPACE") return resolveSpace(viewer, doc.entityId);
+    if (doc.entityType === "BOARD") return resolveBoard(viewer, doc.entityId);
+    // Item-anchored docs: the live shape is BOARD_ITEM; TASK/BOARD_ROW are
+    // tolerated as historical aliases. All defer to the parent item's board.
+    if (doc.entityType === "BOARD_ITEM" || doc.entityType === "TASK" || doc.entityType === "BOARD_ROW") {
+      return resolveItem(viewer, doc.entityId);
+    }
+  }
+  if (doc.createdById === viewer.userId) return { permission: "edit", reason: "you created this doc" };
+  return { permission: "read", reason: "standalone note, org-visible" };
 }
 
 async function resolveItem(viewer: ViewerContext, itemId: string): Promise<AccessDecision> {
@@ -265,7 +373,9 @@ export async function resolveAccess(
   switch (resource.type) {
     case "module":         return resolveModule(viewer, resource.name);
     case "space":          return resolveSpace(viewer, resource.id);
+    case "folder":         return resolveFolder(viewer, resource.id);
     case "board":          return resolveBoard(viewer, resource.id);
+    case "doc":            return resolveDoc(viewer, resource.id);
     case "item":           return resolveItem(viewer, resource.id);
     case "user":           return resolveUser(viewer, resource.id);
     case "weekly-review":  return resolveWeeklyReview(viewer, resource.id);

@@ -18,8 +18,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { getSpaceForReader } from "@/lib/space";
-import { folderVisibleTo } from "@/lib/folder";
+import { folderAccessForSpace, folderVisibleTo } from "@/lib/folder";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -57,57 +56,81 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if ("error" in c) return c.error;
   const { id } = await params;
 
-  const space = await getSpaceForReader(id, c.userId, c.accessLevel);
+  // Org guard first, then decide HOW MUCH of the space this viewer sees.
+  const space = await prisma.space.findUnique({ where: { id }, select: { organizationId: true } });
   if (!space || space.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+  const access = await folderAccessForSpace(id, c.userId, c.accessLevel);
+  if (access.mode === "none") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  // A folder-only grantee sees the Space as a bare container: ONLY their
+  // granted folders (rooted here regardless of real nesting) and their
+  // subtree — nothing else at the space root.
+  const scoped = access.mode === "scoped";
 
-  // Top-level folders with 2 nested levels of childFolders.
-  const [foldersR, rootBoardsR, tablesR, docsR, whiteboardsR] = await Promise.allSettled([
-    prisma.folder.findMany({
-      where: { spaceId: id, archivedAt: null, parentFolderId: null },
-      orderBy: { position: "asc" },
+  // The nested folder shape (2 levels of childFolders) is shared by both modes;
+  // only the top-level WHERE differs: full = the space's root folders; scoped =
+  // exactly the granted folder ids, lifted to the top of the viewer's tree.
+  const NESTED_FOLDER_SELECT = {
+    ...FOLDER_INNER_SELECT,
+    childFolders: {
+      where: { archivedAt: null },
+      orderBy: { position: "asc" as const },
       select: {
         ...FOLDER_INNER_SELECT,
         childFolders: {
           where: { archivedAt: null },
           orderBy: { position: "asc" as const },
-          select: {
-            ...FOLDER_INNER_SELECT,
-            childFolders: {
-              where: { archivedAt: null },
-              orderBy: { position: "asc" as const },
-              select: FOLDER_INNER_SELECT,
-            },
-          },
+          select: FOLDER_INNER_SELECT,
         },
       },
+    },
+  } as const;
+
+  const [foldersR, rootBoardsR, tablesR, docsR, whiteboardsR] = await Promise.allSettled([
+    prisma.folder.findMany({
+      where: scoped
+        ? { spaceId: id, archivedAt: null, id: { in: [...access.folderIds] } }
+        : { spaceId: id, archivedAt: null, parentFolderId: null },
+      orderBy: { position: "asc" },
+      select: NESTED_FOLDER_SELECT,
     }),
-    prisma.board.findMany({
-      where: { spaceId: id, folderId: null, archivedAt: null },
-      orderBy: { name: "asc" },
-      select: BOARD_SELECT,
-    }),
-    prisma.dataTable.findMany({
-      where: { spaceId: id },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, description: true },
-    }),
-    prisma.doc.findMany({
-      where: {
-        organizationId: c.organizationId,
-        entityType: "SPACE",
-        entityId: id,
-        archivedAt: null,
-      },
-      orderBy: { title: "asc" },
-      select: { id: true, title: true },
-    }),
-    prisma.whiteboard.findMany({
-      where: { organizationId: c.organizationId, spaceId: id, archivedAt: null },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
-    }),
+    // Root-level space content is space-wide, so a folder-only grantee gets none.
+    scoped
+      ? Promise.resolve([] as never[])
+      : prisma.board.findMany({
+          where: { spaceId: id, folderId: null, archivedAt: null },
+          orderBy: { name: "asc" },
+          select: BOARD_SELECT,
+        }),
+    scoped
+      ? Promise.resolve([] as never[])
+      : prisma.dataTable.findMany({
+          where: { spaceId: id },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, description: true },
+        }),
+    scoped
+      ? Promise.resolve([] as never[])
+      : prisma.doc.findMany({
+          where: {
+            organizationId: c.organizationId,
+            entityType: "SPACE",
+            entityId: id,
+            archivedAt: null,
+          },
+          orderBy: { title: "asc" },
+          select: { id: true, title: true },
+        }),
+    scoped
+      ? Promise.resolve([] as never[])
+      : prisma.whiteboard.findMany({
+          where: { organizationId: c.organizationId, spaceId: id, archivedAt: null },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        }),
   ]);
 
   if (foldersR.status === "rejected") {
@@ -149,7 +172,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .filter((n) => folderVisibleTo(n, c.userId, c.accessLevel))
       .map((n) => ({ ...n, childFolders: n.childFolders ? prune(n.childFolders) : [] }));
   }
-  const folders = prune(rawFolders as FolderShape[]);
+  // Scoped viewers see exactly their granted folders (and everything beneath,
+  // which they inherit) — never pruned by the coarse PRIVATE rule. Full viewers
+  // drop PRIVATE folders they don't own.
+  const folders = scoped
+    ? (rawFolders as FolderShape[])
+    : prune(rawFolders as FolderShape[]);
 
   function collectIds(nodes: FolderShape[], acc: string[]) {
     for (const n of nodes) {

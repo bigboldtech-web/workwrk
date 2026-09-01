@@ -534,6 +534,8 @@ model User {
   spaceMemberships       SpaceMember[]
   // 🆕 Phase 23 — per-board access overrides
   boardMemberships       BoardMember[] @relation("BoardMemberUser")
+  // 🆕 Granular access — per-folder grants (share one folder without the Space)
+  folderMemberships      FolderMember[] @relation("FolderMemberUser")
   dottedLineToManagers   UserDottedLine[] @relation("DottedLineFromUser")
   dottedLineFromReports  UserDottedLine[] @relation("DottedLineToManager")
   // 🆕 Phase 5 — weekly review heartbeat
@@ -4523,12 +4525,39 @@ model Folder {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  boards Board[]
+  boards  Board[]
+  members FolderMember[]
 
   @@index([organizationId, archivedAt])
   @@index([spaceId, parentFolderId, position])
   @@index([parentFolderId])
   files          FileEntry[]  @relation("FolderFiles")
+}
+
+// 🆕 Granular access — per-Folder ACL, mirroring SpaceMember/BoardMember.
+// The point: share ONE folder (and its boards/docs) with someone WITHOUT
+// giving them the whole Space. Access is ADDITIVE and INHERITED downward:
+//   - A Space grant (SpaceMember / ORG visibility / org admin) still sees
+//     every folder in the Space — no FolderMember row needed. This table
+//     only GRANTS extra access; it never revokes what the Space gave.
+//   - A FolderMember row lets a NON-space-member reach exactly this folder,
+//     its sub-folders and its boards/docs — and nothing else in the Space.
+//     Such a viewer sees the Space as a container holding only their folder.
+// Role semantics mirror SpaceRole: OWNER/ADMIN edit, MEMBER/GUEST read.
+model FolderMember {
+  id        String    @id @default(cuid())
+  folderId  String
+  folder    Folder    @relation(fields: [folderId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("FolderMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  role      SpaceRole @default(MEMBER)
+  invitedBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([folderId, userId])
+  @@index([userId])
+  @@index([folderId, role])
 }
 
 // SpaceMember — per-Space ACL. Org admins implicitly access every

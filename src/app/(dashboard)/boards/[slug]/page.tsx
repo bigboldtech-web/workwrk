@@ -20,6 +20,7 @@ import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { ensureCoreListViews } from "@/lib/board";
 import { canEditSpace } from "@/lib/space";
+import { canRead, type ViewerContext } from "@/lib/access";
 import { hasModule } from "@/lib/space-modules";
 import { BoardAddTaskButton } from "@/components/board-view/board-add-task-button";
 import { BoardCanvas } from "@/components/board-view/board-canvas";
@@ -60,14 +61,11 @@ export default async function BoardPage(props: {
     });
   }
 
-  const isAdmin = u.accessLevel === "SUPER_ADMIN" || u.accessLevel === "COMPANY_ADMIN";
-  if (!isAdmin && board.visibility !== "ORG" && board.space.visibility !== "ORG") {
-    const member = await prisma.spaceMember.findUnique({
-      where: { spaceId_userId: { spaceId: board.space.id, userId: u.id } },
-      select: { id: true },
-    });
-    if (!member) notFound();
-  }
+  // Central gate: org admin / ORG-visible / SpaceMember read via the Space; a
+  // folder-only grantee reads a board inside their granted folder via the
+  // resolver's folder fallback; PRIVATE boards need an explicit grant.
+  const viewer: ViewerContext = { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" };
+  if (!(await canRead(viewer, { type: "board", id: board.id }))) notFound();
 
   const defaultView = views.find((v) => v.isDefault) ?? views[0];
   // Active view = ?view=<id> if it matches an existing view; else default.

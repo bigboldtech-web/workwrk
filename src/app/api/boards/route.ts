@@ -7,6 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
 import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
+import { canRead, type ViewerContext } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
 
 const VIEW_TYPES = [
@@ -57,7 +58,13 @@ export async function GET(req: Request) {
   }
 
   if (folderId) {
-    const boards = await listBoardsInFolder(folderId, { includeArchived });
+    // Gate on folder READ (the resolver also enforces org scope + PRIVATE +
+    // folder grants). Previously this branch was unauthenticated and cross-org.
+    const viewer: ViewerContext = { userId: c.userId, organizationId: c.organizationId, accessLevel: c.accessLevel };
+    if (!(await canRead(viewer, { type: "folder", id: folderId }))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+    const boards = await listBoardsInFolder(folderId, { includeArchived, organizationId: c.organizationId });
     return NextResponse.json({ boards });
   }
   if (spaceId) {

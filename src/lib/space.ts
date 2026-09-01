@@ -71,9 +71,17 @@ export function isOrgAdminAccessLevel(accessLevel: string | null | undefined): b
 export async function listSpacesForUser(
   userId: string,
   organizationId: string,
-  opts: { accessLevel?: string; includeArchived?: boolean } = {},
+  opts: { accessLevel?: string; includeArchived?: boolean; includeFolderContainers?: boolean } = {},
 ): Promise<SpaceSummary[]> {
   const isAdmin = isOrgAdminAccessLevel(opts.accessLevel);
+  // `includeFolderContainers` widens the list to spaces the viewer can reach
+  // ONLY via a folder grant — a container for the folder they were shared. It
+  // returns space metadata only (name/icon/counts), NEVER space content, so it
+  // is safe here even though a folder-only grantee is not a full space reader.
+  // Callers that fan out to space-scoped CONTENT must not pass it.
+  const folderContainerClause = opts.includeFolderContainers
+    ? [{ folders: { some: { archivedAt: null, members: { some: { userId } } } } }]
+    : [];
   const where = isAdmin
     ? {
         organizationId,
@@ -85,6 +93,7 @@ export async function listSpacesForUser(
         OR: [
           { visibility: "ORG" as Visibility },
           { members: { some: { userId } } },
+          ...folderContainerClause,
         ],
       };
 
@@ -144,6 +153,13 @@ export async function visibleSpaceIds(
   const unique = Array.from(new Set(spaceIds));
   if (isOrgAdminAccessLevel(accessLevel)) return new Set(unique);
 
+  // IMPORTANT: this set means "spaces the viewer can FULLY read" — every
+  // caller (files, search, boards, tables, whiteboards, entity-links) treats
+  // membership here as "may read everything space-scoped". A folder-only grant
+  // must NEVER widen it, or those endpoints would leak space-wide content
+  // (board/task/whiteboard names, signed file URLs) beyond the granted folder.
+  // Folder-grant containers are surfaced ONLY in the sidebar space list, via
+  // listSpacesForUser({ includeFolderContainers: true }).
   const [orgVis, memberOf] = await Promise.all([
     prisma.space.findMany({
       where: { id: { in: unique }, visibility: "ORG" },

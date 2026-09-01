@@ -7,9 +7,8 @@
 //   Rename            → PATCH { name }
 //   Change icon&color → PATCH { icon, color }
 //   Archive folder    → DELETE (soft-archive)
-//
-// Folders don't have visibility / member overrides (they inherit from
-// Space), so there's no Share row here — keeps the menu tight.
+//   Sharing & Permissions → ShareFolderDialog (granular per-folder access:
+//     grant someone this folder without the whole Space).
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -20,6 +19,7 @@ import {
   Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
+import { ShareFolderDialog } from "./share-folder-dialog";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
 import { refreshSidebar } from "./sidebar-refresh";
@@ -47,6 +47,9 @@ export const FolderMoreTrigger = forwardRef<ContextMenuHandle, Props>(function F
 ) {
   const [open, setOpen] = useState(false);
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
+  // Share dialog state lives HERE (not in the menu) so it survives the menu
+  // popover closing when the user opens it.
+  const [shareOpen, setShareOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -92,8 +95,21 @@ export const FolderMoreTrigger = forwardRef<ContextMenuHandle, Props>(function F
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
       <MorePortal anchorRef={btnRef} panelRef={panelRef} width={244} open={open} placement="below" point={point}>
-        <FolderMoreMenu folder={folder} spaceId={spaceId} onClose={() => setOpen(false)} onUpdated={onUpdated} />
+        <FolderMoreMenu
+          folder={folder}
+          spaceId={spaceId}
+          onClose={() => setOpen(false)}
+          onUpdated={onUpdated}
+          onOpenShare={() => { setOpen(false); setShareOpen(true); }}
+        />
       </MorePortal>
+      <ShareFolderDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        folderId={folder.id}
+        folderName={folder.name}
+        onChanged={onUpdated}
+      />
     </span>
   );
 });
@@ -105,11 +121,13 @@ function FolderMoreMenu({
   spaceId,
   onClose,
   onUpdated,
+  onOpenShare,
 }: {
   folder: FolderRowLike;
   spaceId?: string;
   onClose: () => void;
   onUpdated?: () => void;
+  onOpenShare: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -447,7 +465,7 @@ function FolderMoreMenu({
       <div className="px-1.5 pt-1 pb-0.5">
         <button
           type="button"
-          onClick={() => soon("Sharing & Permissions")}
+          onClick={onOpenShare}
           className="w-full h-8 rounded-md text-[13.5px] font-medium text-white flex items-center justify-center gap-1.5 hover:opacity-90"
           style={{ backgroundColor: "var(--os-brand, #0073EA)" }}
         >

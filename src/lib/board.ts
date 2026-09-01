@@ -379,9 +379,16 @@ export async function listBoardsInSpace(spaceId: string, opts: { includeArchived
   }));
 }
 
-export async function listBoardsInFolder(folderId: string, opts: { includeArchived?: boolean } = {}): Promise<BoardSummary[]> {
+export async function listBoardsInFolder(
+  folderId: string,
+  opts: { includeArchived?: boolean; organizationId?: string } = {},
+): Promise<BoardSummary[]> {
   const rows = await prisma.board.findMany({
-    where: { folderId, ...(opts.includeArchived ? {} : { archivedAt: null }) },
+    where: {
+      folderId,
+      ...(opts.organizationId ? { organizationId: opts.organizationId } : {}),
+      ...(opts.includeArchived ? {} : { archivedAt: null }),
+    },
     orderBy: { name: "asc" },
     include: {
       views: { where: { isDefault: true }, take: 1, select: { id: true } },

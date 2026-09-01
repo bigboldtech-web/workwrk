@@ -33,6 +33,10 @@ export async function GET(req: Request) {
   const spaces = await listSpacesForUser(c.userId, c.organizationId, {
     accessLevel: c.accessLevel,
     includeArchived,
+    // The sidebar shows a folder-only grantee the Space as a container for the
+    // folder they were shared. Metadata only — the tree inside is scoped by
+    // /api/spaces/[id]/children.
+    includeFolderContainers: true,
   });
   return NextResponse.json({ spaces });
 }

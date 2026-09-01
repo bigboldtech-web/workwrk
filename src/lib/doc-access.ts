@@ -14,10 +14,28 @@
 import { prisma } from "@/lib/prisma";
 import { getSpaceForReader } from "@/lib/space";
 import { getBoardForReader } from "@/lib/board";
+import { folderReadable } from "@/lib/folder";
 
 interface DocAnchor {
   entityType: string | null;
   entityId: string | null;
+}
+
+/** A board doc is readable if the viewer can read the board via the Space OR,
+ *  for a folder-only grantee, via the board's parent folder — mirroring the
+ *  folder fallback the central resolveBoard added. */
+async function boardReadableWithFolder(
+  boardId: string,
+  userId: string,
+  level: string,
+): Promise<boolean> {
+  if (await getBoardForReader(boardId, userId, level)) return true;
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { folderId: true },
+  });
+  if (board?.folderId) return folderReadable(board.folderId, userId, level);
+  return false;
 }
 
 export async function docAccessible(
@@ -34,7 +52,7 @@ export async function docAccessible(
   }
 
   if (anchor.entityType === "BOARD") {
-    return Boolean(await getBoardForReader(anchor.entityId, userId, level));
+    return boardReadableWithFolder(anchor.entityId, userId, level);
   }
 
   if (anchor.entityType === "BOARD_ITEM") {
@@ -44,17 +62,13 @@ export async function docAccessible(
       select: { boardId: true },
     });
     if (!item) return false; // pinned to a deleted item — drop
-    return Boolean(await getBoardForReader(item.boardId, userId, level));
+    return boardReadableWithFolder(item.boardId, userId, level);
   }
 
   if (anchor.entityType === "FOLDER") {
-    // Resolve the parent Space via the folder, then defer.
-    const folder = await prisma.folder.findUnique({
-      where: { id: anchor.entityId },
-      select: { spaceId: true },
-    });
-    if (!folder) return false;
-    return Boolean(await getSpaceForReader(folder.spaceId, userId, level));
+    // Granular: a folder-only grantee reads their folder's docs; a PRIVATE
+    // folder's docs are hidden from space readers without a folder grant.
+    return folderReadable(anchor.entityId, userId, level);
   }
 
   if (anchor.entityType === "NOTEPAD") {
