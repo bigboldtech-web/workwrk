@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonSuccess } from "@/lib/api-helpers";
 import { docAccessible } from "@/lib/doc-access";
 import { visibleSpaceIds, isOrgAdminAccessLevel } from "@/lib/space";
+import { accessibleFolderIds } from "@/lib/folder";
 
 /**
  * Unified entity search across the product. Powers the Cmd-K palette's
@@ -76,14 +77,14 @@ export async function GET(req: NextRequest) {
       where: { organizationId: orgId, archivedAt: null, title: ci },
       select: {
         id: true, title: true, status: true, dueAt: true,
-        board: { select: { id: true, slug: true, name: true, spaceId: true, visibility: true, ownerId: true } },
+        board: { select: { id: true, slug: true, name: true, spaceId: true, folderId: true, visibility: true, ownerId: true } },
       },
       orderBy: { updatedAt: "desc" },
       take: take * 4,
     }),
     prisma.board.findMany({
       where: { organizationId: orgId, archivedAt: null, OR: [{ name: ci }, { description: ci }] },
-      select: { id: true, slug: true, name: true, spaceId: true, visibility: true, ownerId: true },
+      select: { id: true, slug: true, name: true, spaceId: true, folderId: true, visibility: true, ownerId: true },
       orderBy: { updatedAt: "desc" },
       take: take * 3,
     }),
@@ -177,6 +178,10 @@ export async function GET(req: NextRequest) {
   for (const w of whiteboards) if (w.spaceId) spaceIdSet.add(w.spaceId);
 
   const visible = admin ? null : await visibleSpaceIds([...spaceIdSet], me, myAccess);
+  // Folders the viewer reaches via a folder grant (granted + descendants). This
+  // admits their OWN folder's boards/subfolders WITHOUT treating them as a full
+  // space reader — the leak the security review flagged on visibleSpaceIds.
+  const accessibleFolders = admin ? new Set<string>() : await accessibleFolderIds(me);
 
   // PRIVATE boards additionally require a BoardMember row (or ownership).
   const privateBoardIds = new Set<string>();
@@ -191,15 +196,17 @@ export async function GET(req: NextRequest) {
     for (const r of rows) privMemberIds.add(r.boardId);
   }
 
-  type BoardGate = { id: string; spaceId: string | null; visibility: string; ownerId: string | null };
+  type BoardGate = { id: string; spaceId: string | null; folderId: string | null; visibility: string; ownerId: string | null };
   const boardReadable = (b: BoardGate | null | undefined): boolean => {
     if (!b) return false;
     if (admin) return true;
     if (b.visibility === "ORG") return true;
     if (b.visibility === "PRIVATE") return b.ownerId === me || privMemberIds.has(b.id);
-    // WORKSPACE — unscoped boards are org-wide; scoped defer to Space access.
+    // WORKSPACE — unscoped boards are org-wide; scoped defer to Space access,
+    // or to a folder grant when the board lives in a granted folder's subtree.
     if (!b.spaceId) return true;
-    return !!visible && visible.has(b.spaceId);
+    if (!!visible && visible.has(b.spaceId)) return true;
+    return !!b.folderId && accessibleFolders.has(b.folderId);
   };
   const spaceVisibleById = (spaceId: string | null | undefined, vis?: string): boolean => {
     if (admin) return true;
@@ -213,6 +220,8 @@ export async function GET(req: NextRequest) {
 
   const folderReadable = (f: (typeof folders)[number]): boolean => {
     if (admin) return true;
+    // A direct grant (or one inherited from an ancestor) wins over visibility.
+    if (accessibleFolders.has(f.id)) return true;
     if (f.visibility === "ORG") return true;
     if (f.visibility === "PRIVATE") return f.ownerId === me;
     // WORKSPACE — inherit the Space's access.

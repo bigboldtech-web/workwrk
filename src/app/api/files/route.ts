@@ -11,6 +11,7 @@ import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { visibleSpaceIds } from "@/lib/space";
+import { accessibleFolderIds } from "@/lib/folder";
 import { canReadBoard } from "@/lib/board";
 
 export async function GET(req: NextRequest) {
@@ -86,10 +87,21 @@ export async function GET(req: NextRequest) {
   const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
   const userId = getUserId(session);
   const scopedIds = files.map((f) => f.spaceId).filter((s): s is string => Boolean(s));
-  const visible = scopedIds.length > 0
-    ? await visibleSpaceIds(scopedIds, userId, accessLevel)
-    : new Set<string>();
-  const gated = files.filter((f) => !f.spaceId || visible.has(f.spaceId));
+  const [visible, accessibleFolders] = scopedIds.length > 0
+    ? await Promise.all([
+        visibleSpaceIds(scopedIds, userId, accessLevel),
+        accessibleFolderIds(userId),
+      ])
+    : [new Set<string>(), new Set<string>()];
+  // A space file shows if the viewer fully reads its Space OR holds a folder
+  // grant on the Space folder it lives in (their own folder's files, and ONLY
+  // those — never the rest of the space).
+  const gated = files.filter(
+    (f) =>
+      !f.spaceId ||
+      visible.has(f.spaceId) ||
+      (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)),
+  );
 
   // Attach the Space-folder name so the Library drive can show where a
   // space-anchored file lives (chip linking back to the folder).

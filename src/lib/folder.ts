@@ -70,6 +70,42 @@ export async function folderAccessForSpace(
   return { mode: "none" };
 }
 
+/** Every folder id the viewer can reach through a folder grant — the directly
+ *  granted folders PLUS all their descendants (a grant cascades downward). Used
+ *  by content surfaces (search, Library) to admit a folder-grantee's OWN folder
+ *  content WITHOUT widening them to the whole Space. Empty set = no grants (the
+ *  common case), so callers can skip the extra work. */
+export async function accessibleFolderIds(userId: string): Promise<Set<string>> {
+  const grants = await prisma.folderMember.findMany({
+    where: { userId, folder: { archivedAt: null } },
+    select: { folderId: true, folder: { select: { spaceId: true } } },
+  });
+  if (grants.length === 0) return new Set();
+  const grantedIds = grants.map((g) => g.folderId);
+  const spaceIds = [...new Set(grants.map((g) => g.folder.spaceId))];
+  // Descendants live in the same space(s); one query, then BFS down.
+  const allFolders = await prisma.folder.findMany({
+    where: { spaceId: { in: spaceIds }, archivedAt: null },
+    select: { id: true, parentFolderId: true },
+  });
+  const childrenByParent = new Map<string, string[]>();
+  for (const f of allFolders) {
+    if (!f.parentFolderId) continue;
+    const arr = childrenByParent.get(f.parentFolderId) ?? [];
+    arr.push(f.id);
+    childrenByParent.set(f.parentFolderId, arr);
+  }
+  const out = new Set<string>(grantedIds);
+  const queue = [...grantedIds];
+  while (queue.length) {
+    const cur = queue.shift() as string;
+    for (const child of childrenByParent.get(cur) ?? []) {
+      if (!out.has(child)) { out.add(child); queue.push(child); }
+    }
+  }
+  return out;
+}
+
 /** Spaces the viewer can reach ONLY via a folder grant (not space membership).
  *  Unioned into the sidebar's space list so a folder-only grantee still sees
  *  the Space container holding their folder. Org admins/space members are
