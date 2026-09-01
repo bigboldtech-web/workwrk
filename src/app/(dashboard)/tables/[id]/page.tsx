@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, Star, Link2, Check, Tag, Table2,
+  Globe, Lock, Unlock, Sigma, Star, Link2, Check, Tag, Table2,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown, ChevronUp,
   ArrowDownAZ, ArrowUpZA, X, Pencil, MoreVertical,
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
@@ -89,6 +89,7 @@ type Column = {
   format?: ColumnFormat;      // column-level number/date formatting
   rules?: ConditionalRule[];  // conditional formatting v1 (value → cell bg)
   condFormat?: CondFormatV2;  // conditional formatting v2 (color scale / data bar)
+  protected?: boolean;        // 4f: a locked column — read-only, can't be edited/pasted/cleared
   validation?: DataValidation; // data validation (reject-mode): list / number / text-length
 };
 
@@ -4407,12 +4408,15 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         onDrop={(e) => { e.preventDefault(); if (dragColId) moveColumn(dragColId, c.id); setDragColId(null); }}
       >
         <span
-          title={`Column ${columnLetter(colIndex)} · drag to reorder · right-click for options`}
+          title={`Column ${columnLetter(colIndex)}${c.protected ? " · protected (read-only)" : ""} · drag to reorder · right-click for options`}
           draggable
           onDragStart={() => setDragColId(c.id)}
           onDragEnd={() => setDragColId(null)}
-          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "18px", color: "#3f3f46" }}
-        >{columnLetter(colIndex)}</span>
+          style={{ cursor: "grab", textAlign: "center", fontWeight: 600, fontSize: 12.5, lineHeight: "18px", color: "#3f3f46", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3 }}
+        >
+          {columnLetter(colIndex)}
+          {c.protected ? <Lock style={{ width: 10, height: 10, color: "#a1a1aa" }} aria-label="Protected column" /> : null}
+        </span>
         <span
           onMouseDown={(e) => startResize(e, c.id)}
           onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); autoFitColumn(c.id); }}
@@ -4698,14 +4702,16 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       barCell = {
         address: `${columnLetter(colIndex)}${rowNumber}`,
         source: src ?? cellText(activeColDef, activeCellRow),
-        readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell,
+        readOnly: activeColDef.type === "formula" || computedCol || pickerCol || spilledCell || !!activeColDef.protected,
         readOnlyReason: activeColDef.type === "formula"
           ? "This column computes its formula — edit it from the column header (Σ)"
           : computedCol
             ? "Computed column — configure it from the column header"
             : spilledCell
               ? "Spilled from an array formula — edit the array's top-left cell"
-              : "This column edits through its picker in the grid",
+              : activeColDef.protected
+                ? "This column is protected — unprotect it from the column header to edit"
+                : "This column edits through its picker in the grid",
       };
     }
   }
@@ -5116,7 +5122,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 <Plus style={{ width: 15, height: 15 }} />
               </button>
             }
-            readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup").map((c) => c.id))}
+            readOnlyCols={new Set(table.columns.filter((c) => c.type === "formula" || c.type === "lookup" || c.type === "rollup" || c.protected).map((c) => c.id))}
           />
           </div>
           {/* The corner "+": the one manual add-rows affordance left after
@@ -5382,6 +5388,17 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 icon={Palette}
                 label="Conditional formatting"
                 onClick={() => { setHeaderMenu(null); setRulesColId(hc.id); }}
+              />
+              <MenuItem
+                icon={hc.protected ? Unlock : Lock}
+                label={hc.protected ? "Unprotect column" : "Protect column"}
+                onClick={() => {
+                  setHeaderMenu(null);
+                  applyColumnPatches(
+                    [{ colId: hc.id, before: { protected: hc.protected }, after: { protected: !hc.protected } }],
+                    hc.protected ? `unprotect "${hc.label}"` : `protect "${hc.label}"`,
+                  );
+                }}
               />
               <MenuItem
                 icon={Trash2}
