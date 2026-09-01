@@ -31,7 +31,7 @@ import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
   Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Sigma, Star, Link2, Check, Tag,
+  Globe, Lock, Sigma, Star, Link2, Check, Tag, Table2,
   Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown, ChevronUp,
   ArrowDownAZ, ArrowUpZA, X, Pencil, MoreVertical,
   Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
@@ -64,6 +64,7 @@ import { selectionStats } from "@/lib/sheet-stats";
 import { FormulaBar, FormulaTextInput, type FormulaBarCell } from "@/components/tables/formula-bar";
 import { NamedRangesDialog } from "@/components/tables/named-ranges-dialog";
 import { TableTrashDialog } from "@/components/tables/table-trash-dialog";
+import { PivotDialog } from "@/components/tables/pivot-dialog";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
 
 // The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
@@ -874,6 +875,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const [engineVersion, setEngineVersion] = useState(0);
   const [namedRangesOpen, setNamedRangesOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [pivotOpen, setPivotOpen] = useState(false);
   /** Re-render + re-derive after an in-place host mutation. */
   const bumpEngine = useCallback(() => setEngineVersion((v) => v + 1), []);
   /** Swap in a brand-new host built from canonical page state. */
@@ -4939,6 +4941,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
                 formatted values + a raw-values option"). */}
             <button type="button" onClick={(e) => { exportCsv(true); closeDetails(e); }}><Download /> Export CSV (formatted)</button>
             <button type="button" onClick={(e) => { exportCsv(false); closeDetails(e); }}><Download /> Export CSV (raw values)</button>
+            <button type="button" onClick={(e) => { closeDetails(e); setPivotOpen(true); }}><Table2 /> Pivot table…</button>
             <button type="button" onClick={(e) => { closeDetails(e); setNamedRangesOpen(true); }}><Tag /> Named ranges…</button>
             <button type="button" onClick={(e) => { closeDetails(e); setTrashOpen(true); }}><Trash2 /> Trash…</button>
           </div>
@@ -5406,6 +5409,22 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
         tableId={tableId}
         columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
         onChanged={() => { void load(); }}
+      />
+
+      <PivotDialog
+        open={pivotOpen}
+        onOpenChange={setPivotOpen}
+        columns={table.columns.map((c) => ({ id: c.id, label: c.label }))}
+        buildRecords={() =>
+          (rows ?? []).map((r) => {
+            const rec: Record<string, unknown> = {};
+            for (const c of table.columns) {
+              const v = r.values[c.id];
+              rec[c.id] = c.type === "formula" || isFormulaCell(v) ? engineHost.value(c.id, r.id) : v;
+            }
+            return rec;
+          })
+        }
       />
 
       <NamedRangesDialog
