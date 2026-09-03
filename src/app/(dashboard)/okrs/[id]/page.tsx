@@ -14,7 +14,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { isManagerLevel, requireGoalPage } from "@/lib/page-gates";
+import { requireGoalPage } from "@/lib/page-gates";
 import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
@@ -187,8 +187,11 @@ export default async function OkrDetailPage(
     okr.status === "COMPLETED" || cadenceOff,
   );
 
-  const canEditLinks =
-    okr.ownerId === viewer.id || isManagerLevel(viewer.accessLevel);
+  // Contributors + linked-work edits go through the assignees / entity-links
+  // APIs, both of which enforce canEditOkrOwner. Gate the affordance on the
+  // SAME predicate (canEditGoal) so a manager outside the owner's report line
+  // isn't shown a picker that then 403s on every add/remove.
+  const canEditLinks = canEditGoal;
   const ownerName = owner ? `${owner.firstName} ${owner.lastName}`.trim() : "Unassigned";
   // Status follows the rollup: derived thresholds while the goal is
   // measured, the stored value otherwise — same rule as the APIs.

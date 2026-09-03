@@ -50,7 +50,10 @@ export async function GET(req: NextRequest) {
             reviewer: { select: { id: true, firstName: true, lastName: true } },
           },
         },
-        _count: { select: { reviews: true } },
+        // Count must share the SAME scope as the `reviews` rows above,
+        // otherwise a non-hr manager gets a filtered numerator over an
+        // org-wide denominator and the dashboard understates completion.
+        _count: { select: { reviews: reviewsWhere ? { where: reviewsWhere } : true } },
       },
       orderBy: { startDate: "desc" },
       ...skipTake(pagination),

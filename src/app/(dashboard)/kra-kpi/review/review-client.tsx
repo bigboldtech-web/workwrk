@@ -58,8 +58,6 @@ type ApiKra = { id: string; name: string; category?: string | null; kpis?: { id:
 type ApiKraAssignment = { id: string; kraId: string; weightage: number; kra?: ApiKra };
 type ApiRecord = { id: string; kpiId: string; period: string; targetValue: number; actualValue?: number | null; score?: number | null; managerNotes?: string | null };
 
-type Period = "week" | "month" | "quarter";
-
 const AV_PALETTE = ["var(--os-c-blue)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-sage)", "var(--os-c-teal)", "var(--os-c-yellow)", "var(--os-c-brown)", "var(--os-c-red)"];
 function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
 function initials(f?: string | null, l?: string | null) { return (((f ?? "")[0] ?? "") + ((l ?? "")[0] ?? "")).toUpperCase() || "?"; }
@@ -80,6 +78,11 @@ function periodKey(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Human label for the current review month, e.g. "September 2026". */
+function monthLabel(): string {
+  return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
 function scoreColor(score: number, lowerIsBetter = false): string {
   // score is a 0-100 attainment ratio computed below
   if (lowerIsBetter) score = 100 - score; // invert
@@ -97,8 +100,6 @@ type SubjectState = {
 };
 
 export default function ReviewPage() {
-  // Default to the monthly cadence — the canonical recording rhythm.
-  const [period, setPeriod] = useState<Period>("month");
   const [reports, setReports] = useState<ApiUser[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [subjectMap, setSubjectMap] = useState<Map<string, SubjectState>>(new Map());
@@ -109,6 +110,7 @@ export default function ReviewPage() {
   const { toast } = useOsToast();
 
   const period$ = periodKey();
+  const monthLbl = monthLabel();
 
   // Org scoring bands drive the score-chip color + legend (set in
   // Settings → Scoring & reviews).
@@ -248,7 +250,7 @@ export default function ReviewPage() {
         });
         saved += 1;
       }
-      toast(`Saved ${saved} update${saved === 1 ? "" : "s"} for ${period$}`);
+      toast(`Saved ${saved} update${saved === 1 ? "" : "s"} for ${monthLbl}`);
       // Saved server-side — drop the local draft so it isn't re-restored.
       persistDraft(selectedId, period$, new Map());
       // Force reload of this subject for the period
@@ -284,17 +286,13 @@ export default function ReviewPage() {
         title="KPI review"
         Icon={ChartLine}
         iconGradient={GRAD.purpleIndigo}
-        description={reports === null ? "Loading…" : `${reports.length} direct report${reports.length === 1 ? "" : "s"} · period ${period$}`}
+        description={reports === null ? "Loading…" : `${reports.length} direct report${reports.length === 1 ? "" : "s"} · ${monthLbl}`}
         actions={
           <div className="krar__head-actions">
             <Link href="/kra-kpi" className="krar__nav-link"><Target /> KRA library</Link>
-            <div className="krar__period">
+            <div className="krar__period krar__period--static" title="Readings record against the current month; review as often as you like.">
               <Calendar />
-              {(["week", "month", "quarter"] as Period[]).map((p) => (
-                <button key={p} type="button" className={period === p ? "is-active" : ""} onClick={() => setPeriod(p)}>
-                  {p === "week" ? "Weekly" : p === "month" ? "Monthly" : "Quarterly"}
-                </button>
-              ))}
+              <span>{monthLbl}</span>
             </div>
           </div>
         }
@@ -420,7 +418,7 @@ export default function ReviewPage() {
 
                 <footer className="review-pane__foot">
                   <div className="review-pane__progress">
-                    {subject.kpis.filter((k) => subject.records.get(k.kpiId)?.actualValue != null).length} / {subject.kpis.length} KPIs scored for {period$}
+                    {subject.kpis.filter((k) => subject.records.get(k.kpiId)?.actualValue != null).length} / {subject.kpis.length} KPIs scored for {monthLbl}
                   </div>
                   <button type="button" className="review-pane__save" onClick={saveAll} disabled={busy || subject.draft.size === 0}>
                     {busy ? "Saving…" : <><Save /> Save {subject.draft.size > 0 ? `(${subject.draft.size})` : ""}</>}

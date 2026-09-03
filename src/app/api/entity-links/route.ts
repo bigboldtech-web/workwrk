@@ -22,6 +22,7 @@ import {
   listLinksFrom,
   listLinksTo,
 } from "@/lib/entity-link";
+import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
 import { visibleSpaceIds } from "@/lib/space";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 
@@ -283,6 +284,13 @@ export async function POST(req: Request) {
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+  }
+
+  // Governance sources (goals) gate edit rights below their read rights —
+  // enforce the same check the UI hides its buttons behind.
+  const session = { user: { id: c.userId, organizationId: c.organizationId, accessLevel: c.accessLevel } };
+  if (!(await canMutateLinkFromSource(session, c.organizationId, parsed.data.source))) {
+    return NextResponse.json({ error: "You can't edit links on this item." }, { status: 403 });
   }
 
   const link = await createEntityLink({

@@ -30885,6 +30885,9 @@ table.os-tbl {
 }
 .krar__period button:hover { color: var(--os-ink); }
 .krar__period button.is-active { background: var(--os-ink); color: white; }
+/* Static period indicator (no toggle) — just the current review month. */
+.krar__period--static { padding: 2px 10px 2px 8px; gap: 6px; cursor: default; }
+.krar__period--static > span { font-size: 12px; font-weight: 600; color: var(--os-ink); }
 
 /* ════════════════════════════════════════════════════════════════
  * TALENT — 9-box matrix + segment lists
