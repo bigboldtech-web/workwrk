@@ -69,6 +69,11 @@ embeds) · per-node "…" menus (rename/icon/favorite/archive) · `/api/me/items
 - **`native-calls.md`** — Jitsi removal + our OWN video system (user 2026-08-25): self-hosted LiveKit SFU on a
   dedicated calls box, WorkwrK-native call UI, Slack-huddle live presence via webhooks, guest/notetaker tokens,
   recording later. Needs one infra approval (~$24/mo node).
+- **`first-party-whiteboard.md`** — Excalidraw removal + our OWN whiteboard "WorkwrK Canvas" (user 2026-09-03,
+  same pattern as native-calls): first-party Canvas 2D engine, our versioned scene format + Excalidraw importer
+  (nothing lost), phased 0-5, the differentiator = work-graph elements (drop a live task/doc/KRA on the canvas,
+  connectors create real EntityLinks), governed as a module (controlled from the top). Includes finishing the
+  `/tasks` view surface (Team/Dashboard next; unify onto board-view renderers).
 - **`comms-hub.md`** — Slack × Zoom × Meet inside WorkwrK: team chat (DMs/groups/channels) + video/audio
   calls, built LIGHT (Jitsi carries all media, polling-first realtime, 3 lean tables). Phase 0 (meeting
   calls + public guest door for external people and AI notetakers) is live; chat phases ship one at a time.

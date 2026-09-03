@@ -20,7 +20,22 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { WhiteboardCanvas } from "@/components/canvas/whiteboard-canvas";
+import { isCanvasScene, emptyScene, type CanvasScene } from "@/lib/canvas/scene";
+import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 import "@excalidraw/excalidraw/index.css";
+
+// First-party WorkwrK Canvas rollout (safe): a board renders in our engine when
+// its scene is empty (a NEW board) or already in our format. Existing Excalidraw
+// boards stay on Excalidraw — we never auto-convert-and-overwrite a legacy scene
+// (that would risk the original) until migration is proven. Setting
+// NEXT_PUBLIC_FIRST_PARTY_CANVAS=1 forces our engine everywhere for testing.
+const FORCE_CANVAS = process.env.NEXT_PUBLIC_FIRST_PARTY_CANVAS === "1";
+function sceneIsEmpty(scene: unknown): boolean {
+  if (!scene || typeof scene !== "object") return true;
+  const els = (scene as { elements?: unknown[] }).elements;
+  return !Array.isArray(els) || els.length === 0;
+}
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -90,8 +105,10 @@ export default function WhiteboardCanvasPage() {
   const [saveError, setSaveError] = useState(false);
   const [api, setApi] = useState<ExcalidrawAPI | null>(null);
 
-  // Latest scene captured from Excalidraw onChange — flushed by autosave.
-  const pendingSceneRef = useRef<SceneShape | null>(null);
+  // Latest scene captured from the canvas onChange — flushed by autosave.
+  // Holds an Excalidraw blob OR a first-party CanvasScene; both are stored
+  // verbatim on Whiteboard.scene (an opaque Json column to the API).
+  const pendingSceneRef = useRef<unknown>(null);
   const dirtyRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Excalidraw fires onChange once right after mount echoing the loaded scene;
@@ -169,6 +186,15 @@ export default function WhiteboardCanvasPage() {
     saveTimerRef.current = setTimeout(() => { flushSave(); }, AUTOSAVE_DEBOUNCE_MS);
   }, [flushSave]);
 
+  // First-party WorkwrK Canvas onChange — same autosave path as Excalidraw.
+  const onCanvasSceneChange = useCallback((next: CanvasScene) => {
+    pendingSceneRef.current = next;
+    dirtyRef.current = true;
+    setDirty(true);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => { flushSave(); }, AUTOSAVE_DEBOUNCE_MS);
+  }, [flushSave]);
+
   // Once Excalidraw is ready, fit the view to the loaded content so a board
   // saved with an off-screen scroll position doesn't open looking blank. The
   // API can become ready a beat before initialData is applied, so poll briefly
@@ -241,6 +267,16 @@ export default function WhiteboardCanvasPage() {
   }
 
   if (loading || !board) return <CanvasLoader />;
+
+  // Engine choice (see FORCE_CANVAS note above). New/empty boards and boards
+  // already in our format use WorkwrK Canvas; legacy Excalidraw scenes stay on
+  // Excalidraw unless forced, so a legacy scene is never silently overwritten.
+  const useFirstParty = FORCE_CANVAS || isCanvasScene(board.scene) || sceneIsEmpty(board.scene);
+  const canvasInitial: CanvasScene = isCanvasScene(board.scene)
+    ? board.scene
+    : isExcalidrawScene(board.scene)
+      ? importExcalidraw(board.scene)
+      : emptyScene();
 
   const initialData = board.scene && Object.keys(board.scene).length > 0
     ? {
@@ -328,21 +364,25 @@ export default function WhiteboardCanvasPage() {
 
       {/* Canvas */}
       <div className="wbc__canvas">
-        <Excalidraw
-          excalidrawAPI={(a) => setApi(a as unknown as ExcalidrawAPI)}
-          initialData={initialData}
-          onChange={onCanvasChange}
-          UIOptions={{
-            canvasActions: {
-              changeViewBackgroundColor: true,
-              clearCanvas: true,
-              export: { saveFileToDisk: true },
-              loadScene: false,
-              saveToActiveFile: false,
-              toggleTheme: true,
-            },
-          }}
-        />
+        {useFirstParty ? (
+          <WhiteboardCanvas initialScene={canvasInitial} onChange={onCanvasSceneChange} />
+        ) : (
+          <Excalidraw
+            excalidrawAPI={(a) => setApi(a as unknown as ExcalidrawAPI)}
+            initialData={initialData}
+            onChange={onCanvasChange}
+            UIOptions={{
+              canvasActions: {
+                changeViewBackgroundColor: true,
+                clearCanvas: true,
+                export: { saveFileToDisk: true },
+                loadScene: false,
+                saveToActiveFile: false,
+                toggleTheme: true,
+              },
+            }}
+          />
+        )}
       </div>
     </div>
   );
