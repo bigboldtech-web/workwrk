@@ -17,12 +17,19 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
 export type KpiDirectionValue = "HIGHER" | "LOWER" | "MAINTAIN";
+export type KpiTypeValue = "QUANTITATIVE" | "QUALITATIVE";
+export type KpiFrequencyValue = "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "ANNUALLY";
 
 export type KpiDialogKpi = {
   id: string;
   name: string;
   description?: string | null;
   unit?: string | null;
+  // Loose string so any caller shape (e.g. the role bundle's KPI, typed
+  // `string`) assigns; the dialog whitelist-coerces on hydration.
+  type?: string | null;
+  frequency?: string | null;
+  formula?: string | null;
   direction?: KpiDirectionValue | null;
   lowerIsBetter?: boolean;
   targetValue?: number | null;
@@ -35,6 +42,19 @@ const DIRECTIONS: { value: KpiDirectionValue; label: string; icon: typeof Trendi
   { value: "HIGHER", label: "Higher is better", icon: TrendingUp },
   { value: "LOWER", label: "Lower is better", icon: TrendingDown },
   { value: "MAINTAIN", label: "Hold the line", icon: MoveRight },
+];
+
+const KPI_TYPES: { value: KpiTypeValue; label: string }[] = [
+  { value: "QUANTITATIVE", label: "Quantitative" },
+  { value: "QUALITATIVE", label: "Qualitative" },
+];
+
+const FREQUENCIES: { value: KpiFrequencyValue; label: string }[] = [
+  { value: "DAILY", label: "Daily" },
+  { value: "WEEKLY", label: "Weekly" },
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "QUARTERLY", label: "Quarterly" },
+  { value: "ANNUALLY", label: "Annually" },
 ];
 
 export function KpiDialog({
@@ -58,6 +78,9 @@ export function KpiDialog({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [unit, setUnit] = useState("");
+  const [kpiType, setKpiType] = useState<KpiTypeValue>("QUANTITATIVE");
+  const [frequency, setFrequency] = useState<KpiFrequencyValue>("MONTHLY");
+  const [formula, setFormula] = useState("");
   const [direction, setDirection] = useState<KpiDirectionValue>("HIGHER");
   const [target, setTarget] = useState("");
   const [baseline, setBaseline] = useState("");
@@ -71,6 +94,13 @@ export function KpiDialog({
     setName(kpi?.name ?? "");
     setDescription(kpi?.description ?? "");
     setUnit(kpi?.unit ?? "");
+    setKpiType(kpi?.type === "QUALITATIVE" ? "QUALITATIVE" : "QUANTITATIVE");
+    setFrequency(
+      FREQUENCIES.some((f) => f.value === kpi?.frequency)
+        ? (kpi!.frequency as KpiFrequencyValue)
+        : "MONTHLY",
+    );
+    setFormula(kpi?.formula ?? "");
     setDirection(kpi?.direction ?? (kpi?.lowerIsBetter ? "LOWER" : "HIGHER"));
     setTarget(kpi?.targetValue != null ? String(kpi.targetValue) : "");
     setBaseline(kpi?.baselineValue != null ? String(kpi.baselineValue) : "");
@@ -99,6 +129,9 @@ export function KpiDialog({
       name: trimmed,
       description: description.trim() || null,
       unit: unit.trim() || null,
+      type: kpiType,
+      frequency,
+      formula: formula.trim() || null,
       direction,
       targetValue,
       baselineValue,
@@ -181,6 +214,49 @@ export function KpiDialog({
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-2.5">
+            <div className="block">
+              <span className="text-[13px] font-medium text-zinc-600">Measurement</span>
+              <div className="mt-1 grid grid-cols-2 gap-1.5">
+                {KPI_TYPES.map((t) => {
+                  const active = kpiType === t.value;
+                  return (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setKpiType(t.value)}
+                      className={`inline-flex items-center justify-center h-9 rounded-md border text-[13px] font-medium transition-colors ${
+                        active
+                          ? "border-[#0073EA] bg-[#0073EA]/10 text-[#0073EA]"
+                          : "border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label className="block">
+              <span className="text-[13px] font-medium text-zinc-600">Recorded</span>
+              <select
+                value={frequency}
+                onChange={(e) => setFrequency(e.target.value as KpiFrequencyValue)}
+                className="mt-1 w-full h-9 px-2 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-[#0073EA]"
+              >
+                {FREQUENCIES.map((f) => (
+                  <option key={f.value} value={f.value}>{f.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {kpiType === "QUALITATIVE" ? (
+            <p className="text-[12.5px] text-zinc-400 -mt-1">
+              Qualitative gauges are scored against a 1&ndash;{5} rubric rating, so a
+              reading always yields a score even without a numeric target.
+            </p>
+          ) : null}
+
           <div className="grid grid-cols-3 gap-2.5">
             <label className="block">
               <span className="text-[13px] font-medium text-zinc-600">Healthy line</span>
@@ -216,6 +292,19 @@ export function KpiDialog({
             Leave the healthy line blank until you have a baseline — the gauge
             reads &ldquo;no baseline yet&rdquo; instead of a made-up number.
           </p>
+
+          <label className="block">
+            <span className="text-[13px] font-medium text-zinc-600">
+              Formula <span className="text-zinc-400 font-normal">(optional)</span>
+            </span>
+            <input
+              value={formula}
+              onChange={(e) => setFormula(e.target.value)}
+              placeholder="e.g. closed_won / total_leads · 100"
+              className="mt-1 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] font-mono focus:outline-none focus:border-[#0073EA]"
+            />
+            <span className="mt-1 block text-[12.5px] text-zinc-400">How the number is derived — a reference for whoever records it.</span>
+          </label>
 
           <label className="block">
             <span className="text-[13px] font-medium text-zinc-600">

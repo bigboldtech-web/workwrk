@@ -53,8 +53,10 @@ function persistDraft(userId: string, period: string, draft: Map<string, DraftPa
   } catch { /* quota / private mode — non-fatal */ }
 }
 
+type KpiDir = "HIGHER" | "LOWER" | "MAINTAIN";
+
 type ApiUser = { id: string; firstName?: string | null; lastName?: string | null; department?: { name?: string | null } | null; role?: { title?: string | null } | null };
-type ApiKra = { id: string; name: string; category?: string | null; kpis?: { id: string; name: string; unit?: string | null; targetValue?: number | null; lowerIsBetter?: boolean }[] };
+type ApiKra = { id: string; name: string; category?: string | null; kpis?: { id: string; name: string; unit?: string | null; type?: string | null; targetValue?: number | null; lowerIsBetter?: boolean; direction?: KpiDir | null }[] };
 type ApiKraAssignment = { id: string; kraId: string; weightage: number; kra?: ApiKra };
 type ApiRecord = { id: string; kpiId: string; period: string; targetValue: number; actualValue?: number | null; score?: number | null; managerNotes?: string | null };
 
@@ -83,18 +85,51 @@ function monthLabel(): string {
   return new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-function scoreColor(score: number, lowerIsBetter = false): string {
-  // score is a 0-100 attainment ratio computed below
-  if (lowerIsBetter) score = 100 - score; // invert
+// `score` here is already direction-adjusted (previewScore below), so a
+// high value is always good — no per-direction inversion.
+function scoreColor(score: number): string {
   if (score >= 95) return "var(--os-c-green)";
   if (score >= 75) return "var(--os-c-teal)";
   if (score >= 50) return "var(--os-c-orange)";
   return "var(--os-c-red)";
 }
 
+// Client-side mirror of the server's scoring (src/lib/kpi-record.ts:
+// resolveKpiLine + scoreKpiRecord) so the review chip previews EXACTLY the
+// score the POST will store. Direction: the enum wins, else the legacy
+// lowerIsBetter boolean. QUALITATIVE with no target scores against a rubric
+// ceiling. Scores cap at 120; null = "no baseline yet".
+const QUALITATIVE_SCALE_MAX = 5;
+function resolveKpiLine(type: string | null | undefined, target: number): number {
+  if (type === "QUALITATIVE" && target <= 0) return QUALITATIVE_SCALE_MAX;
+  return target;
+}
+function resolveDir(direction: KpiDir | null | undefined, lowerIsBetter?: boolean): KpiDir {
+  if (direction) return direction;
+  return lowerIsBetter ? "LOWER" : "HIGHER";
+}
+function previewScore(
+  kpi: { type?: string | null; target: number; direction?: KpiDir | null; lowerIsBetter?: boolean },
+  actual: number | null,
+): number | null {
+  if (actual == null || !Number.isFinite(actual)) return null;
+  const target = resolveKpiLine(kpi.type, kpi.target);
+  if (!Number.isFinite(target) || target === 0) return null;
+  const dir = resolveDir(kpi.direction, kpi.lowerIsBetter);
+  if (dir === "MAINTAIN") {
+    const deviation = Math.abs(actual - target) / Math.abs(target);
+    return Math.max(0, Math.round((1 - deviation) * 100));
+  }
+  if (dir === "LOWER") {
+    if (actual === 0) return 120;
+    return Math.min(Math.round((target / actual) * 100), 120);
+  }
+  return Math.min(Math.round((actual / target) * 100), 120);
+}
+
 type SubjectState = {
   user: ApiUser;
-  kpis: { kpiId: string; kraName: string; name: string; unit?: string | null; target: number; lowerIsBetter?: boolean }[];
+  kpis: { kpiId: string; kraName: string; name: string; unit?: string | null; type?: string | null; target: number; lowerIsBetter?: boolean; direction?: KpiDir | null }[];
   records: Map<string, ApiRecord>;       // kpiId -> existing record
   draft: Map<string, { actual?: string; notes?: string }>; // pending edits
 };
@@ -177,8 +212,10 @@ export default function ReviewPage() {
             kraName: kra?.name ?? "—",
             name: k.name,
             unit: k.unit,
+            type: k.type,
             target: typeof k.targetValue === "number" ? k.targetValue : 0,
             lowerIsBetter: k.lowerIsBetter,
+            direction: k.direction,
           });
         }
       }
@@ -221,12 +258,6 @@ export default function ReviewPage() {
       n.set(key, { ...cur, draft: d });
       return n;
     });
-  }
-
-  function attainment(target: number, actual: number, lowerIsBetter?: boolean): number {
-    if (target === 0) return actual === 0 ? 100 : 0;
-    if (lowerIsBetter) return Math.max(0, Math.min(100, (target / Math.max(actual, 0.001)) * 100));
-    return Math.max(0, Math.min(100, (actual / target) * 100));
   }
 
   async function saveAll() {
@@ -364,7 +395,7 @@ export default function ReviewPage() {
                     const draft = subject.draft.get(k.kpiId) ?? {};
                     const rawActual = draft.actual ?? (rec?.actualValue != null ? String(rec.actualValue) : "");
                     const actualNum = rawActual === "" ? null : parseFloat(rawActual);
-                    const score = actualNum != null ? attainment(k.target, actualNum, k.lowerIsBetter) : null;
+                    const score = previewScore(k, actualNum);
                     return (
                       <article key={k.kpiId} className="review-kpi">
                         <header className="review-kpi__head">
@@ -375,7 +406,7 @@ export default function ReviewPage() {
                           {score != null ? (
                             <span
                               className="review-kpi__score"
-                              style={{ background: bandFor(score, bands)?.color ?? scoreColor(score, k.lowerIsBetter) }}
+                              style={{ background: bandFor(score, bands)?.color ?? scoreColor(score) }}
                               title={bandFor(score, bands)?.label ?? undefined}
                             >
                               {score.toFixed(0)}%
@@ -388,7 +419,10 @@ export default function ReviewPage() {
                           <label>
                             <span>Target</span>
                             <input type="number" value={k.target} disabled />
-                            <small>{k.unit}{k.lowerIsBetter ? " · lower is better" : ""}</small>
+                            <small>{k.unit}{(() => {
+                              const d = resolveDir(k.direction, k.lowerIsBetter);
+                              return d === "LOWER" ? " · lower is better" : d === "MAINTAIN" ? " · hold at target" : "";
+                            })()}</small>
                           </label>
                           <label>
                             <span>Actual</span>
