@@ -464,17 +464,21 @@ function CreateNewTab({
     <li key={e.type}>
       <button
         type="button"
-        onClick={() => onPick(e.type, e.label)}
-        disabled={busy || !canEdit}
-        title={e.description}
-        className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
+        // "Soon" (tier1:false) types have no renderer yet — creating one made
+        // a permanent dead "—" column, so the tile is disabled until it ships.
+        onClick={() => { if (e.tier1) onPick(e.type, e.label); }}
+        disabled={busy || !canEdit || !e.tier1}
+        title={e.tier1 ? e.description : `${e.description} — coming soon`}
+        className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50 disabled:hover:bg-transparent disabled:cursor-not-allowed"
       >
         <e.Icon className="w-4 h-4 shrink-0" style={{ color: e.color }} />
         <span className="text-sm flex-1 truncate">{e.label}</span>
         {!e.tier1 ? <span className="text-[11px] uppercase tracking-wide text-zinc-400">Soon</span> : null}
-        <span className="text-[12px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
-          <Plus className="w-3 h-3" /> Create
-        </span>
+        {e.tier1 ? (
+          <span className="text-[12px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
+            <Plus className="w-3 h-3" /> Create
+          </span>
+        ) : null}
       </button>
     </li>
   );

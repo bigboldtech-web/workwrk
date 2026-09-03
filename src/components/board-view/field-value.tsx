@@ -205,6 +205,7 @@ export function FieldValue(props: FieldValueProps) {
 
   switch (field.type) {
     case "TEXT":
+    case "CUSTOM_TEXT":
     case "URL":
     case "EMAIL":
     case "PHONE":
@@ -221,6 +222,7 @@ export function FieldValue(props: FieldValueProps) {
     case "CHECKBOX":
       return <CheckboxValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "DROPDOWN":
+    case "CUSTOM_DROPDOWN":
     case "TSHIRT_SIZE":
       return <DropdownValue field={field} value={value} readOnly={readOnly} onChange={onChange} />;
     case "MULTI_SELECT":

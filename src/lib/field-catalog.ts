@@ -4,12 +4,12 @@
 //
 // Tier 1 — fully rendered in TABLE + drawer: TEXT, LONG_TEXT, NUMBER,
 //          DATE, DATETIME, DROPDOWN, MULTI_SELECT, CHECKBOX, URL,
-//          EMAIL, PHONE, MONEY, PERCENT, RATING, LABELS, USER, FILES.
-// Tier 2 — placeholder in MVP, renders as "—" until wired:
-//          FORMULA, ROLLUP, RELATIONSHIP, BUTTON, SIGNATURE,
-//          LOCATION, PROGRESS_AUTO, PROGRESS_MANUAL, SENTIMENT,
-//          CATEGORIZE, TRANSLATION, SUMMARY, ACTION_ITEMS,
-//          TSHIRT_SIZE, VOTING, CUSTOM_TEXT, CUSTOM_DROPDOWN.
+//          EMAIL, PHONE, MONEY, PERCENT, RATING, LABELS, USER, FILES,
+//          CUSTOM_TEXT (plain text), CUSTOM_DROPDOWN (plain pick-one).
+// Tier 2 — placeholder in MVP, renders as "—" until wired; the field
+//          shelf DISABLES these tiles so they can't create a dead column:
+//          FORMULA, ROLLUP, BUTTON, SIGNATURE, PROGRESS_AUTO, SENTIMENT,
+//          CATEGORIZE, TRANSLATION, SUMMARY, ACTION_ITEMS.
 
 import {
   Type, AlignLeft, Hash, Calendar as CalIcon, CalendarClock,
@@ -88,14 +88,14 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "USER",        label: "Person",        Icon: UserIcon,    color: C.pink,   group: "Common", tier1: true,  description: "A single person" },
   { type: "PEOPLE",      label: "People",        Icon: Users,       color: C.pink,   group: "Common", tier1: true, description: "Multiple people on one row" },
   { type: "FILES",       label: "Files",         Icon: Paperclip,   color: C.violet, group: "Common", tier1: true,  description: "Attach files to the row" },
+  { type: "CUSTOM_TEXT", label: "Custom text",   Icon: Type,        color: C.blue,   group: "Common", tier1: true,  description: "A free-form custom text field" },
+  { type: "CUSTOM_DROPDOWN", label: "Custom dropdown", Icon: ChevronDown, color: C.green, group: "Common", tier1: true, description: "A custom pick-one dropdown" },
 
   // ── AI ──────────────────────────────────────────────────────
   { type: "SUMMARY",       label: "Summary",       Icon: ScrollText, color: C.violet, group: "AI", tier1: false, description: "AI summary of the row" },
   { type: "SENTIMENT",     label: "Sentiment",     Icon: Activity,   color: C.violet, group: "AI", tier1: false, description: "AI sentiment score" },
   { type: "CATEGORIZE",    label: "Categorize",    Icon: Sparkles,   color: C.violet, group: "AI", tier1: false, description: "AI auto-categorization" },
   { type: "TRANSLATION",   label: "Translation",   Icon: Languages,  color: C.violet, group: "AI", tier1: false, description: "AI translation of text" },
-  { type: "CUSTOM_TEXT",   label: "Custom text",   Icon: Sparkles,   color: C.violet, group: "AI", tier1: false, description: "Free-form AI text on the row" },
-  { type: "CUSTOM_DROPDOWN", label: "Custom dropdown", Icon: Sparkles, color: C.violet, group: "AI", tier1: false, description: "AI-picked option from a list" },
 
   // ── WorkwrK AI-OS ───────────────────────────────────────────
   { type: "KRA", label: "KRA tag", Icon: Target, color: C.amber, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },

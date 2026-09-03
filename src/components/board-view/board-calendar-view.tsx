@@ -257,9 +257,9 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <div className="grid grid-cols-7 border-b border-zinc-200">
+        <div className="grid grid-cols-7 border-b border-zinc-200 [&>div:nth-child(7n)]:border-r-0">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2.5 py-1.5 text-[12px] font-medium text-zinc-500">
+            <div key={d} className="border-r border-zinc-100 px-1.5 py-1.5 text-[12px] font-medium text-zinc-500">
               {d}
             </div>
           ))}

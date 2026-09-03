@@ -9,7 +9,7 @@
 // Rename / "..." menu). Native HTML5 drag re-statuses a card between columns.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, Network, Pencil, Plus, Repeat, X } from "lucide-react";
+import { Check, CheckCircle2, Columns3, Network, Pencil, Plus, Repeat, X } from "lucide-react";
 import { PRIORITY_OPTIONS, isDoneStatus, splitBulkResults, bulkFailureMessage, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
@@ -320,6 +320,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
         </div>
       ) : null}
 
+      {statuses.length === 0 ? (
+        <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
+          <Columns3 className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
+          <p className="text-[13.5px] text-zinc-500">This board has no statuses yet. Add a status to group your cards into columns.</p>
+        </div>
+      ) : (
       <div className="flex gap-3 overflow-x-auto pb-2">
         {statuses.map((meta) => {
           const status = meta.value;
@@ -412,6 +418,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
           );
         })}
       </div>
+      )}
 
       <BulkActionBar
         selectedCount={selected.size}

@@ -624,6 +624,9 @@ export function WorkloadGrid({ items, people, statuses, settings, canEdit, onSet
                     : null}
                 </Fragment>
               ))}
+              {/* Matches the left pane's h-7 "Show people without tasks" toggle
+                  so both columns end at the same height (was off by 28px). */}
+              {hiddenCount > 0 ? <div className="h-7" aria-hidden="true" /> : null}
             </div>
           </div>
         )}
