@@ -6,7 +6,8 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { removeBoardField, updateBoardField } from "@/lib/board-fields";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { getSpaceForReader } from "@/lib/space";
+import { canEditBoard } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
 
 async function ctx() {
@@ -31,7 +32,11 @@ async function gate(boardId: string, c: { userId: string; accessLevel: string; o
   }
   const space = await getSpaceForReader(board.spaceId, c.userId, c.accessLevel);
   if (!space) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditSpace(board.spaceId, c.userId, c.accessLevel);
+  // Editing a field (rename / re-option / reposition / delete) must use the
+  // SAME gate as creating one (canEditBoard) — canEditSpace is looser: on a
+  // private board it also passes space admins who aren't board members, who
+  // could otherwise delete columns of a board they can't even open.
+  const canEdit = await canEditBoard(boardId, c.userId, c.accessLevel);
   if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { ok: true as const };
 }

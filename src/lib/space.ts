@@ -112,7 +112,16 @@ export async function listSpacesForUser(
       visibility: true,
       displayOrder: true,
       archivedAt: true,
-      _count: { select: { members: true, folders: true, boards: true } },
+      // Counts must exclude archived (trashed) folders/boards — the actual
+      // lists do (board.ts / folder.ts filter archivedAt: null), so an
+      // unfiltered count reads higher than what the sidebar can show.
+      _count: {
+        select: {
+          members: true,
+          folders: { where: { archivedAt: null } },
+          boards: { where: { archivedAt: null } },
+        },
+      },
     },
   });
 

@@ -380,6 +380,18 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
   const trimmed = input.title.trim();
   if (!trimmed) throw new Error("Title is required");
 
+  // A subtask's parent MUST live on the same board (and org). Without this
+  // check a caller could pass any item id and create a cross-board parent/
+  // child link, which breaks the nested render (the child appears on neither
+  // board's tree correctly).
+  if (input.parentItemId) {
+    const parent = await prisma.item.findFirst({
+      where: { id: input.parentItemId, boardId: input.boardId, organizationId: input.organizationId },
+      select: { id: true },
+    });
+    if (!parent) throw new Error("Parent task must be on the same board");
+  }
+
   // Position scoped to the parent: subtasks order among themselves,
   // top-level items order among themselves. Otherwise creating the
   // first subtask under any parent would land at the bottom of the

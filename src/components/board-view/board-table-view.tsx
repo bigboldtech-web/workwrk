@@ -441,8 +441,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   const { topLevel, childrenByParent } = useMemo(() => {
     const top: BoardItemRow[] = [];
     const byParent = new Map<string, BoardItemRow[]>();
+    // A subtask whose parent isn't in this set (e.g. the parent was archived)
+    // would otherwise land in byParent under a key with no top-level row and
+    // vanish from the board entirely. Re-root such orphans to top-level so a
+    // live subtask is never silently hidden — same rule the hierarchy view uses.
+    const presentIds = new Set(items.map((it) => it.id));
     for (const it of items) {
-      if (it.parentItemId) {
+      if (it.parentItemId && presentIds.has(it.parentItemId)) {
         const arr = byParent.get(it.parentItemId) ?? [];
         arr.push(it);
         byParent.set(it.parentItemId, arr);
@@ -812,16 +817,22 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         .sort((a, b) => a.position - b.position),
     );
     onItemPatched?.(draggedId, { position: newPos });
+    // Revert (refetch the board) on ANY failure — a network throw OR a
+    // non-OK response (403/400). Without the res.ok check a server-rejected
+    // reorder stayed applied locally while the server kept the old order.
+    const revert = async () => {
+      const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
+      if (fresh?.items) reportRefreshed(fresh.items);
+    };
     try {
-      await fetch(`/api/items/${draggedId}`, {
+      const res = await fetch(`/api/items/${draggedId}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ position: newPos }),
       });
+      if (!res.ok) await revert();
     } catch {
-      // Revert by refetching the board on failure.
-      const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
-      if (fresh?.items) reportRefreshed(fresh.items);
+      await revert();
     }
   }, [items, boardId, onItemPatched, reportRefreshed]);
 

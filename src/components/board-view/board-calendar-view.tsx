@@ -42,6 +42,15 @@ function dateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// ISO timestamp for LOCAL midnight of a "YYYY-MM-DD" day. The grid buckets by
+// local date (dateKey above), so storing UTC midnight ("…T00:00:00.000Z")
+// made a task dropped on a day re-render on the PREVIOUS day for anyone west
+// of UTC (all of the Americas). Local midnight round-trips back to the same
+// day under dateKey.
+function localMidnightIso(dayKey: string): string {
+  return new Date(`${dayKey}T00:00:00`).toISOString();
+}
+
 export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onItemCreated, onItemChanged, onItemRemoved, timeTrackingEnabled }: BoardCalendarViewProps) {
   const now = new Date();
   const statusLookup = useMemo(() => makeStatusLookup(statuses), [statuses]);
@@ -115,7 +124,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "New item", status: "TO_DO", dueAt: `${key}T00:00:00.000Z` }),
+        body: JSON.stringify({ title: "New item", status: "TO_DO", dueAt: localMidnightIso(key) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -139,7 +148,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     if (!canEdit) return;
     const current = initialItems.find((it) => it.id === itemId);
     if (!current) return;
-    const nextDue = `${dayKey}T00:00:00.000Z`;
+    const nextDue = localMidnightIso(dayKey);
     if (current.dueAt && new Date(current.dueAt).toISOString() === nextDue) return;
     setError(null);
     try {

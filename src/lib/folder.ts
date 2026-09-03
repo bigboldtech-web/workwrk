@@ -245,7 +245,14 @@ export async function listFoldersInSpace(spaceId: string, opts: { includeArchive
       visibility: true,
       position: true,
       archivedAt: true,
-      _count: { select: { childFolders: true, boards: true } },
+      // Exclude archived child folders/boards from the counts so they match
+      // the (archivedAt: null) lists the sidebar actually renders.
+      _count: {
+        select: {
+          childFolders: { where: { archivedAt: null } },
+          boards: { where: { archivedAt: null } },
+        },
+      },
     },
   });
   return rows.map((f) => ({
