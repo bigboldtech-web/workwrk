@@ -110,15 +110,26 @@ function gradientCSS(key?: string): string {
   return COVER_GRADIENTS.find((g) => g.key === key)?.css ?? COVER_GRADIENTS[0].css;
 }
 
-// Curated cover-image gallery. Seeded picsum URLs are stable + free (no API
-// key) so the gallery always renders real photos as thumbnails — the full
-// cover uses the wide variant, the picker shows a small one.
-const COVER_SEEDS = [
-  "ridge", "harbor", "dunes", "aurora", "canyon", "tide",
-  "forest", "summit", "meadow", "city9", "coast4", "valley7",
+// Curated cover-image gallery — work / focus / calm photos from the Unsplash
+// CDN (stable, free, no API key; Unsplash license permits hotlinking). The
+// picsum seeds this replaces returned random, often-failing thumbnails. The
+// full cover uses a wide crop; the picker shows a small one.
+const COVER_IMAGES: { id: string; label: string }[] = [
+  { id: "1499750310107-5fef28a66643", label: "Focused desk" },
+  { id: "1497215728101-856f4ea42174", label: "Modern office" },
+  { id: "1524758631624-e2822e304c36", label: "Workspace" },
+  { id: "1531403009284-440f080d1e12", label: "Collaboration" },
+  { id: "1454165804606-c3d57bc86b40", label: "Planning" },
+  { id: "1497436072909-60f360e1d4b1", label: "Forest light" },
+  { id: "1470071459604-3b5ec3a7fe05", label: "Calm mountains" },
+  { id: "1506905925346-21bda4d32df4", label: "Mountain lake" },
+  { id: "1441974231531-c6227db76b6e", label: "Quiet forest" },
+  { id: "1557682250-33bd709cbe85", label: "Soft gradient" },
+  { id: "1451187580459-43490279c0fa", label: "Deep focus" },
+  { id: "1519681393784-d120267933ba", label: "Night sky" },
 ];
-const coverImageUrl = (seed: string, w: number, h: number) =>
-  `https://picsum.photos/seed/${seed}/${w}/${h}`;
+const coverImageUrl = (id: string, w: number, h: number) =>
+  `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&h=${h}&q=70`;
 
 interface Props {
   docId: string;
@@ -978,22 +989,32 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       <div className="flex items-start">
       <div className="flex-1 min-w-0" ref={contentColRef}>
 
-      {/* Cover */}
+      {/* Cover. The picker is a SIBLING of the clipped cover (not a child):
+          .bdoc__cover has overflow:hidden + a fixed height, so a picker inside
+          it gets clipped and stuck behind the image. The wrapper is the
+          positioning context; the picker floats above everything. */}
       {hasCover && (
-        <div className="bdoc__cover" style={coverStyle}>
-          <button
-            type="button"
-            className="bdoc__cover-edit"
-            onClick={() => setCoverOpen((s) => !s)}
-          >
-            <ImagePlus /> Change cover
-          </button>
+        <div className="bdoc__cover-wrap">
+          <div className="bdoc__cover" style={coverStyle}>
+            <button
+              type="button"
+              className="bdoc__cover-edit"
+              onClick={() => setCoverOpen((s) => !s)}
+            >
+              <ImagePlus /> Change cover
+            </button>
+          </div>
           {coverOpen && (
-            <CoverPicker
-              meta={meta}
-              onPick={(patch) => { void saveMeta(patch); setCoverOpen(false); }}
-              onClear={() => { void saveMeta({ coverUrl: undefined, coverGradient: undefined }); setCoverOpen(false); }}
-            />
+            <>
+              <div className="bdoc__cover-scrim" onClick={() => setCoverOpen(false)} aria-hidden="true" />
+              <div className="bdoc__cover-pop-anchor">
+                <CoverPicker
+                  meta={meta}
+                  onPick={(patch) => { void saveMeta(patch); setCoverOpen(false); }}
+                  onClear={() => { void saveMeta({ coverUrl: undefined, coverGradient: undefined }); setCoverOpen(false); }}
+                />
+              </div>
+            </>
           )}
         </div>
       )}
@@ -2342,19 +2363,19 @@ function CoverPicker({ meta, onPick, onClear }: { meta: DocMeta; onPick: (m: Par
       {/* Image gallery — real photo thumbnails */}
       <div className="bdoc__cover-sec">Gallery</div>
       <div className="bdoc__cover-grid bdoc__cover-grid--img">
-        {COVER_SEEDS.map((seed) => {
-          const full = coverImageUrl(seed, 1600, 400);
+        {COVER_IMAGES.map((img) => {
+          const full = coverImageUrl(img.id, 1600, 400);
           return (
             <button
-              key={seed}
+              key={img.id}
               type="button"
               className={`bdoc__cover-cell bdoc__cover-cell--img ${meta.coverUrl === full ? "is-current" : ""}`}
               onClick={() => onPick({ coverUrl: full, coverGradient: undefined })}
-              aria-label={`Cover ${seed}`}
-              title="Use this cover"
+              aria-label={`Cover: ${img.label}`}
+              title={img.label}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverImageUrl(seed, 240, 90)} alt="" loading="lazy" />
+              <img src={coverImageUrl(img.id, 240, 90)} alt="" loading="lazy" />
             </button>
           );
         })}

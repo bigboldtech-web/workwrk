@@ -32113,6 +32113,15 @@ table.os-tbl {
 }
 .bdoc__cover-edit svg { width: 12px; height: 12px; }
 .bdoc__cover-edit:hover { background: white; }
+/* The cover picker floats ABOVE the clipped cover: the wrapper is the
+   positioning context, the picker is a sibling of the overflow:hidden cover
+   (so it isn't clipped), anchored under the "Change cover" button. */
+.bdoc__cover-wrap { position: relative; }
+.bdoc__cover-scrim { position: fixed; inset: 0; z-index: 190; }
+.bdoc__cover-pop-anchor {
+  position: absolute; right: 18px; top: 100%; margin-top: -6px; z-index: 200;
+  width: min(460px, calc(100vw - 36px));
+}
 .bdoc__page.has-cover { padding-top: 28px; }
 .bdoc__chrome {
   display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
@@ -32156,7 +32165,10 @@ table.os-tbl {
   background: var(--os-surface); border: 1px solid var(--os-line);
   border-radius: 10px; box-shadow: 0 12px 36px rgba(0,0,0,0.12);
   padding: 10px; margin: 6px 0 14px; max-width: 460px;
+  max-height: min(70vh, 560px); overflow-y: auto;
 }
+/* Inside the absolute anchor the popover fills it and drops its flow margin. */
+.bdoc__cover-pop-anchor .bdoc__cover-pop { width: 100%; max-width: none; margin: 0; }
 .bdoc__emoji-head, .bdoc__cover-head {
   display: flex; align-items: center; gap: 6px;
   font-size: 11.5px; font-weight: 700; text-transform: uppercase;
