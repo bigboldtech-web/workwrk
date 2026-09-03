@@ -1029,7 +1029,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           <button type="button" className="bdoc__conflict-dismiss" onClick={() => setConflict(false)}>Dismiss</button>
         </div>
       )}
-      <div className={`bdoc__page mx-auto max-w-[920px] ${hasCover ? "has-cover" : ""}`}>
+      <div className={`bdoc__page mx-auto max-w-[920px] ${hasCover ? "has-cover" : ""} ${meta.icon ? "has-icon" : ""}`}>
         {/* Emoji + add-cover-row */}
         <div className="bdoc__chrome">
           {meta.icon ? (

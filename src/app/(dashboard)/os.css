@@ -32143,9 +32143,13 @@ table.os-tbl {
 .workwrk-os .bdoc__emoji:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .workwrk-os .bdoc__emoji svg { width: 58px; height: 58px; }
 .workwrk-os .bdoc__emoji > span { font-size: inherit; line-height: 1; }
-/* Notion-style: the big icon overlaps the bottom of the cover image
-   (~half of the 78px icon sits over the cover). */
-.bdoc__page.has-cover .bdoc__chrome { margin-top: -40px; }
+/* Notion-style: when an icon is SET, the big 78px icon overlaps the bottom
+   of the cover (~half sits over the image). With NO icon the row is only the
+   small "Add icon / Add comment" buttons — pulling those up straddles them
+   across the cover's bottom edge (unreadable), so they sit cleanly BELOW the
+   cover instead. */
+.bdoc__page.has-cover.has-icon .bdoc__chrome { margin-top: -40px; }
+.bdoc__page.has-cover:not(.has-icon) .bdoc__chrome { margin-top: 6px; }
 /* Placeholder add-buttons (Add icon / Add cover / Add comment) are
    hover-revealed, Notion-style — invisible at rest, fade in when the writer
    hovers the page header area. The actual set icon (.bdoc__emoji) stays. */
