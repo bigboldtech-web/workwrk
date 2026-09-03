@@ -5,7 +5,6 @@ import { Switch } from "@/components/ui/switch";
 import {
   Activity,
   AlignLeft,
-  ArrowRightLeft,
   BarChart3,
   Bot,
   Box,
@@ -24,7 +23,6 @@ import {
   Trash2,
   Info,
   ClipboardList,
-  Copy,
   DollarSign,
   FileImage,
   FileSpreadsheet,
@@ -1396,6 +1394,15 @@ function ListMode({
     });
   };
 
+  // Bulk actions apply one patch across every selected task by looping the
+  // single-task update (optimistic + rollback per task). Clears the selection
+  // afterwards so the bar dismisses.
+  const bulkApply = async (patch: Partial<TaskItem>) => {
+    const ids = Array.from(selectedTaskIds);
+    await Promise.all(ids.map((id) => onTaskChange(id, patch)));
+    setSelectedTaskIds(new Set());
+  };
+
   const selectTasks = (taskIds: string[]) => {
     setSelectedTaskIds((current) => {
       const next = new Set(current);
@@ -1660,7 +1667,15 @@ function ListMode({
         </div>
       )}
       {selectedTaskIds.size > 0 ? (
-        <MultiSelectActionBar count={selectedTaskIds.size} onClear={() => setSelectedTaskIds(new Set())} />
+        <MultiSelectActionBar
+          count={selectedTaskIds.size}
+          assigneeOptions={assigneeOptions}
+          onClear={() => setSelectedTaskIds(new Set())}
+          onStatus={(status) => void bulkApply({ status })}
+          onAssignee={(assigneeId, name) => void bulkApply({ assigneeId, assignee: name })}
+          onDate={(iso, display) => void bulkApply({ dueDateISO: iso, dueDate: display })}
+          onPriority={(priority) => void bulkApply({ priority })}
+        />
       ) : null}
     </div>
   );
@@ -3337,7 +3352,6 @@ function FormMode({
 function PlaceholderMode({
   activeView,
   tasks,
-  onOpenTask,
 }: {
   activeView: ViewDef;
   tasks: TaskItem[];
@@ -3345,28 +3359,19 @@ function PlaceholderMode({
 }) {
   return (
     <div className="min-w-[860px] !p-4">
-      <div className="mb-3 inline-flex h-6 items-center gap-1.5 rounded-full border border-zinc-200 bg-zinc-50 !px-2 text-[12px] font-medium text-zinc-700">
-        <activeView.Icon className="h-3.5 w-3.5" style={{ color: activeView.swatch }} />
-        {activeView.label}
-      </div>
-      <div className="rounded-xl border border-zinc-200 bg-white !p-4">
-        <h2 className="mb-1.5 text-[14px] font-semibold text-zinc-900">{activeView.label} view</h2>
-        <p className="mb-4 max-w-[440px] text-[13px] leading-5 text-zinc-500">
-          This view is active and keeps the same task data. Open a task from the preview while this renderer is expanded.
+      <div className="mx-auto mt-10 flex max-w-[460px] flex-col items-center rounded-xl border border-zinc-200 bg-white !p-8 text-center">
+        <span
+          className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl"
+          style={{ background: `${activeView.swatch}1a` }}
+        >
+          <activeView.Icon className="h-5 w-5" style={{ color: activeView.swatch }} />
+        </span>
+        <h2 className="mb-1.5 text-[15px] font-semibold text-zinc-900">{activeView.label} view</h2>
+        <p className="mb-5 text-[13px] leading-5 text-zinc-500">
+          The {activeView.label} view isn&apos;t available for this space yet. All {tasks.length} of your
+          task{tasks.length === 1 ? "" : "s"} are safe — switch to List, Board, Calendar, Gantt, or Table
+          to work with them now.
         </p>
-        <div className="grid max-w-[640px] grid-cols-2 gap-2">
-          {tasks.slice(0, 6).map((task) => (
-            <button
-              key={task.id}
-              type="button"
-              className="flex h-9 items-center gap-2 rounded-lg border border-zinc-200 bg-white !px-2 text-left text-[13px] hover:bg-zinc-50"
-              onClick={() => onOpenTask(task)}
-            >
-              <CircleDashed className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-              <span className="truncate">{task.name}</span>
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -5704,38 +5709,157 @@ function getNextSaturday(date: Date) {
 
 function MultiSelectActionBar({
   count,
+  assigneeOptions,
   onClear,
+  onStatus,
+  onAssignee,
+  onDate,
+  onPriority,
 }: {
   count: number;
+  assigneeOptions: AssigneeOption[];
   onClear: () => void;
+  onStatus: (status: TaskItem["status"]) => void;
+  onAssignee: (assigneeId: string, name: string) => void;
+  onDate: (iso: string, display: string) => void;
+  onPriority: (priority: TaskPriority) => void;
 }) {
+  const [menu, setMenu] = useState<"status" | "assignee" | "date" | "priority" | null>(null);
+  const close = () => setMenu(null);
+  const toggle = (m: NonNullable<typeof menu>) => setMenu((cur) => (cur === m ? null : m));
+  const priorities: { label: TaskPriority; color: string }[] = [
+    { label: "Urgent", color: "#DC2626" },
+    { label: "High", color: "#F59E0B" },
+    { label: "Normal", color: "#4F46E5" },
+    { label: "Low", color: "#A1A1AA" },
+  ];
+  const quickDates: { label: string; date: () => Date }[] = [
+    { label: "Today", date: () => new Date() },
+    { label: "Tomorrow", date: () => addDays(new Date(), 1) },
+    { label: "Next week", date: () => addDays(new Date(), 7) },
+  ];
+  const pickDate = (d: Date) => {
+    const iso = formatDateInput(d);
+    onDate(iso, formatRelativeTaskDate(`${iso}T12:00:00`));
+    close();
+  };
   return (
-    <div className="fixed bottom-8 left-1/2 z-[100] flex h-12 -translate-x-1/2 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 !px-2.5 text-white shadow-2xl">
-      <div className="flex h-8 items-center rounded-md bg-zinc-800 !px-3 text-[14px] font-medium text-white shadow-inner">
-        {count} Task{count === 1 ? "" : "s"} selected
-        <button type="button" onClick={onClear} className="ml-2 text-zinc-400 hover:text-white">
-          <X className="h-3.5 w-3.5" />
-        </button>
+    <div className="fixed bottom-8 left-1/2 z-[100] -translate-x-1/2">
+      {menu ? <div className="fixed inset-0 z-0" onClick={close} aria-hidden /> : null}
+      <div className="relative z-[1] flex h-12 items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-900 !px-2.5 text-white shadow-2xl">
+        <div className="flex h-8 items-center rounded-md bg-zinc-800 !px-3 text-[14px] font-medium text-white shadow-inner">
+          {count} Task{count === 1 ? "" : "s"} selected
+          <button type="button" onClick={onClear} className="ml-2 text-zinc-400 hover:text-white">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="mx-1.5 h-6 w-px bg-zinc-700" />
+
+        <div className="relative">
+          <ActionPill Icon={CircleDashed} label="Status" active={menu === "status"} onClick={() => toggle("status")} />
+          {menu === "status" ? (
+            <BarPopover>
+              {STATUS_COLUMNS.map((s) => (
+                <BarRow key={s.key} onClick={() => { onStatus(s.key); close(); }}>
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: s.color }} />
+                  {s.label}
+                </BarRow>
+              ))}
+            </BarPopover>
+          ) : null}
+        </div>
+
+        <div className="relative">
+          <ActionPill Icon={UserRound} label="Assignees" active={menu === "assignee"} onClick={() => toggle("assignee")} />
+          {menu === "assignee" ? (
+            <BarPopover className="max-h-[280px] overflow-y-auto">
+              <BarRow onClick={() => { onAssignee("", "Unassigned"); close(); }}>
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-zinc-200 text-[10px] text-zinc-500">?</span>
+                Unassigned
+              </BarRow>
+              {assigneeOptions.map((a) => (
+                <BarRow key={a.id} onClick={() => { onAssignee(a.id, a.name); close(); }}>
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--os-brand-rail)] text-[10px] font-medium text-white">{a.initials}</span>
+                  <span className="truncate">{a.name}</span>
+                </BarRow>
+              ))}
+            </BarPopover>
+          ) : null}
+        </div>
+
+        <div className="relative">
+          <ActionPill Icon={CalendarIcon} label="Dates" active={menu === "date"} onClick={() => toggle("date")} />
+          {menu === "date" ? (
+            <BarPopover>
+              {quickDates.map((q) => (
+                <BarRow key={q.label} onClick={() => pickDate(q.date())}>
+                  <CalendarIcon className="h-3.5 w-3.5 text-zinc-400" />
+                  {q.label}
+                </BarRow>
+              ))}
+              <BarRow onClick={() => { onDate("", ""); close(); }}>
+                <X className="h-3.5 w-3.5 text-zinc-400" />
+                Clear date
+              </BarRow>
+              <div className="mt-1 border-t border-zinc-100 !px-2 pb-1 pt-2">
+                <input
+                  type="date"
+                  aria-label="Pick a due date"
+                  className="h-8 w-full rounded-md border border-zinc-200 !px-2 text-[13px] text-zinc-700 outline-none focus:border-[var(--os-brand-rail)]"
+                  onChange={(e) => { if (e.target.value) { onDate(e.target.value, formatRelativeTaskDate(`${e.target.value}T12:00:00`)); close(); } }}
+                />
+              </div>
+            </BarPopover>
+          ) : null}
+        </div>
+
+        <div className="relative">
+          <ActionPill Icon={Flag} label="Priority" active={menu === "priority"} onClick={() => toggle("priority")} />
+          {menu === "priority" ? (
+            <BarPopover>
+              {priorities.map((p) => (
+                <BarRow key={p.label} onClick={() => { onPriority(p.label); close(); }}>
+                  <Flag className="h-3.5 w-3.5 fill-current" style={{ color: p.color }} />
+                  {p.label}
+                </BarRow>
+              ))}
+              <BarRow onClick={() => { onPriority(""); close(); }}>
+                <Flag className="h-3.5 w-3.5 text-zinc-300" />
+                Clear
+              </BarRow>
+            </BarPopover>
+          ) : null}
+        </div>
       </div>
-      <div className="mx-1.5 h-6 w-px bg-zinc-700" />
-      <ActionPill Icon={CircleDashed} label="Status" />
-      <ActionPill Icon={UserRound} label="Assignees" />
-      <ActionPill Icon={CalendarIcon} label="Dates" />
-      <ActionPill Icon={Columns3} label="Custom Fields" />
-      <ActionPill Icon={Tag} label="Tags" />
-      <ActionPill Icon={ArrowRightLeft} label="Move/Add" />
-      <ActionPill Icon={GitBranch} label="Convert to Subtasks" />
-      <ActionPill Icon={Copy} label="Copy" />
-      <ActionPill Icon={MoreHorizontal} label="More" />
     </div>
   );
 }
 
-function ActionPill({ Icon, label, onClick }: { Icon: LucideIcon; label: string; onClick?: () => void }) {
+function BarPopover({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`absolute bottom-full left-0 mb-2 w-[220px] rounded-lg border border-zinc-200 bg-white !p-1.5 text-zinc-700 shadow-xl ${className ?? ""}`}>
+      {children}
+    </div>
+  );
+}
+
+function BarRow({ children, onClick }: { children: ReactNode; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="flex h-8 items-center gap-1.5 rounded-md !px-2 text-[13px] font-medium text-zinc-300 hover:bg-zinc-800 hover:text-white"
+      onClick={onClick}
+      className="flex h-8 w-full items-center gap-2 rounded-md !px-2 text-left text-[13px] text-zinc-700 hover:bg-zinc-100"
+    >
+      {children}
+    </button>
+  );
+}
+
+function ActionPill({ Icon, label, onClick, active }: { Icon: LucideIcon; label: string; onClick?: () => void; active?: boolean }) {
+  return (
+    <button
+      type="button"
+      className={`flex h-8 items-center gap-1.5 rounded-md !px-2 text-[13px] font-medium hover:bg-zinc-800 hover:text-white ${active ? "bg-zinc-800 text-white" : "text-zinc-300"}`}
       onClick={onClick}
     >
       <Icon className="h-3.5 w-3.5" />
