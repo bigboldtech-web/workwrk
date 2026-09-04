@@ -61,18 +61,23 @@ async function loadScaledImage(file: File, maxDim: number): Promise<{ src: strin
 
 type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "line" | "arrow" | "freedraw" | "text" | "sticky";
 
-const TOOLS: { tool: Tool; Icon: typeof Square; label: string; key?: string }[] = [
-  { tool: "select", Icon: MousePointer2, label: "Select", key: "V" },
+// `key` = letter shortcut, `num` = number shortcut (Excalidraw-style, for fast
+// flow-drawing). Both are shown as a hint on the tool and switch the tool.
+const TOOLS: { tool: Tool; Icon: typeof Square; label: string; key?: string; num?: string }[] = [
+  { tool: "select", Icon: MousePointer2, label: "Select", key: "V", num: "1" },
   { tool: "hand", Icon: Hand, label: "Pan", key: "H" },
-  { tool: "rect", Icon: Square, label: "Rectangle", key: "R" },
-  { tool: "ellipse", Icon: Circle, label: "Ellipse", key: "O" },
-  { tool: "diamond", Icon: Diamond, label: "Diamond", key: "D" },
-  { tool: "line", Icon: Minus, label: "Line", key: "L" },
-  { tool: "arrow", Icon: ArrowRight, label: "Arrow", key: "A" },
-  { tool: "freedraw", Icon: Pencil, label: "Pen", key: "P" },
-  { tool: "text", Icon: TypeIcon, label: "Text", key: "T" },
-  { tool: "sticky", Icon: StickyNote, label: "Sticky note", key: "S" },
+  { tool: "rect", Icon: Square, label: "Rectangle", key: "R", num: "2" },
+  { tool: "diamond", Icon: Diamond, label: "Diamond", key: "D", num: "3" },
+  { tool: "ellipse", Icon: Circle, label: "Ellipse", key: "O", num: "4" },
+  { tool: "arrow", Icon: ArrowRight, label: "Arrow", key: "A", num: "5" },
+  { tool: "line", Icon: Minus, label: "Line", key: "L", num: "6" },
+  { tool: "freedraw", Icon: Pencil, label: "Pen", key: "P", num: "7" },
+  { tool: "text", Icon: TypeIcon, label: "Text", key: "T", num: "8" },
+  { tool: "sticky", Icon: StickyNote, label: "Sticky note", key: "S", num: "9" },
 ];
+const TOOL_BY_NUM: Record<string, Tool> = Object.fromEntries(
+  TOOLS.filter((t) => t.num).map((t) => [t.num!, t.tool]),
+);
 
 const HANDLE = 8; // px, screen space
 const MIN_ZOOM = 0.1;
@@ -618,6 +623,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         else if (e.key === "ArrowDown") nudge(0, step);
         return;
       }
+      // Number keys pick a tool (Excalidraw-style speed for drawing flows).
+      if (!mod && TOOL_BY_NUM[e.key]) { setTool(TOOL_BY_NUM[e.key]); return; }
       const match = TOOLS.find((x) => x.key?.toLowerCase() === e.key.toLowerCase());
       if (match) setTool(match.tool);
     };
@@ -776,12 +783,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
 
       {/* toolbar */}
       <div className="wbcanvas__tools" style={toolbarStyle}>
-        {TOOLS.map(({ tool: t, Icon, label, key }) => (
-          <button key={t} type="button" title={`${label}${key ? ` (${key})` : ""}`} onClick={() => setTool(t)}
-            style={toolBtn(tool === t)}>
-            <Icon style={{ width: 17, height: 17 }} />
-          </button>
-        ))}
+        {TOOLS.map(({ tool: t, Icon, label, key, num }) => {
+          const active = tool === t;
+          const hint = num ?? key;
+          return (
+            <button key={t} type="button" title={`${label}${num ? ` (${num})` : key ? ` (${key})` : ""}`} onClick={() => setTool(t)}
+              style={{ ...toolBtn(active), position: "relative" }}>
+              <Icon style={{ width: 17, height: 17 }} />
+              {hint ? (
+                <span style={{ position: "absolute", bottom: 1, right: 3, fontSize: 8, fontWeight: 700, lineHeight: 1, color: active ? "rgba(255,255,255,.85)" : "var(--os-ink-3, #9aa3b2)" }}>{hint}</span>
+              ) : null}
+            </button>
+          );
+        })}
         <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
@@ -1032,20 +1046,21 @@ function cloneEl(el: CanvasElement): CanvasElement {
 }
 
 // ── inline styles (kept local; the page owns the surrounding chrome) ─────────
+// ClickUp puts the whiteboard toolbar at the bottom-centre.
 const toolbarStyle: React.CSSProperties = {
-  position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)",
+  position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)",
   display: "flex", alignItems: "center", gap: 3, padding: 5,
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 5, flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
 };
 const taskPanelStyle: React.CSSProperties = {
-  position: "absolute", top: 62, left: "50%", transform: "translateX(-50%)", zIndex: 9,
+  position: "absolute", bottom: 70, left: "50%", transform: "translateX(-50%)", zIndex: 9,
   width: "min(420px, calc(100vw - 24px))",
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 12px 36px rgba(20,34,60,.16)", overflow: "hidden",
 };
 const zoomStyle: React.CSSProperties = {
-  position: "absolute", bottom: 16, right: 16, display: "flex", alignItems: "center", gap: 2, padding: 4,
+  position: "absolute", bottom: 16, left: 16, display: "flex", alignItems: "center", gap: 2, padding: 4,
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)", borderRadius: 10,
   boxShadow: "0 4px 16px rgba(20,34,60,.10)", zIndex: 5,
 };
