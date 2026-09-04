@@ -17,7 +17,7 @@ import {
 import {
   cloneScene, genId, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox,
-  STROKE_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
+  STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
 
@@ -88,6 +88,8 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<Box | null>(null);
   const [stroke, setStroke] = useState(DEFAULT_STROKE);
+  const [fillColor, setFillColor] = useState("transparent");
+  const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const clipboardRef = useRef<CanvasElement[]>([]);
   const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
@@ -282,19 +284,19 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     const snapshot = cloneScene(scene);
     const id = genId();
     if (tool === "rect" || tool === "ellipse" || tool === "diamond") {
-      const el: ShapeElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1 };
+      const el: ShapeElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: fillColor, strokeWidth: strokeW, opacity: 1 };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
-      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1, points: [[world.x, world.y], [world.x, world.y]] };
+      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]] };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
       dragRef.current = { kind: "path", id };
     } else if (tool === "freedraw") {
-      const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1, points: [[world.x, world.y]] };
+      const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]] };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       dragRef.current = { kind: "path", id };
@@ -313,7 +315,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       setEditing({ id });
       setTool("select");
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, toWorld, selectOne]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, toWorld, selectOne]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current;
@@ -447,6 +449,34 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
         if (el.type === "sticky") return { ...el, fill: color };
         return { ...el, stroke: color };
       }),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const applyFill = useCallback((color: string) => {
+    setFillColor(color);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) =>
+        selectedIds.has(el.id) && (el.type === "rect" || el.type === "ellipse" || el.type === "diamond")
+          ? { ...el, fill: color } : el,
+      ),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const applyWidth = useCallback((width: number) => {
+    setStrokeW(width);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) =>
+        selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image"
+          ? { ...el, strokeWidth: width } : el,
+      ),
     };
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
@@ -675,8 +705,24 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
         </button>
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         {STROKE_COLORS.slice(0, 6).map((c) => (
-          <button key={c} type="button" title="Color" onClick={() => applyStroke(c)}
+          <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
             style={{ width: 20, height: 20, borderRadius: 6, background: c, border: stroke === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)", cursor: "pointer", padding: 0 }} />
+        ))}
+        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
+        {FILL_COLORS.map((c) => (
+          <button key={c} type="button" title={c === "transparent" ? "No fill" : "Fill color"} onClick={() => applyFill(c)}
+            style={{
+              width: 20, height: 20, borderRadius: 6, cursor: "pointer", padding: 0,
+              background: c === "transparent" ? "linear-gradient(135deg, #fff 42%, #ef4444 44%, #ef4444 56%, #fff 58%)" : c,
+              border: fillColor === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)",
+            }} />
+        ))}
+        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
+        {[1, 2, 4].map((wdt) => (
+          <button key={wdt} type="button" title={`${wdt === 1 ? "Thin" : wdt === 2 ? "Medium" : "Thick"} stroke`} onClick={() => applyWidth(wdt)}
+            style={{ ...toolBtn(strokeW === wdt), width: 28 }}>
+            <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
+          </button>
         ))}
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         <button type="button" title="Undo (⌘Z)" onClick={undo} disabled={hist.u === 0} style={toolBtn(false)}><Undo2 style={{ width: 16, height: 16 }} /></button>
