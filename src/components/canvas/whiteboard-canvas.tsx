@@ -13,7 +13,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
+  Shapes, Triangle, Cloud, Database, RectangleHorizontal,
 } from "lucide-react";
+
+// Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
+const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
+  { tool: "roundRect", Icon: Square, label: "Rounded rectangle" },
+  { tool: "triangle", Icon: Triangle, label: "Triangle" },
+  { tool: "parallelogram", Icon: RectangleHorizontal, label: "Parallelogram" },
+  { tool: "cylinder", Icon: Database, label: "Cylinder / database" },
+  { tool: "cloud", Icon: Cloud, label: "Cloud" },
+];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox, reflowConnectors,
@@ -59,7 +69,12 @@ async function loadScaledImage(file: File, maxDim: number): Promise<{ src: strin
   return { src: c.toDataURL(type, 0.85), w, h };
 }
 
-type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "line" | "arrow" | "freedraw" | "text" | "sticky";
+type Tool =
+  | "select" | "hand"
+  | "rect" | "ellipse" | "diamond" | "roundRect" | "triangle" | "parallelogram" | "cylinder" | "cloud"
+  | "line" | "arrow" | "freedraw" | "text" | "sticky";
+
+const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
 // `key` = letter shortcut, `num` = number shortcut (Excalidraw-style, for fast
 // flow-drawing). Both are shown as a hint on the tool and switch the tool.
@@ -128,6 +143,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     cache.set(src, img);
     return null;
   }, []);
+  const [shapesOpen, setShapesOpen] = useState(false); // "More shapes" flyout
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; onElement: boolean; hasClipboard: boolean } | null>(null);
   // Task-card picker (work-graph): drop a live task onto the canvas.
   const [taskPickerOpen, setTaskPickerOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskSummary[] | null>(null);
@@ -320,8 +337,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     // creation tools
     const snapshot = cloneScene(scene);
     const id = genId();
-    if (tool === "rect" || tool === "ellipse" || tool === "diamond") {
-      const el: ShapeElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: fillColor, strokeWidth: strokeW, opacity: 1 };
+    if (SHAPE_TOOLS.has(tool)) {
+      const el: ShapeElement = { id, type: tool as ShapeElement["type"], x: world.x, y: world.y, w: 1, h: 1, stroke, fill: fillColor, strokeWidth: strokeW, opacity: 1 };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
@@ -598,6 +615,27 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const reorderZ = useCallback((toFront: boolean) => {
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const sel = scene.elements.filter((el) => selectedIds.has(el.id));
+    const rest = scene.elements.filter((el) => !selectedIds.has(el.id));
+    commit({ ...scene, elements: toFront ? [...rest, ...sel] : [...sel, ...rest] }, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const onContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const rect = canvasRef.current!.getBoundingClientRect();
+    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const world = toWorld(sx, sy);
+    const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+    if (hit) { if (!selectedIds.has(hit.id)) selectOne(hit.id); }
+    else selectOne(null);
+    setShapesOpen(false);
+    const cx = Math.min(sx, Math.max(0, rect.width - 190));
+    setCtxMenu({ x: cx, y: sy, onElement: !!hit, hasClipboard: clipboardRef.current.length > 0 });
+  }, [scene, vp, selectedIds, toWorld, selectOne]);
+
   // Insert an image centred on (wx,wy) world coords — downscaled, aspect kept,
   // capped to a sensible initial size.
   const addImageAt = useCallback(async (file: File, wx: number, wy: number) => {
@@ -742,6 +780,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
+        onContextMenu={onContextMenu}
         onWheel={onWheel}
         onDoubleClick={(e) => {
           const rect = canvasRef.current!.getBoundingClientRect();
@@ -836,6 +875,29 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         </>
       ) : null}
 
+      {/* right-click context menu */}
+      {ctxMenu ? (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 19 }} onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} aria-hidden />
+          <div style={{ position: "absolute", left: ctxMenu.x, top: ctxMenu.y, zIndex: 20, minWidth: 176, background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)", borderRadius: 10, boxShadow: "0 12px 36px rgba(20,34,60,.16)", padding: 5 }}>
+            {ctxMenu.onElement ? (
+              <>
+                <CtxItem label="Duplicate" hint="⌘D" onClick={() => { duplicateSelected(); setCtxMenu(null); }} />
+                <CtxItem label="Bring to front" onClick={() => { reorderZ(true); setCtxMenu(null); }} />
+                <CtxItem label="Send to back" onClick={() => { reorderZ(false); setCtxMenu(null); }} />
+                <div style={{ height: 1, background: "var(--os-line, #eee)", margin: "4px 6px" }} />
+                <CtxItem label="Delete" hint="⌫" danger onClick={() => { deleteSelected(); setCtxMenu(null); }} />
+              </>
+            ) : (
+              <>
+                {ctxMenu.hasClipboard ? <CtxItem label="Paste" hint="⌘V" onClick={() => { pasteElements(clipboardRef.current); setCtxMenu(null); }} /> : null}
+                <CtxItem label="Select all" hint="⌘A" onClick={() => { setSelectedIds(new Set(scene.elements.map((el) => el.id))); setCtxMenu(null); }} />
+              </>
+            )}
+          </div>
+        </>
+      ) : null}
+
       {/* contextual style bar — shows when something is selected or a drawing
           tool is active (keeps the tools bar itself clean, ClickUp-style) */}
       {selectedIds.size > 0 || (tool !== "select" && tool !== "hand") ? (
@@ -878,6 +940,24 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
             </button>
           );
         })}
+        <div style={{ position: "relative" }}>
+          <button type="button" title="More shapes" onClick={() => setShapesOpen((v) => !v)}
+            style={toolBtn(shapesOpen || SHAPE_FLYOUT.some((s) => s.tool === tool))}>
+            <Shapes style={{ width: 17, height: 17 }} />
+          </button>
+          {shapesOpen ? (
+            <>
+              <div style={{ position: "fixed", inset: 0, zIndex: 0 }} onClick={() => setShapesOpen(false)} aria-hidden />
+              <div style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)", marginBottom: 8, display: "flex", gap: 3, padding: 5, background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)", borderRadius: 10, boxShadow: "0 6px 24px rgba(20,34,60,.14)", zIndex: 1 }}>
+                {SHAPE_FLYOUT.map(({ tool: t, Icon, label }) => (
+                  <button key={t} type="button" title={label} onClick={() => { setTool(t); setShapesOpen(false); }} style={toolBtn(tool === t)}>
+                    <Icon style={{ width: 17, height: 17 }} />
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
         <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
@@ -978,6 +1058,46 @@ function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage:
     const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
     ctx.beginPath();
     ctx.moveTo(cx, el.y); ctx.lineTo(el.x + el.w, cy); ctx.lineTo(cx, el.y + el.h); ctx.lineTo(el.x, cy); ctx.closePath();
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+  } else if (el.type === "roundRect") {
+    roundRect(ctx, el.x, el.y, el.w, el.h, Math.min(16, el.w / 4, el.h / 4));
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+  } else if (el.type === "triangle") {
+    ctx.beginPath();
+    ctx.moveTo(el.x + el.w / 2, el.y); ctx.lineTo(el.x + el.w, el.y + el.h); ctx.lineTo(el.x, el.y + el.h); ctx.closePath();
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+  } else if (el.type === "parallelogram") {
+    const off = Math.min(el.w * 0.25, el.h);
+    ctx.beginPath();
+    ctx.moveTo(el.x + off, el.y); ctx.lineTo(el.x + el.w, el.y); ctx.lineTo(el.x + el.w - off, el.y + el.h); ctx.lineTo(el.x, el.y + el.h); ctx.closePath();
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+  } else if (el.type === "cylinder") {
+    const ry = Math.max(3, Math.min(el.h * 0.14, el.w * 0.4));
+    ctx.beginPath();
+    ctx.moveTo(el.x, el.y + ry);
+    ctx.lineTo(el.x, el.y + el.h - ry);
+    ctx.bezierCurveTo(el.x, el.y + el.h, el.x + el.w, el.y + el.h, el.x + el.w, el.y + el.h - ry);
+    ctx.lineTo(el.x + el.w, el.y + ry);
+    ctx.closePath();
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(el.x + el.w / 2, el.y + ry, el.w / 2, ry, 0, 0, Math.PI * 2);
+    if (el.fill !== "transparent") ctx.fill();
+    if (el.strokeWidth > 0) ctx.stroke();
+  } else if (el.type === "cloud") {
+    const { x, y, w, h } = el;
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.25, y + h);
+    ctx.bezierCurveTo(x, y + h, x, y + h * 0.55, x + w * 0.2, y + h * 0.48);
+    ctx.bezierCurveTo(x + w * 0.16, y + h * 0.12, x + w * 0.52, y - h * 0.05, x + w * 0.62, y + h * 0.3);
+    ctx.bezierCurveTo(x + w * 0.78, y + h * 0.02, x + w * 1.02, y + h * 0.22, x + w * 0.84, y + h * 0.52);
+    ctx.bezierCurveTo(x + w * 1.02, y + h * 0.6, x + w * 0.98, y + h, x + w * 0.75, y + h);
+    ctx.closePath();
     if (el.fill !== "transparent") ctx.fill();
     if (el.strokeWidth > 0) ctx.stroke();
   } else if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") {
@@ -1133,6 +1253,25 @@ function applyResize(el: CanvasElement, orig: CanvasElement, handle: number, wor
 
 function cloneEl(el: CanvasElement): CanvasElement {
   return "points" in el ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) } : { ...el };
+}
+
+function CtxItem({ label, hint, danger, onClick }: { label: string; hint?: string; danger?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, width: "100%",
+        padding: "7px 10px", borderRadius: 7, border: "none", background: "transparent", cursor: "pointer",
+        textAlign: "left", fontSize: 13.5, color: danger ? "#dc2626" : "var(--os-ink, #1e293b)",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = danger ? "rgba(220,38,38,0.08)" : "var(--os-surface-1, #f4f4f5)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <span>{label}</span>
+      {hint ? <span style={{ fontSize: 12, color: "var(--os-ink-3, #9aa3b2)" }}>{hint}</span> : null}
+    </button>
+  );
 }
 
 /** A connector can bind to any element that isn't itself a line/arrow/pen. */

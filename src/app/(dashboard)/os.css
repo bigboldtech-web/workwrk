@@ -17866,7 +17866,10 @@ table.os-tbl {
 .mtgr-modal__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--os-line); background: var(--os-surface-1); }
 
 /* ─── Whiteboard canvas (whiteboards/[id]) ─── */
-.wbc { display: flex; flex-direction: column; height: 100vh; background: var(--os-canvas); }
+/* Fill the dashboard content area (which sits BELOW the topbar), not the whole
+   viewport — height:100vh overflowed <main> and pushed the bottom toolbar off
+   the screen. overflow:hidden keeps the canvas from ever page-scrolling. */
+.wbc { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; background: var(--os-canvas); }
 .wbc__loading {
   display: flex; flex-direction: column; gap: 10px;
   align-items: center; justify-content: center;

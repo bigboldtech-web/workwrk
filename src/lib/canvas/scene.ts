@@ -13,6 +13,11 @@ export type ElementType =
   | "rect"
   | "ellipse"
   | "diamond"
+  | "roundRect"
+  | "triangle"
+  | "parallelogram"
+  | "cylinder"
+  | "cloud"
   | "line"
   | "arrow"
   | "freedraw"
@@ -35,8 +40,14 @@ export interface BaseElement {
   opacity: number; // 0..1
 }
 
+/** Box-geometry shapes (all hit-tested as their bounding box, except the
+ *  ellipse which uses the radial test). */
+export type ShapeType =
+  | "rect" | "ellipse" | "diamond"
+  | "roundRect" | "triangle" | "parallelogram" | "cylinder" | "cloud";
+
 export interface ShapeElement extends BaseElement {
-  type: "rect" | "ellipse" | "diamond";
+  type: ShapeType;
 }
 
 /** line / arrow / freedraw — geometry lives in `points` (absolute world).
