@@ -12,14 +12,41 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
-  Pencil, Type as TypeIcon, StickyNote, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
+  Pencil, Type as TypeIcon, StickyNote, ImagePlus, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
 } from "lucide-react";
 import {
   cloneScene, genId, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox,
   STROKE_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type CanvasElement, type CanvasScene, type PathElement, type ShapeElement,
+  type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
+
+/** Read a File → data URL, downscaling to `maxDim` so scenes stay a sane size. */
+async function loadScaledImage(file: File, maxDim: number): Promise<{ src: string; w: number; h: number }> {
+  const dataUrl = await new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(new Error("read failed"));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error("decode failed"));
+    i.src = dataUrl;
+  });
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (Math.max(nw, nh) <= maxDim) return { src: dataUrl, w: nw, h: nh };
+  const scale = maxDim / Math.max(nw, nh);
+  const w = Math.round(nw * scale), h = Math.round(nh * scale);
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const cx = c.getContext("2d");
+  if (!cx) return { src: dataUrl, w: nw, h: nh };
+  cx.drawImage(img, 0, 0, w, h);
+  const type = file.type === "image/png" || file.type === "image/webp" ? file.type : "image/jpeg";
+  return { src: c.toDataURL(type, 0.85), w, h };
+}
 
 type Tool = "select" | "hand" | "rect" | "ellipse" | "diamond" | "line" | "arrow" | "freedraw" | "text" | "sticky";
 
@@ -64,6 +91,20 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const clipboardRef = useRef<CanvasElement[]>([]);
   const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
+  const fileRef = useRef<HTMLInputElement>(null);
+  // Decoded <img> cache keyed by data URL; a load re-triggers draw via imgVersion.
+  const imageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const [imgVersion, setImgVersion] = useState(0);
+  const getImage = useCallback((src: string): HTMLImageElement | null => {
+    const cache = imageCacheRef.current;
+    const cached = cache.get(src);
+    if (cached) return cached.complete && cached.naturalWidth > 0 ? cached : null;
+    const img = new Image();
+    img.onload = () => setImgVersion((v) => v + 1);
+    img.src = src;
+    cache.set(src, img);
+    return null;
+  }, []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -137,7 +178,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
 
     // elements in world space
     ctx.setTransform(vp.zoom * dpr, 0, 0, vp.zoom * dpr, vp.x * dpr, vp.y * dpr);
-    for (const el of scene.elements) drawElement(ctx, el);
+    for (const el of scene.elements) drawElement(ctx, el, getImage);
 
     // selection chrome in screen space: an outline per selected element, and
     // resize handles only when exactly one is selected (group resize is later).
@@ -145,9 +186,11 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     const selected = scene.elements.filter((e) => selectedIds.has(e.id));
     for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1);
     if (marquee) drawMarquee(ctx, marquee, vp);
-  }, [scene, selectedIds, marquee, vp]);
+  }, [scene, selectedIds, marquee, vp, getImage]);
 
-  useLayoutEffect(() => { draw(); }, [draw]);
+  // Redraw when the scene/viewport change, and when a pending image finishes
+  // decoding (imgVersion bumps) so it replaces its placeholder.
+  useLayoutEffect(() => { draw(); }, [draw, imgVersion]);
 
   // size to container (dpr-aware)
   useEffect(() => {
@@ -446,6 +489,37 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  // Insert an image centred on (wx,wy) world coords — downscaled, aspect kept,
+  // capped to a sensible initial size.
+  const addImageAt = useCallback(async (file: File, wx: number, wy: number) => {
+    if (!file.type.startsWith("image/")) return;
+    try {
+      const { src, w, h } = await loadScaledImage(file, 1600);
+      const maxW = 480;
+      const scale = w > maxW ? maxW / w : 1;
+      const ew = Math.max(1, w * scale), eh = Math.max(1, h * scale);
+      const id = genId();
+      const el: ImageElement = { id, type: "image", x: wx - ew / 2, y: wy - eh / 2, w: ew, h: eh, stroke: "transparent", fill: "transparent", strokeWidth: 0, opacity: 1, src };
+      setScene((s) => {
+        const snapshot = cloneScene(s);
+        undoRef.current.push(snapshot);
+        if (undoRef.current.length > 100) undoRef.current.shift();
+        redoRef.current = [];
+        const next = { ...s, elements: [...s.elements, el] };
+        onChange(next);
+        return next;
+      });
+      setSelectedIds(new Set([id]));
+      setTool("select");
+      bump();
+    } catch { /* unreadable image — ignore */ }
+  }, [onChange, bump]);
+
+  const centreWorld = useCallback(() => {
+    const { w, h } = sizeRef.current;
+    return toWorld(w / 2, h / 2);
+  }, [toWorld]);
+
   // keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -458,7 +532,8 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); setSelectedIds(new Set(scene.elements.map((el) => el.id))); return; }
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelected(); return; }
       if (mod && e.key.toLowerCase() === "c") { copySelected(); return; }
-      if (mod && e.key.toLowerCase() === "v") { e.preventDefault(); pasteElements(clipboardRef.current); return; }
+      // ⌘V is handled by the native paste listener below (so an OS-clipboard
+      // image or our internal element copy both route through one place).
       if (e.key === "Delete" || e.key === "Backspace") { if (selectedIds.size > 0) { e.preventDefault(); deleteSelected(); } return; }
       if (e.key === "Escape") { setSelectedIds(new Set()); return; }
       if (e.key.startsWith("Arrow") && selectedIds.size > 0) {
@@ -477,7 +552,29 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, pasteElements, nudge, selectedIds, scene.elements]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements]);
+
+  // Native paste: an OS-clipboard image inserts an image; otherwise our
+  // internal element copy (from ⌘C) is pasted. Ignored while editing text.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = document.activeElement;
+      if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
+      const items = e.clipboardData?.items;
+      if (items) {
+        for (const it of items) {
+          if (it.type.startsWith("image/")) {
+            const file = it.getAsFile();
+            if (file) { e.preventDefault(); const p = centreWorld(); void addImageAt(file, p.x, p.y); }
+            return;
+          }
+        }
+      }
+      if (clipboardRef.current.length > 0) { e.preventDefault(); pasteElements(clipboardRef.current); }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [addImageAt, pasteElements, centreWorld]);
 
   // text-edit commit
   const commitText = useCallback((value: string) => {
@@ -517,7 +614,28 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
           if (hit && (hit.type === "text" || hit.type === "sticky")) { selectOne(hit.id); setEditing({ id: hit.id }); }
         }}
+        onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
+        onDrop={(e) => {
+          const file = e.dataTransfer?.files?.[0];
+          if (file && file.type.startsWith("image/")) {
+            e.preventDefault();
+            const rect = canvasRef.current!.getBoundingClientRect();
+            const p = toWorld(e.clientX - rect.left, e.clientY - rect.top);
+            void addImageAt(file, p.x, p.y);
+          }
+        }}
         style={{ display: "block", touchAction: "none", cursor }}
+      />
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) { const p = centreWorld(); void addImageAt(file, p.x, p.y); }
+          e.target.value = "";
+        }}
       />
 
       {/* text / sticky editing overlay */}
@@ -552,6 +670,9 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
             <Icon style={{ width: 17, height: 17 }} />
           </button>
         ))}
+        <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
+          <ImagePlus style={{ width: 17, height: 17 }} />
+        </button>
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         {STROKE_COLORS.slice(0, 6).map((c) => (
           <button key={c} type="button" title="Color" onClick={() => applyStroke(c)}
@@ -574,9 +695,25 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
 }
 
 // ── drawing helpers ─────────────────────────────────────────────────────────
-function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement) {
+function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null) {
   ctx.save();
   ctx.globalAlpha = el.opacity;
+
+  if (el.type === "image") {
+    const img = getImage(el.src);
+    if (img) {
+      ctx.drawImage(img, el.x, el.y, el.w, el.h);
+    } else {
+      // placeholder while the data URL decodes
+      ctx.fillStyle = "#EEF1F6";
+      ctx.strokeStyle = "#CBD5E1";
+      ctx.lineWidth = 1;
+      ctx.fillRect(el.x, el.y, el.w, el.h);
+      ctx.strokeRect(el.x, el.y, el.w, el.h);
+    }
+    ctx.restore();
+    return;
+  }
   ctx.strokeStyle = el.stroke;
   ctx.fillStyle = el.fill;
   ctx.lineWidth = el.strokeWidth;

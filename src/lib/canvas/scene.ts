@@ -17,7 +17,8 @@ export type ElementType =
   | "arrow"
   | "freedraw"
   | "text"
-  | "sticky";
+  | "sticky"
+  | "image";
 
 /** Every element carries a world-space bounding box + shared style. */
 export interface BaseElement {
@@ -55,7 +56,13 @@ export interface StickyElement extends BaseElement {
   fontSize: number;
 }
 
-export type CanvasElement = ShapeElement | PathElement | TextElement | StickyElement;
+export interface ImageElement extends BaseElement {
+  type: "image";
+  /** Data URL (downscaled on insert to keep the scene a sane size). */
+  src: string;
+}
+
+export type CanvasElement = ShapeElement | PathElement | TextElement | StickyElement | ImageElement;
 
 export interface Viewport {
   x: number; // pan offset in screen px
