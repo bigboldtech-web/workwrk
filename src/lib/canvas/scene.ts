@@ -39,10 +39,15 @@ export interface ShapeElement extends BaseElement {
   type: "rect" | "ellipse" | "diamond";
 }
 
-/** line / arrow / freedraw — geometry lives in `points` (absolute world). */
+/** line / arrow / freedraw — geometry lives in `points` (absolute world).
+ *  A line/arrow may also be a CONNECTOR: fromId/toId bind an endpoint to
+ *  another element, and the endpoint is recomputed from that element's edge
+ *  (reflowConnectors) so the connector follows when the element moves. */
 export interface PathElement extends BaseElement {
   type: "line" | "arrow" | "freedraw";
   points: [number, number][];
+  fromId?: string;
+  toId?: string;
 }
 
 export interface TextElement extends BaseElement {
@@ -204,6 +209,42 @@ export function hitTopElement(scene: CanvasScene, wx: number, wy: number, tol = 
     if (hitTest(scene.elements[i], wx, wy, tol)) return scene.elements[i];
   }
   return null;
+}
+
+/** The point on a box's boundary in the direction of `target` (from its
+ *  centre). Used to anchor a connector to the edge of the element it binds. */
+export function rectEdgePoint(
+  box: { x: number; y: number; w: number; h: number },
+  target: { x: number; y: number },
+): [number, number] {
+  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  const dx = target.x - cx, dy = target.y - cy;
+  if (dx === 0 && dy === 0) return [cx, cy];
+  const hw = box.w / 2 || 0.5, hh = box.h / 2 || 0.5;
+  const scale = 1 / Math.max(Math.abs(dx) / hw, Math.abs(dy) / hh);
+  return [cx + dx * scale, cy + dy * scale];
+}
+
+/** Recompute every bound connector's endpoints from its bound elements' edges,
+ *  so connectors follow when the shapes they link move/resize. Mutates the
+ *  connector elements in the array in place (clone them first if they are
+ *  React state). */
+export function reflowConnectors(elements: CanvasElement[]): void {
+  const byId = new Map(elements.map((el) => [el.id, el]));
+  for (const el of elements) {
+    if (el.type !== "line" && el.type !== "arrow") continue;
+    if (!el.fromId && !el.toId) continue;
+    const from = el.fromId ? byId.get(el.fromId) : undefined;
+    const to = el.toId ? byId.get(el.toId) : undefined;
+    // Fall back to the current free endpoint when a side isn't bound (or the
+    // bound element was deleted).
+    const aCentre = from ? { x: from.x + from.w / 2, y: from.y + from.h / 2 } : { x: el.points[0][0], y: el.points[0][1] };
+    const bCentre = to ? { x: to.x + to.w / 2, y: to.y + to.h / 2 } : { x: el.points[el.points.length - 1][0], y: el.points[el.points.length - 1][1] };
+    const a = from ? rectEdgePoint(from, bCentre) : [aCentre.x, aCentre.y] as [number, number];
+    const b = to ? rectEdgePoint(to, aCentre) : [bCentre.x, bCentre.y] as [number, number];
+    el.points = [a, b];
+    syncPathBounds(el);
+  }
 }
 
 /** Does an element's bounding box overlap a world-space box (marquee select)? */

@@ -15,8 +15,8 @@ import {
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
 } from "lucide-react";
 import {
-  cloneScene, genId, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox,
+  cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
+  elementInBox, reflowConnectors,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
 } from "@/lib/canvas/scene";
@@ -314,7 +314,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
-      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]] };
+      // A line/arrow becomes a CONNECTOR when it starts on an element — bind it
+      // so it re-routes when that element moves.
+      const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+      const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
+      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
@@ -362,20 +366,29 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       });
     } else if (drag.kind === "move") {
       const dx = world.x - drag.startX, dy = world.y - drag.startY;
-      // Move every selected element from its captured origin (no drift).
+      // Move every selected element from its captured origin (no drift), then
+      // reflow so any connector bound to a moved element follows it live.
       setScene((s) => ({
         ...s,
-        elements: s.elements.map((el) => {
+        elements: reflowElements(s.elements.map((el) => {
           const o = drag.origs.get(el.id);
           if (!o) return el;
           const copy: CanvasElement = "points" in o
             ? { ...(el as PathElement), x: o.x + dx, y: o.y + dy, points: (o as PathElement).points.map((p) => [p[0] + dx, p[1] + dy] as [number, number]) }
             : { ...el, x: o.x + dx, y: o.y + dy };
           return copy;
-        }),
+        })),
       }));
     } else if (drag.kind === "resize") {
-      patchElement(drag.id, (el) => applyResize(el, drag.orig, drag.handle, world));
+      setScene((s) => ({
+        ...s,
+        elements: reflowElements(s.elements.map((el) => {
+          if (el.id !== drag.id) return el;
+          const copy = cloneEl(el);
+          applyResize(copy, drag.orig, drag.handle, world);
+          return copy;
+        })),
+      }));
     } else if (drag.kind === "marquee") {
       const box = normalizeBox({ x: drag.startX, y: drag.startY, w: world.x - drag.startX, h: world.y - drag.startY });
       setMarquee(box);
@@ -401,11 +414,27 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         let elements = s.elements;
         if (tiny) { elements = s.elements.filter((x) => x.id !== drag.id); selectOne(null); }
         else {
+          // connector end-binding: a line/arrow that ends on an element binds to it
+          let toId: string | undefined;
+          if (el.type === "line" || el.type === "arrow") {
+            const end = el.points[el.points.length - 1];
+            for (let i = s.elements.length - 1; i >= 0; i--) {
+              const cand = s.elements[i];
+              if (cand.id === drag.id || cand.id === el.fromId || !isBindable(cand)) continue;
+              if (hitTest(cand, end[0], end[1], 6 / s.viewport.zoom)) { toId = cand.id; break; }
+            }
+          }
           elements = s.elements.map((x) => {
             if (x.id !== drag.id) return x;
-            if ("points" in x) { const c = { ...x, points: x.points.map((p) => [p[0], p[1]] as [number, number]) }; syncPathBounds(c); return c; }
+            if ("points" in x) {
+              const c: PathElement = { ...(x as PathElement), points: x.points.map((p) => [p[0], p[1]] as [number, number]) };
+              if ((c.type === "line" || c.type === "arrow") && toId) c.toId = toId;
+              syncPathBounds(c);
+              return c;
+            }
             return { ...x, ...normalizeBox(x) };
           });
+          elements = reflowElements(elements);
           setTool("select");
         }
         const next = { ...s, elements };
@@ -1043,6 +1072,23 @@ function applyResize(el: CanvasElement, orig: CanvasElement, handle: number, wor
 
 function cloneEl(el: CanvasElement): CanvasElement {
   return "points" in el ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) } : { ...el };
+}
+
+/** A connector can bind to any element that isn't itself a line/arrow/pen. */
+function isBindable(el: CanvasElement): boolean {
+  return el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw";
+}
+
+/** Clone the bound connectors in `elements` (so reflow never mutates React
+ *  state), recompute their endpoints, and return the new array. */
+function reflowElements(elements: CanvasElement[]): CanvasElement[] {
+  const cloned = elements.map((el) =>
+    (el.type === "line" || el.type === "arrow") && (el.fromId || el.toId)
+      ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) }
+      : el,
+  );
+  reflowConnectors(cloned);
+  return cloned;
 }
 
 // ── inline styles (kept local; the page owns the surrounding chrome) ─────────

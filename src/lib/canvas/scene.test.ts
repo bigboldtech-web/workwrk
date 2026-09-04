@@ -10,8 +10,11 @@ import {
   hitTopElement,
   isCanvasScene,
   normalizeBox,
+  rectEdgePoint,
+  reflowConnectors,
   sceneBounds,
   syncPathBounds,
+  type CanvasElement,
   type PathElement,
   type ShapeElement,
 } from "./scene";
@@ -96,6 +99,36 @@ describe("scene geometry", () => {
     expect(isCanvasScene(emptyScene())).toBe(true);
     expect(isCanvasScene({ elements: [] })).toBe(false); // no version = legacy
     expect(isCanvasScene(null)).toBe(false);
+  });
+});
+
+describe("connectors", () => {
+  it("rectEdgePoint lands on the box boundary toward the target", () => {
+    const box = { x: 0, y: 0, w: 100, h: 100 }; // centre (50,50)
+    // target straight to the right → exits the right edge at x=100, y=50
+    expect(rectEdgePoint(box, { x: 500, y: 50 })).toEqual([100, 50]);
+    // straight up → top edge
+    expect(rectEdgePoint(box, { x: 50, y: -500 })).toEqual([50, 0]);
+  });
+
+  it("reflowConnectors anchors a bound connector to both shapes' edges", () => {
+    const a: ShapeElement = { id: "a", type: "rect", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
+    const b: ShapeElement = { id: "b", type: "rect", x: 300, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
+    const conn: PathElement = { id: "c", type: "arrow", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[9, 9], [9, 9]], fromId: "a", toId: "b" };
+    const els: CanvasElement[] = [a, b, conn];
+    reflowConnectors(els);
+    // a centre (50,50) → toward b centre (350,50): exits a's right edge (100,50)
+    expect(conn.points[0]).toEqual([100, 50]);
+    // b centre (350,50) → toward a: exits b's left edge (300,50)
+    expect(conn.points[1]).toEqual([300, 50]);
+  });
+
+  it("reflowConnectors keeps a free (unbound) endpoint as-is", () => {
+    const a: ShapeElement = { id: "a", type: "rect", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
+    const conn: PathElement = { id: "c", type: "line", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[10, 10], [400, 400]], fromId: "a" };
+    reflowConnectors([a, conn]);
+    expect(conn.points[1]).toEqual([400, 400]); // free end untouched
+    expect(conn.points[0][0]).toBeGreaterThan(0); // bound end moved to a's edge
   });
 });
 
