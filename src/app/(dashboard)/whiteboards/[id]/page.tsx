@@ -20,10 +20,37 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { WhiteboardCanvas } from "@/components/canvas/whiteboard-canvas";
+import { WhiteboardCanvas, type TaskSummary } from "@/components/canvas/whiteboard-canvas";
 import { isCanvasScene, emptyScene, type CanvasScene } from "@/lib/canvas/scene";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
+import { STATUS_LOOKUP } from "@/lib/board-items-shared";
 import "@excalidraw/excalidraw/index.css";
+
+// Load the viewer's tasks for the whiteboard task-card picker → the work graph
+// on the canvas. Cross-board "my items"; status label/color from the shared
+// lookup; meta = due date when set, else the board name.
+type MeItem = { id: string; title: string; status: string | null; dueAt: string | null; board: { name: string } | null };
+async function loadMyTasks(): Promise<TaskSummary[]> {
+  const res = await fetch("/api/me/items?status=all", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({ items: [] }));
+  const items: MeItem[] = Array.isArray(data.items) ? data.items : [];
+  return items.map((it) => {
+    const s = it.status ? STATUS_LOOKUP[it.status] : undefined;
+    const due = it.dueAt ? new Date(it.dueAt) : null;
+    const meta = due && !Number.isNaN(due.getTime())
+      ? due.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : it.board?.name ?? "";
+    return {
+      id: it.id,
+      title: it.title,
+      status: it.status ?? "",
+      statusLabel: s?.label ?? (it.status ?? "No status"),
+      statusColor: s?.color ?? "#94A3B8",
+      meta,
+    };
+  });
+}
 
 // First-party WorkwrK Canvas rollout (safe): a board renders in our engine when
 // its scene is empty (a NEW board) or already in our format. Existing Excalidraw
@@ -365,7 +392,12 @@ export default function WhiteboardCanvasPage() {
       {/* Canvas */}
       <div className="wbc__canvas">
         {useFirstParty ? (
-          <WhiteboardCanvas initialScene={canvasInitial} onChange={onCanvasSceneChange} />
+          <WhiteboardCanvas
+            initialScene={canvasInitial}
+            onChange={onCanvasSceneChange}
+            loadTasks={loadMyTasks}
+            onOpenTask={(itemId) => router.push(`/item/${itemId}`)}
+          />
         ) : (
           <Excalidraw
             excalidrawAPI={(a) => setApi(a as unknown as ExcalidrawAPI)}

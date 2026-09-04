@@ -12,14 +12,25 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
-  Pencil, Type as TypeIcon, StickyNote, ImagePlus, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
+  Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
 } from "lucide-react";
 import {
   cloneScene, genId, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement,
+  type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
 } from "@/lib/canvas/scene";
+
+/** A task the picker can drop onto the canvas as a live card. Resolved by the
+ *  host (which owns task data + status colors) and passed in via `loadTasks`. */
+export interface TaskSummary {
+  id: string;
+  title: string;
+  status: string;
+  statusLabel: string;
+  statusColor: string;
+  meta: string;
+}
 
 /** Read a File → data URL, downscaling to `maxDim` so scenes stay a sane size. */
 async function loadScaledImage(file: File, maxDim: number): Promise<{ src: string; w: number; h: number }> {
@@ -80,9 +91,13 @@ type Drag =
 export interface WhiteboardCanvasProps {
   initialScene: CanvasScene;
   onChange: (scene: CanvasScene) => void;
+  /** Fetch tasks for the "Task card" picker. Omit to hide the feature. */
+  loadTasks?: () => Promise<TaskSummary[]>;
+  /** Open a task (double-click a card). Omit to make cards non-navigable. */
+  onOpenTask?: (itemId: string) => void;
 }
 
-export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasProps) {
+export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask }: WhiteboardCanvasProps) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -107,6 +122,10 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     cache.set(src, img);
     return null;
   }, []);
+  // Task-card picker (work-graph): drop a live task onto the canvas.
+  const [taskPickerOpen, setTaskPickerOpen] = useState(false);
+  const [tasks, setTasks] = useState<TaskSummary[] | null>(null);
+  const [taskQuery, setTaskQuery] = useState("");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -550,6 +569,30 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     return toWorld(w / 2, h / 2);
   }, [toWorld]);
 
+  const addTaskCard = useCallback((task: TaskSummary) => {
+    const c = centreWorld();
+    const w = 240, h = 92;
+    const id = genId();
+    const el: TaskCardElement = {
+      id, type: "taskCard", x: c.x - w / 2, y: c.y - h / 2, w, h,
+      stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
+      itemId: task.id, title: task.title, status: task.status,
+      statusLabel: task.statusLabel, statusColor: task.statusColor, meta: task.meta,
+    };
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: [...scene.elements, el] };
+    setSelectedIds(new Set([id]));
+    setTaskPickerOpen(false);
+    commit(next, snapshot);
+  }, [scene, commit, centreWorld]);
+
+  const openTaskPicker = useCallback(() => {
+    setTaskPickerOpen(true);
+    if (tasks === null && loadTasks) {
+      void loadTasks().then((t) => setTasks(t)).catch(() => setTasks([]));
+    }
+  }, [tasks, loadTasks]);
+
   // keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -643,6 +686,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
           if (hit && (hit.type === "text" || hit.type === "sticky")) { selectOne(hit.id); setEditing({ id: hit.id }); }
+          else if (hit && hit.type === "taskCard" && onOpenTask) onOpenTask(hit.itemId);
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
@@ -692,6 +736,44 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
         />
       ) : null}
 
+      {/* task-card picker */}
+      {taskPickerOpen ? (
+        <>
+          <div style={{ position: "absolute", inset: 0, zIndex: 8 }} onClick={() => setTaskPickerOpen(false)} aria-hidden />
+          <div style={taskPanelStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", borderBottom: "1px solid var(--os-line, #e5e7eb)" }}>
+              <Search style={{ width: 14, height: 14, color: "var(--os-ink-3, #9aa3b2)" }} />
+              <input
+                autoFocus
+                value={taskQuery}
+                onChange={(e) => setTaskQuery(e.target.value)}
+                placeholder="Search tasks to drop on the board…"
+                style={{ flex: 1, border: "none", outline: "none", fontSize: 13.5, background: "transparent", color: "var(--os-ink, #1e293b)" }}
+              />
+            </div>
+            <div style={{ maxHeight: 320, overflowY: "auto", padding: 6 }}>
+              {tasks === null ? (
+                <p style={{ padding: "18px 12px", textAlign: "center", fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>Loading tasks…</p>
+              ) : (() => {
+                const q = taskQuery.trim().toLowerCase();
+                const list = q ? tasks.filter((t) => t.title.toLowerCase().includes(q)) : tasks;
+                if (list.length === 0) return <p style={{ padding: "18px 12px", textAlign: "center", fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>{tasks.length === 0 ? "No tasks yet." : "No matches."}</p>;
+                return list.slice(0, 100).map((t) => (
+                  <button key={t.id} type="button" onClick={() => addTaskCard(t)}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer", textAlign: "left" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "var(--os-surface-1, #f4f4f5)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    <span style={{ width: 8, height: 8, borderRadius: 8, background: t.statusColor || "#94A3B8", flex: "none" }} />
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "var(--os-ink, #1e293b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
+                    {t.meta ? <span style={{ fontSize: 12, color: "var(--os-ink-3, #9aa3b2)", flex: "none" }}>{t.meta}</span> : null}
+                  </button>
+                ));
+              })()}
+            </div>
+          </div>
+        </>
+      ) : null}
+
       {/* toolbar */}
       <div className="wbcanvas__tools" style={toolbarStyle}>
         {TOOLS.map(({ tool: t, Icon, label, key }) => (
@@ -703,6 +785,11 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
         <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
+        {loadTasks ? (
+          <button type="button" title="Insert task card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
+            <ListTodo style={{ width: 17, height: 17 }} />
+          </button>
+        ) : null}
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         {STROKE_COLORS.slice(0, 6).map((c) => (
           <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
@@ -756,6 +843,44 @@ function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage:
       ctx.lineWidth = 1;
       ctx.fillRect(el.x, el.y, el.w, el.h);
       ctx.strokeRect(el.x, el.y, el.w, el.h);
+    }
+    ctx.restore();
+    return;
+  }
+
+  if (el.type === "taskCard") {
+    ctx.fillStyle = "#FFFFFF";
+    roundRect(ctx, el.x, el.y, el.w, el.h, 10);
+    ctx.fill();
+    ctx.strokeStyle = "#E2E8F0";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.save();
+    roundRect(ctx, el.x, el.y, el.w, el.h, 10);
+    ctx.clip();
+    ctx.fillStyle = el.statusColor || "#94A3B8";
+    ctx.fillRect(el.x, el.y, 4, el.h);
+    ctx.restore();
+    const pad = 14;
+    ctx.fillStyle = "#1E293B";
+    ctx.textBaseline = "top";
+    ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif";
+    wrapText(ctx, el.title || "Untitled task", el.x + pad, el.y + 14, el.w - pad - 12, 18, 2);
+    ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
+    const label = (el.statusLabel || el.status || "").toUpperCase();
+    const lw = ctx.measureText(label).width;
+    ctx.globalAlpha = el.opacity * 0.16;
+    ctx.fillStyle = el.statusColor || "#94A3B8";
+    roundRect(ctx, el.x + pad, el.y + el.h - 26, lw + 16, 17, 8);
+    ctx.fill();
+    ctx.globalAlpha = el.opacity;
+    ctx.fillStyle = el.statusColor || "#64748B";
+    ctx.fillText(label, el.x + pad + 8, el.y + el.h - 23);
+    if (el.meta) {
+      ctx.fillStyle = "#94A3B8";
+      ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+      const mw = ctx.measureText(el.meta).width;
+      ctx.fillText(el.meta, el.x + el.w - pad - mw, el.y + el.h - 22);
     }
     ctx.restore();
     return;
@@ -827,18 +952,26 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number) {
+function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number, maxLines = Infinity) {
   if (!text) return;
+  const lines: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
     for (const word of para.split(" ")) {
       const test = line ? `${line} ${word}` : word;
-      if (ctx.measureText(test).width > maxW && line) { ctx.fillText(line, x, y); y += lineH; line = word; }
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
       else line = test;
     }
-    ctx.fillText(line, x, y);
-    y += lineH;
+    lines.push(line);
   }
+  const shown = lines.slice(0, maxLines);
+  if (lines.length > maxLines && shown.length > 0) {
+    // ellipsize the last visible line
+    let last = shown[shown.length - 1];
+    while (last && ctx.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
+    shown[shown.length - 1] = `${last}…`;
+  }
+  for (const l of shown) { ctx.fillText(l, x, y); y += lineH; }
 }
 
 function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x: number; y: number; zoom: number }, withHandles: boolean) {
@@ -904,6 +1037,12 @@ const toolbarStyle: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 3, padding: 5,
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 5, flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
+};
+const taskPanelStyle: React.CSSProperties = {
+  position: "absolute", top: 62, left: "50%", transform: "translateX(-50%)", zIndex: 9,
+  width: "min(420px, calc(100vw - 24px))",
+  background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
+  borderRadius: 12, boxShadow: "0 12px 36px rgba(20,34,60,.16)", overflow: "hidden",
 };
 const zoomStyle: React.CSSProperties = {
   position: "absolute", bottom: 16, right: 16, display: "flex", alignItems: "center", gap: 2, padding: 4,

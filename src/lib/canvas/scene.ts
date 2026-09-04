@@ -18,7 +18,8 @@ export type ElementType =
   | "freedraw"
   | "text"
   | "sticky"
-  | "image";
+  | "image"
+  | "taskCard";
 
 /** Every element carries a world-space bounding box + shared style. */
 export interface BaseElement {
@@ -62,7 +63,21 @@ export interface ImageElement extends BaseElement {
   src: string;
 }
 
-export type CanvasElement = ShapeElement | PathElement | TextElement | StickyElement | ImageElement;
+/** A live reference to a task (Item). Cached display is stored so the card
+ *  renders without a fetch; opening the card navigates to the task. This is
+ *  the first "work-graph" element — the canvas joins the work graph. */
+export interface TaskCardElement extends BaseElement {
+  type: "taskCard";
+  itemId: string;
+  title: string;
+  status: string;
+  statusLabel: string;
+  statusColor: string;
+  meta: string; // small subtitle (due date / board), captured at insert
+}
+
+export type CanvasElement =
+  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement;
 
 export interface Viewport {
   x: number; // pan offset in screen px
