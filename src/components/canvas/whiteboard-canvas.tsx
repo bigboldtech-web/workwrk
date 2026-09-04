@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import {
   cloneScene, genId, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
+  elementInBox,
   STROKE_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type CanvasElement, type CanvasScene, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -39,12 +40,14 @@ const HANDLE = 8; // px, screen space
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 6;
 
+type Box = { x: number; y: number; w: number; h: number };
 type Drag =
   | { kind: "pan"; sx: number; sy: number; ox: number; oy: number }
   | { kind: "draw"; id: string; startX: number; startY: number }
   | { kind: "path"; id: string }
-  | { kind: "move"; id: string; startX: number; startY: number; orig: CanvasElement }
+  | { kind: "move"; ids: string[]; startX: number; startY: number; origs: Map<string, CanvasElement> }
   | { kind: "resize"; id: string; handle: number; orig: CanvasElement }
+  | { kind: "marquee"; startX: number; startY: number; add: boolean; base: string[] }
   | null;
 
 export interface WhiteboardCanvasProps {
@@ -55,9 +58,12 @@ export interface WhiteboardCanvasProps {
 export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasProps) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
   const [tool, setTool] = useState<Tool>("select");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [marquee, setMarquee] = useState<Box | null>(null);
   const [stroke, setStroke] = useState(DEFAULT_STROKE);
   const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const clipboardRef = useRef<CanvasElement[]>([]);
+  const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -94,7 +100,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     redoRef.current.push(cloneScene(scene));
     setScene(prev);
     onChange(prev);
-    setSelectedId(null);
+    setSelectedIds(new Set());
     setEditing(null);
     bump();
   }, [scene, onChange, bump]);
@@ -133,11 +139,13 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     ctx.setTransform(vp.zoom * dpr, 0, 0, vp.zoom * dpr, vp.x * dpr, vp.y * dpr);
     for (const el of scene.elements) drawElement(ctx, el);
 
-    // selection chrome in screen space
+    // selection chrome in screen space: an outline per selected element, and
+    // resize handles only when exactly one is selected (group resize is later).
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const sel = scene.elements.find((e) => e.id === selectedId);
-    if (sel) drawSelection(ctx, sel, vp);
-  }, [scene, selectedId, vp]);
+    const selected = scene.elements.filter((e) => selectedIds.has(e.id));
+    for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1);
+    if (marquee) drawMarquee(ctx, marquee, vp);
+  }, [scene, selectedIds, marquee, vp]);
 
   useLayoutEffect(() => { draw(); }, [draw]);
 
@@ -190,22 +198,39 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     }
 
     if (tool === "select") {
-      const sel = scene.elements.find((el) => el.id === selectedId);
-      if (sel) {
-        const handle = hitHandle(sel, sx, sy, vp);
-        if (handle >= 0) {
-          dragRef.current = { kind: "resize", id: sel.id, handle, orig: cloneEl(sel) };
-          undoRef.current.push(cloneScene(scene));
-          return;
+      // Resize handle — only when exactly one element is selected.
+      if (selectedIds.size === 1) {
+        const sel = scene.elements.find((el) => selectedIds.has(el.id));
+        if (sel) {
+          const handle = hitHandle(sel, sx, sy, vp);
+          if (handle >= 0) {
+            dragRef.current = { kind: "resize", id: sel.id, handle, orig: cloneEl(sel) };
+            undoRef.current.push(cloneScene(scene));
+            return;
+          }
         }
       }
       const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
       if (hit) {
-        setSelectedId(hit.id);
-        dragRef.current = { kind: "move", id: hit.id, startX: world.x, startY: world.y, orig: cloneEl(hit) };
+        if (e.shiftKey) {
+          // shift-click toggles membership; never starts a drag
+          const ids = new Set(selectedIds);
+          if (ids.has(hit.id)) ids.delete(hit.id); else ids.add(hit.id);
+          setSelectedIds(ids);
+          return;
+        }
+        // click a member → move the whole group; click a non-member → select it
+        const ids = selectedIds.has(hit.id) ? selectedIds : new Set([hit.id]);
+        if (!selectedIds.has(hit.id)) setSelectedIds(ids);
+        const moveIds = Array.from(ids);
+        const origs = new Map(moveIds.map((id) => [id, cloneEl(scene.elements.find((el) => el.id === id)!)]));
+        dragRef.current = { kind: "move", ids: moveIds, startX: world.x, startY: world.y, origs };
         undoRef.current.push(cloneScene(scene));
       } else {
-        setSelectedId(null);
+        // empty space → marquee (shift keeps the existing selection as a base)
+        dragRef.current = { kind: "marquee", startX: world.x, startY: world.y, add: e.shiftKey, base: e.shiftKey ? Array.from(selectedIds) : [] };
+        if (!e.shiftKey) setSelectedIds(new Set());
+        setMarquee({ x: world.x, y: world.y, w: 0, h: 0 });
       }
       return;
     }
@@ -217,13 +242,13 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       const el: ShapeElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1 };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(id);
+      selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
       const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1, points: [[world.x, world.y], [world.x, world.y]] };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(id);
+      selectOne(id);
       dragRef.current = { kind: "path", id };
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: DEFAULT_STROKE_WIDTH, opacity: 1, points: [[world.x, world.y]] };
@@ -234,18 +259,18 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       const el: CanvasElement = { id, type: "text", x: world.x, y: world.y - DEFAULT_FONT_SIZE / 2, w: 160, h: DEFAULT_FONT_SIZE * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize: DEFAULT_FONT_SIZE };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(id);
+      selectOne(id);
       setEditing({ id });
       setTool("select");
     } else if (tool === "sticky") {
       const el: CanvasElement = { id, type: "sticky", x: world.x, y: world.y, w: 180, h: 180, stroke: "transparent", fill: STICKY_COLORS[0], strokeWidth: 0, opacity: 1, text: "", fontSize: 16 };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      setSelectedId(id);
+      selectOne(id);
       setEditing({ id });
       setTool("select");
     }
-  }, [editing, tool, scene, selectedId, vp, stroke, toWorld]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, toWorld, selectOne]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const drag = dragRef.current;
@@ -268,15 +293,28 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       });
     } else if (drag.kind === "move") {
       const dx = world.x - drag.startX, dy = world.y - drag.startY;
-      patchElement(drag.id, (el) => {
-        const o = drag.orig;
-        el.x = o.x + dx; el.y = o.y + dy;
-        if ("points" in el && "points" in o) el.points = o.points.map((p) => [p[0] + dx, p[1] + dy]);
-      });
+      // Move every selected element from its captured origin (no drift).
+      setScene((s) => ({
+        ...s,
+        elements: s.elements.map((el) => {
+          const o = drag.origs.get(el.id);
+          if (!o) return el;
+          const copy: CanvasElement = "points" in o
+            ? { ...(el as PathElement), x: o.x + dx, y: o.y + dy, points: (o as PathElement).points.map((p) => [p[0] + dx, p[1] + dy] as [number, number]) }
+            : { ...el, x: o.x + dx, y: o.y + dy };
+          return copy;
+        }),
+      }));
     } else if (drag.kind === "resize") {
       patchElement(drag.id, (el) => applyResize(el, drag.orig, drag.handle, world));
+    } else if (drag.kind === "marquee") {
+      const box = normalizeBox({ x: drag.startX, y: drag.startY, w: world.x - drag.startX, h: world.y - drag.startY });
+      setMarquee(box);
+      const base = new Set(drag.base);
+      for (const el of scene.elements) if (elementInBox(el, box)) base.add(el.id);
+      setSelectedIds(base);
     }
-  }, [patchElement, toWorld]);
+  }, [patchElement, toWorld, scene.elements]);
 
   const onPointerUp = useCallback(() => {
     const drag = dragRef.current;
@@ -292,7 +330,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
           ? el.points.length < 2 && el.type !== "freedraw"
           : el.w < 3 && el.h < 3;
         let elements = s.elements;
-        if (tiny) { elements = s.elements.filter((x) => x.id !== drag.id); setSelectedId(null); }
+        if (tiny) { elements = s.elements.filter((x) => x.id !== drag.id); selectOne(null); }
         else {
           elements = s.elements.map((x) => {
             if (x.id !== drag.id) return x;
@@ -307,10 +345,12 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       });
     } else if (drag.kind === "move" || drag.kind === "resize") {
       setScene((s) => { onChange(s); return s; });
+    } else if (drag.kind === "marquee") {
+      setMarquee(null); // selection was updated live in onPointerMove
     }
     // pan doesn't touch persisted elements — no onChange
     bump();
-  }, [onChange, bump]);
+  }, [onChange, bump, selectOne]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     const canvas = canvasRef.current!;
@@ -346,27 +386,65 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
   }, [scene]);
 
   const deleteSelected = useCallback(() => {
-    if (!selectedId) return;
+    if (selectedIds.size === 0) return;
     const snapshot = cloneScene(scene);
-    const next = { ...scene, elements: scene.elements.filter((el) => el.id !== selectedId) };
-    setSelectedId(null);
+    const next = { ...scene, elements: scene.elements.filter((el) => !selectedIds.has(el.id)) };
+    setSelectedIds(new Set());
     commit(next, snapshot);
-  }, [selectedId, scene, commit]);
+  }, [selectedIds, scene, commit]);
 
   const applyStroke = useCallback((color: string) => {
     setStroke(color);
-    if (!selectedId) return;
+    if (selectedIds.size === 0) return;
     const snapshot = cloneScene(scene);
     const next = {
       ...scene,
       elements: scene.elements.map((el) => {
-        if (el.id !== selectedId) return el;
+        if (!selectedIds.has(el.id)) return el;
         if (el.type === "sticky") return { ...el, fill: color };
         return { ...el, stroke: color };
       }),
     };
     commit(next, snapshot);
-  }, [selectedId, scene, commit]);
+  }, [selectedIds, scene, commit]);
+
+  // Duplicate the given elements with an offset + fresh ids; returns the copies.
+  const pasteElements = useCallback((src: CanvasElement[], dx = 16, dy = 16) => {
+    if (src.length === 0) return;
+    const snapshot = cloneScene(scene);
+    const copies: CanvasElement[] = src.map((el) => {
+      const base = "points" in el
+        ? { ...el, id: genId(), x: el.x + dx, y: el.y + dy, points: el.points.map((p) => [p[0] + dx, p[1] + dy] as [number, number]) }
+        : { ...el, id: genId(), x: el.x + dx, y: el.y + dy };
+      return base as CanvasElement;
+    });
+    const next = { ...scene, elements: [...scene.elements, ...copies] };
+    setSelectedIds(new Set(copies.map((c) => c.id)));
+    commit(next, snapshot);
+  }, [scene, commit]);
+
+  const duplicateSelected = useCallback(() => {
+    pasteElements(scene.elements.filter((el) => selectedIds.has(el.id)));
+  }, [scene.elements, selectedIds, pasteElements]);
+
+  const copySelected = useCallback(() => {
+    clipboardRef.current = scene.elements.filter((el) => selectedIds.has(el.id)).map((el) => cloneEl(el));
+  }, [scene.elements, selectedIds]);
+
+  const nudge = useCallback((dx: number, dy: number) => {
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) => {
+        if (!selectedIds.has(el.id)) return el;
+        return "points" in el
+          ? { ...el, x: el.x + dx, y: el.y + dy, points: el.points.map((p) => [p[0] + dx, p[1] + dy] as [number, number]) }
+          : { ...el, x: el.x + dx, y: el.y + dy };
+      }),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
 
   // keyboard
   useEffect(() => {
@@ -374,9 +452,24 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
       if (e.key === " ") { spaceRef.current = true; return; }
       const t = e.target as HTMLElement;
       if (t.tagName === "TEXTAREA" || t.tagName === "INPUT") return;
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
-      if (e.key === "Delete" || e.key === "Backspace") { if (selectedId) { e.preventDefault(); deleteSelected(); } return; }
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+      if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); setSelectedIds(new Set(scene.elements.map((el) => el.id))); return; }
+      if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelected(); return; }
+      if (mod && e.key.toLowerCase() === "c") { copySelected(); return; }
+      if (mod && e.key.toLowerCase() === "v") { e.preventDefault(); pasteElements(clipboardRef.current); return; }
+      if (e.key === "Delete" || e.key === "Backspace") { if (selectedIds.size > 0) { e.preventDefault(); deleteSelected(); } return; }
+      if (e.key === "Escape") { setSelectedIds(new Set()); return; }
+      if (e.key.startsWith("Arrow") && selectedIds.size > 0) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        if (e.key === "ArrowLeft") nudge(-step, 0);
+        else if (e.key === "ArrowRight") nudge(step, 0);
+        else if (e.key === "ArrowUp") nudge(0, -step);
+        else if (e.key === "ArrowDown") nudge(0, step);
+        return;
+      }
       const match = TOOLS.find((x) => x.key?.toLowerCase() === e.key.toLowerCase());
       if (match) setTool(match.tool);
     };
@@ -384,7 +477,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, selectedId]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, pasteElements, nudge, selectedIds, scene.elements]);
 
   // text-edit commit
   const commitText = useCallback((value: string) => {
@@ -422,7 +515,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-          if (hit && (hit.type === "text" || hit.type === "sticky")) { setSelectedId(hit.id); setEditing({ id: hit.id }); }
+          if (hit && (hit.type === "text" || hit.type === "sticky")) { selectOne(hit.id); setEditing({ id: hit.id }); }
         }}
         style={{ display: "block", touchAction: "none", cursor }}
       />
@@ -467,7 +560,7 @@ export function WhiteboardCanvas({ initialScene, onChange }: WhiteboardCanvasPro
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         <button type="button" title="Undo (⌘Z)" onClick={undo} disabled={hist.u === 0} style={toolBtn(false)}><Undo2 style={{ width: 16, height: 16 }} /></button>
         <button type="button" title="Redo (⌘⇧Z)" onClick={redo} disabled={hist.r === 0} style={toolBtn(false)}><Redo2 style={{ width: 16, height: 16 }} /></button>
-        <button type="button" title="Delete (⌫)" onClick={deleteSelected} disabled={!selectedId} style={toolBtn(false)}><Trash2 style={{ width: 16, height: 16 }} /></button>
+        <button type="button" title="Delete (⌫)" onClick={deleteSelected} disabled={selectedIds.size === 0} style={toolBtn(false)}><Trash2 style={{ width: 16, height: 16 }} /></button>
       </div>
 
       {/* zoom */}
@@ -565,20 +658,32 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
   }
 }
 
-function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x: number; y: number; zoom: number }) {
+function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x: number; y: number; zoom: number }, withHandles: boolean) {
   const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
   ctx.save();
   ctx.strokeStyle = "#0073EA";
   ctx.lineWidth = 1.5;
   ctx.setLineDash([]);
   ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
-  if (el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw") {
+  if (withHandles && el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw") {
     ctx.fillStyle = "#fff";
     for (const [hx, hy] of handlePositions(x, y, w, h)) {
       ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
       ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
     }
   }
+  ctx.restore();
+}
+
+function drawMarquee(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }, vp: { x: number; y: number; zoom: number }) {
+  const x = box.x * vp.zoom + vp.x, y = box.y * vp.zoom + vp.y, w = box.w * vp.zoom, h = box.h * vp.zoom;
+  ctx.save();
+  ctx.fillStyle = "rgba(0,115,234,0.08)";
+  ctx.strokeStyle = "#0073EA";
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
   ctx.restore();
 }
 

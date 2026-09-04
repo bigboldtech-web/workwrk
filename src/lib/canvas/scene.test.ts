@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  boundsOfElements,
   boundsOfPoints,
   cloneScene,
+  elementInBox,
   emptyScene,
   hitTest,
   hitTopElement,
@@ -66,6 +68,19 @@ describe("scene geometry", () => {
     const scene = emptyScene();
     scene.elements.push(rect("a", 0, 0, 10, 10), rect("b", 40, 20, 10, 10));
     expect(sceneBounds(scene)).toEqual({ x: 0, y: 0, w: 50, h: 30 });
+  });
+
+  it("elementInBox: marquee selects an overlapping element, skips a disjoint one", () => {
+    const r = rect("r", 10, 10, 20, 20);
+    expect(elementInBox(r, { x: 0, y: 0, w: 15, h: 15 })).toBe(true); // corner overlap
+    expect(elementInBox(r, { x: 100, y: 100, w: 10, h: 10 })).toBe(false);
+    // touching edges only (no overlap) is not a hit
+    expect(elementInBox(r, { x: 30, y: 10, w: 5, h: 5 })).toBe(false);
+  });
+
+  it("boundsOfElements unions a group; null when empty", () => {
+    expect(boundsOfElements([])).toBeNull();
+    expect(boundsOfElements([rect("a", 0, 0, 10, 10), rect("b", 20, 5, 10, 30)])).toEqual({ x: 0, y: 0, w: 30, h: 35 });
   });
 
   it("cloneScene deep-copies element point arrays (no shared refs)", () => {

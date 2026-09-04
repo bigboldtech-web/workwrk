@@ -184,6 +184,24 @@ export function hitTopElement(scene: CanvasScene, wx: number, wy: number, tol = 
   return null;
 }
 
+/** Does an element's bounding box overlap a world-space box (marquee select)? */
+export function elementInBox(el: CanvasElement, box: { x: number; y: number; w: number; h: number }): boolean {
+  return el.x < box.x + box.w && el.x + el.w > box.x && el.y < box.y + box.h && el.y + el.h > box.y;
+}
+
+/** Union bounds of a specific set of elements (group selection box); null when empty. */
+export function boundsOfElements(els: CanvasElement[]): { x: number; y: number; w: number; h: number } | null {
+  if (els.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const el of els) {
+    minX = Math.min(minX, el.x);
+    minY = Math.min(minY, el.y);
+    maxX = Math.max(maxX, el.x + el.w);
+    maxY = Math.max(maxY, el.y + el.h);
+  }
+  return { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+}
+
 /** Union bounds of all elements (for zoom-to-fit); null when empty. */
 export function sceneBounds(scene: CanvasScene): { x: number; y: number; w: number; h: number } | null {
   if (scene.elements.length === 0) return null;
