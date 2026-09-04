@@ -107,6 +107,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
   const [tool, setTool] = useState<Tool>("select");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<Box | null>(null);
+  const [hoverBindId, setHoverBindId] = useState<string | null>(null); // shape a connector-in-progress will bind to
   const [stroke, setStroke] = useState(DEFAULT_STROKE);
   const [fillColor, setFillColor] = useState("transparent");
   const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
@@ -212,7 +213,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     const selected = scene.elements.filter((e) => selectedIds.has(e.id));
     for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1);
     if (marquee) drawMarquee(ctx, marquee, vp);
-  }, [scene, selectedIds, marquee, vp, getImage]);
+    // connector bind target: a blue ring around the shape the arrow will attach to
+    if (hoverBindId) {
+      const he = scene.elements.find((e) => e.id === hoverBindId);
+      if (he) {
+        ctx.save();
+        ctx.strokeStyle = "#0073EA";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        ctx.strokeRect(he.x * vp.zoom + vp.x - 2, he.y * vp.zoom + vp.y - 2, he.w * vp.zoom + 4, he.h * vp.zoom + 4);
+        ctx.restore();
+      }
+    }
+  }, [scene, selectedIds, marquee, hoverBindId, vp, getImage]);
 
   // Redraw when the scene/viewport change, and when a pending image finishes
   // decoding (imgVersion bumps) so it replaces its placeholder.
@@ -364,6 +377,17 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         else el.points[1] = [world.x, world.y];
         syncPathBounds(el as PathElement);
       });
+      // connector hover: highlight the shape the end would bind to
+      const drawn = scene.elements.find((x) => x.id === drag.id);
+      if (drawn && (drawn.type === "line" || drawn.type === "arrow")) {
+        let hover: string | null = null;
+        for (let i = scene.elements.length - 1; i >= 0; i--) {
+          const cand = scene.elements[i];
+          if (cand.id === drag.id || !isBindable(cand)) continue;
+          if (hitTest(cand, world.x, world.y, 6 / vp.zoom)) { hover = cand.id; break; }
+        }
+        setHoverBindId(hover);
+      }
     } else if (drag.kind === "move") {
       const dx = world.x - drag.startX, dy = world.y - drag.startY;
       // Move every selected element from its captured origin (no drift), then
@@ -396,7 +420,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       for (const el of scene.elements) if (elementInBox(el, box)) base.add(el.id);
       setSelectedIds(base);
     }
-  }, [patchElement, toWorld, scene.elements]);
+  }, [patchElement, toWorld, scene.elements, vp]);
 
   const onPointerUp = useCallback(() => {
     const drag = dragRef.current;
@@ -435,7 +459,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
             return { ...x, ...normalizeBox(x) };
           });
           elements = reflowElements(elements);
-          setTool("select");
+          // The drawing tool STAYS active (like Excalidraw with tool-lock) so
+          // you can keep drawing shapes/lines/pen strokes without re-picking it.
         }
         const next = { ...s, elements };
         onChange(next);
@@ -446,6 +471,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     } else if (drag.kind === "marquee") {
       setMarquee(null); // selection was updated live in onPointerMove
     }
+    setHoverBindId(null);
     // pan doesn't touch persisted elements — no onChange
     bump();
   }, [onChange, bump, selectOne]);
@@ -810,6 +836,33 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         </>
       ) : null}
 
+      {/* contextual style bar — shows when something is selected or a drawing
+          tool is active (keeps the tools bar itself clean, ClickUp-style) */}
+      {selectedIds.size > 0 || (tool !== "select" && tool !== "hand") ? (
+        <div style={styleBarStyle}>
+          {STROKE_COLORS.slice(0, 6).map((c) => (
+            <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
+              style={{ width: 20, height: 20, borderRadius: 6, background: c, border: stroke === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)", cursor: "pointer", padding: 0 }} />
+          ))}
+          <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+          {FILL_COLORS.map((c) => (
+            <button key={c} type="button" title={c === "transparent" ? "No fill" : "Fill color"} onClick={() => applyFill(c)}
+              style={{
+                width: 20, height: 20, borderRadius: 6, cursor: "pointer", padding: 0,
+                background: c === "transparent" ? "linear-gradient(135deg, #fff 42%, #ef4444 44%, #ef4444 56%, #fff 58%)" : c,
+                border: fillColor === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)",
+              }} />
+          ))}
+          <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+          {[1, 2, 4].map((wdt) => (
+            <button key={wdt} type="button" title={`${wdt === 1 ? "Thin" : wdt === 2 ? "Medium" : "Thick"} stroke`} onClick={() => applyWidth(wdt)}
+              style={{ ...toolBtn(strokeW === wdt), width: 28, height: 28 }}>
+              <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {/* toolbar */}
       <div className="wbcanvas__tools" style={toolbarStyle}>
         {TOOLS.map(({ tool: t, Icon, label, key, num }) => {
@@ -833,27 +886,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
             <ListTodo style={{ width: 17, height: 17 }} />
           </button>
         ) : null}
-        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
-        {STROKE_COLORS.slice(0, 6).map((c) => (
-          <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
-            style={{ width: 20, height: 20, borderRadius: 6, background: c, border: stroke === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)", cursor: "pointer", padding: 0 }} />
-        ))}
-        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
-        {FILL_COLORS.map((c) => (
-          <button key={c} type="button" title={c === "transparent" ? "No fill" : "Fill color"} onClick={() => applyFill(c)}
-            style={{
-              width: 20, height: 20, borderRadius: 6, cursor: "pointer", padding: 0,
-              background: c === "transparent" ? "linear-gradient(135deg, #fff 42%, #ef4444 44%, #ef4444 56%, #fff 58%)" : c,
-              border: fillColor === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)",
-            }} />
-        ))}
-        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
-        {[1, 2, 4].map((wdt) => (
-          <button key={wdt} type="button" title={`${wdt === 1 ? "Thin" : wdt === 2 ? "Medium" : "Thick"} stroke`} onClick={() => applyWidth(wdt)}
-            style={{ ...toolBtn(strokeW === wdt), width: 28 }}>
-            <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
-          </button>
-        ))}
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         <button type="button" title="Undo (⌘Z)" onClick={undo} disabled={hist.u === 0} style={toolBtn(false)}><Undo2 style={{ width: 16, height: 16 }} /></button>
         <button type="button" title="Redo (⌘⇧Z)" onClick={redo} disabled={hist.r === 0} style={toolBtn(false)}><Redo2 style={{ width: 16, height: 16 }} /></button>
@@ -1018,13 +1050,42 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: num
 }
 
 function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x: number; y: number; zoom: number }, withHandles: boolean) {
-  const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
   ctx.save();
   ctx.strokeStyle = "#0073EA";
-  ctx.lineWidth = 1.5;
   ctx.setLineDash([]);
+
+  // Lines / arrows / pen: highlight the STROKE itself (never a rectangle box),
+  // with square handles at the two endpoints of a line/arrow.
+  if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") {
+    const pts = el.points;
+    if (pts.length > 0) {
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      ctx.lineWidth = el.strokeWidth * vp.zoom + 4;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0] * vp.zoom + vp.x, pts[0][1] * vp.zoom + vp.y);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * vp.zoom + vp.x, pts[i][1] * vp.zoom + vp.y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (el.type !== "freedraw" && pts.length >= 2) {
+      ctx.fillStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      for (const p of [pts[0], pts[pts.length - 1]]) {
+        const sx = p[0] * vp.zoom + vp.x, sy = p[1] * vp.zoom + vp.y;
+        ctx.fillRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
+        ctx.strokeRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
+      }
+    }
+    ctx.restore();
+    return;
+  }
+
+  // Shapes / text / sticky / image / task cards: bounding box + corner handles.
+  const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
+  ctx.lineWidth = 1.5;
   ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
-  if (withHandles && el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw") {
+  if (withHandles) {
     ctx.fillStyle = "#fff";
     for (const [hx, hy] of handlePositions(x, y, w, h)) {
       ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
@@ -1099,8 +1160,16 @@ const toolbarStyle: React.CSSProperties = {
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 5, flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
 };
+// Contextual style bar, floating just above the bottom tools bar.
+const styleBarStyle: React.CSSProperties = {
+  position: "absolute", bottom: 68, left: "50%", transform: "translateX(-50%)",
+  display: "flex", alignItems: "center", gap: 3, padding: "5px 7px",
+  background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
+  borderRadius: 10, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 6,
+  flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
+};
 const taskPanelStyle: React.CSSProperties = {
-  position: "absolute", bottom: 70, left: "50%", transform: "translateX(-50%)", zIndex: 9,
+  position: "absolute", bottom: 116, left: "50%", transform: "translateX(-50%)", zIndex: 9,
   width: "min(420px, calc(100vw - 24px))",
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 12px 36px rgba(20,34,60,.16)", overflow: "hidden",
