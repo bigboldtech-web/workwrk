@@ -1062,7 +1062,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                 autoFocus
                 value={taskQuery}
                 onChange={(e) => setTaskQuery(e.target.value)}
-                placeholder="Search tasks, docs & canvases to drop on the board…"
+                placeholder="Search tasks, docs, canvases & SOPs to drop on the board…"
                 style={{ flex: 1, border: "none", outline: "none", fontSize: 13.5, background: "transparent", color: "var(--os-ink, #1e293b)" }}
               />
             </div>
@@ -1082,6 +1082,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "var(--os-ink, #1e293b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
                     {t.kind === "doc" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#3B82F6", background: "rgba(59,130,246,0.12)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>DOC</span> : null}
                     {t.kind === "canvas" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#7C3AED", background: "rgba(124,58,237,0.12)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>CANVAS</span> : null}
+                    {t.kind === "sop" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#D97706", background: "rgba(245,158,11,0.14)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>SOP</span> : null}
                     {t.meta ? <span style={{ fontSize: 12, color: "var(--os-ink-3, #9aa3b2)", flex: "none" }}>{t.meta}</span> : null}
                   </button>
                 ));
@@ -1191,7 +1192,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
         {loadEntities ? (
-          <button type="button" title="Insert a task, doc or canvas card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
+          <button type="button" title="Insert a task, doc, canvas or SOP card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
             <ListTodo style={{ width: 17, height: 17 }} />
           </button>
         ) : null}

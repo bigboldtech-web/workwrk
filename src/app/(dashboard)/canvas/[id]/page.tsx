@@ -32,16 +32,18 @@ import "@excalidraw/excalidraw/index.css";
 type MeItem = { id: string; title: string; status: string | null; dueAt: string | null; board: { name: string } | null };
 type DocItem = { id: string; title: string | null; updatedAt: string | null };
 type CanvasItem = { id: string; name: string | null; updatedAt?: string | null };
+type SopItem = { id: string; title: string | null; category: string | null };
 function relUpdated(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 async function loadCanvasEntities(excludeId?: string): Promise<TaskSummary[]> {
-  const [taskRes, docRes, canvasRes] = await Promise.all([
+  const [taskRes, docRes, canvasRes, sopRes] = await Promise.all([
     fetch("/api/me/items?status=all", { cache: "no-store" }).catch(() => null),
     fetch("/api/docs", { cache: "no-store" }).catch(() => null),
     fetch("/api/whiteboards", { cache: "no-store" }).catch(() => null),
+    fetch("/api/sops?limit=200", { cache: "no-store" }).catch(() => null),
   ]);
   const tasks: TaskSummary[] = [];
   if (taskRes?.ok) {
@@ -83,7 +85,19 @@ async function loadCanvasEntities(excludeId?: string): Promise<TaskSummary[]> {
       });
     }
   }
-  return [...tasks, ...docs, ...canvases];
+  const sops: TaskSummary[] = [];
+  if (sopRes?.ok) {
+    const data = await sopRes.json().catch(() => ({}));
+    const list: SopItem[] = data.data ?? data.sops ?? (Array.isArray(data) ? data : []);
+    for (const s of list.slice(0, 60)) {
+      sops.push({
+        id: s.id, kind: "sop", title: s.title || "Untitled SOP", status: "",
+        statusLabel: "SOP", statusColor: "#F59E0B", meta: s.category ?? "",
+        href: `/sops/${s.id}`,
+      });
+    }
+  }
+  return [...tasks, ...docs, ...canvases, ...sops];
 }
 
 // First-party WorkwrK Canvas rollout (safe): a board renders in our engine when
