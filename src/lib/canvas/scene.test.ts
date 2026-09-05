@@ -103,6 +103,22 @@ describe("scene geometry", () => {
     expect(isCanvasScene({ elements: [] })).toBe(false); // no version = legacy
     expect(isCanvasScene(null)).toBe(false);
   });
+
+  it("a canvasCard is a normal box: hit-tests, bounds, and clones like any element", () => {
+    const scene = emptyScene();
+    const card: CanvasElement = {
+      id: "cc", type: "canvasCard", x: 10, y: 20, w: 260, h: 180,
+      stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
+      whiteboardId: "wb_1", title: "Roadmap",
+    };
+    scene.elements.push(card);
+    expect(hitTest(card, 100, 100)).toBe(true);      // inside the box
+    expect(hitTest(card, 400, 100)).toBe(false);     // outside
+    expect(sceneBounds(scene)).toMatchObject({ x: 10, y: 20, w: 260, h: 180 });
+    const copy = cloneScene(scene);
+    expect(copy.elements[0]).not.toBe(card);         // deep copy
+    expect(copy.elements[0]).toMatchObject({ type: "canvasCard", whiteboardId: "wb_1" });
+  });
 });
 
 describe("elbow routing", () => {

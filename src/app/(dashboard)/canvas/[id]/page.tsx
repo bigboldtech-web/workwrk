@@ -31,15 +31,17 @@ import "@excalidraw/excalidraw/index.css";
 // due date else board). Docs: recent org docs (blue "Doc" pill, meta = updated).
 type MeItem = { id: string; title: string; status: string | null; dueAt: string | null; board: { name: string } | null };
 type DocItem = { id: string; title: string | null; updatedAt: string | null };
+type CanvasItem = { id: string; name: string | null; updatedAt?: string | null };
 function relUpdated(iso?: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
-async function loadCanvasEntities(): Promise<TaskSummary[]> {
-  const [taskRes, docRes] = await Promise.all([
+async function loadCanvasEntities(excludeId?: string): Promise<TaskSummary[]> {
+  const [taskRes, docRes, canvasRes] = await Promise.all([
     fetch("/api/me/items?status=all", { cache: "no-store" }).catch(() => null),
     fetch("/api/docs", { cache: "no-store" }).catch(() => null),
+    fetch("/api/whiteboards", { cache: "no-store" }).catch(() => null),
   ]);
   const tasks: TaskSummary[] = [];
   if (taskRes?.ok) {
@@ -68,7 +70,20 @@ async function loadCanvasEntities(): Promise<TaskSummary[]> {
       });
     }
   }
-  return [...tasks, ...docs];
+  const canvases: TaskSummary[] = [];
+  if (canvasRes?.ok) {
+    const data = await canvasRes.json().catch(() => ({}));
+    const list: CanvasItem[] = data.whiteboards ?? (Array.isArray(data) ? data : []);
+    for (const w of list.slice(0, 60)) {
+      if (excludeId && w.id === excludeId) continue; // never drop a Canvas onto itself
+      canvases.push({
+        id: w.id, kind: "canvas", title: w.name || "Untitled canvas", status: "",
+        statusLabel: "Canvas", statusColor: "#7C3AED", meta: relUpdated(w.updatedAt ?? null),
+        href: `/canvas/${w.id}`,
+      });
+    }
+  }
+  return [...tasks, ...docs, ...canvases];
 }
 
 // First-party WorkwrK Canvas rollout (safe): a board renders in our engine when
@@ -414,7 +429,7 @@ export default function WhiteboardCanvasPage() {
           <WhiteboardCanvas
             initialScene={canvasInitial}
             onChange={onCanvasSceneChange}
-            loadEntities={loadCanvasEntities}
+            loadEntities={() => loadCanvasEntities(board.id)}
             onOpenEntity={(href) => router.push(href)}
           />
         ) : (

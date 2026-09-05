@@ -33,11 +33,12 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type ArrowType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
+  type ArrowType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
-import { drawElement } from "@/lib/canvas/render";
+import { drawElement, drawCanvasCard } from "@/lib/canvas/render";
+import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 
 /** A work-graph item the picker can drop onto the canvas as a live card
  *  (a task, doc, …). Resolved by the host (which owns the data + colors) and
@@ -159,6 +160,23 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     cache.set(src, img);
     return null;
   }, []);
+  // Linked Canvas scenes for canvas-in-canvas thumbnails; a fetch re-triggers draw.
+  const linkedSceneCacheRef = useRef<Map<string, CanvasScene | null>>(new Map());
+  const [linkedVersion, setLinkedVersion] = useState(0);
+  const getLinkedScene = useCallback((id: string): CanvasScene | null => {
+    const cache = linkedSceneCacheRef.current;
+    if (cache.has(id)) return cache.get(id) ?? null;
+    cache.set(id, null); // mark in-flight so we fetch each id once
+    fetch(`/api/whiteboards/${id}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
+      .then((d) => {
+        const raw = d?.whiteboard?.scene;
+        cache.set(id, isCanvasScene(raw) ? raw : isExcalidrawScene(raw) ? importExcalidraw(raw) : emptyScene());
+        setLinkedVersion((v) => v + 1);
+      })
+      .catch(() => { /* leave null — the card shows a placeholder */ });
+    return null;
+  }, []);
   const [shapesOpen, setShapesOpen] = useState(false); // "More shapes" flyout
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; onElement: boolean; hasClipboard: boolean } | null>(null);
   // Task-card picker (work-graph): drop a live task onto the canvas.
@@ -238,7 +256,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
 
     // elements in world space
     ctx.setTransform(vp.zoom * dpr, 0, 0, vp.zoom * dpr, vp.x * dpr, vp.y * dpr);
-    for (const el of scene.elements) drawElement(ctx, el, getImage);
+    for (const el of scene.elements) {
+      if (el.type === "canvasCard") drawCanvasCard(ctx, el, getLinkedScene(el.whiteboardId), getImage);
+      else drawElement(ctx, el, getImage);
+    }
 
     // selection chrome in screen space: an outline per selected element, and
     // resize handles only when exactly one is selected (group resize is later).
@@ -258,11 +279,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         ctx.restore();
       }
     }
-  }, [scene, selectedIds, marquee, hoverBindId, vp, getImage]);
+  }, [scene, selectedIds, marquee, hoverBindId, vp, getImage, getLinkedScene]);
 
   // Redraw when the scene/viewport change, and when a pending image finishes
   // decoding (imgVersion bumps) so it replaces its placeholder.
-  useLayoutEffect(() => { draw(); }, [draw, imgVersion]);
+  useLayoutEffect(() => { draw(); }, [draw, imgVersion, linkedVersion]);
 
   // size to container (dpr-aware)
   useEffect(() => {
@@ -825,14 +846,21 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
 
   const addTaskCard = useCallback((task: TaskSummary) => {
     const c = centreWorld();
-    const w = 240, h = 92;
     const id = genId();
-    const el: TaskCardElement = {
-      id, type: "taskCard", x: c.x - w / 2, y: c.y - h / 2, w, h,
-      stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
-      itemId: task.id, title: task.title, status: task.status,
-      statusLabel: task.statusLabel, statusColor: task.statusColor, meta: task.meta, href: task.href,
-    };
+    // A Canvas drops as a live thumbnail card (canvas-in-canvas); everything
+    // else drops as a task/doc card.
+    const el: CanvasElement = task.kind === "canvas"
+      ? {
+          id, type: "canvasCard", x: c.x - 130, y: c.y - 90, w: 260, h: 180,
+          stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
+          whiteboardId: task.id, title: task.title,
+        }
+      : {
+          id, type: "taskCard", x: c.x - 120, y: c.y - 46, w: 240, h: 92,
+          stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
+          itemId: task.id, title: task.title, status: task.status,
+          statusLabel: task.statusLabel, statusColor: task.statusColor, meta: task.meta, href: task.href,
+        };
     const snapshot = cloneScene(scene);
     const next = { ...scene, elements: [...scene.elements, el] };
     setSelectedIds(new Set([id]));
@@ -954,6 +982,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
           if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame")) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
+          else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
@@ -1033,7 +1062,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                 autoFocus
                 value={taskQuery}
                 onChange={(e) => setTaskQuery(e.target.value)}
-                placeholder="Search tasks & docs to drop on the board…"
+                placeholder="Search tasks, docs & canvases to drop on the board…"
                 style={{ flex: 1, border: "none", outline: "none", fontSize: 13.5, background: "transparent", color: "var(--os-ink, #1e293b)" }}
               />
             </div>
@@ -1052,6 +1081,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                     <span style={{ width: 8, height: 8, borderRadius: 8, background: t.statusColor || "#94A3B8", flex: "none" }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "var(--os-ink, #1e293b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
                     {t.kind === "doc" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#3B82F6", background: "rgba(59,130,246,0.12)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>DOC</span> : null}
+                    {t.kind === "canvas" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#7C3AED", background: "rgba(124,58,237,0.12)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>CANVAS</span> : null}
                     {t.meta ? <span style={{ fontSize: 12, color: "var(--os-ink-3, #9aa3b2)", flex: "none" }}>{t.meta}</span> : null}
                   </button>
                 ));
@@ -1161,7 +1191,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
         {loadEntities ? (
-          <button type="button" title="Insert a task or doc card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
+          <button type="button" title="Insert a task, doc or canvas card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
             <ListTodo style={{ width: 17, height: 17 }} />
           </button>
         ) : null}

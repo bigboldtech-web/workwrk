@@ -5,6 +5,7 @@
 
 import {
   type CanvasElement,
+  type CanvasCardElement,
   type CanvasScene,
   type PathElement,
   type ArrowType,
@@ -291,4 +292,98 @@ export function renderScene(ctx: CanvasRenderingContext2D, scene: CanvasScene, o
   ctx.setTransform(scale * dpr, 0, 0, scale * dpr, tx * dpr, ty * dpr);
   for (const el of scene.elements) drawElement(ctx, el, getImage);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/**
+ * Paint a canvas-in-canvas card: a titled frame with a live thumbnail of the
+ * linked Canvas (or a placeholder while it loads / when empty). Drawn by the
+ * editor's world-space loop; the caller resolves `linked` from its own cache.
+ */
+export function drawCanvasCard(
+  ctx: CanvasRenderingContext2D,
+  el: CanvasCardElement,
+  linked: CanvasScene | null,
+  getImage: (src: string) => HTMLImageElement | null,
+): void {
+  const headH = 28;
+  ctx.save();
+  ctx.globalAlpha = el.opacity;
+
+  // Card body + border.
+  ctx.fillStyle = "#FFFFFF";
+  roundRect(ctx, el.x, el.y, el.w, el.h, 10);
+  ctx.fill();
+  ctx.strokeStyle = "#E2E8F0";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Thumbnail area (below the header).
+  const inner = { x: el.x + 1, y: el.y + headH, w: el.w - 2, h: el.h - headH - 1 };
+  ctx.save();
+  roundRect(ctx, el.x, el.y, el.w, el.h, 10);
+  ctx.clip();
+  ctx.fillStyle = "#F8FAFC";
+  ctx.fillRect(inner.x, inner.y, inner.w, inner.h);
+  if (linked && linked.elements.length > 0) {
+    renderSceneInto(ctx, linked, inner, { padding: 10, getImage });
+  } else {
+    ctx.fillStyle = "#CBD5E1";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(linked ? "Empty canvas" : "Loading canvas…", inner.x + inner.w / 2, inner.y + inner.h / 2);
+    ctx.textAlign = "left";
+  }
+  ctx.restore();
+
+  // Header: a small canvas glyph + the title, on a faint bar.
+  ctx.fillStyle = "#F1F5F9";
+  ctx.beginPath();
+  ctx.rect(el.x + 1, el.y + 1, el.w - 2, headH - 1);
+  ctx.fill();
+  ctx.strokeStyle = "#94A3B8";
+  ctx.lineWidth = 1.4;
+  roundRect(ctx, el.x + 9, el.y + 9, 11, 10, 2);
+  ctx.stroke();
+  ctx.fillStyle = "#334155";
+  ctx.textBaseline = "middle";
+  ctx.font = "600 12.5px ui-sans-serif, system-ui, sans-serif";
+  wrapText(ctx, el.title || "Canvas", el.x + 28, el.y + headH / 2 + 1, el.w - 40, 16, 1);
+
+  ctx.restore();
+}
+
+/**
+ * Draw a scene fit-to-contain inside `rect` (in the CURRENT user-space units),
+ * composing on top of whatever transform is already active — used to paint a
+ * canvas-in-canvas thumbnail inside the live editor's world-space draw loop.
+ * Clips to the rect and never touches setTransform, so the caller's transform
+ * is preserved. Nested canvasCard elements inside `scene` draw nothing (no
+ * recursion) since drawElement doesn't paint them.
+ */
+export function renderSceneInto(
+  ctx: CanvasRenderingContext2D,
+  scene: CanvasScene,
+  rect: { x: number; y: number; w: number; h: number },
+  opts: { padding?: number; getImage?: (src: string) => HTMLImageElement | null } = {},
+): void {
+  const padding = opts.padding ?? 8;
+  const getImage = opts.getImage ?? (() => null);
+  const b = sceneBounds(scene);
+  if (!b || b.w <= 0 || b.h <= 0) return;
+
+  const availW = Math.max(1, rect.w - padding * 2);
+  const availH = Math.max(1, rect.h - padding * 2);
+  const scale = Math.min(availW / b.w, availH / b.h, 1);
+  const tx = rect.x + (rect.w - b.w * scale) / 2 - b.x * scale;
+  const ty = rect.y + (rect.h - b.h * scale) / 2 - b.y * scale;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rect.x, rect.y, rect.w, rect.h);
+  ctx.clip();
+  ctx.translate(tx, ty);
+  ctx.scale(scale, scale);
+  for (const el of scene.elements) drawElement(ctx, el, getImage);
+  ctx.restore();
 }

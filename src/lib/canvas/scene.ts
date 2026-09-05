@@ -25,6 +25,7 @@ export type ElementType =
   | "sticky"
   | "image"
   | "taskCard"
+  | "canvasCard"
   | "frame";
 
 /** Every element carries a world-space bounding box + shared style. */
@@ -110,6 +111,15 @@ export interface TaskCardElement extends BaseElement {
   href?: string;
 }
 
+/** A live reference to another Canvas, rendered as a thumbnail card that
+ *  opens the target Canvas. The canvas-in-canvas node — a Canvas nests inside
+ *  another Canvas the way a task/doc card does (Phase D of the primitive plan). */
+export interface CanvasCardElement extends BaseElement {
+  type: "canvasCard";
+  whiteboardId: string;
+  title: string;
+}
+
 /** A labeled container. Rendered behind other elements; moving it moves the
  *  elements whose centre sits inside it (frameChildren). */
 export interface FrameElement extends BaseElement {
@@ -118,7 +128,7 @@ export interface FrameElement extends BaseElement {
 }
 
 export type CanvasElement =
-  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement | FrameElement;
+  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement | CanvasCardElement | FrameElement;
 
 export interface Viewport {
   x: number; // pan offset in screen px
