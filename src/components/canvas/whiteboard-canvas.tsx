@@ -122,6 +122,7 @@ const TOOL_BY_NUM: Record<string, Tool> = Object.fromEntries(
 );
 
 const HANDLE = 8; // px, screen space
+const ROT_OFFSET = 22; // px above the top edge — where the rotation handle sits
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 6;
 
@@ -133,6 +134,7 @@ type Drag =
   | { kind: "move"; ids: string[]; startX: number; startY: number; origs: Map<string, CanvasElement> }
   | { kind: "resize"; id: string; handle: number; orig: CanvasElement }
   | { kind: "endpoint"; id: string; vi: number } // dragging a line/arrow vertex (0=start, last=end, middle=bend)
+  | { kind: "rotate"; id: string } // rotating a box element about its centre
   | { kind: "marquee"; startX: number; startY: number; add: boolean; base: string[] }
   | null;
 
@@ -412,6 +414,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             return;
           }
         } else if (sel) {
+          if (hitRotateHandle(sel, sx, sy, vp)) {
+            dragRef.current = { kind: "rotate", id: sel.id };
+            undoRef.current.push(cloneScene(scene));
+            return;
+          }
           const handle = hitHandle(sel, sx, sy, vp);
           if (handle >= 0) {
             dragRef.current = { kind: "resize", id: sel.id, handle, orig: cloneEl(sel) };
@@ -588,6 +595,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           return copy;
         })),
       }));
+    } else if (drag.kind === "rotate") {
+      const shift = e.shiftKey;
+      patchElement(drag.id, (el) => {
+        const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+        // Handle sits above centre; +PI/2 makes "cursor straight up" = 0 rad.
+        let a = Math.atan2(world.y - cy, world.x - cx) + Math.PI / 2;
+        if (shift) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12); // snap to 15°
+        el.angle = a;
+      });
     } else if (drag.kind === "endpoint") {
       patchElement(drag.id, (el) => {
         if (!("points" in el)) return;
@@ -665,7 +681,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         onChange(next);
         return next;
       });
-    } else if (drag.kind === "move" || drag.kind === "resize") {
+    } else if (drag.kind === "move" || drag.kind === "resize" || drag.kind === "rotate") {
       setScene((s) => { onChange(s); return s; });
     } else if (drag.kind === "endpoint") {
       // Re-bind (or free) a dragged END based on where it landed; a middle bend
@@ -1433,18 +1449,57 @@ function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x
     return;
   }
 
-  // Shapes / text / sticky / image / task cards: bounding box + corner handles.
+  // Shapes / text / sticky / image / task cards: bounding box + corner handles,
+  // rotated about the element centre when it has an angle.
+  const angle = el.angle ?? 0;
+  const cx = (el.x + el.w / 2) * vp.zoom + vp.x, cy = (el.y + el.h / 2) * vp.zoom + vp.y;
   const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
+  const corners = handlePositions(x, y, w, h).map(([hx, hy]) => rotatePt(hx, hy, cx, cy, angle));
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.beginPath();
+  ctx.moveTo(corners[0][0], corners[0][1]);
+  for (let i = 1; i < corners.length; i++) ctx.lineTo(corners[i][0], corners[i][1]);
+  ctx.closePath();
+  ctx.stroke();
   if (withHandles) {
     ctx.fillStyle = "#fff";
-    for (const [hx, hy] of handlePositions(x, y, w, h)) {
+    for (const [hx, hy] of corners) {
       ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
       ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
     }
+    // rotation handle: a circle above the top edge, along the box's up vector.
+    if (el.type !== "frame") {
+      const [rx, ry] = rotateHandlePos(el, vp);
+      const topMid = rotatePt(x + w / 2, y, cx, cy, angle);
+      ctx.beginPath(); ctx.moveTo(topMid[0], topMid[1]); ctx.lineTo(rx, ry); ctx.stroke();
+      ctx.beginPath(); ctx.arc(rx, ry, HANDLE / 2 + 1, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+    }
   }
   ctx.restore();
+}
+
+// Rotate screen point (px,py) about screen centre (cx,cy) by `angle` radians.
+function rotatePt(px: number, py: number, cx: number, cy: number, angle: number): [number, number] {
+  if (!angle) return [px, py];
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const dx = px - cx, dy = py - cy;
+  return [cx + dx * c - dy * s, cy + dx * s + dy * c];
+}
+
+// Screen position of an element's rotation handle (above its top-edge centre).
+function rotateHandlePos(el: CanvasElement, vp: { x: number; y: number; zoom: number }): [number, number] {
+  const angle = el.angle ?? 0;
+  const cx = (el.x + el.w / 2) * vp.zoom + vp.x, cy = (el.y + el.h / 2) * vp.zoom + vp.y;
+  const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom;
+  const topMid = rotatePt(x + w / 2, y, cx, cy, angle);
+  return [topMid[0] + Math.sin(angle) * ROT_OFFSET, topMid[1] - Math.cos(angle) * ROT_OFFSET];
+}
+
+// True when the cursor is over an element's rotation handle.
+function hitRotateHandle(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): boolean {
+  if (el.type === "line" || el.type === "arrow" || el.type === "freedraw" || el.type === "frame") return false;
+  const [rx, ry] = rotateHandlePos(el, vp);
+  return Math.hypot(sx - rx, sy - ry) <= HANDLE;
 }
 
 function drawMarquee(ctx: CanvasRenderingContext2D, box: { x: number; y: number; w: number; h: number }, vp: { x: number; y: number; zoom: number }) {
@@ -1499,22 +1554,46 @@ function hitSegment(el: CanvasElement, sx: number, sy: number, vp: { x: number; 
 
 function hitHandle(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): number {
   if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") return -1;
+  const angle = el.angle ?? 0;
+  const cx = (el.x + el.w / 2) * vp.zoom + vp.x, cy = (el.y + el.h / 2) * vp.zoom + vp.y;
   const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
-  const hs = handlePositions(x, y, w, h);
+  const hs = handlePositions(x, y, w, h).map(([hx, hy]) => rotatePt(hx, hy, cx, cy, angle));
   for (let i = 0; i < hs.length; i++) {
-    if (Math.abs(sx - hs[i][0]) <= HANDLE && Math.abs(sy - hs[i][1]) <= HANDLE) return i;
+    if (Math.hypot(sx - hs[i][0], sy - hs[i][1]) <= HANDLE) return i;
   }
   return -1;
 }
 
 function applyResize(el: CanvasElement, orig: CanvasElement, handle: number, world: { x: number; y: number }) {
-  let left = orig.x, top = orig.y, right = orig.x + orig.w, bottom = orig.y + orig.h;
-  if (handle === 0) { left = world.x; top = world.y; }
-  else if (handle === 1) { right = world.x; top = world.y; }
-  else if (handle === 2) { right = world.x; bottom = world.y; }
-  else if (handle === 3) { left = world.x; bottom = world.y; }
-  const box = normalizeBox({ x: left, y: top, w: right - left, h: bottom - top });
-  el.x = box.x; el.y = box.y; el.w = box.w; el.h = box.h;
+  const angle = orig.angle ?? 0;
+  if (!angle) {
+    let left = orig.x, top = orig.y, right = orig.x + orig.w, bottom = orig.y + orig.h;
+    if (handle === 0) { left = world.x; top = world.y; }
+    else if (handle === 1) { right = world.x; top = world.y; }
+    else if (handle === 2) { right = world.x; bottom = world.y; }
+    else if (handle === 3) { left = world.x; bottom = world.y; }
+    const box = normalizeBox({ x: left, y: top, w: right - left, h: bottom - top });
+    el.x = box.x; el.y = box.y; el.w = box.w; el.h = box.h;
+    return;
+  }
+  // Rotated: resize in the element's LOCAL frame so the opposite corner stays
+  // fixed in world space. Map the cursor into local coords (centred), edit the
+  // grabbed corner, then map the new local centre back to world.
+  const cx = orig.x + orig.w / 2, cy = orig.y + orig.h / 2;
+  const cos = Math.cos(-angle), sin = Math.sin(-angle);
+  const dx = world.x - cx, dy = world.y - cy;
+  const lx = dx * cos - dy * sin, ly = dx * sin + dy * cos;
+  const hw = orig.w / 2, hh = orig.h / 2;
+  let left = -hw, top = -hh, right = hw, bottom = hh;
+  if (handle === 0) { left = lx; top = ly; }
+  else if (handle === 1) { right = lx; top = ly; }
+  else if (handle === 2) { right = lx; bottom = ly; }
+  else if (handle === 3) { left = lx; bottom = ly; }
+  const nw = Math.max(1, Math.abs(right - left)), nh = Math.max(1, Math.abs(bottom - top));
+  const lcx = (left + right) / 2, lcy = (top + bottom) / 2;
+  const cosF = Math.cos(angle), sinF = Math.sin(angle);
+  const ncx = cx + (lcx * cosF - lcy * sinF), ncy = cy + (lcx * sinF + lcy * cosF);
+  el.x = ncx - nw / 2; el.y = ncy - nh / 2; el.w = nw; el.h = nh;
 }
 
 function cloneEl(el: CanvasElement): CanvasElement {

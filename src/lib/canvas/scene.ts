@@ -42,6 +42,8 @@ export interface BaseElement {
   opacity: number; // 0..1
   /** Line style for the stroke. Absent = "solid" (back-compat). */
   dash?: DashStyle;
+  /** Rotation in radians about the element centre. Absent/0 = upright. */
+  angle?: number;
 }
 
 export type DashStyle = "solid" | "dashed" | "dotted";
@@ -249,6 +251,15 @@ function distToSegment(px: number, py: number, ax: number, ay: number, bx: numbe
  * thin shapes (scaled by the caller to stay constant on screen at any zoom).
  */
 export function hitTest(el: CanvasElement, wx: number, wy: number, tol = 6): boolean {
+  // For a rotated box element, test in its LOCAL frame: inverse-rotate the
+  // point around the element's centre, then run the axis-aligned tests below.
+  if (el.angle && el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw") {
+    const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+    const cos = Math.cos(-el.angle), sin = Math.sin(-el.angle);
+    const dx = wx - cx, dy = wy - cy;
+    wx = cx + dx * cos - dy * sin;
+    wy = cy + dx * sin + dy * cos;
+  }
   if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") {
     const pts = el.points;
     for (let i = 1; i < pts.length; i++) {

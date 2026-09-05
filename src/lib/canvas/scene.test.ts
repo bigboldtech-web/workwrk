@@ -105,6 +105,14 @@ describe("scene geometry", () => {
     expect(isCanvasScene(null)).toBe(false);
   });
 
+  it("hitTest respects rotation (tests in the element's local frame)", () => {
+    // a wide, short rect rotated 90° occupies a TALL footprint on screen.
+    const base: ShapeElement = { id: "r", type: "rect", x: 0, y: 0, w: 100, h: 20, stroke: "#000", fill: "#eee", strokeWidth: 1, opacity: 1 };
+    const below: [number, number] = [50, 60]; // straight below the centre (50,10)
+    expect(hitTest(base, below[0], below[1])).toBe(false);          // upright: outside
+    expect(hitTest({ ...base, angle: Math.PI / 2 }, below[0], below[1])).toBe(true); // rotated: inside
+  });
+
   it("dashPattern: solid = no dashes, dashed/dotted scale with width", () => {
     expect(dashPattern("solid", 2)).toEqual([]);
     expect(dashPattern(undefined, 2)).toEqual([]); // absent = solid

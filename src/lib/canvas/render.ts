@@ -17,6 +17,13 @@ import {
 export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null) {
   ctx.save();
   ctx.globalAlpha = el.opacity;
+  // Rotate the whole element about its centre (contained by save/restore).
+  if (el.angle) {
+    const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+    ctx.translate(cx, cy);
+    ctx.rotate(el.angle);
+    ctx.translate(-cx, -cy);
+  }
 
   if (el.type === "image") {
     const img = getImage(el.src);
