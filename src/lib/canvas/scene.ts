@@ -24,7 +24,8 @@ export type ElementType =
   | "text"
   | "sticky"
   | "image"
-  | "taskCard";
+  | "taskCard"
+  | "frame";
 
 /** Every element carries a world-space bounding box + shared style. */
 export interface BaseElement {
@@ -92,8 +93,15 @@ export interface TaskCardElement extends BaseElement {
   meta: string; // small subtitle (due date / board), captured at insert
 }
 
+/** A labeled container. Rendered behind other elements; moving it moves the
+ *  elements whose centre sits inside it (frameChildren). */
+export interface FrameElement extends BaseElement {
+  type: "frame";
+  title: string;
+}
+
 export type CanvasElement =
-  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement;
+  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement | FrameElement;
 
 export interface Viewport {
   x: number; // pan offset in screen px
@@ -211,6 +219,14 @@ export function hitTest(el: CanvasElement, wx: number, wy: number, tol = 6): boo
     const nx = (wx - (x + rx)) / rx, ny = (wy - (y + ry)) / ry;
     return nx * nx + ny * ny <= 1;
   }
+  // A frame is hit only on its BORDER or its title strip (above the top edge),
+  // never its empty interior — so you can still marquee-select inside it.
+  if (el.type === "frame") {
+    const onSide = (Math.abs(wx - x) <= tol || Math.abs(wx - (x + w)) <= tol) && wy >= y - tol && wy <= y + h + tol;
+    const onCap = (Math.abs(wy - y) <= tol || Math.abs(wy - (y + h)) <= tol) && wx >= x - tol && wx <= x + w + tol;
+    const inTitle = wx >= x && wx <= x + w && wy >= y - 26 && wy <= y;
+    return onSide || onCap || inTitle;
+  }
   return wx >= x - tol && wx <= x + w + tol && wy >= y - tol && wy <= y + h + tol;
 }
 
@@ -256,6 +272,18 @@ export function reflowConnectors(elements: CanvasElement[]): void {
     el.points = [a, b];
     syncPathBounds(el);
   }
+}
+
+/** Ids of the non-frame elements whose CENTRE sits inside a frame — the set
+ *  that moves with the frame when it's dragged. */
+export function frameChildren(elements: CanvasElement[], frame: FrameElement): string[] {
+  const ids: string[] = [];
+  for (const el of elements) {
+    if (el.id === frame.id || el.type === "frame") continue;
+    const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+    if (cx >= frame.x && cx <= frame.x + frame.w && cy >= frame.y && cy <= frame.y + frame.h) ids.push(el.id);
+  }
+  return ids;
 }
 
 /** Does an element's bounding box overlap a world-space box (marquee select)? */

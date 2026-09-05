@@ -13,7 +13,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
-  Shapes, Triangle, Cloud, Database, RectangleHorizontal,
+  Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
 } from "lucide-react";
 
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
@@ -26,9 +26,9 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors,
+  elementInBox, reflowConnectors, frameChildren,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type CanvasElement, type CanvasScene, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
+  type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
 } from "@/lib/canvas/scene";
 
 /** A task the picker can drop onto the canvas as a live card. Resolved by the
@@ -72,7 +72,7 @@ async function loadScaledImage(file: File, maxDim: number): Promise<{ src: strin
 type Tool =
   | "select" | "hand"
   | "rect" | "ellipse" | "diamond" | "roundRect" | "triangle" | "parallelogram" | "cylinder" | "cloud"
-  | "line" | "arrow" | "freedraw" | "text" | "sticky";
+  | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame";
 
 const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
@@ -321,7 +321,13 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         // click a member → move the whole group; click a non-member → select it
         const ids = selectedIds.has(hit.id) ? selectedIds : new Set([hit.id]);
         if (!selectedIds.has(hit.id)) setSelectedIds(ids);
-        const moveIds = Array.from(ids);
+        // Dragging a frame drags its contents too (children captured now).
+        const moveIdSet = new Set(ids);
+        for (const id of ids) {
+          const el = scene.elements.find((e) => e.id === id);
+          if (el && el.type === "frame") for (const c of frameChildren(scene.elements, el)) moveIdSet.add(c);
+        }
+        const moveIds = Array.from(moveIdSet);
         const origs = new Map(moveIds.map((id) => [id, cloneEl(scene.elements.find((el) => el.id === id)!)]));
         dragRef.current = { kind: "move", ids: moveIds, startX: world.x, startY: world.y, origs };
         undoRef.current.push(cloneScene(scene));
@@ -372,6 +378,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       selectOne(id);
       setEditing({ id });
       setTool("select");
+    } else if (tool === "frame") {
+      const n = scene.elements.filter((e) => e.type === "frame").length + 1;
+      const el: FrameElement = { id, type: "frame", x: world.x, y: world.y, w: 1, h: 1, stroke: "#94A3B8", fill: "transparent", strokeWidth: 1.5, opacity: 1, title: `Frame ${n}` };
+      undoRef.current.push(snapshot);
+      // Insert at the FRONT of the array = bottom of the z-order, so elements
+      // dropped inside the frame always render on top of it.
+      setScene((s) => ({ ...s, elements: [el, ...s.elements] }));
+      selectOne(id);
+      dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
   }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, toWorld, selectOne]);
 
@@ -763,7 +778,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         onChange(next);
         return next;
       }
-      const next = { ...s, elements: s.elements.map((x) => (x.id === id && (x.type === "text" || x.type === "sticky") ? { ...x, text: value } : x)) };
+      const next = { ...s, elements: s.elements.map((x) => {
+        if (x.id !== id) return x;
+        if (x.type === "text" || x.type === "sticky") return { ...x, text: value };
+        if (x.type === "frame") return { ...x, title: value.trim() || "Frame" };
+        return x;
+      }) };
       onChange(next);
       return next;
     });
@@ -786,7 +806,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-          if (hit && (hit.type === "text" || hit.type === "sticky")) { selectOne(hit.id); setEditing({ id: hit.id }); }
+          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame")) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenTask) onOpenTask(hit.itemId);
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
@@ -833,6 +853,25 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
             background: editingEl.type === "sticky" ? editingEl.fill : "transparent",
             color: editingEl.type === "text" ? editingEl.stroke : "#1E293B",
             resize: "none", overflow: "hidden", fontFamily: "inherit",
+          }}
+        />
+      ) : null}
+
+      {/* frame title editing */}
+      {editingEl && editingEl.type === "frame" ? (
+        <input
+          autoFocus
+          defaultValue={editingEl.title}
+          onBlur={(e) => commitText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === "Escape") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+          style={{
+            position: "absolute",
+            left: editingEl.x * vp.zoom + vp.x,
+            top: (editingEl.y - 24) * vp.zoom + vp.y,
+            width: Math.max(90, editingEl.w * vp.zoom),
+            fontSize: 13 * vp.zoom, fontWeight: 600,
+            border: "none", outline: "2px solid #0073EA", borderRadius: 4, padding: "1px 4px",
+            background: "#fff", color: "#475569", fontFamily: "inherit",
           }}
         />
       ) : null}
@@ -958,6 +997,9 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
             </>
           ) : null}
         </div>
+        <button type="button" title="Frame (labeled container)" onClick={() => setTool("frame")} style={toolBtn(tool === "frame")}>
+          <FrameIcon style={{ width: 17, height: 17 }} />
+        </button>
         <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
@@ -1037,6 +1079,21 @@ function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage:
       const mw = ctx.measureText(el.meta).width;
       ctx.fillText(el.meta, el.x + el.w - pad - mw, el.y + el.h - 22);
     }
+    ctx.restore();
+    return;
+  }
+
+  if (el.type === "frame") {
+    ctx.fillStyle = "rgba(148,163,184,0.06)";
+    roundRect(ctx, el.x, el.y, el.w, el.h, 8);
+    ctx.fill();
+    ctx.strokeStyle = "#CBD5E1";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#64748B";
+    ctx.textBaseline = "bottom";
+    ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(el.title || "Frame", el.x + 2, el.y - 6);
     ctx.restore();
     return;
   }
@@ -1274,9 +1331,9 @@ function CtxItem({ label, hint, danger, onClick }: { label: string; hint?: strin
   );
 }
 
-/** A connector can bind to any element that isn't itself a line/arrow/pen. */
+/** A connector can bind to any element that isn't a line/arrow/pen or a frame. */
 function isBindable(el: CanvasElement): boolean {
-  return el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw";
+  return el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw" && el.type !== "frame";
 }
 
 /** Clone the bound connectors in `elements` (so reflow never mutates React

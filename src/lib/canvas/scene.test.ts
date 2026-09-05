@@ -6,6 +6,7 @@ import {
   cloneScene,
   elementInBox,
   emptyScene,
+  frameChildren,
   hitTest,
   hitTopElement,
   isCanvasScene,
@@ -15,6 +16,7 @@ import {
   sceneBounds,
   syncPathBounds,
   type CanvasElement,
+  type FrameElement,
   type PathElement,
   type ShapeElement,
 } from "./scene";
@@ -99,6 +101,21 @@ describe("scene geometry", () => {
     expect(isCanvasScene(emptyScene())).toBe(true);
     expect(isCanvasScene({ elements: [] })).toBe(false); // no version = legacy
     expect(isCanvasScene(null)).toBe(false);
+  });
+});
+
+describe("frames", () => {
+  const frame: FrameElement = { id: "f", type: "frame", x: 0, y: 0, w: 200, h: 200, stroke: "#94A3B8", fill: "transparent", strokeWidth: 1, opacity: 1, title: "Frame 1" };
+  it("frameChildren returns elements whose centre is inside, skips others + the frame + nested frames", () => {
+    const inside = rect("in", 20, 20, 40, 40); // centre (40,40) inside
+    const outside = rect("out", 300, 300, 40, 40); // far away
+    const nested: FrameElement = { ...frame, id: "f2", x: 10, y: 10, w: 50, h: 50 };
+    const ids = frameChildren([frame, inside, outside, nested], frame);
+    expect(ids).toEqual(["in"]); // "out" excluded, frame + nested frame skipped
+  });
+  it("frameChildren excludes an element whose centre is just outside even if it overlaps the edge", () => {
+    const straddle = rect("s", 180, 90, 60, 20); // centre x=210 > 200 → out
+    expect(frameChildren([frame, straddle], frame)).toEqual([]);
   });
 });
 
