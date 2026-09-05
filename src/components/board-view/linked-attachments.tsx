@@ -140,7 +140,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         sourceId={sourceId}
         onReload={load}
         linkExisting={{
-          kindLabel: "whiteboard",
+          kindLabel: "canvas",
           targetType: "WHITEBOARD",
           loadCandidates: async () => {
             const res = await fetch("/api/whiteboards");
@@ -157,7 +157,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
           });
           const data = await wbRes.json();
           const wbId = data?.whiteboard?.id;
-          if (!wbId) throw new Error("Could not create whiteboard");
+          if (!wbId) throw new Error("Could not create canvas");
           await fetch("/api/entity-links", {
             method: "POST",
             headers: { "content-type": "application/json" },

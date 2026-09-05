@@ -18,6 +18,12 @@ interface Candidate {
   subtitle?: string | null;
 }
 
+// English plural for the kind labels we use ("note" → "notes",
+// "canvas" → "canvases", not "canvass"). Words ending in s/x/z/ch/sh take "es".
+function pluralize(word: string): string {
+  return /(?:s|x|z|ch|sh)$/i.test(word) ? `${word}es` : `${word}s`;
+}
+
 interface Props {
   /** Anchored next to "+ Add"; we control the toggle from the parent. */
   open: boolean;
@@ -123,7 +129,7 @@ export function LinkExistingPicker({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${kindLabel}s…`}
+              placeholder={`Search ${pluralize(kindLabel)}…`}
               className="w-full h-7 pl-7 pr-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
               autoFocus
             />
@@ -148,8 +154,8 @@ export function LinkExistingPicker({
         ) : filtered.length === 0 ? (
           <div className="px-3 py-4 text-[12.5px] text-zinc-400">
             {query
-              ? `No ${kindLabel}s match "${query}"`
-              : `No ${kindLabel}s to link — create a new one above.`}
+              ? `No ${pluralize(kindLabel)} match "${query}"`
+              : `No ${pluralize(kindLabel)} to link — create a new one above.`}
           </div>
         ) : (
           filtered.map((c) => {

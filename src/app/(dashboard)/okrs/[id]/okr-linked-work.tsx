@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Boxes, FolderKanban, Target, Link2, Plus, X, ExternalLink, Loader2 } from "lucide-react";
+import { Boxes, FolderKanban, Target, Link2, X, ExternalLink, Loader2, Frame } from "lucide-react";
 import { LinkExistingPicker } from "@/components/board-view/link-existing-picker";
 
 interface HydratedLink {
@@ -17,22 +17,25 @@ interface HydratedLink {
   target?: { title: string | null; subtitle?: string | null; href?: string | null };
 }
 
-type Kind = "SPACE" | "BOARD" | "KRA";
+type Kind = "SPACE" | "BOARD" | "KRA" | "WHITEBOARD";
 
 export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: boolean }) {
   const [spaces, setSpaces] = useState<HydratedLink[] | null>(null);
   const [boards, setBoards] = useState<HydratedLink[] | null>(null);
   const [kras, setKras] = useState<HydratedLink[] | null>(null);
+  const [canvases, setCanvases] = useState<HydratedLink[] | null>(null);
 
   const load = useCallback(() => {
     Promise.all([
       fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=SPACE`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=BOARD`).then((r) => r.json()).catch(() => ({ links: [] })),
       fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=KRA`).then((r) => r.json()).catch(() => ({ links: [] })),
-    ]).then(([sp, bd, kr]) => {
+      fetch(`/api/entity-links?sourceType=OKR&sourceId=${okrId}&filterTargetType=WHITEBOARD`).then((r) => r.json()).catch(() => ({ links: [] })),
+    ]).then(([sp, bd, kr, cv]) => {
       setSpaces(sp.links ?? []);
       setBoards(bd.links ?? []);
       setKras(kr.links ?? []);
+      setCanvases(cv.links ?? []);
     });
   }, [okrId]);
 
@@ -91,15 +94,35 @@ export function OkrLinkedWork({ okrId, canEdit }: { okrId: string; canEdit: bool
         }}
         fallbackHref={(id) => `/boards/${id}`}
       />
+      <LinkRow
+        kind="WHITEBOARD"
+        title="Canvases"
+        kindLabel="canvas"
+        Icon={Frame}
+        okrId={okrId}
+        items={canvases}
+        canEdit={canEdit}
+        onReload={load}
+        emptyHint="Link a Canvas — a strategy map, a diagram, a retro — that frames this objective."
+        loadCandidates={async () => {
+          const res = await fetch("/api/whiteboards");
+          const data = await res.json().catch(() => ({}));
+          const list: Array<{ id: string; name: string; description?: string | null }> = data?.whiteboards ?? [];
+          return list.map((w) => ({ id: w.id, title: w.name, subtitle: w.description ?? null }));
+        }}
+        fallbackHref={(id) => `/canvas/${id}`}
+      />
     </div>
   );
 }
 
 function LinkRow({
-  kind, title, Icon, okrId, items, canEdit, onReload, emptyHint, loadCandidates, fallbackHref,
+  kind, title, kindLabel, Icon, okrId, items, canEdit, onReload, emptyHint, loadCandidates, fallbackHref,
 }: {
   kind: Kind;
   title: string;
+  /** Explicit singular label for the picker; defaults to the title minus a trailing "s". */
+  kindLabel?: string;
   Icon: typeof Boxes;
   okrId: string;
   items: HydratedLink[] | null;
@@ -156,7 +179,7 @@ function LinkRow({
             <LinkExistingPicker
               open={pickerOpen}
               onClose={() => setPickerOpen(false)}
-              kindLabel={title.toLowerCase().replace(/s$/, "")}
+              kindLabel={kindLabel ?? title.toLowerCase().replace(/s$/, "")}
               loadCandidates={loadCandidates}
               excludeIds={linkedIds}
               onPick={pick}
