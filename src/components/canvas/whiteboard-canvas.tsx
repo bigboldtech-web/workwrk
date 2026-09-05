@@ -469,9 +469,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
       if (!multiRef.current) {
-        // Start an arrow. Points = [start, floating-end]. Binds to a shape it
-        // STARTS on. Press-drag = quick 2-point arrow; a click starts a
-        // MULTI-POINT arrow — click to drop elbow/curve bends.
+        // Click (or press) to START the arrow. Points = [start, floating-end].
+        // It binds to a shape it starts on.
         const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
         const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
         const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
@@ -481,22 +480,14 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         multiRef.current = { id, downX: sx, downY: sy };
         dragRef.current = { kind: "path", id };
       } else {
-        // Continue an in-progress arrow. If the click lands on a bindable shape
-        // (an edge) — other than the one it started on — snap the end there and
-        // FINISH (no double-click needed). Otherwise drop a bend and keep going.
+        // Second click STOPS the arrow. Place the end here and finish: it binds
+        // if it landed on a shape, otherwise it just ends straight in empty
+        // space. (No bends are added while drawing — click the finished line to
+        // add a bend afterwards.)
         const mid = multiRef.current.id;
-        const el = scene.elements.find((x) => x.id === mid) as PathElement | undefined;
-        const endHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-        const onEdge = endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== el?.fromId;
         patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
-        if (onEdge) {
-          finishMultiArrow();
-          dragRef.current = null;
-        } else {
-          patchElement(mid, (x) => { if ("points" in x) { x.points.push([world.x, world.y]); syncPathBounds(x as PathElement); } });
-          multiRef.current = { id: mid, downX: sx, downY: sy };
-          dragRef.current = null;
-        }
+        finishMultiArrow();
+        dragRef.current = null;
       }
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]], ...(dash !== "solid" ? { dash } : {}) };
