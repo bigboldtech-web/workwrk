@@ -505,15 +505,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         multiRef.current = { id, downX: sx, downY: sy };
         dragRef.current = { kind: "path", id };
       } else {
-        // Multi-point mode (Excalidraw). Each click adds a vertex, EXCEPT:
-        //  - click on a bindable shape → magnet-connect to it + FINISH.
-        //  - click on the last placed point → FINISH.
-        // (double-click / Enter / Escape also finish.) A press-drag finishes on
-        // release (see onPointerUp).
+        // ONLY straight arrows are multi-point (click adds a joint). Elbow and
+        // curved arrows just connect start→end and auto-route, so their second
+        // click always FINISHES (2-point). For straight arrows: an empty click
+        // adds a joint; a click on a shape / on the last point finishes; so do
+        // double-click / Enter / Escape. A press-drag finishes on release.
         const mid = multiRef.current.id;
         const el = scene.elements.find((x) => x.id === mid);
         if (!el || !("points" in el)) { multiRef.current = null; dragRef.current = null; }
         else {
+          const isStraight = (el as PathElement).arrowType !== "elbow" && (el as PathElement).arrowType !== "curved";
           const pts = el.points;
           const lastFixed = pts[pts.length - 2]; // the floating end is pts[last]
           const lsx = lastFixed[0] * vp.zoom + vp.x, lsy = lastFixed[1] * vp.zoom + vp.y;
@@ -521,8 +522,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const endHit = hitTopElement(scene, world.x, world.y, BIND_TOL / vp.zoom);
           const onShape = !!endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== (el as PathElement).fromId;
           patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
-          if (onShape || onLast) {
-            // magnet-connect to a shape, or close on the last point → finish
+          if (!isStraight || onShape || onLast) {
+            // elbow/curved always finish; straight finishes on a shape or the last point
             if (onLast) patchElement(mid, (x) => { if ("points" in x && x.points.length > 2) { x.points.pop(); syncPathBounds(x as PathElement); } });
             finishMultiArrow();
           } else {
