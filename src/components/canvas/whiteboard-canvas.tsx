@@ -38,8 +38,9 @@ import {
   type ArrowType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
 } from "@/lib/canvas/scene";
 
-/** A task the picker can drop onto the canvas as a live card. Resolved by the
- *  host (which owns task data + status colors) and passed in via `loadTasks`. */
+/** A work-graph item the picker can drop onto the canvas as a live card
+ *  (a task, doc, …). Resolved by the host (which owns the data + colors) and
+ *  passed in via `loadEntities`. `href` is the open target; `kind` labels it. */
 export interface TaskSummary {
   id: string;
   title: string;
@@ -47,6 +48,8 @@ export interface TaskSummary {
   statusLabel: string;
   statusColor: string;
   meta: string;
+  href: string;
+  kind?: string;
 }
 
 /** Read a File → data URL, downscaling to `maxDim` so scenes stay a sane size. */
@@ -119,13 +122,13 @@ type Drag =
 export interface WhiteboardCanvasProps {
   initialScene: CanvasScene;
   onChange: (scene: CanvasScene) => void;
-  /** Fetch tasks for the "Task card" picker. Omit to hide the feature. */
-  loadTasks?: () => Promise<TaskSummary[]>;
-  /** Open a task (double-click a card). Omit to make cards non-navigable. */
-  onOpenTask?: (itemId: string) => void;
+  /** Fetch work-graph items (tasks, docs, …) for the card picker. Omit to hide. */
+  loadEntities?: () => Promise<TaskSummary[]>;
+  /** Open a card's target (double-click) — receives its href. Omit = non-navigable. */
+  onOpenEntity?: (href: string) => void;
 }
 
-export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask }: WhiteboardCanvasProps) {
+export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenEntity }: WhiteboardCanvasProps) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -827,7 +830,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       id, type: "taskCard", x: c.x - w / 2, y: c.y - h / 2, w, h,
       stroke: "#E2E8F0", fill: "#FFFFFF", strokeWidth: 1, opacity: 1,
       itemId: task.id, title: task.title, status: task.status,
-      statusLabel: task.statusLabel, statusColor: task.statusColor, meta: task.meta,
+      statusLabel: task.statusLabel, statusColor: task.statusColor, meta: task.meta, href: task.href,
     };
     const snapshot = cloneScene(scene);
     const next = { ...scene, elements: [...scene.elements, el] };
@@ -838,10 +841,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
 
   const openTaskPicker = useCallback(() => {
     setTaskPickerOpen(true);
-    if (tasks === null && loadTasks) {
-      void loadTasks().then((t) => setTasks(t)).catch(() => setTasks([]));
+    if (tasks === null && loadEntities) {
+      void loadEntities().then((t) => setTasks(t)).catch(() => setTasks([]));
     }
-  }, [tasks, loadTasks]);
+  }, [tasks, loadEntities]);
 
   // keyboard
   useEffect(() => {
@@ -949,7 +952,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
           if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame")) { selectOne(hit.id); setEditing({ id: hit.id }); }
-          else if (hit && hit.type === "taskCard" && onOpenTask) onOpenTask(hit.itemId);
+          else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
@@ -1029,7 +1032,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
                 autoFocus
                 value={taskQuery}
                 onChange={(e) => setTaskQuery(e.target.value)}
-                placeholder="Search tasks to drop on the board…"
+                placeholder="Search tasks & docs to drop on the board…"
                 style={{ flex: 1, border: "none", outline: "none", fontSize: 13.5, background: "transparent", color: "var(--os-ink, #1e293b)" }}
               />
             </div>
@@ -1039,14 +1042,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
               ) : (() => {
                 const q = taskQuery.trim().toLowerCase();
                 const list = q ? tasks.filter((t) => t.title.toLowerCase().includes(q)) : tasks;
-                if (list.length === 0) return <p style={{ padding: "18px 12px", textAlign: "center", fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>{tasks.length === 0 ? "No tasks yet." : "No matches."}</p>;
+                if (list.length === 0) return <p style={{ padding: "18px 12px", textAlign: "center", fontSize: 13, color: "var(--os-ink-3, #9aa3b2)" }}>{tasks.length === 0 ? "Nothing to drop yet." : "No matches."}</p>;
                 return list.slice(0, 100).map((t) => (
-                  <button key={t.id} type="button" onClick={() => addTaskCard(t)}
+                  <button key={`${t.kind ?? "task"}:${t.id}`} type="button" onClick={() => addTaskCard(t)}
                     style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "8px 10px", borderRadius: 8, border: "none", background: "transparent", cursor: "pointer", textAlign: "left" }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = "var(--os-surface-1, #f4f4f5)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                     <span style={{ width: 8, height: 8, borderRadius: 8, background: t.statusColor || "#94A3B8", flex: "none" }} />
                     <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: "var(--os-ink, #1e293b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.title}</span>
+                    {t.kind === "doc" ? <span style={{ fontSize: 10.5, fontWeight: 600, letterSpacing: ".04em", color: "#3B82F6", background: "rgba(59,130,246,0.12)", borderRadius: 5, padding: "1px 5px", flex: "none" }}>DOC</span> : null}
                     {t.meta ? <span style={{ fontSize: 12, color: "var(--os-ink-3, #9aa3b2)", flex: "none" }}>{t.meta}</span> : null}
                   </button>
                 ));
@@ -1155,8 +1159,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         <button type="button" title="Insert image (or paste / drop one)" onClick={() => fileRef.current?.click()} style={toolBtn(false)}>
           <ImagePlus style={{ width: 17, height: 17 }} />
         </button>
-        {loadTasks ? (
-          <button type="button" title="Insert task card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
+        {loadEntities ? (
+          <button type="button" title="Insert a task or doc card" onClick={openTaskPicker} style={toolBtn(taskPickerOpen)}>
             <ListTodo style={{ width: 17, height: 17 }} />
           </button>
         ) : null}

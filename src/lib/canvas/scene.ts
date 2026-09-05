@@ -104,7 +104,10 @@ export interface TaskCardElement extends BaseElement {
   status: string;
   statusLabel: string;
   statusColor: string;
-  meta: string; // small subtitle (due date / board), captured at insert
+  meta: string; // small subtitle (due date / board / updated), captured at insert
+  /** Open target — a task ("/item/:id"), doc ("/docs/:id"), etc. Falls back
+   *  to "/item/:itemId" for legacy task cards. */
+  href?: string;
 }
 
 /** A labeled container. Rendered behind other elements; moving it moves the

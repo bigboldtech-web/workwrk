@@ -26,30 +26,49 @@ import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalid
 import { STATUS_LOOKUP } from "@/lib/board-items-shared";
 import "@excalidraw/excalidraw/index.css";
 
-// Load the viewer's tasks for the whiteboard task-card picker → the work graph
-// on the canvas. Cross-board "my items"; status label/color from the shared
-// lookup; meta = due date when set, else the board name.
+// Load droppable work-graph items for the canvas card picker → tasks AND docs.
+// Tasks: cross-board "my items" (status/color from the shared lookup, meta =
+// due date else board). Docs: recent org docs (blue "Doc" pill, meta = updated).
 type MeItem = { id: string; title: string; status: string | null; dueAt: string | null; board: { name: string } | null };
-async function loadMyTasks(): Promise<TaskSummary[]> {
-  const res = await fetch("/api/me/items?status=all", { cache: "no-store" });
-  if (!res.ok) return [];
-  const data = await res.json().catch(() => ({ items: [] }));
-  const items: MeItem[] = Array.isArray(data.items) ? data.items : [];
-  return items.map((it) => {
-    const s = it.status ? STATUS_LOOKUP[it.status] : undefined;
-    const due = it.dueAt ? new Date(it.dueAt) : null;
-    const meta = due && !Number.isNaN(due.getTime())
-      ? due.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-      : it.board?.name ?? "";
-    return {
-      id: it.id,
-      title: it.title,
-      status: it.status ?? "",
-      statusLabel: s?.label ?? (it.status ?? "No status"),
-      statusColor: s?.color ?? "#94A3B8",
-      meta,
-    };
-  });
+type DocItem = { id: string; title: string | null; updatedAt: string | null };
+function relUpdated(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+async function loadCanvasEntities(): Promise<TaskSummary[]> {
+  const [taskRes, docRes] = await Promise.all([
+    fetch("/api/me/items?status=all", { cache: "no-store" }).catch(() => null),
+    fetch("/api/docs", { cache: "no-store" }).catch(() => null),
+  ]);
+  const tasks: TaskSummary[] = [];
+  if (taskRes?.ok) {
+    const data = await taskRes.json().catch(() => ({ items: [] }));
+    const items: MeItem[] = Array.isArray(data.items) ? data.items : [];
+    for (const it of items) {
+      const s = it.status ? STATUS_LOOKUP[it.status] : undefined;
+      const due = it.dueAt ? new Date(it.dueAt) : null;
+      tasks.push({
+        id: it.id, kind: "task", title: it.title, status: it.status ?? "",
+        statusLabel: s?.label ?? (it.status ?? "No status"), statusColor: s?.color ?? "#94A3B8",
+        meta: due && !Number.isNaN(due.getTime()) ? due.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : it.board?.name ?? "",
+        href: `/item/${it.id}`,
+      });
+    }
+  }
+  const docs: TaskSummary[] = [];
+  if (docRes?.ok) {
+    const data = await docRes.json().catch(() => ({}));
+    const list: DocItem[] = data.docs ?? data.data ?? (Array.isArray(data) ? data : []);
+    for (const d of list.slice(0, 60)) {
+      docs.push({
+        id: d.id, kind: "doc", title: d.title || "Untitled doc", status: "",
+        statusLabel: "Doc", statusColor: "#3B82F6", meta: relUpdated(d.updatedAt),
+        href: `/docs/${d.id}`,
+      });
+    }
+  }
+  return [...tasks, ...docs];
 }
 
 // First-party WorkwrK Canvas rollout (safe): a board renders in our engine when
@@ -395,8 +414,8 @@ export default function WhiteboardCanvasPage() {
           <WhiteboardCanvas
             initialScene={canvasInitial}
             onChange={onCanvasSceneChange}
-            loadTasks={loadMyTasks}
-            onOpenTask={(itemId) => router.push(`/item/${itemId}`)}
+            loadEntities={loadCanvasEntities}
+            onOpenEntity={(href) => router.push(href)}
           />
         ) : (
           <Excalidraw
