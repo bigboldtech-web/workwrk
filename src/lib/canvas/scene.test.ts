@@ -4,6 +4,7 @@ import {
   boundsOfElements,
   boundsOfPoints,
   cloneScene,
+  elbowPoints,
   elementInBox,
   emptyScene,
   frameChildren,
@@ -101,6 +102,15 @@ describe("scene geometry", () => {
     expect(isCanvasScene(emptyScene())).toBe(true);
     expect(isCanvasScene({ elements: [] })).toBe(false); // no version = legacy
     expect(isCanvasScene(null)).toBe(false);
+  });
+});
+
+describe("elbow routing", () => {
+  it("routes H-V-H via the mid-x when the span is wider than tall", () => {
+    expect(elbowPoints([0, 0], [100, 40])).toEqual([[0, 0], [50, 0], [50, 40], [100, 40]]);
+  });
+  it("routes V-H-V via the mid-y when taller than wide", () => {
+    expect(elbowPoints([0, 0], [40, 100])).toEqual([[0, 0], [0, 50], [40, 50], [40, 100]]);
   });
 });
 

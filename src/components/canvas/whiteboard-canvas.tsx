@@ -14,7 +14,14 @@ import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
+  MoveRight, CornerDownRight, Spline,
 } from "lucide-react";
+
+const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
+  { type: "straight", Icon: MoveRight, label: "Straight" },
+  { type: "elbow", Icon: CornerDownRight, label: "Elbow" },
+  { type: "curved", Icon: Spline, label: "Curved" },
+];
 
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
 const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
@@ -26,9 +33,9 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren,
+  elementInBox, reflowConnectors, frameChildren, elbowPoints,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
+  type ArrowType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TaskCardElement,
 } from "@/lib/canvas/scene";
 
 /** A task the picker can drop onto the canvas as a live card. Resolved by the
@@ -105,6 +112,7 @@ type Drag =
   | { kind: "path"; id: string }
   | { kind: "move"; ids: string[]; startX: number; startY: number; origs: Map<string, CanvasElement> }
   | { kind: "resize"; id: string; handle: number; orig: CanvasElement }
+  | { kind: "endpoint"; id: string; end: 0 | 1 } // dragging a line/arrow endpoint
   | { kind: "marquee"; startX: number; startY: number; add: boolean; base: string[] }
   | null;
 
@@ -126,7 +134,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
   const [stroke, setStroke] = useState(DEFAULT_STROKE);
   const [fillColor, setFillColor] = useState("transparent");
   const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
+  const [arrowType, setArrowType] = useState<ArrowType>("straight");
+  const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
+  const multiRef = useRef<{ id: string; downX: number; downY: number } | null>(null); // in-progress multi-point arrow
+  const lastPtrRef = useRef({ sx: 0, sy: 0 }); // last pointer pos (screen), for drag-vs-click
   const clipboardRef = useRef<CanvasElement[]>([]);
   const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -282,6 +294,46 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     }));
   }, []);
 
+  // Finish the in-progress multi-point arrow (double-click / Enter / Escape /
+  // press-drag): trim trailing floating/coincident points, bind the end to a
+  // shape if it lands on one, or drop a stray zero-length arrow.
+  const finishMultiArrow = useCallback(() => {
+    const m = multiRef.current;
+    if (!m) return;
+    multiRef.current = null;
+    setHoverBindId(null);
+    setScene((s) => {
+      const el = s.elements.find((x) => x.id === m.id);
+      if (!el || !("points" in el)) return s;
+      const points = el.points.map((p) => [p[0], p[1]] as [number, number]);
+      while (points.length > 2 && dist(points[points.length - 1], points[points.length - 2]) < 4) points.pop();
+      if (points.length < 2 || (points.length === 2 && dist(points[0], points[1]) < 4)) {
+        selectOne(null);
+        const next = { ...s, elements: s.elements.filter((x) => x.id !== m.id) };
+        onChange(next);
+        return next;
+      }
+      const end = points[points.length - 1];
+      let toId: string | undefined;
+      for (let i = s.elements.length - 1; i >= 0; i--) {
+        const c = s.elements[i];
+        if (c.id === m.id || c.id === (el as PathElement).fromId || !isBindable(c)) continue;
+        if (hitTest(c, end[0], end[1], 6 / s.viewport.zoom)) { toId = c.id; break; }
+      }
+      let elements = s.elements.map((x) => {
+        if (x.id !== m.id) return x;
+        const c: PathElement = { ...(x as PathElement), points, toId };
+        syncPathBounds(c);
+        return c;
+      });
+      elements = reflowElements(elements);
+      const next = { ...s, elements };
+      onChange(next);
+      return next;
+    });
+    bump();
+  }, [onChange, bump, selectOne]);
+
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (editing) return;
     const canvas = canvasRef.current!;
@@ -297,10 +349,17 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
     }
 
     if (tool === "select") {
-      // Resize handle — only when exactly one element is selected.
+      // Endpoint / resize handles — only when exactly one element is selected.
       if (selectedIds.size === 1) {
         const sel = scene.elements.find((el) => selectedIds.has(el.id));
-        if (sel) {
+        if (sel && (sel.type === "line" || sel.type === "arrow")) {
+          const ep = hitEndpoint(sel, sx, sy, vp);
+          if (ep !== -1) {
+            dragRef.current = { kind: "endpoint", id: sel.id, end: ep };
+            undoRef.current.push(cloneScene(scene));
+            return;
+          }
+        } else if (sel) {
           const handle = hitHandle(sel, sx, sy, vp);
           if (handle >= 0) {
             dragRef.current = { kind: "resize", id: sel.id, handle, orig: cloneEl(sel) };
@@ -350,15 +409,25 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
-      // A line/arrow becomes a CONNECTOR when it starts on an element — bind it
-      // so it re-routes when that element moves.
-      const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-      const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
-      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId };
-      undoRef.current.push(snapshot);
-      setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      selectOne(id);
-      dragRef.current = { kind: "path", id };
+      if (!multiRef.current) {
+        // Start a new arrow. Points = [start, floating-end]. It binds to a shape
+        // it starts on (connector). Press-drag makes a quick 2-point arrow; a
+        // click starts a MULTI-POINT arrow (click to add bends, dbl-click ends).
+        const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+        const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
+        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType };
+        undoRef.current.push(snapshot);
+        setScene((s) => ({ ...s, elements: [...s.elements, el] }));
+        selectOne(id);
+        multiRef.current = { id, downX: sx, downY: sy };
+        dragRef.current = { kind: "path", id };
+      } else {
+        // Continue: fix the floating end at this click + append a new floating.
+        const mid = multiRef.current.id;
+        patchElement(mid, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [world.x, world.y]; el.points.push([world.x, world.y]); syncPathBounds(el as PathElement); } });
+        multiRef.current = { id: mid, downX: sx, downY: sy };
+        dragRef.current = null;
+      }
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]] };
       undoRef.current.push(snapshot);
@@ -388,14 +457,25 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, toWorld, selectOne]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, toWorld, selectOne, patchElement]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const canvas = canvasRef.current!;
+    const mrect = canvas.getBoundingClientRect();
+    const msx = e.clientX - mrect.left, msy = e.clientY - mrect.top;
+    lastPtrRef.current = { sx: msx, sy: msy };
+    // Multi-point arrow: the floating end tracks the cursor (even between clicks).
+    if (multiRef.current) {
+      const w = toWorld(msx, msy);
+      patchElement(multiRef.current.id, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [w.x, w.y]; syncPathBounds(el as PathElement); } });
+      let hover: string | null = null;
+      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      setHoverBindId(hover);
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
-    const canvas = canvasRef.current!;
-    const rect = canvas.getBoundingClientRect();
-    const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
+    const sx = msx, sy = msy;
     const world = toWorld(sx, sy);
 
     if (drag.kind === "pan") {
@@ -445,6 +525,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
           return copy;
         })),
       }));
+    } else if (drag.kind === "endpoint") {
+      patchElement(drag.id, (el) => {
+        if (!("points" in el)) return;
+        el.points[drag.end === 0 ? 0 : el.points.length - 1] = [world.x, world.y];
+        syncPathBounds(el as PathElement);
+      });
+      let hover: string | null = null;
+      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === drag.id || !isBindable(c)) continue; if (hitTest(c, world.x, world.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      setHoverBindId(hover);
     } else if (drag.kind === "marquee") {
       const box = normalizeBox({ x: drag.startX, y: drag.startY, w: world.x - drag.startX, h: world.y - drag.startY });
       setMarquee(box);
@@ -455,6 +544,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
   }, [patchElement, toWorld, scene.elements, vp]);
 
   const onPointerUp = useCallback(() => {
+    // In multi-point arrow mode: a press-DRAG ends the arrow (quick 2-point, or
+    // the final segment); a plain CLICK keeps adding bends (dbl-click/Esc ends).
+    if (multiRef.current) {
+      dragRef.current = null;
+      const moved = dist([lastPtrRef.current.sx, lastPtrRef.current.sy], [multiRef.current.downX, multiRef.current.downY]);
+      if (moved > 5) finishMultiArrow();
+      setHoverBindId(null);
+      bump();
+      return;
+    }
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
@@ -500,13 +599,38 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       });
     } else if (drag.kind === "move" || drag.kind === "resize") {
       setScene((s) => { onChange(s); return s; });
+    } else if (drag.kind === "endpoint") {
+      // Re-bind (or free) the dragged endpoint based on where it landed.
+      setScene((s) => {
+        const el = s.elements.find((x) => x.id === drag.id);
+        if (!el || !("points" in el)) return s;
+        const p = el.points[drag.end === 0 ? 0 : el.points.length - 1];
+        let bindId: string | undefined;
+        for (let k = s.elements.length - 1; k >= 0; k--) {
+          const c = s.elements[k];
+          if (c.id === drag.id || !isBindable(c)) continue;
+          if (hitTest(c, p[0], p[1], 6 / s.viewport.zoom)) { bindId = c.id; break; }
+        }
+        let elements = s.elements.map((x) => {
+          if (x.id !== drag.id) return x;
+          const xp = x as PathElement;
+          const c: PathElement = { ...xp, points: xp.points.map((pp) => [pp[0], pp[1]] as [number, number]) };
+          if (drag.end === 0) c.fromId = bindId; else c.toId = bindId;
+          syncPathBounds(c);
+          return c;
+        });
+        elements = reflowElements(elements);
+        const next = { ...s, elements };
+        onChange(next);
+        return next;
+      });
     } else if (drag.kind === "marquee") {
       setMarquee(null); // selection was updated live in onPointerMove
     }
     setHoverBindId(null);
     // pan doesn't touch persisted elements — no onChange
     bump();
-  }, [onChange, bump, selectOne]);
+  }, [onChange, bump, selectOne, finishMultiArrow]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     const canvas = canvasRef.current!;
@@ -587,6 +711,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       elements: scene.elements.map((el) =>
         selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image"
           ? { ...el, strokeWidth: width } : el,
+      ),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const applyArrowType = useCallback((t: ArrowType) => {
+    setArrowType(t);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) =>
+        selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow") ? { ...el, arrowType: t } : el,
       ),
     };
     commit(next, snapshot);
@@ -709,9 +846,13 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
   // keyboard
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === " ") { spaceRef.current = true; return; }
       const t = e.target as HTMLElement;
-      if (t.tagName === "TEXTAREA" || t.tagName === "INPUT") return;
+      const typing = t.tagName === "TEXTAREA" || t.tagName === "INPUT";
+      // Hold Space = temporary pan (returns to your tool on release). Not while typing.
+      if (e.key === " " && !typing) { e.preventDefault(); spaceRef.current = true; setSpaceDown(true); return; }
+      if (typing) return;
+      // Enter / Escape finish an in-progress multi-point arrow.
+      if ((e.key === "Enter" || e.key === "Escape") && multiRef.current) { e.preventDefault(); finishMultiArrow(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -736,11 +877,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
       const match = TOOLS.find((x) => x.key?.toLowerCase() === e.key.toLowerCase());
       if (match) setTool(match.tool);
     };
-    const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") spaceRef.current = false; };
+    const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") { spaceRef.current = false; setSpaceDown(false); } };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow]);
 
   // Native paste: an OS-clipboard image inserts an image; otherwise our
   // internal element copy (from ⌘C) is pasted. Ignored while editing text.
@@ -790,7 +931,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
   }, [editing, onChange]);
 
   const editingEl = editing ? scene.elements.find((e) => e.id === editing.id) : null;
-  const cursor = tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
+  const cursor = spaceDown || tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -803,6 +944,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
         onContextMenu={onContextMenu}
         onWheel={onWheel}
         onDoubleClick={(e) => {
+          if (multiRef.current) { finishMultiArrow(); return; }
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
@@ -961,6 +1103,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadTasks, onOpenTask
               <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
             </button>
           ))}
+          {tool === "arrow" || tool === "line" || scene.elements.some((el) => selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow")) ? (
+            <>
+              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+              {ARROW_TYPES.map(({ type: at, Icon, label }) => (
+                <button key={at} type="button" title={`${label} arrow`} onClick={() => applyArrowType(at)} style={{ ...toolBtn(arrowType === at), width: 28, height: 28 }}>
+                  <Icon style={{ width: 16, height: 16 }} />
+                </button>
+              ))}
+            </>
+          ) : null}
         </div>
       ) : null}
 
@@ -1158,13 +1310,10 @@ function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage:
     if (el.fill !== "transparent") ctx.fill();
     if (el.strokeWidth > 0) ctx.stroke();
   } else if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") {
-    const pts = el.points;
-    if (pts.length > 0) {
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    if (el.points.length > 0) {
+      const head = strokeConnectorPath(ctx, el);
       ctx.stroke();
-      if (el.type === "arrow" && pts.length >= 2) drawArrowhead(ctx, pts[pts.length - 2], pts[pts.length - 1], el.strokeWidth);
+      if (el.type === "arrow" && head) drawArrowhead(ctx, head[0], head[1], el.strokeWidth);
     }
   } else if (el.type === "sticky") {
     ctx.fillStyle = el.fill;
@@ -1180,6 +1329,39 @@ function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage:
     wrapText(ctx, el.text, el.x, el.y, el.w, el.fontSize * 1.35);
   }
   ctx.restore();
+}
+
+/** Trace a line/arrow into ctx following its arrowType (straight / elbow /
+ *  curved through all its points). Returns [penultimate, last] for the
+ *  arrowhead direction, or null. Does NOT stroke — the caller does. */
+function strokeConnectorPath(ctx: CanvasRenderingContext2D, el: PathElement): [[number, number], [number, number]] | null {
+  const pts = el.points;
+  const type: ArrowType = el.type === "freedraw" ? "straight" : (el.arrowType ?? "straight");
+  ctx.beginPath();
+  if (pts.length < 2) { if (pts.length === 1) ctx.moveTo(pts[0][0], pts[0][1]); return null; }
+
+  if (type === "elbow") {
+    const route: [number, number][] = [pts[0]];
+    for (let i = 1; i < pts.length; i++) route.push(...elbowPoints(pts[i - 1], pts[i]).slice(1));
+    ctx.moveTo(route[0][0], route[0][1]);
+    for (let i = 1; i < route.length; i++) ctx.lineTo(route[i][0], route[i][1]);
+    return [route[route.length - 2], route[route.length - 1]];
+  }
+
+  if (type === "curved" && pts.length >= 3) {
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const xc = (pts[i][0] + pts[i + 1][0]) / 2, yc = (pts[i][1] + pts[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(pts[i][0], pts[i][1], xc, yc);
+    }
+    ctx.quadraticCurveTo(pts[pts.length - 2][0], pts[pts.length - 2][1], pts[pts.length - 1][0], pts[pts.length - 1][1]);
+    return [pts[pts.length - 2], pts[pts.length - 1]];
+  }
+
+  // straight (also curved with only 2 points)
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  return [pts[pts.length - 2], pts[pts.length - 1]];
 }
 
 function drawArrowhead(ctx: CanvasRenderingContext2D, from: [number, number], to: [number, number], sw: number) {
@@ -1288,6 +1470,18 @@ function handlePositions(x: number, y: number, w: number, h: number): [number, n
   return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]; // corners: 0 TL, 1 TR, 2 BR, 3 BL
 }
 
+/** Which endpoint of a line/arrow is under (sx,sy) — 0 (start), 1 (end), or -1. */
+function hitEndpoint(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): 0 | 1 | -1 {
+  if (el.type !== "line" && el.type !== "arrow") return -1;
+  const pts = el.points;
+  if (pts.length < 2) return -1;
+  for (const [end, p] of [[0, pts[0]], [1, pts[pts.length - 1]]] as [0 | 1, [number, number]][]) {
+    const px = p[0] * vp.zoom + vp.x, py = p[1] * vp.zoom + vp.y;
+    if (Math.abs(sx - px) <= HANDLE && Math.abs(sy - py) <= HANDLE) return end;
+  }
+  return -1;
+}
+
 function hitHandle(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): number {
   if (el.type === "line" || el.type === "arrow" || el.type === "freedraw") return -1;
   const x = el.x * vp.zoom + vp.x, y = el.y * vp.zoom + vp.y, w = el.w * vp.zoom, h = el.h * vp.zoom;
@@ -1310,6 +1504,10 @@ function applyResize(el: CanvasElement, orig: CanvasElement, handle: number, wor
 
 function cloneEl(el: CanvasElement): CanvasElement {
   return "points" in el ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) } : { ...el };
+}
+
+function dist(a: [number, number], b: [number, number]): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
 function CtxItem({ label, hint, danger, onClick }: { label: string; hint?: string; danger?: boolean; onClick: () => void }) {

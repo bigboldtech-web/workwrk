@@ -55,11 +55,25 @@ export interface ShapeElement extends BaseElement {
  *  A line/arrow may also be a CONNECTOR: fromId/toId bind an endpoint to
  *  another element, and the endpoint is recomputed from that element's edge
  *  (reflowConnectors) so the connector follows when the element moves. */
+export type ArrowType = "straight" | "elbow" | "curved";
+
 export interface PathElement extends BaseElement {
   type: "line" | "arrow" | "freedraw";
   points: [number, number][];
   fromId?: string;
   toId?: string;
+  /** line/arrow routing between endpoints (default straight). */
+  arrowType?: ArrowType;
+}
+
+/** Orthogonal (elbow) waypoints between two endpoints — an L or Z route. */
+export function elbowPoints(a: [number, number], b: [number, number]): [number, number][] {
+  if (Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1])) {
+    const mx = (a[0] + b[0]) / 2;
+    return [a, [mx, a[1]], [mx, b[1]], b];
+  }
+  const my = (a[1] + b[1]) / 2;
+  return [a, [a[0], my], [b[0], my], b];
 }
 
 export interface TextElement extends BaseElement {
