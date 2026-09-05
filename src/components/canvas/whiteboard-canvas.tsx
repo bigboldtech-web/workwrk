@@ -202,6 +202,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<Drag>(null);
+  const multiRef = useRef<{ id: string; downX: number; downY: number } | null>(null); // in-progress multi-point arrow
+  const lastPtrRef = useRef({ sx: 0, sy: 0 }); // last pointer pos (screen), for drag-vs-click
   const spaceRef = useRef(false);
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
   const undoRef = useRef<CanvasScene[]>([]);
@@ -334,6 +336,47 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     }));
   }, []);
 
+  // Finish the in-progress multi-point arrow (edge-click / double-click / Enter /
+  // Escape / press-drag): trim trailing floating/coincident points, bind the end
+  // to a shape if it lands on one, or drop a stray zero-length arrow. Points are
+  // preserved so the arrow renders per its arrowType (elbow / curved).
+  const finishMultiArrow = useCallback(() => {
+    const m = multiRef.current;
+    if (!m) return;
+    multiRef.current = null;
+    setHoverBindId(null);
+    setScene((s) => {
+      const el = s.elements.find((x) => x.id === m.id);
+      if (!el || !("points" in el)) return s;
+      const points = el.points.map((p) => [p[0], p[1]] as [number, number]);
+      while (points.length > 2 && dist(points[points.length - 1], points[points.length - 2]) < 4) points.pop();
+      if (points.length < 2 || (points.length === 2 && dist(points[0], points[1]) < 4)) {
+        selectOne(null);
+        const next = { ...s, elements: s.elements.filter((x) => x.id !== m.id) };
+        onChange(next);
+        return next;
+      }
+      const end = points[points.length - 1];
+      let toId: string | undefined;
+      for (let i = s.elements.length - 1; i >= 0; i--) {
+        const c = s.elements[i];
+        if (c.id === m.id || c.id === (el as PathElement).fromId || !isBindable(c)) continue;
+        if (hitTest(c, end[0], end[1], 6 / s.viewport.zoom)) { toId = c.id; break; }
+      }
+      let elements = s.elements.map((x) => {
+        if (x.id !== m.id) return x;
+        const c: PathElement = { ...(x as PathElement), points, toId };
+        syncPathBounds(c);
+        return c;
+      });
+      elements = reflowElements(elements);
+      const next = { ...s, elements };
+      onChange(next);
+      return next;
+    });
+    bump();
+  }, [onChange, bump, selectOne]);
+
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (editing) return;
     const canvas = canvasRef.current!;
@@ -409,16 +452,36 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
-      // Simple press-drag arrow (Excalidraw-style): points = [start, end]. Binds
-      // to a shape it STARTS on, and (on release) to the shape its END lands on —
-      // where it stops. No multi-point / double-click flow.
-      const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-      const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
-      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
-      undoRef.current.push(snapshot);
-      setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-      selectOne(id);
-      dragRef.current = { kind: "path", id };
+      if (!multiRef.current) {
+        // Start an arrow. Points = [start, floating-end]. Binds to a shape it
+        // STARTS on. Press-drag = quick 2-point arrow; a click starts a
+        // MULTI-POINT arrow — click to drop elbow/curve bends.
+        const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+        const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
+        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
+        undoRef.current.push(snapshot);
+        setScene((s) => ({ ...s, elements: [...s.elements, el] }));
+        selectOne(id);
+        multiRef.current = { id, downX: sx, downY: sy };
+        dragRef.current = { kind: "path", id };
+      } else {
+        // Continue an in-progress arrow. If the click lands on a bindable shape
+        // (an edge) — other than the one it started on — snap the end there and
+        // FINISH (no double-click needed). Otherwise drop a bend and keep going.
+        const mid = multiRef.current.id;
+        const el = scene.elements.find((x) => x.id === mid) as PathElement | undefined;
+        const endHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+        const onEdge = endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== el?.fromId;
+        patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
+        if (onEdge) {
+          finishMultiArrow();
+          dragRef.current = null;
+        } else {
+          patchElement(mid, (x) => { if ("points" in x) { x.points.push([world.x, world.y]); syncPathBounds(x as PathElement); } });
+          multiRef.current = { id: mid, downX: sx, downY: sy };
+          dragRef.current = null;
+        }
+      }
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]], ...(dash !== "solid" ? { dash } : {}) };
       undoRef.current.push(snapshot);
@@ -448,12 +511,22 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, align, toWorld, selectOne]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, align, toWorld, selectOne, patchElement, finishMultiArrow]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     const mrect = canvas.getBoundingClientRect();
     const msx = e.clientX - mrect.left, msy = e.clientY - mrect.top;
+    lastPtrRef.current = { sx: msx, sy: msy };
+    // Multi-point arrow: the floating end tracks the cursor (even between clicks).
+    if (multiRef.current) {
+      const w = toWorld(msx, msy);
+      patchElement(multiRef.current.id, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [w.x, w.y]; syncPathBounds(el as PathElement); } });
+      let hover: string | null = null;
+      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      setHoverBindId(hover);
+      return;
+    }
     const drag = dragRef.current;
     if (!drag) return;
     const sx = msx, sy = msy;
@@ -525,6 +598,17 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   }, [patchElement, toWorld, scene.elements, vp]);
 
   const onPointerUp = useCallback(() => {
+    // In multi-point arrow mode: a press-DRAG ends the arrow (quick 2-point or
+    // the final segment); a plain CLICK drops a bend and keeps going (an
+    // edge-click / double-click / Enter / Escape ends it).
+    if (multiRef.current) {
+      dragRef.current = null;
+      const moved = dist([lastPtrRef.current.sx, lastPtrRef.current.sy], [multiRef.current.downX, multiRef.current.downY]);
+      if (moved > 5) finishMultiArrow();
+      setHoverBindId(null);
+      bump();
+      return;
+    }
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
@@ -601,7 +685,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     setHoverBindId(null);
     // pan doesn't touch persisted elements — no onChange
     bump();
-  }, [onChange, bump, selectOne]);
+  }, [onChange, bump, selectOne, finishMultiArrow]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     const canvas = canvasRef.current!;
@@ -871,6 +955,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // Hold Space = temporary pan (returns to your tool on release). Not while typing.
       if (e.key === " " && !typing) { e.preventDefault(); spaceRef.current = true; setSpaceDown(true); return; }
       if (typing) return;
+      // Enter / Escape finish an in-progress multi-point arrow.
+      if ((e.key === "Enter" || e.key === "Escape") && multiRef.current) { e.preventDefault(); finishMultiArrow(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -899,7 +985,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow]);
 
   // Native paste: an OS-clipboard image inserts an image; otherwise our
   // internal element copy (from ⌘C) is pasted. Ignored while editing text.
@@ -968,6 +1054,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         onContextMenu={onContextMenu}
         onWheel={onWheel}
         onDoubleClick={(e) => {
+          if (multiRef.current) { finishMultiArrow(); return; }
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
@@ -1329,6 +1416,10 @@ function applyResize(el: CanvasElement, orig: CanvasElement, handle: number, wor
 
 function cloneEl(el: CanvasElement): CanvasElement {
   return "points" in el ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) } : { ...el };
+}
+
+function dist(a: [number, number], b: [number, number]): number {
+  return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
 
