@@ -48,7 +48,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, rectEdgePoint,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -399,7 +399,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     if (!shapeId) { setHoverDot(null); return; }
     const shape = scene.elements.find((e) => e.id === shapeId);
     if (!shape) { setHoverDot(null); return; }
-    const [ex, ey] = rectEdgePoint(shape, { x: tx, y: ty });
+    const [ex, ey] = elementEdgePoint(shape, { x: tx, y: ty });
     setHoverDot({ x: ex * vp.zoom + vp.x, y: ey * vp.zoom + vp.y });
   }, [scene.elements, vp]);
 
@@ -497,7 +497,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         const startHit = hitTopElement(scene, world.x, world.y, BIND_TOL / vp.zoom);
         const bindStart = startHit && isBindable(startHit) ? startHit : null;
         const fromId = bindStart?.id;
-        const startPt: [number, number] = bindStart ? rectEdgePoint(bindStart, world) : [world.x, world.y];
+        const startPt: [number, number] = bindStart ? elementEdgePoint(bindStart, world) : [world.x, world.y];
         const el: PathElement = { id, type: tool, x: startPt[0], y: startPt[1], w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [startPt, [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
         undoRef.current.push(snapshot);
         setScene((s) => ({ ...s, elements: [...s.elements, el] }));

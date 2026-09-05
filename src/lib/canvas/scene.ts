@@ -308,6 +308,27 @@ export function rectEdgePoint(
   return [cx + dx * scale, cy + dy * scale];
 }
 
+/** The point on an ELEMENT's actual visible border in the direction of
+ *  `target` — an ellipse's circumference, a diamond's edge, otherwise the
+ *  bounding box. So a connector touches a circle/diamond cleanly, not the box. */
+export function elementEdgePoint(el: CanvasElement, target: { x: number; y: number }): [number, number] {
+  const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+  const dx = target.x - cx, dy = target.y - cy;
+  if (dx === 0 && dy === 0) return [cx, cy];
+  const hw = el.w / 2 || 0.5, hh = el.h / 2 || 0.5;
+  if (el.type === "ellipse") {
+    // intersect the ray with the ellipse (dx/hw)² + (dy/hh)² = 1
+    const t = 1 / Math.hypot(dx / hw, dy / hh);
+    return [cx + dx * t, cy + dy * t];
+  }
+  if (el.type === "diamond") {
+    // rhombus |x/hw| + |y/hh| = 1
+    const t = 1 / (Math.abs(dx) / hw + Math.abs(dy) / hh);
+    return [cx + dx * t, cy + dy * t];
+  }
+  return rectEdgePoint(el, target);
+}
+
 /** Recompute every bound connector's endpoints from its bound elements' edges,
  *  so connectors follow when the shapes they link move/resize. Mutates the
  *  connector elements in the array in place (clone them first if they are
@@ -332,8 +353,8 @@ export function reflowConnectors(elements: CanvasElement[]): void {
     const bTarget = last > 1
       ? { x: pts[last - 1][0], y: pts[last - 1][1] }
       : from ? { x: from.x + from.w / 2, y: from.y + from.h / 2 } : { x: pts[0][0], y: pts[0][1] };
-    if (from) pts[0] = rectEdgePoint(from, aTarget);
-    if (to) pts[last] = rectEdgePoint(to, bTarget);
+    if (from) pts[0] = elementEdgePoint(from, aTarget);
+    if (to) pts[last] = elementEdgePoint(to, bTarget);
     syncPathBounds(el);
   }
 }

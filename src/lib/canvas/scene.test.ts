@@ -6,6 +6,7 @@ import {
   cloneScene,
   dashPattern,
   elbowPoints,
+  elementEdgePoint,
   elementInBox,
   emptyScene,
   frameChildren,
@@ -170,6 +171,20 @@ describe("connectors", () => {
     expect(rectEdgePoint(box, { x: 500, y: 50 })).toEqual([100, 50]);
     // straight up → top edge
     expect(rectEdgePoint(box, { x: 50, y: -500 })).toEqual([50, 0]);
+  });
+
+  it("elementEdgePoint lands on the real border: ellipse circumference, diamond edge", () => {
+    const circle: ShapeElement = { id: "e", type: "ellipse", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 1, opacity: 1 };
+    // straight to the right from centre (50,50) → circle radius 50 → (100,50)
+    expect(elementEdgePoint(circle, { x: 500, y: 50 })).toEqual([100, 50]);
+    // 45° toward (150,150): on the circle, not the box corner (100,100)
+    const [px, py] = elementEdgePoint(circle, { x: 150, y: 150 });
+    expect(Math.hypot(px - 50, py - 50)).toBeCloseTo(50, 5); // exactly on the circumference
+    const diamond: ShapeElement = { ...circle, id: "d", type: "diamond" };
+    // toward (150,150): diamond edge |x/50|+|y/50|=1 → 45° hits (75,75)
+    const [dx, dy] = elementEdgePoint(diamond, { x: 150, y: 150 });
+    expect(dx).toBeCloseTo(75, 5);
+    expect(dy).toBeCloseTo(75, 5);
   });
 
   it("reflowConnectors keeps middle bends when a multi-point connector binds", () => {
