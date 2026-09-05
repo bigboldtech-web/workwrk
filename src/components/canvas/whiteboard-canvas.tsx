@@ -14,7 +14,7 @@ import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
-  MoveRight, CornerDownRight, Spline,
+  MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -30,6 +30,13 @@ const FONT_SIZES: { label: string; size: number }[] = [
   { label: "L", size: 28 },
 ];
 
+// Text alignment options for the style panel.
+const TEXT_ALIGNS: { align: TextAlign; Icon: typeof AlignLeft; label: string }[] = [
+  { align: "left", Icon: AlignLeft, label: "Left" },
+  { align: "center", Icon: AlignCenter, label: "Center" },
+  { align: "right", Icon: AlignRight, label: "Right" },
+];
+
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
 const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
   { tool: "roundRect", Icon: Square, label: "Rounded rectangle" },
@@ -42,7 +49,7 @@ import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type ArrowType, type DashStyle, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
+  type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
 import { drawElement, drawCanvasCard } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
@@ -149,6 +156,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [arrowType, setArrowType] = useState<ArrowType>("straight");
   const [dash, setDash] = useState<DashStyle>("solid");
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [align, setAlign] = useState<TextAlign>("left");
   const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const clipboardRef = useRef<CanvasElement[]>([]);
@@ -417,14 +425,14 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       dragRef.current = { kind: "path", id };
     } else if (tool === "text") {
-      const el: CanvasElement = { id, type: "text", x: world.x, y: world.y - fontSize / 2, w: 160, h: fontSize * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize };
+      const el: CanvasElement = { id, type: "text", x: world.x, y: world.y - fontSize / 2, w: 160, h: fontSize * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize, ...(align !== "left" ? { align } : {}) };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
       setEditing({ id });
       setTool("select");
     } else if (tool === "sticky") {
-      const el: CanvasElement = { id, type: "sticky", x: world.x, y: world.y, w: 180, h: 180, stroke: "transparent", fill: STICKY_COLORS[0], strokeWidth: 0, opacity: 1, text: "", fontSize: 16 };
+      const el: CanvasElement = { id, type: "sticky", x: world.x, y: world.y, w: 180, h: 180, stroke: "transparent", fill: STICKY_COLORS[0], strokeWidth: 0, opacity: 1, text: "", fontSize: 16, ...(align !== "left" ? { align } : {}) };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
@@ -440,7 +448,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, toWorld, selectOne]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, align, toWorld, selectOne]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -721,6 +729,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const applyAlign = useCallback((a: TextAlign) => {
+    setAlign(a);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) =>
+        selectedIds.has(el.id) && (el.type === "text" || el.type === "sticky") ? { ...el, align: a } : el,
+      ),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
   // Duplicate the given elements with an offset + fresh ids; returns the copies.
   const pasteElements = useCallback((src: CanvasElement[], dx = 16, dy = 16) => {
     if (src.length === 0) return;
@@ -993,6 +1014,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             height: Math.max(28, editingEl.h * vp.zoom),
             fontSize: editingEl.fontSize * vp.zoom,
             lineHeight: 1.3,
+            textAlign: editingEl.align ?? "left",
             padding: editingEl.type === "sticky" ? 10 * vp.zoom : 0,
             border: "none", outline: "2px solid #0073EA", borderRadius: editingEl.type === "sticky" ? 6 : 3,
             background: editingEl.type === "sticky" ? editingEl.fill : "transparent",
@@ -1138,6 +1160,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                 <button key={label} type="button" title={`${label === "S" ? "Small" : label === "M" ? "Medium" : "Large"} text`} onClick={() => applyFontSize(size)}
                   style={{ ...toolBtn(fontSize === size), width: 28, height: 28, fontWeight: 700, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
                   {label}
+                </button>
+              ))}
+              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+              {TEXT_ALIGNS.map(({ align: a, Icon, label }) => (
+                <button key={a} type="button" title={`Align ${label}`} onClick={() => applyAlign(a)} style={{ ...toolBtn(align === a), width: 28, height: 28 }}>
+                  <Icon style={{ width: 16, height: 16 }} />
                 </button>
               ))}
             </>

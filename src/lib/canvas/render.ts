@@ -160,12 +160,12 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     ctx.fill();
     ctx.fillStyle = "#1E293B";
     ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
-    wrapText(ctx, el.text, el.x + 10, el.y + 10 + el.fontSize, el.w - 20, el.fontSize * 1.35);
+    wrapText(ctx, el.text, el.x + 10, el.y + 10 + el.fontSize, el.w - 20, el.fontSize * 1.35, Infinity, el.align ?? "left");
   } else if (el.type === "text") {
     ctx.fillStyle = el.stroke;
     ctx.textBaseline = "top";
     ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
-    wrapText(ctx, el.text, el.x, el.y, el.w, el.fontSize * 1.35);
+    wrapText(ctx, el.text, el.x, el.y, el.w, el.fontSize * 1.35, Infinity, el.align ?? "left");
   }
   ctx.restore();
 }
@@ -240,7 +240,7 @@ export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w
   ctx.closePath();
 }
 
-export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number, maxLines = Infinity) {
+export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, maxW: number, lineH: number, maxLines = Infinity, align: "left" | "center" | "right" = "left") {
   if (!text) return;
   const lines: string[] = [];
   for (const para of text.split("\n")) {
@@ -259,7 +259,13 @@ export function wrapText(ctx: CanvasRenderingContext2D, text: string, x: number,
     while (last && ctx.measureText(`${last}…`).width > maxW) last = last.slice(0, -1);
     shown[shown.length - 1] = `${last}…`;
   }
-  for (const l of shown) { ctx.fillText(l, x, y); y += lineH; }
+  // Anchor x + textAlign so center/right lay out within [x, x+maxW]. Restored
+  // by the per-element save/restore in drawElement, so it never leaks.
+  const anchorX = align === "center" ? x + maxW / 2 : align === "right" ? x + maxW : x;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = align;
+  for (const l of shown) { ctx.fillText(l, anchorX, y); y += lineH; }
+  ctx.textAlign = prevAlign;
 }
 
 // ───────── Read-only preview (Doc embed / canvas-in-canvas thumbnail) ─────────

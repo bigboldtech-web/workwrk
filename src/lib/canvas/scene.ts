@@ -90,16 +90,21 @@ export function elbowPoints(a: [number, number], b: [number, number]): [number, 
   return [a, [a[0], my], [b[0], my], b];
 }
 
+export type TextAlign = "left" | "center" | "right";
+
 export interface TextElement extends BaseElement {
   type: "text";
   text: string;
   fontSize: number;
+  /** Horizontal alignment of the text. Absent = "left" (back-compat). */
+  align?: TextAlign;
 }
 
 export interface StickyElement extends BaseElement {
   type: "sticky";
   text: string;
   fontSize: number;
+  align?: TextAlign;
 }
 
 export interface ImageElement extends BaseElement {
