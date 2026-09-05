@@ -80,6 +80,12 @@ export interface PathElement extends BaseElement {
   toId?: string;
   /** line/arrow routing between endpoints (default straight). */
   arrowType?: ArrowType;
+  /** Where a bound end attaches, as an offset from the shape centre normalized
+   *  by its half-size (roughly -1..1 per axis). Captured when it binds so the
+   *  connection stays on the SIDE/corner you drew to (not snapped to centre)
+   *  and follows the shape on move/resize. Absent → auto-anchor toward centre. */
+  fromFocus?: [number, number];
+  toFocus?: [number, number];
 }
 
 /** Orthogonal (elbow) waypoints between two endpoints — an L or Z route. */
@@ -329,6 +335,15 @@ export function elementEdgePoint(el: CanvasElement, target: { x: number; y: numb
   return rectEdgePoint(el, target);
 }
 
+/** A point's "focus" on a shape: its offset from the shape centre, normalized
+ *  by the shape's half-size (roughly -1..1 per axis). Records WHICH side/corner
+ *  a connector attaches to, so it survives moves/resizes. */
+export function focusOf(el: CanvasElement, point: [number, number]): [number, number] {
+  const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+  const hw = el.w / 2 || 0.5, hh = el.h / 2 || 0.5;
+  return [(point[0] - cx) / hw, (point[1] - cy) / hh];
+}
+
 /** Recompute every bound connector's endpoints from its bound elements' edges,
  *  so connectors follow when the shapes they link move/resize. Mutates the
  *  connector elements in the array in place (clone them first if they are
@@ -344,17 +359,22 @@ export function reflowConnectors(elements: CanvasElement[]): void {
     if (pts.length < 2) continue;
     const last = pts.length - 1;
     // Re-anchor ONLY the two ends to their bound shapes' edges — KEEP every
-    // middle bend so a multi-point curved/elbow connector stays curved/elbow
-    // after it binds. Each end aims at its neighbour point (or, for a plain
-    // 2-point connector, at the opposite shape's centre).
-    const aTarget = last > 1
-      ? { x: pts[1][0], y: pts[1][1] }
-      : to ? { x: to.x + to.w / 2, y: to.y + to.h / 2 } : { x: pts[last][0], y: pts[last][1] };
-    const bTarget = last > 1
-      ? { x: pts[last - 1][0], y: pts[last - 1][1] }
-      : from ? { x: from.x + from.w / 2, y: from.y + from.h / 2 } : { x: pts[0][0], y: pts[0][1] };
-    if (from) pts[0] = elementEdgePoint(from, aTarget);
-    if (to) pts[last] = elementEdgePoint(to, bTarget);
+    // middle bend. Each end stays on the SIDE/corner you attached it to: the
+    // first time we reflow a bound end we capture its "focus" (its direction
+    // from the shape centre, normalized by half-size); after that the end holds
+    // that focus, so it follows the shape without snapping to the centre line.
+    if (from) {
+      let foc = el.fromFocus;
+      if (!foc) { foc = focusOf(from, pts[0]); el.fromFocus = foc; }
+      const target = { x: from.x + from.w / 2 + foc[0] * (from.w / 2 || 0.5), y: from.y + from.h / 2 + foc[1] * (from.h / 2 || 0.5) };
+      pts[0] = elementEdgePoint(from, target);
+    }
+    if (to) {
+      let foc = el.toFocus;
+      if (!foc) { foc = focusOf(to, pts[last]); el.toFocus = foc; }
+      const target = { x: to.x + to.w / 2 + foc[0] * (to.w / 2 || 0.5), y: to.y + to.h / 2 + foc[1] * (to.h / 2 || 0.5) };
+      pts[last] = elementEdgePoint(to, target);
+    }
     syncPathBounds(el);
   }
 }

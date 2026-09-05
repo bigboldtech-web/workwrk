@@ -187,35 +187,35 @@ describe("connectors", () => {
     expect(dy).toBeCloseTo(75, 5);
   });
 
-  it("reflowConnectors keeps middle bends when a multi-point connector binds", () => {
+  it("reflowConnectors keeps middle bends AND the sides you drew the ends on", () => {
     const a: ShapeElement = { id: "a", type: "rect", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
     const b: ShapeElement = { id: "b", type: "rect", x: 300, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
-    const conn: PathElement = { id: "c", type: "arrow", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[9, 9], [200, -50], [309, 9]], fromId: "a", toId: "b" };
+    // drawn from a's right edge, up over a bend, into b's left edge
+    const conn: PathElement = { id: "c", type: "arrow", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[100, 50], [200, -50], [300, 50]], fromId: "a", toId: "b" };
     reflowConnectors([a, b, conn]);
     expect(conn.points.length).toBe(3);           // the bend is NOT flattened away
     expect(conn.points[1]).toEqual([200, -50]);    // middle bend untouched
-    expect(conn.points[0][0]).toBe(100);           // start re-anchored to a's right edge
-    expect(conn.points[2][0]).toBe(300);           // end re-anchored to b's left edge
+    expect(conn.points[0]).toEqual([100, 50]);     // start stays on a's right edge
+    expect(conn.points[2]).toEqual([300, 50]);     // end stays on b's left edge
   });
 
-  it("reflowConnectors anchors a bound connector to both shapes' edges", () => {
+  it("reflowConnectors keeps the connection on the SIDE you attached (not centre)", () => {
     const a: ShapeElement = { id: "a", type: "rect", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
     const b: ShapeElement = { id: "b", type: "rect", x: 300, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
-    const conn: PathElement = { id: "c", type: "arrow", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[9, 9], [9, 9]], fromId: "a", toId: "b" };
-    const els: CanvasElement[] = [a, b, conn];
-    reflowConnectors(els);
-    // a centre (50,50) → toward b centre (350,50): exits a's right edge (100,50)
-    expect(conn.points[0]).toEqual([100, 50]);
-    // b centre (350,50) → toward a: exits b's left edge (300,50)
-    expect(conn.points[1]).toEqual([300, 50]);
+    // drawn from a's TOP-middle to b's BOTTOM-middle — must not snap to the
+    // right/left centre edges (the "auto-centering" bug).
+    const conn: PathElement = { id: "c", type: "arrow", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[50, 0], [350, 100]], fromId: "a", toId: "b" };
+    reflowConnectors([a, b, conn]);
+    expect(conn.points[0]).toEqual([50, 0]);    // stays on a's top edge
+    expect(conn.points[1]).toEqual([350, 100]); // stays on b's bottom edge
   });
 
   it("reflowConnectors keeps a free (unbound) endpoint as-is", () => {
     const a: ShapeElement = { id: "a", type: "rect", x: 0, y: 0, w: 100, h: 100, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1 };
-    const conn: PathElement = { id: "c", type: "line", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[10, 10], [400, 400]], fromId: "a" };
+    const conn: PathElement = { id: "c", type: "line", x: 0, y: 0, w: 1, h: 1, stroke: "#000", fill: "transparent", strokeWidth: 2, opacity: 1, points: [[100, 50], [400, 400]], fromId: "a" };
     reflowConnectors([a, conn]);
     expect(conn.points[1]).toEqual([400, 400]); // free end untouched
-    expect(conn.points[0][0]).toBeGreaterThan(0); // bound end moved to a's edge
+    expect(conn.points[0]).toEqual([100, 50]);  // bound end stays on a's right edge (where drawn)
   });
 });
 

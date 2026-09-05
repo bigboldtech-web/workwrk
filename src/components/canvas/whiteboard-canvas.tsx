@@ -519,8 +519,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const lastFixed = pts[pts.length - 2]; // the floating end is pts[last]
           const lsx = lastFixed[0] * vp.zoom + vp.x, lsy = lastFixed[1] * vp.zoom + vp.y;
           const onLast = Math.hypot(sx - lsx, sy - lsy) <= HANDLE * 1.6;
-          const endHit = hitTopElement(scene, world.x, world.y, BIND_TOL / vp.zoom);
-          const onShape = !!endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== (el as PathElement).fromId;
+          // Find the shape UNDER the cursor, looking past the arrow being drawn
+          // (it's on top, so hitTopElement would return the arrow itself).
+          let endHit: CanvasElement | null = null;
+          for (let i = scene.elements.length - 1; i >= 0; i--) {
+            const c = scene.elements[i];
+            if (c.id === mid || !isBindable(c)) continue;
+            if (hitTest(c, world.x, world.y, BIND_TOL / vp.zoom)) { endHit = c; break; }
+          }
+          const onShape = !!endHit && endHit.id !== (el as PathElement).fromId;
           patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
           if (!isStraight || onShape || onLast) {
             // elbow/curved always finish; straight finishes on a shape or the last point
@@ -751,7 +758,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           if (x.id !== drag.id) return x;
           const xp = x as PathElement;
           const c: PathElement = { ...xp, points: xp.points.map((pp) => [pp[0], pp[1]] as [number, number]) };
-          if (isStart) c.fromId = bindId; else if (isEnd) c.toId = bindId;
+          // Re-dragging an end re-binds it → clear its focus so reflow re-captures
+          // the new attachment side/corner (and drop the focus if it went free).
+          if (isStart) { c.fromId = bindId; c.fromFocus = undefined; }
+          else if (isEnd) { c.toId = bindId; c.toFocus = undefined; }
           syncPathBounds(c);
           return c;
         });
