@@ -35,7 +35,7 @@ import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, boundsOfElements,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type ArrowType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
+  type ArrowType, type DashStyle, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
 import { drawElement, drawCanvasCard } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
@@ -140,6 +140,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [fillColor, setFillColor] = useState("transparent");
   const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
   const [arrowType, setArrowType] = useState<ArrowType>("straight");
+  const [dash, setDash] = useState<DashStyle>("solid");
   const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const multiRef = useRef<{ id: string; downX: number; downY: number } | null>(null); // in-progress multi-point arrow
@@ -430,7 +431,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     const snapshot = cloneScene(scene);
     const id = genId();
     if (SHAPE_TOOLS.has(tool)) {
-      const el: ShapeElement = { id, type: tool as ShapeElement["type"], x: world.x, y: world.y, w: 1, h: 1, stroke, fill: fillColor, strokeWidth: strokeW, opacity: 1 };
+      const el: ShapeElement = { id, type: tool as ShapeElement["type"], x: world.x, y: world.y, w: 1, h: 1, stroke, fill: fillColor, strokeWidth: strokeW, opacity: 1, ...(dash !== "solid" ? { dash } : {}) };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
@@ -442,7 +443,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         // click starts a MULTI-POINT arrow (click to add bends, dbl-click ends).
         const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
         const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
-        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType };
+        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
         undoRef.current.push(snapshot);
         setScene((s) => ({ ...s, elements: [...s.elements, el] }));
         selectOne(id);
@@ -456,7 +457,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         dragRef.current = null;
       }
     } else if (tool === "freedraw") {
-      const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]] };
+      const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]], ...(dash !== "solid" ? { dash } : {}) };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       dragRef.current = { kind: "path", id };
@@ -484,7 +485,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, toWorld, selectOne, patchElement]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, toWorld, selectOne, patchElement]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -751,6 +752,20 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       ...scene,
       elements: scene.elements.map((el) =>
         selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow") ? { ...el, arrowType: t } : el,
+      ),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const applyDash = useCallback((d: DashStyle) => {
+    setDash(d);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) =>
+        selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard" && el.type !== "frame"
+          ? { ...el, dash: d } : el,
       ),
     };
     commit(next, snapshot);
@@ -1164,6 +1179,18 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
             </button>
           ))}
+          {SHAPE_TOOLS.has(tool) || tool === "line" || tool === "arrow" || tool === "freedraw"
+            || scene.elements.some((el) => selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard" && el.type !== "frame") ? (
+            <>
+              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+              {(["solid", "dashed", "dotted"] as DashStyle[]).map((d) => (
+                <button key={d} type="button" title={`${d[0].toUpperCase()}${d.slice(1)} stroke`} onClick={() => applyDash(d)}
+                  style={{ ...toolBtn(dash === d), width: 28, height: 28 }}>
+                  <span style={{ width: 16, height: 0, borderTopWidth: 2, borderTopStyle: d, borderTopColor: dash === d ? "#fff" : "var(--os-ink-2, #52525b)" }} />
+                </button>
+              ))}
+            </>
+          ) : null}
           {tool === "arrow" || tool === "line" || scene.elements.some((el) => selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow")) ? (
             <>
               <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />

@@ -9,6 +9,7 @@ import {
   type CanvasScene,
   type PathElement,
   type ArrowType,
+  dashPattern,
   elbowPoints,
   sceneBounds,
 } from "./scene";
@@ -90,6 +91,7 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
   ctx.lineWidth = el.strokeWidth;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
+  ctx.setLineDash(dashPattern(el.dash, el.strokeWidth));
 
   if (el.type === "rect") {
     if (el.fill !== "transparent") ctx.fillRect(el.x, el.y, el.w, el.h);
@@ -149,7 +151,8 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     if (el.points.length > 0) {
       const head = strokeConnectorPath(ctx, el);
       ctx.stroke();
-      if (el.type === "arrow" && head) drawArrowhead(ctx, head[0], head[1], el.strokeWidth);
+      // the arrowhead is always solid — a dashed head reads as broken
+      if (el.type === "arrow" && head) { ctx.setLineDash([]); drawArrowhead(ctx, head[0], head[1], el.strokeWidth); }
     }
   } else if (el.type === "sticky") {
     ctx.fillStyle = el.fill;

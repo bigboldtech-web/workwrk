@@ -4,6 +4,7 @@ import {
   boundsOfElements,
   boundsOfPoints,
   cloneScene,
+  dashPattern,
   elbowPoints,
   elementInBox,
   emptyScene,
@@ -102,6 +103,15 @@ describe("scene geometry", () => {
     expect(isCanvasScene(emptyScene())).toBe(true);
     expect(isCanvasScene({ elements: [] })).toBe(false); // no version = legacy
     expect(isCanvasScene(null)).toBe(false);
+  });
+
+  it("dashPattern: solid = no dashes, dashed/dotted scale with width", () => {
+    expect(dashPattern("solid", 2)).toEqual([]);
+    expect(dashPattern(undefined, 2)).toEqual([]); // absent = solid
+    expect(dashPattern("dashed", 2)[0]).toBeGreaterThan(0);
+    const dotted = dashPattern("dotted", 2);
+    expect(dotted[0]).toBeLessThan(1);   // near-zero segment → a dot with round caps
+    expect(dotted[1]).toBeGreaterThan(0); // real gap between dots
   });
 
   it("a canvasCard is a normal box: hit-tests, bounds, and clones like any element", () => {

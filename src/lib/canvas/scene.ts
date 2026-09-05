@@ -40,6 +40,19 @@ export interface BaseElement {
   fill: string; // "transparent" for no fill
   strokeWidth: number;
   opacity: number; // 0..1
+  /** Line style for the stroke. Absent = "solid" (back-compat). */
+  dash?: DashStyle;
+}
+
+export type DashStyle = "solid" | "dashed" | "dotted";
+
+/** Canvas line-dash pattern for a stroke style, scaled by stroke width.
+ *  Solid = no dashes. Meant for ctx.setLineDash(). */
+export function dashPattern(dash: DashStyle | undefined, strokeWidth: number): number[] {
+  const w = Math.max(1, strokeWidth);
+  if (dash === "dashed") return [w * 3 + 3, w * 2 + 2];
+  if (dash === "dotted") return [0.1, w * 2 + 2]; // round cap + ~0 length = dots
+  return [];
 }
 
 /** Box-geometry shapes (all hit-tested as their bounding box, except the
