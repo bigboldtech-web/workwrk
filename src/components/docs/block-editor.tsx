@@ -28,8 +28,9 @@ import {
   Table as TableIcon, List as ListIcon, ListOrdered, Quote, Code, Copy,
   ArrowRightLeft, ChevronDown, Wand2, AtSign, Target, User as UserIcon, X, RefreshCw,
   Bold, Italic, Strikethrough, Underline, Image as ImageIcon, Upload,
-  FilePlus, Star, Highlighter, Palette, MessageCircle,
+  FilePlus, Star, Highlighter, Palette, MessageCircle, Frame as FrameEmbedIcon,
 } from "lucide-react";
+import { CanvasPreview } from "@/components/canvas/canvas-preview";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -41,7 +42,7 @@ export type BlockKind =
   | "divider" | "embed" | "file" | "image" | "callout"
   | "toggle" | "ai_write" | "entity_link" | "subpage"
   | "sop_card" | "task_card" | "note_card"
-  | "tasks_view" | "studio_board" | "sops_list" | "meetings_view" | "form" | "data_table";
+  | "tasks_view" | "studio_board" | "sops_list" | "meetings_view" | "form" | "data_table" | "canvas_card";
 
 export type EntityKind = "user" | "task" | "board" | "sop" | "kra" | "space";
 
@@ -66,7 +67,8 @@ export type Block =
   | { id: string; kind: "sops_list"; category?: string }
   | { id: string; kind: "meetings_view"; window: "upcoming" | "past" }
   | { id: string; kind: "form"; formId: string; formName?: string }
-  | { id: string; kind: "data_table"; tableId: string; tableName?: string };
+  | { id: string; kind: "data_table"; tableId: string; tableName?: string }
+  | { id: string; kind: "canvas_card"; whiteboardId: string; whiteboardName?: string };
 
 type ApiFile = { id: string; name: string; mimeType: string; size: number; url: string };
 
@@ -129,6 +131,7 @@ function buildBlock(kind: BlockKind, text = ""): Block {
     case "meetings_view": return { id: newId(), kind: "meetings_view", window: "upcoming" };
     case "form":          return { id: newId(), kind: "form", formId: "" };
     case "data_table":    return { id: newId(), kind: "data_table", tableId: "" };
+    case "canvas_card":   return { id: newId(), kind: "canvas_card", whiteboardId: "" };
   }
 }
 
@@ -163,6 +166,7 @@ const MENU: MenuItem[] = [
   { kind: "meetings_view", label: "Meetings",    hint: "Upcoming / past",      keywords: "meetings calendar",     Icon: CalendarClock,group: "Workspace" },
   { kind: "form",          label: "Form",        hint: "Embed a form",         keywords: "form survey",           Icon: FormInput,  group: "Workspace" },
   { kind: "data_table",    label: "Table",       hint: "Embed a data table",   keywords: "table data sheet",      Icon: TableIcon,  group: "Workspace" },
+  { kind: "canvas_card",   label: "Canvas",      hint: "Embed a Canvas preview inline", keywords: "canvas whiteboard diagram draw board embed", Icon: FrameEmbedIcon, group: "Workspace" },
 
   { kind: "image",     label: "Image",           hint: "Upload or paste",      keywords: "image picture photo upload", Icon: ImageIcon, group: "Embed" },
   { kind: "embed",     label: "Embed URL",       hint: "Linkable preview",     keywords: "embed url link iframe", Icon: Link2,      group: "Embed" },
@@ -1463,6 +1467,7 @@ function BlockContent(p: ContentProps) {
   if (block.kind === "meetings_view") return <MeetingsViewBlock block={block} readonly={readonly} onUpdate={p.onUpdate} />;
   if (block.kind === "form")          return <FormBlock block={block} readonly={readonly} onUpdate={p.onUpdate} />;
   if (block.kind === "data_table")    return <DataTableBlock block={block} readonly={readonly} onUpdate={p.onUpdate} />;
+  if (block.kind === "canvas_card")   return <CanvasCardBlock block={block} readonly={readonly} onUpdate={p.onUpdate} />;
 
   return null;
 }
@@ -2850,6 +2855,70 @@ function DataTableBlock({ block, readonly, onUpdate }: { block: Extract<Block, {
       </header>
       <Link href={`/tables/${block.tableId}`} className="bembed__form-cta">
         <TableIcon /> Open this table →
+      </Link>
+    </div>
+  );
+}
+
+// ───────── Canvas embed (inline read-only preview of a Canvas) ─────────
+type ApiWhiteboard = { id: string; name: string; description?: string | null };
+
+function CanvasCardBlock({ block, readonly, onUpdate }: { block: Extract<Block, { kind: "canvas_card" }>; readonly: boolean; onUpdate: (p: Partial<Block>) => void }) {
+  const [boards, setBoards] = useState<ApiWhiteboard[] | null>(null);
+  const [picking, setPicking] = useState(!block.whiteboardId);
+
+  useEffect(() => {
+    if (!picking) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/whiteboards");
+        if (!res.ok) return;
+        const d = await res.json();
+        if (cancelled) return;
+        setBoards(d.whiteboards ?? (Array.isArray(d) ? d : []));
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [picking]);
+
+  if (!block.whiteboardId || picking) {
+    return (
+      <div className="bembed bembed--pick">
+        <header className="bembed__head">
+          <FrameEmbedIcon />
+          <strong>Embed a Canvas</strong>
+          {block.whiteboardId && <button type="button" className="bembed__cancel" onClick={() => setPicking(false)}>Cancel</button>}
+        </header>
+        {boards === null ? (
+          <div className="bembed__loading">Loading canvases…</div>
+        ) : boards.length === 0 ? (
+          <div className="bembed__empty">No canvases yet. Create one at <Link href="/canvas">/canvas</Link>.</div>
+        ) : (
+          <div className="bembed__pick-list">
+            {boards.map((w) => (
+              <button key={w.id} type="button" onClick={() => { onUpdate({ whiteboardId: w.id, whiteboardName: w.name }); setPicking(false); }}>
+                <FrameEmbedIcon />
+                <span>{w.name}</span>
+                {w.description ? <em>{w.description}</em> : null}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="bembed bembed--form">
+      <header className="bembed__head">
+        <FrameEmbedIcon />
+        <strong>{block.whiteboardName ?? "Canvas"}</strong>
+        {!readonly && <button type="button" className="bembed__cancel" onClick={() => setPicking(true)}>Change</button>}
+        <Link href={`/canvas/${block.whiteboardId}`} className="bembed__open">Open <ChevronRight /></Link>
+      </header>
+      <Link href={`/canvas/${block.whiteboardId}`} style={{ display: "block", border: "1px solid var(--os-border, #e2e8f0)", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+        <CanvasPreview whiteboardId={block.whiteboardId} height={240} />
       </Link>
     </div>
   );

@@ -10,7 +10,7 @@
 // AI types render as a muted "—" placeholder until Phase 4+.
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Loader2 } from "lucide-react";
+import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Loader2, Frame } from "lucide-react";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { useAnchorPos } from "./use-anchor-pos";
@@ -150,6 +150,13 @@ const loadSopEntities = makeEntityLoader(async () => {
   return (data.data ?? []).map((s: { id: string; title: string | null; category: string | null }) => ({ id: s.id, label: s.title || "Untitled SOP", sub: s.category }));
 });
 
+const loadCanvasEntities = makeEntityLoader(async () => {
+  const res = await fetch("/api/whiteboards", { cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.whiteboards ?? []).map((w: { id: string; name: string | null; description: string | null }) => ({ id: w.id, label: w.name || "Untitled canvas", sub: w.description }));
+});
+
 // Create-new helpers — used by the LINKED_DOC / LINKED_SOP pickers so a row can
 // spin up a brand-new Doc/SOP and link it in one step (not only link existing).
 async function createDocEntity(title: string): Promise<EntityLite | null> {
@@ -171,6 +178,16 @@ async function createSopEntity(title: string): Promise<EntityLite | null> {
   const data = await res.json();
   const s = data.data ?? data.sop ?? data;
   return s?.id ? { id: s.id, label: s.title || title } : null;
+}
+async function createCanvasEntity(name: string): Promise<EntityLite | null> {
+  const res = await fetch("/api/whiteboards", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const w = data.whiteboard ?? data.data ?? data;
+  return w?.id ? { id: w.id, label: w.name || name } : null;
 }
 
 const loadKraEntities = makeEntityLoader(async () => {
@@ -236,6 +253,8 @@ export function FieldValue(props: FieldValueProps) {
       return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadDocEntities} Icon={FileText} hrefFor={(id) => `/docs/${id}`} emptyHint="No docs in this org yet." onCreate={createDocEntity} createLabel="Doc" />;
     case "LINKED_SOP":
       return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadSopEntities} Icon={BookOpen} hrefFor={(id) => `/sops/${id}`} emptyHint="No SOPs in this org yet." onCreate={createSopEntity} createLabel="SOP" />;
+    case "LINKED_CANVAS":
+      return <LinkedEntityValue value={value} readOnly={readOnly} onChange={onChange} loader={loadCanvasEntities} Icon={Frame} hrefFor={(id) => `/canvas/${id}`} emptyHint="No canvases in this org yet." onCreate={createCanvasEntity} createLabel="Canvas" />;
     case "RELATIONSHIP":
       return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":

@@ -19,7 +19,7 @@ import {
   MapPin, GaugeCircle, Gauge, Activity, Languages, FileText, ScrollText,
   CheckCheck, Shirt, ThumbsUp, Sparkles, ListFilter, Target, BookOpen,
   Flag, Box, CircleDot, MessageSquare, GanttChart, Clock, Link2,
-  CalendarCheck, GitPullRequest,
+  CalendarCheck, GitPullRequest, Frame,
   type LucideIcon,
 } from "lucide-react";
 
@@ -53,8 +53,8 @@ export type FieldType =
   | "CUSTOM_TEXT" | "CUSTOM_DROPDOWN"
   // WorkwrK AI-OS gating fields (Phase 4)
   | "KRA"
-  // connection-as-field — link a Doc / SOP to the row (mirror KRA)
-  | "LINKED_DOC" | "LINKED_SOP";
+  // connection-as-field — link a Doc / SOP / Canvas to the row (mirror KRA)
+  | "LINKED_DOC" | "LINKED_SOP" | "LINKED_CANVAS";
 
 export interface FieldCatalogEntry {
   type: FieldType;
@@ -101,6 +101,7 @@ export const FIELD_CATALOG: FieldCatalogEntry[] = [
   { type: "KRA", label: "KRA tag", Icon: Target, color: C.amber, group: "WorkwrK", tier1: true, description: "Tag this row with an organizational KRA" },
   { type: "LINKED_DOC", label: "Linked Doc", Icon: FileText, color: C.amber, group: "WorkwrK", tier1: true, description: "Link a Doc to this row" },
   { type: "LINKED_SOP", label: "Linked SOP", Icon: BookOpen, color: C.amber, group: "WorkwrK", tier1: true, description: "Link an SOP to this row" },
+  { type: "LINKED_CANVAS", label: "Linked Canvas", Icon: Frame, color: C.amber, group: "WorkwrK", tier1: true, description: "Link a Canvas to this row" },
 
   // ── Advanced ────────────────────────────────────────────────
   { type: "FORMULA",          label: "Formula",         Icon: Sigma,         color: C.green,  group: "Advanced", tier1: false, description: "Compute a value from other fields" },
