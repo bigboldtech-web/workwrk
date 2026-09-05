@@ -319,13 +319,21 @@ export function reflowConnectors(elements: CanvasElement[]): void {
     if (!el.fromId && !el.toId) continue;
     const from = el.fromId ? byId.get(el.fromId) : undefined;
     const to = el.toId ? byId.get(el.toId) : undefined;
-    // Fall back to the current free endpoint when a side isn't bound (or the
-    // bound element was deleted).
-    const aCentre = from ? { x: from.x + from.w / 2, y: from.y + from.h / 2 } : { x: el.points[0][0], y: el.points[0][1] };
-    const bCentre = to ? { x: to.x + to.w / 2, y: to.y + to.h / 2 } : { x: el.points[el.points.length - 1][0], y: el.points[el.points.length - 1][1] };
-    const a = from ? rectEdgePoint(from, bCentre) : [aCentre.x, aCentre.y] as [number, number];
-    const b = to ? rectEdgePoint(to, aCentre) : [bCentre.x, bCentre.y] as [number, number];
-    el.points = [a, b];
+    const pts = el.points;
+    if (pts.length < 2) continue;
+    const last = pts.length - 1;
+    // Re-anchor ONLY the two ends to their bound shapes' edges — KEEP every
+    // middle bend so a multi-point curved/elbow connector stays curved/elbow
+    // after it binds. Each end aims at its neighbour point (or, for a plain
+    // 2-point connector, at the opposite shape's centre).
+    const aTarget = last > 1
+      ? { x: pts[1][0], y: pts[1][1] }
+      : to ? { x: to.x + to.w / 2, y: to.y + to.h / 2 } : { x: pts[last][0], y: pts[last][1] };
+    const bTarget = last > 1
+      ? { x: pts[last - 1][0], y: pts[last - 1][1] }
+      : from ? { x: from.x + from.w / 2, y: from.y + from.h / 2 } : { x: pts[0][0], y: pts[0][1] };
+    if (from) pts[0] = rectEdgePoint(from, aTarget);
+    if (to) pts[last] = rectEdgePoint(to, bTarget);
     syncPathBounds(el);
   }
 }

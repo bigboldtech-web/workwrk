@@ -123,6 +123,7 @@ const TOOL_BY_NUM: Record<string, Tool> = Object.fromEntries(
 
 const HANDLE = 8; // px, screen space
 const ROT_OFFSET = 22; // px above the top edge — where the rotation handle sits
+const BIND_TOL = 14; // px, screen — how close counts as "over a shape" for magnetic binding
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 6;
 
@@ -377,7 +378,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       for (let i = s.elements.length - 1; i >= 0; i--) {
         const c = s.elements[i];
         if (c.id === m.id || c.id === (el as PathElement).fromId || !isBindable(c)) continue;
-        if (hitTest(c, end[0], end[1], 6 / s.viewport.zoom)) { toId = c.id; break; }
+        if (hitTest(c, end[0], end[1], BIND_TOL / s.viewport.zoom)) { toId = c.id; break; }
       }
       let elements = s.elements.map((x) => {
         if (x.id !== m.id) return x;
@@ -491,11 +492,13 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
       if (!multiRef.current) {
-        // Click (or press) to START the arrow. Points = [start, floating-end].
-        // It binds to a shape it starts on.
-        const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-        const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
-        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
+        // Click (or press) to START the arrow. If it starts on/near a shape,
+        // bind to it AND snap the start onto that shape's edge (magnetic start).
+        const startHit = hitTopElement(scene, world.x, world.y, BIND_TOL / vp.zoom);
+        const bindStart = startHit && isBindable(startHit) ? startHit : null;
+        const fromId = bindStart?.id;
+        const startPt: [number, number] = bindStart ? rectEdgePoint(bindStart, world) : [world.x, world.y];
+        const el: PathElement = { id, type: tool, x: startPt[0], y: startPt[1], w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [startPt, [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
         undoRef.current.push(snapshot);
         setScene((s) => ({ ...s, elements: [...s.elements, el] }));
         selectOne(id);
@@ -515,7 +518,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const lastFixed = pts[pts.length - 2]; // the floating end is pts[last]
           const lsx = lastFixed[0] * vp.zoom + vp.x, lsy = lastFixed[1] * vp.zoom + vp.y;
           const onLast = Math.hypot(sx - lsx, sy - lsy) <= HANDLE * 1.6;
-          const endHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+          const endHit = hitTopElement(scene, world.x, world.y, BIND_TOL / vp.zoom);
           const onShape = !!endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== (el as PathElement).fromId;
           patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
           if (onShape || onLast) {
@@ -570,7 +573,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       const w = toWorld(msx, msy);
       patchElement(multiRef.current.id, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [w.x, w.y]; syncPathBounds(el as PathElement); } });
       let hover: string | null = null;
-      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, BIND_TOL / vp.zoom)) { hover = c.id; break; } }
       setHoverBindId(hover);
       updateHoverDot(hover, w.x, w.y);
       return;
@@ -581,7 +584,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // cursor, so you can see where the arrow will attach (Excalidraw).
       if (tool === "arrow" || tool === "line") {
         const w = toWorld(msx, msy);
-        const shape = hitTopElement(scene, w.x, w.y, 8 / vp.zoom);
+        const shape = hitTopElement(scene, w.x, w.y, BIND_TOL / vp.zoom);
         updateHoverDot(shape && isBindable(shape) ? shape.id : null, w.x, w.y);
       } else if (hoverDot) {
         setHoverDot(null);
@@ -609,7 +612,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         for (let i = scene.elements.length - 1; i >= 0; i--) {
           const cand = scene.elements[i];
           if (cand.id === drag.id || !isBindable(cand)) continue;
-          if (hitTest(cand, world.x, world.y, 6 / vp.zoom)) { hover = cand.id; break; }
+          if (hitTest(cand, world.x, world.y, BIND_TOL / vp.zoom)) { hover = cand.id; break; }
         }
         setHoverBindId(hover);
         updateHoverDot(hover, world.x, world.y);
@@ -659,7 +662,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       const el = scene.elements.find((x) => x.id === drag.id);
       const isEnd = el && "points" in el && (drag.vi === 0 || drag.vi === el.points.length - 1);
       let hover: string | null = null;
-      if (isEnd) for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === drag.id || !isBindable(c)) continue; if (hitTest(c, world.x, world.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      if (isEnd) for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === drag.id || !isBindable(c)) continue; if (hitTest(c, world.x, world.y, BIND_TOL / vp.zoom)) { hover = c.id; break; } }
       setHoverBindId(hover);
     } else if (drag.kind === "marquee") {
       const box = normalizeBox({ x: drag.startX, y: drag.startY, w: world.x - drag.startX, h: world.y - drag.startY });
@@ -705,7 +708,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             for (let i = s.elements.length - 1; i >= 0; i--) {
               const cand = s.elements[i];
               if (cand.id === drag.id || cand.id === el.fromId || !isBindable(cand)) continue;
-              if (hitTest(cand, end[0], end[1], 6 / s.viewport.zoom)) { toId = cand.id; break; }
+              if (hitTest(cand, end[0], end[1], BIND_TOL / s.viewport.zoom)) { toId = cand.id; break; }
             }
           }
           elements = s.elements.map((x) => {
@@ -741,7 +744,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         if (isStart || isEnd) for (let k = s.elements.length - 1; k >= 0; k--) {
           const c = s.elements[k];
           if (c.id === drag.id || !isBindable(c)) continue;
-          if (hitTest(c, p[0], p[1], 6 / s.viewport.zoom)) { bindId = c.id; break; }
+          if (hitTest(c, p[0], p[1], BIND_TOL / s.viewport.zoom)) { bindId = c.id; break; }
         }
         let elements = s.elements.map((x) => {
           if (x.id !== drag.id) return x;
