@@ -197,6 +197,21 @@ export function strokeConnectorPath(ctx: CanvasRenderingContext2D, el: PathEleme
     return [pts[pts.length - 2], pts[pts.length - 1]];
   }
 
+  if (type === "curved" && pts.length === 2) {
+    // A simple drag makes a 2-point arrow; bow it perpendicular to the segment
+    // so "curved" is a real curve (not a straight line). Control point at the
+    // midpoint pushed out ~22% of the length. Arrowhead follows the tangent.
+    const a = pts[0], b = pts[1];
+    const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy) || 1;
+    const bow = Math.min(len * 0.22, 80);
+    const cx = mx + (-dy / len) * bow, cy = my + (dx / len) * bow;
+    ctx.moveTo(a[0], a[1]);
+    ctx.quadraticCurveTo(cx, cy, b[0], b[1]);
+    return [[cx, cy], b];
+  }
+
   // straight (also curved with only 2 points)
   ctx.moveTo(pts[0][0], pts[0][1]);
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);

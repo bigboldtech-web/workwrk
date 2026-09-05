@@ -33,7 +33,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, boundsOfElements,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -143,8 +143,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [dash, setDash] = useState<DashStyle>("solid");
   const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
-  const multiRef = useRef<{ id: string; downX: number; downY: number } | null>(null); // in-progress multi-point arrow
-  const lastPtrRef = useRef({ sx: 0, sy: 0 }); // last pointer pos (screen), for drag-vs-click
   const clipboardRef = useRef<CanvasElement[]>([]);
   const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -178,7 +176,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       .catch(() => { /* leave null — the card shows a placeholder */ });
     return null;
   }, []);
-  const [containerW, setContainerW] = useState(0); // canvas CSS width, for clamping the floating style bar
   const [shapesOpen, setShapesOpen] = useState(false); // "More shapes" flyout
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; onElement: boolean; hasClipboard: boolean } | null>(null);
   // Task-card picker (work-graph): drop a live task onto the canvas.
@@ -296,7 +293,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       const rect = wrap.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       sizeRef.current = { w: rect.width, h: rect.height, dpr };
-      setContainerW(rect.width); // for clamping the floating style bar in render
       canvas.width = Math.round(rect.width * dpr);
       canvas.height = Math.round(rect.height * dpr);
       canvas.style.width = `${rect.width}px`;
@@ -321,46 +317,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       }),
     }));
   }, []);
-
-  // Finish the in-progress multi-point arrow (double-click / Enter / Escape /
-  // press-drag): trim trailing floating/coincident points, bind the end to a
-  // shape if it lands on one, or drop a stray zero-length arrow.
-  const finishMultiArrow = useCallback(() => {
-    const m = multiRef.current;
-    if (!m) return;
-    multiRef.current = null;
-    setHoverBindId(null);
-    setScene((s) => {
-      const el = s.elements.find((x) => x.id === m.id);
-      if (!el || !("points" in el)) return s;
-      const points = el.points.map((p) => [p[0], p[1]] as [number, number]);
-      while (points.length > 2 && dist(points[points.length - 1], points[points.length - 2]) < 4) points.pop();
-      if (points.length < 2 || (points.length === 2 && dist(points[0], points[1]) < 4)) {
-        selectOne(null);
-        const next = { ...s, elements: s.elements.filter((x) => x.id !== m.id) };
-        onChange(next);
-        return next;
-      }
-      const end = points[points.length - 1];
-      let toId: string | undefined;
-      for (let i = s.elements.length - 1; i >= 0; i--) {
-        const c = s.elements[i];
-        if (c.id === m.id || c.id === (el as PathElement).fromId || !isBindable(c)) continue;
-        if (hitTest(c, end[0], end[1], 6 / s.viewport.zoom)) { toId = c.id; break; }
-      }
-      let elements = s.elements.map((x) => {
-        if (x.id !== m.id) return x;
-        const c: PathElement = { ...(x as PathElement), points, toId };
-        syncPathBounds(c);
-        return c;
-      });
-      elements = reflowElements(elements);
-      const next = { ...s, elements };
-      onChange(next);
-      return next;
-    });
-    bump();
-  }, [onChange, bump, selectOne]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (editing) return;
@@ -437,25 +393,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     } else if (tool === "line" || tool === "arrow") {
-      if (!multiRef.current) {
-        // Start a new arrow. Points = [start, floating-end]. It binds to a shape
-        // it starts on (connector). Press-drag makes a quick 2-point arrow; a
-        // click starts a MULTI-POINT arrow (click to add bends, dbl-click ends).
-        const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-        const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
-        const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
-        undoRef.current.push(snapshot);
-        setScene((s) => ({ ...s, elements: [...s.elements, el] }));
-        selectOne(id);
-        multiRef.current = { id, downX: sx, downY: sy };
-        dragRef.current = { kind: "path", id };
-      } else {
-        // Continue: fix the floating end at this click + append a new floating.
-        const mid = multiRef.current.id;
-        patchElement(mid, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [world.x, world.y]; el.points.push([world.x, world.y]); syncPathBounds(el as PathElement); } });
-        multiRef.current = { id: mid, downX: sx, downY: sy };
-        dragRef.current = null;
-      }
+      // Simple press-drag arrow (Excalidraw-style): points = [start, end]. Binds
+      // to a shape it STARTS on, and (on release) to the shape its END lands on —
+      // where it stops. No multi-point / double-click flow.
+      const startHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+      const fromId = startHit && isBindable(startHit) ? startHit.id : undefined;
+      const el: PathElement = { id, type: tool, x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y], [world.x, world.y]], fromId, arrowType, ...(dash !== "solid" ? { dash } : {}) };
+      undoRef.current.push(snapshot);
+      setScene((s) => ({ ...s, elements: [...s.elements, el] }));
+      selectOne(id);
+      dragRef.current = { kind: "path", id };
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]], ...(dash !== "solid" ? { dash } : {}) };
       undoRef.current.push(snapshot);
@@ -485,22 +432,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, toWorld, selectOne, patchElement]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, toWorld, selectOne]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     const mrect = canvas.getBoundingClientRect();
     const msx = e.clientX - mrect.left, msy = e.clientY - mrect.top;
-    lastPtrRef.current = { sx: msx, sy: msy };
-    // Multi-point arrow: the floating end tracks the cursor (even between clicks).
-    if (multiRef.current) {
-      const w = toWorld(msx, msy);
-      patchElement(multiRef.current.id, (el) => { if ("points" in el) { el.points[el.points.length - 1] = [w.x, w.y]; syncPathBounds(el as PathElement); } });
-      let hover: string | null = null;
-      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, 6 / vp.zoom)) { hover = c.id; break; } }
-      setHoverBindId(hover);
-      return;
-    }
     const drag = dragRef.current;
     if (!drag) return;
     const sx = msx, sy = msy;
@@ -572,16 +509,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   }, [patchElement, toWorld, scene.elements, vp]);
 
   const onPointerUp = useCallback(() => {
-    // In multi-point arrow mode: a press-DRAG ends the arrow (quick 2-point, or
-    // the final segment); a plain CLICK keeps adding bends (dbl-click/Esc ends).
-    if (multiRef.current) {
-      dragRef.current = null;
-      const moved = dist([lastPtrRef.current.sx, lastPtrRef.current.sy], [multiRef.current.downX, multiRef.current.downY]);
-      if (moved > 5) finishMultiArrow();
-      setHoverBindId(null);
-      bump();
-      return;
-    }
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
@@ -658,7 +585,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     setHoverBindId(null);
     // pan doesn't touch persisted elements — no onChange
     bump();
-  }, [onChange, bump, selectOne, finishMultiArrow]);
+  }, [onChange, bump, selectOne]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     const canvas = canvasRef.current!;
@@ -900,8 +827,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // Hold Space = temporary pan (returns to your tool on release). Not while typing.
       if (e.key === " " && !typing) { e.preventDefault(); spaceRef.current = true; setSpaceDown(true); return; }
       if (typing) return;
-      // Enter / Escape finish an in-progress multi-point arrow.
-      if ((e.key === "Enter" || e.key === "Escape") && multiRef.current) { e.preventDefault(); finishMultiArrow(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -930,7 +855,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements]);
 
   // Native paste: an OS-clipboard image inserts an image; otherwise our
   // internal element copy (from ⌘C) is pasted. Ignored while editing text.
@@ -982,28 +907,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const editingEl = editing ? scene.elements.find((e) => e.id === editing.id) : null;
   const cursor = spaceDown || tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
 
-  // Contextual style bar placement (ClickUp-style): float just above the
-  // selection's screen-space box when something is selected; otherwise (a
-  // drawing tool is active with no selection) park it above the bottom tools.
+  // Contextual style bar: a fixed, compact panel pinned to the TOP-LEFT
+  // (Excalidraw-style) that opens when something is selected or a drawing tool
+  // is active. It does not follow the selection around the canvas.
   const styleToolActive = tool !== "select" && tool !== "hand";
   const showStyleBar = (selectedIds.size > 0 || styleToolActive) && !marquee && !editing;
-  let styleBarPlacement: React.CSSProperties = styleBarStyleBottom;
-  if (selectedIds.size > 0) {
-    const selEls = scene.elements.filter((e) => selectedIds.has(e.id));
-    const wb = boundsOfElements(selEls);
-    if (wb) {
-      const sx = wb.x * vp.zoom + vp.x;
-      const sy = wb.y * vp.zoom + vp.y;
-      const sw = wb.w * vp.zoom;
-      const sh = wb.h * vp.zoom;
-      const barH = 42, gap = 12, halfW = 200;
-      let cx = sx + sw / 2;
-      if (containerW > 0) cx = Math.max(halfW + 8, Math.min(containerW - halfW - 8, cx));
-      let top = sy - gap - barH;
-      if (top < 8) top = sy + sh + gap; // flip below when there's no room above
-      styleBarPlacement = { ...styleBarBase, left: cx, top, transform: "translateX(-50%)" };
-    }
-  }
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1016,7 +924,6 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         onContextMenu={onContextMenu}
         onWheel={onWheel}
         onDoubleClick={(e) => {
-          if (multiRef.current) { finishMultiArrow(); return; }
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
@@ -1155,10 +1062,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         </>
       ) : null}
 
-      {/* contextual style bar — floats above the selection (ClickUp), or parks
-          above the bottom tools when only a drawing tool is active */}
+      {/* contextual style bar — fixed compact panel at the top-left
+          (Excalidraw-style), opens on selection or an active drawing tool */}
       {showStyleBar ? (
-        <div style={styleBarPlacement}>
+        <div style={styleBarStyleTopLeft}>
           {STROKE_COLORS.slice(0, 6).map((c) => (
             <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
               style={{ width: 20, height: 20, borderRadius: 6, background: c, border: stroke === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)", cursor: "pointer", padding: 0 }} />
@@ -1362,9 +1269,6 @@ function cloneEl(el: CanvasElement): CanvasElement {
   return "points" in el ? { ...el, points: el.points.map((p) => [p[0], p[1]] as [number, number]) } : { ...el };
 }
 
-function dist(a: [number, number], b: [number, number]): number {
-  return Math.hypot(a[0] - b[0], a[1] - b[1]);
-}
 
 function CtxItem({ label, hint, danger, onClick }: { label: string; hint?: string; danger?: boolean; onClick: () => void }) {
   return (
@@ -1410,18 +1314,14 @@ const toolbarStyle: React.CSSProperties = {
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 5, flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
 };
-// Contextual style bar. Shared chrome; positioned two ways:
-//  - a SELECTION present → floats just above the selection (ClickUp pattern)
-//  - only a drawing tool active → parked above the bottom tools bar
-const styleBarBase: React.CSSProperties = {
-  position: "absolute",
-  display: "flex", alignItems: "center", gap: 3, padding: "5px 7px",
+// Contextual style bar: a fixed, compact panel pinned to the top-left
+// (Excalidraw-style). Wraps to a few narrow rows rather than one wide bar.
+const styleBarStyleTopLeft: React.CSSProperties = {
+  position: "absolute", top: 12, left: 12,
+  display: "flex", alignItems: "center", gap: 3, padding: "6px 7px",
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 10, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 6,
-  flexWrap: "wrap", maxWidth: "min(92vw, 540px)",
-};
-const styleBarStyleBottom: React.CSSProperties = {
-  ...styleBarBase, bottom: 68, left: "50%", transform: "translateX(-50%)",
+  flexWrap: "wrap", maxWidth: "min(78vw, 260px)",
 };
 const taskPanelStyle: React.CSSProperties = {
   position: "absolute", bottom: 116, left: "50%", transform: "translateX(-50%)", zIndex: 9,
