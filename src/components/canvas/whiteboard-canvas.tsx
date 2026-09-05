@@ -403,6 +403,14 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             undoRef.current.push(cloneScene(scene));
             return;
           }
+          // Click ON the line (between vertices) → insert a bend there and drag it.
+          const segIdx = hitSegment(sel, sx, sy, vp);
+          if (segIdx !== -1) {
+            undoRef.current.push(cloneScene(scene));
+            patchElement(sel.id, (el) => { if ("points" in el) { el.points.splice(segIdx, 0, [world.x, world.y]); syncPathBounds(el as PathElement); } });
+            dragRef.current = { kind: "endpoint", id: sel.id, vi: segIdx };
+            return;
+          }
         } else if (sel) {
           const handle = hitHandle(sel, sx, sy, vp);
           if (handle >= 0) {
@@ -834,6 +842,26 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  // Opacity is a live-drag slider: update the scene as it moves (no history),
+  // then commit ONCE on release against the snapshot taken when the drag began.
+  const opacitySnapRef = useRef<CanvasScene | null>(null);
+  const setOpacityLive = useCallback((o: number) => {
+    setScene((s) => ({ ...s, elements: s.elements.map((el) => (selectedIds.has(el.id) ? { ...el, opacity: o } : el)) }));
+  }, [selectedIds]);
+  const commitOpacity = useCallback(() => {
+    const snap = opacitySnapRef.current;
+    opacitySnapRef.current = null;
+    if (!snap) return;
+    setScene((s) => {
+      undoRef.current.push(snap);
+      if (undoRef.current.length > 100) undoRef.current.shift();
+      redoRef.current = [];
+      onChange(s);
+      return s;
+    });
+    bump();
+  }, [onChange, bump]);
+
   // Duplicate the given elements with an offset + fresh ids; returns the copies.
   const pasteElements = useCallback((src: CanvasElement[], dx = 16, dy = 16) => {
     if (src.length === 0) return;
@@ -1063,6 +1091,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const secArrow = tool === "line" || tool === "arrow" || someSel((el) => el.type === "line" || el.type === "arrow");
   const secText = tool === "text" || tool === "sticky" || someSel((el) => el.type === "text" || el.type === "sticky");
   const hasSelection = selectedIds.size > 0;
+  const selOpacity = selEls.length > 0 ? selEls[0].opacity : 1;
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1282,6 +1311,18 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             </PanelSection>
           ) : null}
           {hasSelection ? (
+            <PanelSection label="Opacity">
+              <input
+                type="range" min={10} max={100} step={10} value={Math.round(selOpacity * 100)}
+                onPointerDown={() => { opacitySnapRef.current = cloneScene(scene); }}
+                onChange={(e) => setOpacityLive(Number(e.target.value) / 100)}
+                onPointerUp={commitOpacity}
+                onKeyUp={commitOpacity}
+                style={{ width: "100%", accentColor: "#6965db", cursor: "pointer" }}
+              />
+            </PanelSection>
+          ) : null}
+          {hasSelection ? (
             <PanelSection label="Layers">
               <button type="button" title="Send to back" onClick={() => reorderZ(false)} style={panelBtn(false)}><ChevronsDown style={{ width: 16, height: 16 }} /></button>
               <button type="button" title="Bring to front" onClick={() => reorderZ(true)} style={panelBtn(false)}><ChevronsUp style={{ width: 16, height: 16 }} /></button>
@@ -1432,6 +1473,26 @@ function hitVertex(el: CanvasElement, sx: number, sy: number, vp: { x: number; y
   for (let i = 0; i < pts.length; i++) {
     const px = pts[i][0] * vp.zoom + vp.x, py = pts[i][1] * vp.zoom + vp.y;
     if (Math.abs(sx - px) <= HANDLE && Math.abs(sy - py) <= HANDLE) return i;
+  }
+  return -1;
+}
+
+// If the cursor is on a line/arrow's segment (away from its vertices), returns
+// the index at which to INSERT a new bend point; else -1. Tests the raw point
+// polyline (exact for straight arrows — the common "break a straight arrow" case).
+function hitSegment(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): number {
+  if (el.type !== "line" && el.type !== "arrow") return -1;
+  const pts = el.points;
+  const tol = 6 + el.strokeWidth * vp.zoom / 2;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const ax = pts[i][0] * vp.zoom + vp.x, ay = pts[i][1] * vp.zoom + vp.y;
+    const bx = pts[i + 1][0] * vp.zoom + vp.x, by = pts[i + 1][1] * vp.zoom + vp.y;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((sx - ax) * dx + (sy - ay) * dy) / len2));
+    const px = ax + t * dx, py = ay + t * dy;
+    // Only mid-segment (not hugging a vertex — those are drags via hitVertex).
+    if (t > 0.12 && t < 0.88 && Math.hypot(sx - px, sy - py) <= tol) return i + 1;
   }
   return -1;
 }
