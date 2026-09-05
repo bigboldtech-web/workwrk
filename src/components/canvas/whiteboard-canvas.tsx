@@ -480,14 +480,29 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         multiRef.current = { id, downX: sx, downY: sy };
         dragRef.current = { kind: "path", id };
       } else {
-        // Second click STOPS the arrow. Place the end here and finish: it binds
-        // if it landed on a shape, otherwise it just ends straight in empty
-        // space. (No bends are added while drawing — click the finished line to
-        // add a bend afterwards.)
+        // Multi-point mode (Excalidraw): each click adds a vertex. Clicking ON
+        // the last placed point finishes it; so do double-click / Enter / Escape.
+        // Ending on a shape binds. This branch only runs for CLICK-started
+        // arrows (a press-drag finishes on release, see onPointerUp).
         const mid = multiRef.current.id;
-        patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
-        finishMultiArrow();
-        dragRef.current = null;
+        const el = scene.elements.find((x) => x.id === mid);
+        if (!el || !("points" in el)) { multiRef.current = null; dragRef.current = null; }
+        else {
+          const pts = el.points;
+          const lastFixed = pts[pts.length - 2]; // the floating end is pts[last]
+          const lsx = lastFixed[0] * vp.zoom + vp.x, lsy = lastFixed[1] * vp.zoom + vp.y;
+          const onLast = Math.hypot(sx - lsx, sy - lsy) <= HANDLE * 1.6;
+          patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
+          if (onLast) {
+            // clicked the last point → drop the coincident floating point + finish
+            patchElement(mid, (x) => { if ("points" in x && x.points.length > 2) { x.points.pop(); syncPathBounds(x as PathElement); } });
+            finishMultiArrow();
+          } else {
+            patchElement(mid, (x) => { if ("points" in x) { x.points.push([world.x, world.y]); syncPathBounds(x as PathElement); } });
+            multiRef.current = { id: mid, downX: sx, downY: sy };
+          }
+          dragRef.current = null;
+        }
       }
     } else if (tool === "freedraw") {
       const el: PathElement = { id, type: "freedraw", x: world.x, y: world.y, w: 1, h: 1, stroke, fill: "transparent", strokeWidth: strokeW, opacity: 1, points: [[world.x, world.y]], ...(dash !== "solid" ? { dash } : {}) };
