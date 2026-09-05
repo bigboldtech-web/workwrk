@@ -15,6 +15,7 @@ import {
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
   MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight,
+  ChevronsUp, ChevronsDown, Copy as CopyIcon,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -51,7 +52,7 @@ import {
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
-import { drawElement, drawCanvasCard } from "@/lib/canvas/render";
+import { drawElement, drawCanvasCard, strokeConnectorPath } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 
 /** A work-graph item the picker can drop onto the canvas as a live card
@@ -131,7 +132,7 @@ type Drag =
   | { kind: "path"; id: string }
   | { kind: "move"; ids: string[]; startX: number; startY: number; origs: Map<string, CanvasElement> }
   | { kind: "resize"; id: string; handle: number; orig: CanvasElement }
-  | { kind: "endpoint"; id: string; end: 0 | 1 } // dragging a line/arrow endpoint
+  | { kind: "endpoint"; id: string; vi: number } // dragging a line/arrow vertex (0=start, last=end, middle=bend)
   | { kind: "marquee"; startX: number; startY: number; add: boolean; base: string[] }
   | null;
 
@@ -396,9 +397,9 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       if (selectedIds.size === 1) {
         const sel = scene.elements.find((el) => selectedIds.has(el.id));
         if (sel && (sel.type === "line" || sel.type === "arrow")) {
-          const ep = hitEndpoint(sel, sx, sy, vp);
-          if (ep !== -1) {
-            dragRef.current = { kind: "endpoint", id: sel.id, end: ep };
+          const vi = hitVertex(sel, sx, sy, vp);
+          if (vi !== -1) {
+            dragRef.current = { kind: "endpoint", id: sel.id, vi };
             undoRef.current.push(cloneScene(scene));
             return;
           }
@@ -582,11 +583,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     } else if (drag.kind === "endpoint") {
       patchElement(drag.id, (el) => {
         if (!("points" in el)) return;
-        el.points[drag.end === 0 ? 0 : el.points.length - 1] = [world.x, world.y];
+        const idx = drag.vi >= el.points.length ? el.points.length - 1 : drag.vi;
+        el.points[idx] = [world.x, world.y];
         syncPathBounds(el as PathElement);
       });
+      // Only the two ENDS bind to shapes; a middle bend never highlights a target.
+      const el = scene.elements.find((x) => x.id === drag.id);
+      const isEnd = el && "points" in el && (drag.vi === 0 || drag.vi === el.points.length - 1);
       let hover: string | null = null;
-      for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === drag.id || !isBindable(c)) continue; if (hitTest(c, world.x, world.y, 6 / vp.zoom)) { hover = c.id; break; } }
+      if (isEnd) for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === drag.id || !isBindable(c)) continue; if (hitTest(c, world.x, world.y, 6 / vp.zoom)) { hover = c.id; break; } }
       setHoverBindId(hover);
     } else if (drag.kind === "marquee") {
       const box = normalizeBox({ x: drag.startX, y: drag.startY, w: world.x - drag.startX, h: world.y - drag.startY });
@@ -655,13 +660,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     } else if (drag.kind === "move" || drag.kind === "resize") {
       setScene((s) => { onChange(s); return s; });
     } else if (drag.kind === "endpoint") {
-      // Re-bind (or free) the dragged endpoint based on where it landed.
+      // Re-bind (or free) a dragged END based on where it landed; a middle bend
+      // just moves (never binds).
       setScene((s) => {
         const el = s.elements.find((x) => x.id === drag.id);
         if (!el || !("points" in el)) return s;
-        const p = el.points[drag.end === 0 ? 0 : el.points.length - 1];
+        const isStart = drag.vi === 0;
+        const isEnd = drag.vi === el.points.length - 1;
+        const p = el.points[Math.min(drag.vi, el.points.length - 1)];
         let bindId: string | undefined;
-        for (let k = s.elements.length - 1; k >= 0; k--) {
+        if (isStart || isEnd) for (let k = s.elements.length - 1; k >= 0; k--) {
           const c = s.elements[k];
           if (c.id === drag.id || !isBindable(c)) continue;
           if (hitTest(c, p[0], p[1], 6 / s.viewport.zoom)) { bindId = c.id; break; }
@@ -670,7 +678,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           if (x.id !== drag.id) return x;
           const xp = x as PathElement;
           const c: PathElement = { ...xp, points: xp.points.map((pp) => [pp[0], pp[1]] as [number, number]) };
-          if (drag.end === 0) c.fromId = bindId; else c.toId = bindId;
+          if (isStart) c.fromId = bindId; else if (isEnd) c.toId = bindId;
           syncPathBounds(c);
           return c;
         });
@@ -1037,11 +1045,24 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const editingEl = editing ? scene.elements.find((e) => e.id === editing.id) : null;
   const cursor = spaceDown || tool === "hand" ? "grab" : tool === "select" ? "default" : "crosshair";
 
-  // Contextual style bar: a fixed, compact panel pinned to the TOP-LEFT
-  // (Excalidraw-style) that opens when something is selected or a drawing tool
-  // is active. It does not follow the selection around the canvas.
+  // Contextual style PANEL: a fixed, vertical, labeled panel pinned to the
+  // top-left (Excalidraw-style) that opens when something is selected or a
+  // drawing tool is active. Sections show based on what's selected / the tool.
   const styleToolActive = tool !== "select" && tool !== "hand";
   const showStyleBar = (selectedIds.size > 0 || styleToolActive) && !marquee && !editing;
+  const selEls = scene.elements.filter((e) => selectedIds.has(e.id));
+  const someSel = (pred: (el: CanvasElement) => boolean) => selEls.some(pred);
+  const isShapeTool = SHAPE_TOOLS.has(tool);
+  // Which sections are relevant right now.
+  const secStroke = isShapeTool || tool === "line" || tool === "arrow" || tool === "freedraw"
+    || someSel((el) => el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard");
+  const secFill = isShapeTool || tool === "sticky" || someSel((el) => el.type === "sticky" || (el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw" && el.type !== "text" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard" && el.type !== "frame"));
+  const secWidth = isShapeTool || tool === "line" || tool === "arrow" || tool === "freedraw"
+    || someSel((el) => el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard");
+  const secDash = secWidth && !someSel((el) => el.type === "frame"); // frames stay solid
+  const secArrow = tool === "line" || tool === "arrow" || someSel((el) => el.type === "line" || el.type === "arrow");
+  const secText = tool === "text" || tool === "sticky" || someSel((el) => el.type === "text" || el.type === "sticky");
+  const hasSelection = selectedIds.size > 0;
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1198,64 +1219,79 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           (Excalidraw-style), opens on selection or an active drawing tool */}
       {showStyleBar ? (
         <div style={styleBarStyleTopLeft}>
-          {STROKE_COLORS.slice(0, 6).map((c) => (
-            <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
-              style={{ width: 20, height: 20, borderRadius: 6, background: c, border: stroke === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)", cursor: "pointer", padding: 0 }} />
-          ))}
-          <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
-          {FILL_COLORS.map((c) => (
-            <button key={c} type="button" title={c === "transparent" ? "No fill" : "Fill color"} onClick={() => applyFill(c)}
-              style={{
-                width: 20, height: 20, borderRadius: 6, cursor: "pointer", padding: 0,
-                background: c === "transparent" ? "linear-gradient(135deg, #fff 42%, #ef4444 44%, #ef4444 56%, #fff 58%)" : c,
-                border: fillColor === c ? "2px solid #0073EA" : "1px solid rgba(0,0,0,.15)",
-              }} />
-          ))}
-          <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
-          {[1, 2, 4].map((wdt) => (
-            <button key={wdt} type="button" title={`${wdt === 1 ? "Thin" : wdt === 2 ? "Medium" : "Thick"} stroke`} onClick={() => applyWidth(wdt)}
-              style={{ ...toolBtn(strokeW === wdt), width: 28, height: 28 }}>
-              <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#fff" : "var(--os-ink-2, #52525b)" }} />
-            </button>
-          ))}
-          {SHAPE_TOOLS.has(tool) || tool === "line" || tool === "arrow" || tool === "freedraw"
-            || scene.elements.some((el) => selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard" && el.type !== "frame") ? (
-            <>
-              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
-              {(["solid", "dashed", "dotted"] as DashStyle[]).map((d) => (
-                <button key={d} type="button" title={`${d[0].toUpperCase()}${d.slice(1)} stroke`} onClick={() => applyDash(d)}
-                  style={{ ...toolBtn(dash === d), width: 28, height: 28 }}>
-                  <span style={{ width: 16, height: 0, borderTopWidth: 2, borderTopStyle: d, borderTopColor: dash === d ? "#fff" : "var(--os-ink-2, #52525b)" }} />
+          {secStroke ? (
+            <PanelSection label="Stroke">
+              {STROKE_COLORS.slice(0, 5).map((c) => (
+                <button key={c} type="button" title="Stroke color" onClick={() => applyStroke(c)}
+                  style={{ ...swatchStyle, background: c, outline: stroke === c ? "2px solid #6965db" : "none", outlineOffset: 1 }} />
+              ))}
+            </PanelSection>
+          ) : null}
+          {secFill ? (
+            <PanelSection label="Background">
+              {FILL_COLORS.slice(0, 5).map((c) => (
+                <button key={c} type="button" title={c === "transparent" ? "No fill" : "Background color"} onClick={() => applyFill(c)}
+                  style={{ ...swatchStyle, background: c === "transparent" ? "conic-gradient(#eee 0 25%, #fff 0 50%, #eee 0 75%, #fff 0) 0 / 10px 10px" : c, outline: fillColor === c ? "2px solid #6965db" : "none", outlineOffset: 1 }} />
+              ))}
+            </PanelSection>
+          ) : null}
+          {secWidth ? (
+            <PanelSection label="Stroke width">
+              {[1, 2, 4].map((wdt) => (
+                <button key={wdt} type="button" title={`${wdt === 1 ? "Thin" : wdt === 2 ? "Bold" : "Extra bold"}`} onClick={() => applyWidth(wdt)} style={panelBtn(strokeW === wdt)}>
+                  <span style={{ width: 15, height: wdt + 1, borderRadius: 4, background: strokeW === wdt ? "#111827" : "var(--os-ink-2, #52525b)" }} />
                 </button>
               ))}
-            </>
+            </PanelSection>
           ) : null}
-          {tool === "arrow" || tool === "line" || scene.elements.some((el) => selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow")) ? (
-            <>
-              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+          {secDash ? (
+            <PanelSection label="Stroke style">
+              {(["solid", "dashed", "dotted"] as DashStyle[]).map((d) => (
+                <button key={d} type="button" title={`${d[0].toUpperCase()}${d.slice(1)}`} onClick={() => applyDash(d)} style={panelBtn(dash === d)}>
+                  <span style={{ width: 16, height: 0, borderTopWidth: 2, borderTopStyle: d, borderTopColor: dash === d ? "#111827" : "var(--os-ink-2, #52525b)" }} />
+                </button>
+              ))}
+            </PanelSection>
+          ) : null}
+          {secArrow ? (
+            <PanelSection label="Arrow type">
               {ARROW_TYPES.map(({ type: at, Icon, label }) => (
-                <button key={at} type="button" title={`${label} arrow`} onClick={() => applyArrowType(at)} style={{ ...toolBtn(arrowType === at), width: 28, height: 28 }}>
+                <button key={at} type="button" title={`${label}`} onClick={() => applyArrowType(at)} style={panelBtn(arrowType === at)}>
                   <Icon style={{ width: 16, height: 16 }} />
                 </button>
               ))}
-            </>
+            </PanelSection>
           ) : null}
-          {tool === "text" || tool === "sticky" || scene.elements.some((el) => selectedIds.has(el.id) && (el.type === "text" || el.type === "sticky")) ? (
-            <>
-              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+          {secText ? (
+            <PanelSection label="Font size">
               {FONT_SIZES.map(({ label, size }) => (
-                <button key={label} type="button" title={`${label === "S" ? "Small" : label === "M" ? "Medium" : "Large"} text`} onClick={() => applyFontSize(size)}
-                  style={{ ...toolBtn(fontSize === size), width: 28, height: 28, fontWeight: 700, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
+                <button key={label} type="button" title={`${label === "S" ? "Small" : label === "M" ? "Medium" : "Large"}`} onClick={() => applyFontSize(size)}
+                  style={{ ...panelBtn(fontSize === size), fontWeight: 700, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
                   {label}
                 </button>
               ))}
-              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+            </PanelSection>
+          ) : null}
+          {secText ? (
+            <PanelSection label="Text align">
               {TEXT_ALIGNS.map(({ align: a, Icon, label }) => (
-                <button key={a} type="button" title={`Align ${label}`} onClick={() => applyAlign(a)} style={{ ...toolBtn(align === a), width: 28, height: 28 }}>
+                <button key={a} type="button" title={`Align ${label}`} onClick={() => applyAlign(a)} style={panelBtn(align === a)}>
                   <Icon style={{ width: 16, height: 16 }} />
                 </button>
               ))}
-            </>
+            </PanelSection>
+          ) : null}
+          {hasSelection ? (
+            <PanelSection label="Layers">
+              <button type="button" title="Send to back" onClick={() => reorderZ(false)} style={panelBtn(false)}><ChevronsDown style={{ width: 16, height: 16 }} /></button>
+              <button type="button" title="Bring to front" onClick={() => reorderZ(true)} style={panelBtn(false)}><ChevronsUp style={{ width: 16, height: 16 }} /></button>
+            </PanelSection>
+          ) : null}
+          {hasSelection ? (
+            <PanelSection label="Actions">
+              <button type="button" title="Duplicate (⌘D)" onClick={() => duplicateSelected()} style={panelBtn(false)}><CopyIcon style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Delete (⌫)" onClick={() => deleteSelected()} style={panelBtn(false)}><Trash2 style={{ width: 15, height: 15 }} /></button>
+            </PanelSection>
           ) : null}
         </div>
       ) : null}
@@ -1333,16 +1369,20 @@ function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x
       ctx.lineJoin = "round"; ctx.lineCap = "round";
       ctx.lineWidth = el.strokeWidth * vp.zoom + 4;
       ctx.globalAlpha = 0.25;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0] * vp.zoom + vp.x, pts[0][1] * vp.zoom + vp.y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * vp.zoom + vp.x, pts[i][1] * vp.zoom + vp.y);
+      // Trace the SAME routed path the arrow actually renders (straight / elbow /
+      // curved), in screen space — so the highlight hugs the curve, not a
+      // straight chord. The transform is affine + uniform, so routing is
+      // preserved when we pre-map the points to screen coordinates.
+      const screenEl: PathElement = { ...el, points: pts.map((p) => [p[0] * vp.zoom + vp.x, p[1] * vp.zoom + vp.y] as [number, number]) };
+      strokeConnectorPath(ctx, screenEl);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
     if (el.type !== "freedraw" && pts.length >= 2) {
+      // Editable vertices: a white square at each point (endpoints + every bend).
       ctx.fillStyle = "#fff";
       ctx.lineWidth = 1.5;
-      for (const p of [pts[0], pts[pts.length - 1]]) {
+      for (const p of pts) {
         const sx = p[0] * vp.zoom + vp.x, sy = p[1] * vp.zoom + vp.y;
         ctx.fillRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
         ctx.strokeRect(sx - HANDLE / 2, sy - HANDLE / 2, HANDLE, HANDLE);
@@ -1383,13 +1423,15 @@ function handlePositions(x: number, y: number, w: number, h: number): [number, n
 }
 
 /** Which endpoint of a line/arrow is under (sx,sy) — 0 (start), 1 (end), or -1. */
-function hitEndpoint(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): 0 | 1 | -1 {
+// Returns the index of the line/arrow vertex under the cursor (0 = start,
+// last = end, middle = a bend), or -1. Every vertex is draggable.
+function hitVertex(el: CanvasElement, sx: number, sy: number, vp: { x: number; y: number; zoom: number }): number {
   if (el.type !== "line" && el.type !== "arrow") return -1;
   const pts = el.points;
   if (pts.length < 2) return -1;
-  for (const [end, p] of [[0, pts[0]], [1, pts[pts.length - 1]]] as [0 | 1, [number, number]][]) {
-    const px = p[0] * vp.zoom + vp.x, py = p[1] * vp.zoom + vp.y;
-    if (Math.abs(sx - px) <= HANDLE && Math.abs(sy - py) <= HANDLE) return end;
+  for (let i = 0; i < pts.length; i++) {
+    const px = pts[i][0] * vp.zoom + vp.x, py = pts[i][1] * vp.zoom + vp.y;
+    if (Math.abs(sx - px) <= HANDLE && Math.abs(sy - py) <= HANDLE) return i;
   }
   return -1;
 }
@@ -1467,15 +1509,35 @@ const toolbarStyle: React.CSSProperties = {
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 5, flexWrap: "wrap", maxWidth: "calc(100vw - 24px)",
 };
-// Contextual style bar: a fixed, compact panel pinned to the top-left
-// (Excalidraw-style). Wraps to a few narrow rows rather than one wide bar.
+// Contextual style panel: a fixed, VERTICAL, labeled panel pinned to the
+// top-left (Excalidraw-style) — a stack of titled sections.
 const styleBarStyleTopLeft: React.CSSProperties = {
   position: "absolute", top: 12, left: 12,
-  display: "flex", alignItems: "center", gap: 3, padding: "6px 7px",
+  display: "flex", flexDirection: "column", gap: 10, padding: "12px 12px 14px",
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
-  borderRadius: 10, boxShadow: "0 6px 24px rgba(20,34,60,.12)", zIndex: 6,
-  flexWrap: "wrap", maxWidth: "min(78vw, 260px)",
+  borderRadius: 12, boxShadow: "0 8px 30px rgba(20,34,60,.14)", zIndex: 6,
+  width: 208, maxHeight: "calc(100% - 24px)", overflowY: "auto",
 };
+const swatchStyle: React.CSSProperties = {
+  width: 22, height: 22, borderRadius: 6, border: "1px solid rgba(0,0,0,.12)", cursor: "pointer", padding: 0,
+};
+// A labeled panel section: a small uppercase title over a row of controls.
+function PanelSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: "var(--os-ink-3, #9aa3b2)", letterSpacing: ".01em" }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>{children}</div>
+    </div>
+  );
+}
+// A square panel control button (active = tinted).
+function panelBtn(active: boolean): React.CSSProperties {
+  return {
+    width: 32, height: 32, display: "grid", placeItems: "center", borderRadius: 8, cursor: "pointer",
+    border: "none", background: active ? "#ecebfb" : "var(--os-surface-1, #f4f4f5)",
+    color: active ? "#4b45c6" : "var(--os-ink-2, #52525b)",
+  };
+}
 const taskPanelStyle: React.CSSProperties = {
   position: "absolute", bottom: 116, left: "50%", transform: "translateX(-50%)", zIndex: 9,
   width: "min(420px, calc(100vw - 24px))",
