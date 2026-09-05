@@ -27,6 +27,7 @@ import { FolderMoreTrigger } from "./folder-more-menu";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { TableMoreTrigger } from "./table-more-menu";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
+import { CanvasMoreTrigger } from "./canvas-more-menu";
 import { MenuList, MenuItem, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 import { useOsToast } from "./toast";
 import { uploadDroppedFiles, dragHasFiles } from "@/lib/upload-dropped-files";
@@ -434,7 +435,7 @@ export function SpaceTreeRow({
                 <DocTreeRow key={d.id} doc={d} />
               ))}
               {data.whiteboards.map((w) => (
-                <WhiteboardTreeRow key={w.id} whiteboard={w} />
+                <WhiteboardTreeRow key={w.id} whiteboard={w} onChanged={refresh} />
               ))}
               {data.tables.map((t) => (
                 <TableTreeRow key={t.id} table={t} onChanged={refresh} />
@@ -736,13 +737,17 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
   );
 }
 
-function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
+function WhiteboardTreeRow({ whiteboard, onChanged }: { whiteboard: WhiteboardChild; onChanged: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
+  const moreRef = useRef<ContextMenuHandle>(null);
   const isActive = pathname === `/canvas/${whiteboard.id}`;
   return (
     <li className="group/wbrow relative">
-      <div className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}>
+      <div
+        onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
+        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+      >
         <button
           type="button"
           onClick={() => router.push(`/canvas/${whiteboard.id}`)}
@@ -751,8 +756,10 @@ function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
         </button>
-        {/* Hover cluster returns when whiteboard rows grow a real "..." menu;
-            the retired quick-star alone painted an empty white sliver. */}
+        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+          <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
+          <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name }} onUpdated={onChanged} />
+        </span>
       </div>
     </li>
   );
