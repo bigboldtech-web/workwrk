@@ -23,6 +23,13 @@ const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] 
   { type: "curved", Icon: Spline, label: "Curved" },
 ];
 
+// Text sizes for the style panel (S / M / L), shown for text + sticky notes.
+const FONT_SIZES: { label: string; size: number }[] = [
+  { label: "S", size: 16 },
+  { label: "M", size: 20 },
+  { label: "L", size: 28 },
+];
+
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
 const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
   { tool: "roundRect", Icon: Square, label: "Rounded rectangle" },
@@ -141,6 +148,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
   const [arrowType, setArrowType] = useState<ArrowType>("straight");
   const [dash, setDash] = useState<DashStyle>("solid");
+  const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
   const clipboardRef = useRef<CanvasElement[]>([]);
@@ -409,7 +417,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       dragRef.current = { kind: "path", id };
     } else if (tool === "text") {
-      const el: CanvasElement = { id, type: "text", x: world.x, y: world.y - DEFAULT_FONT_SIZE / 2, w: 160, h: DEFAULT_FONT_SIZE * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize: DEFAULT_FONT_SIZE };
+      const el: CanvasElement = { id, type: "text", x: world.x, y: world.y - fontSize / 2, w: 160, h: fontSize * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize };
       undoRef.current.push(snapshot);
       setScene((s) => ({ ...s, elements: [...s.elements, el] }));
       selectOne(id);
@@ -432,7 +440,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
     }
-  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, toWorld, selectOne]);
+  }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, toWorld, selectOne]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
@@ -694,6 +702,21 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         selectedIds.has(el.id) && el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard" && el.type !== "frame"
           ? { ...el, dash: d } : el,
       ),
+    };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const applyFontSize = useCallback((size: number) => {
+    setFontSize(size);
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = {
+      ...scene,
+      elements: scene.elements.map((el) => {
+        if (!selectedIds.has(el.id) || (el.type !== "text" && el.type !== "sticky")) return el;
+        // keep a text element's box height in step with its new line height
+        return el.type === "text" ? { ...el, fontSize: size, h: size * 1.4 } : { ...el, fontSize: size };
+      }),
     };
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
@@ -1104,6 +1127,17 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               {ARROW_TYPES.map(({ type: at, Icon, label }) => (
                 <button key={at} type="button" title={`${label} arrow`} onClick={() => applyArrowType(at)} style={{ ...toolBtn(arrowType === at), width: 28, height: 28 }}>
                   <Icon style={{ width: 16, height: 16 }} />
+                </button>
+              ))}
+            </>
+          ) : null}
+          {tool === "text" || tool === "sticky" || scene.elements.some((el) => selectedIds.has(el.id) && (el.type === "text" || el.type === "sticky")) ? (
+            <>
+              <span style={{ width: 1, height: 20, background: "var(--os-line, #e5e7eb)", margin: "0 3px" }} />
+              {FONT_SIZES.map(({ label, size }) => (
+                <button key={label} type="button" title={`${label === "S" ? "Small" : label === "M" ? "Medium" : "Large"} text`} onClick={() => applyFontSize(size)}
+                  style={{ ...toolBtn(fontSize === size), width: 28, height: 28, fontWeight: 700, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
+                  {label}
                 </button>
               ))}
             </>
