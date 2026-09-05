@@ -36,7 +36,7 @@ interface TemplateDetail extends TemplateRow {
 
 const KIND_LABEL: Record<Kind, string> = {
   TASK: "Task", LIST: "List", SPACE: "Space", FOLDER: "Folder",
-  DOC: "Doc", VIEW: "View", WHITEBOARD: "Whiteboard",
+  DOC: "Doc", VIEW: "View", WHITEBOARD: "Canvas",
 };
 const COMPLEXITY_LABEL: Record<Complexity, string> = {
   BEGINNER: "Beginner", INTERMEDIATE: "Intermediate", ADVANCED: "Advanced",

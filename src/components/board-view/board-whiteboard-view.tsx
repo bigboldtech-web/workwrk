@@ -2,7 +2,7 @@
 
 // BoardWhiteboardView — WHITEBOARD renderer. Embeds an Excalidraw
 // canvas as a board tab (View.config.whiteboardId). Same load /
-// debounced-autosave contract as the standalone /whiteboards/[id]
+// debounced-autosave contract as the standalone /canvas/[id]
 // page, minus its page chrome. Read-only viewers get Excalidraw's
 // view mode. No canvas yet → setup card (create or embed existing).
 
@@ -239,7 +239,7 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
     <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
       <div className="flex h-10 items-center gap-2 border-b border-zinc-100 px-3">
         <Brush className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-        <span className="text-[14px] font-semibold text-zinc-800 truncate">{board?.name ?? "Whiteboard"}</span>
+        <span className="text-[14px] font-semibold text-zinc-800 truncate">{board?.name ?? "Canvas"}</span>
         {saving ? (
           <span className="inline-flex items-center gap-1 rounded-full border border-zinc-100 bg-zinc-50 px-2 py-0.5 text-[12px] font-medium text-zinc-500">
             <Cloud className="w-3 h-3" /> Saving…
@@ -247,7 +247,7 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
         ) : null}
         <div className="flex-1" />
         <Link
-          href={`/whiteboards/${whiteboardId}`}
+          href={`/canvas/${whiteboardId}`}
           className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[12.5px] font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-800"
         >
           <ExternalLink className="w-3 h-3" />

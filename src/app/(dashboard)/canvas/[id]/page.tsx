@@ -118,15 +118,15 @@ export default function WhiteboardCanvasPage() {
     const id = params?.id;
     if (!id) return;
     const ok = await confirm({
-      title: "Delete whiteboard?",
-      description: "This whiteboard and its canvas will be deleted.",
+      title: "Delete canvas?",
+      description: "This canvas will be deleted.",
       confirmLabel: "Delete",
       destructive: true,
     });
     if (!ok) return;
     const res = await fetch(`/api/whiteboards/${id}`, { method: "DELETE" });
-    if (res.ok) { refreshSidebar(); router.push("/whiteboards"); }
-    else toast("Couldn't delete whiteboard");
+    if (res.ok) { refreshSidebar(); router.push("/canvas"); }
+    else toast("Couldn't delete canvas");
   }, [params?.id, confirm, router, toast]);
   const [dirty, setDirty] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -156,7 +156,7 @@ export default function WhiteboardCanvasPage() {
         setBoard(data.whiteboard);
         setRenameValue(data.whiteboard.name);
       } else {
-        router.push("/whiteboards");
+        router.push("/canvas");
       }
       setLoading(false);
     })();
@@ -317,7 +317,7 @@ export default function WhiteboardCanvasPage() {
     <div className="wbc">
       {/* Toolbar */}
       <header className="wbc__bar">
-        <button type="button" className="wbc__back" onClick={() => router.push("/whiteboards")} aria-label="Back to whiteboards">
+        <button type="button" className="wbc__back" onClick={() => router.push("/canvas")} aria-label="Back to canvases">
           <ArrowLeft />
         </button>
 
@@ -333,7 +333,7 @@ export default function WhiteboardCanvasPage() {
           onChange={(e) => setRenameValue(e.target.value)}
           onBlur={renameBoard}
           onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-          placeholder="Untitled whiteboard"
+          placeholder="Untitled canvas"
         />
 
         <WhiteboardFavoriteButton whiteboardId={board.id} />
@@ -373,7 +373,7 @@ export default function WhiteboardCanvasPage() {
         <button
           ref={moreRef}
           type="button"
-          aria-label="Whiteboard actions"
+          aria-label="Canvas actions"
           onClick={() => setMoreOpen((v) => !v)}
           className="w-7 h-7 grid place-items-center rounded-md text-zinc-500 hover:bg-zinc-100 shrink-0"
         >
@@ -424,7 +424,7 @@ function CanvasLoader() {
   return (
     <div className="wbc__loading">
       <Loader2 className="wbc__spin" />
-      <p>Loading whiteboard…</p>
+      <p>Loading canvas…</p>
     </div>
   );
 }

@@ -37,7 +37,7 @@ export async function freeTrashStorage(entityType: string, snapshot: unknown): P
 }
 
 export const TRASH_LABEL: Record<TrashType, string> = {
-  note: "Note", sop: "SOP", whiteboard: "Whiteboard", table: "Table",
+  note: "Note", sop: "SOP", whiteboard: "Canvas", table: "Table",
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
 };
@@ -151,7 +151,7 @@ const REGISTRY: Record<TrashType, Entry> = {
   whiteboard: {
     capture: async (id) => {
       const row = await prisma.whiteboard.findUnique({ where: { id } });
-      return row ? { label: row.name || "Untitled whiteboard", snapshot: { row } } : null;
+      return row ? { label: row.name || "Untitled canvas", snapshot: { row } } : null;
     },
     restore: async (s) => { await prisma.whiteboard.create({ data: asData(s.row) }); },
   },

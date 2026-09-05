@@ -37,7 +37,7 @@ const VIEW_LABEL: Record<string, string> = {
   TABLE: "List", KANBAN: "Board", GANTT: "Gantt", CALENDAR: "Calendar",
   TIMELINE: "Timeline", CHART: "Chart", DOC: "Doc", FORM: "Form",
   DASHBOARD: "Dashboard", MAP: "Map", WORKLOAD: "Workload",
-  WHITEBOARD: "Whiteboard", FILE_GALLERY: "Files",
+  WHITEBOARD: "Canvas", FILE_GALLERY: "Files",
 };
 function viewLabel(t: ViewType): string {
   return VIEW_LABEL[t] ?? String(t).charAt(0) + String(t).slice(1).toLowerCase();

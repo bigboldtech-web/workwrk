@@ -38,7 +38,7 @@ export const PROFILE_TOOLS: ProfileTool[] = [
   // Whiteboards / Dashboards live at their real gallery routes (each with a
   // "New …" CTA). The old hrefs pointed at /build (wrong app) and /boards
   // (no index → 404); those surfaces never existed.
-  { key: "create-whiteboard", label: "Create Whiteboard", Icon: PencilRuler,  href: "/whiteboards" },
+  { key: "create-whiteboard", label: "Create Canvas", Icon: PencilRuler,  href: "/canvas" },
   { key: "view-people",       label: "View People",       Icon: Users,        href: "/people" },
   { key: "ai-notetaker",      label: "AI Notetaker",      Icon: Sparkles,     href: "/notetaker" },
 ];

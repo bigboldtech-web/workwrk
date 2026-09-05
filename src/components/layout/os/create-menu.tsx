@@ -100,15 +100,15 @@ const BUILD_META: Record<BuildKind, {
     href: (id) => `/forms/${id}`,
   },
   whiteboard: {
-    label: "Whiteboard",
+    label: "Canvas",
     Icon: Brush,
     iconClassName: "text-amber-500",
-    placeholder: "Whiteboard name",
+    placeholder: "Canvas name",
     hasLocation: true,
     endpoint: "/api/whiteboards",
     body: (name, spaceId) => ({ name, ...(spaceId ? { spaceId } : {}) }),
     idFrom: (data) => (data as { whiteboard?: { id?: string } })?.whiteboard?.id,
-    href: (id) => `/whiteboards/${id}`,
+    href: (id) => `/canvas/${id}`,
   },
   database: {
     label: "Database",
@@ -369,7 +369,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 <MenuItem
                   variant="inset"
                   icon={Brush}
-                  label="Whiteboard"
+                  label="Canvas"
                   iconClassName="text-amber-500"
                   submenu
                   onClick={() => setBuildKind("whiteboard")}

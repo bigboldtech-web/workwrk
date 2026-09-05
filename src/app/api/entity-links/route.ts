@@ -95,7 +95,7 @@ async function hydrate(
           select: { id: true, name: true, description: true, spaceId: true },
         });
         for (const w of wbs) {
-          titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/whiteboards/${w.id}` });
+          titleByKey.set(`${type}:${w.id}`, { title: w.name, subtitle: w.description, href: `/canvas/${w.id}` });
           if (w.spaceId) targetSpaceId.set(`${type}:${w.id}`, w.spaceId);
         }
       } else if (type === "SOP") {

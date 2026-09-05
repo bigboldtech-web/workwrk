@@ -80,7 +80,7 @@ const POPULAR_TILES: ViewTile[] = [
   { key: "ai",          label: "Create with AI",                  Icon: BloomMark,       viewType: null,         hue: "#579BFC" },
   { key: "dashboard",   label: "Dashboard", sublabel: "Report",   Icon: BarChart3,       viewType: "DASHBOARD",  hue: "#C62D42" },
   { key: "table",       label: "Table",                           Icon: Table2,          viewType: "TABLE",      hue: "#10b981" },
-  { key: "whiteboard",  label: "Whiteboard",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#eab308" },
+  { key: "whiteboard",  label: "Canvas",                      Icon: Brush,           viewType: "WHITEBOARD", hue: "#eab308" },
   { key: "activity",    label: "Activity", sublabel: "Feed",      Icon: ActivityIcon,    viewType: null,         hue: "#0ea5e9" },
   { key: "workload",    label: "Workload", sublabel: "Capacity",  Icon: GaugeCircle,     viewType: "WORKLOAD",   hue: "#14b8a6" },
   { key: "team",        label: "Team",                            Icon: UsersIcon,       viewType: null,         hue: "#00C875" },

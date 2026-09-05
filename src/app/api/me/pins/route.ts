@@ -41,7 +41,7 @@ export async function GET() {
   for (const f of folders) map.set(`folder:${f.id}`, { kind: "folder", id: f.id, label: f.name, href: f.space?.slug ? `/spaces/${f.space.slug}` : "#", icon: f.icon, color: f.color });
   for (const t of tables) map.set(`table:${t.id}`, { kind: "table", id: t.id, label: t.name, href: `/tables/${t.id}`, icon: null, color: null });
   for (const d of docs) map.set(`doc:${d.id}`, { kind: "doc", id: d.id, label: d.title || "Untitled doc", href: `/docs/${d.id}`, icon: null, color: null });
-  for (const w of whiteboards) map.set(`whiteboard:${w.id}`, { kind: "whiteboard", id: w.id, label: w.name || "Whiteboard", href: `/whiteboards/${w.id}`, icon: null, color: null });
+  for (const w of whiteboards) map.set(`whiteboard:${w.id}`, { kind: "whiteboard", id: w.id, label: w.name || "Canvas", href: `/canvas/${w.id}`, icon: null, color: null });
 
   // Keep pin order; drop any that no longer resolve.
   const chips = pins.map((p) => map.get(`${p.kind}:${p.id}`)).filter((c): c is PinChip => !!c);

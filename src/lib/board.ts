@@ -345,7 +345,7 @@ function viewTypeDefaultLabel(t: ViewType): string {
     case "DASHBOARD":return "Dashboard";
     case "MAP":      return "Map";
     case "WORKLOAD": return "Workload";
-    case "WHITEBOARD":return "Whiteboard";
+    case "WHITEBOARD":return "Canvas";
     case "FILE_GALLERY": return "Gallery";
     case "CHART":    return "Chart";
     default:         return "View";

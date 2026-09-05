@@ -2,7 +2,7 @@
 
 // /library — unified destination for Notes, Whiteboards, and Files.
 //
-// Replaces the standalone /whiteboards entry as a sidebar destination.
+// Replaces the standalone /canvas entry as a sidebar destination.
 // Notes live in Doc table; Whiteboards in Whiteboard table; Files is
 // a placeholder until the upload surface lands.
 
@@ -109,7 +109,7 @@ export default function LibraryPage() {
             Notes
           </TabPill>
           <TabPill active={tab === "whiteboards"} onClick={() => setTab("whiteboards")} icon={<Frame className="h-3.5 w-3.5" />}>
-            Whiteboards
+            Canvases
           </TabPill>
           <TabPill active={tab === "files"} onClick={() => setTab("files")} icon={<Folder className="h-3.5 w-3.5" />}>
             Files
@@ -329,7 +329,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
   useEffect(() => { load(); }, [load]);
 
   const newBoard = async () => {
-    const name = (await promptDialog({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
+    const name = (await promptDialog({ title: "Canvas name?", defaultValue: "Untitled canvas" }))?.trim();
     if (!name) return;
     setCreating(true);
     try {
@@ -346,7 +346,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
       });
       const data = await res.json();
       const id = data?.whiteboard?.id;
-      if (id) router.push(`/whiteboards/${id}`);
+      if (id) router.push(`/canvas/${id}`);
       else throw new Error();
     } catch {
       toast("Couldn't create whiteboard");
@@ -387,16 +387,16 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-[13.5px] font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
           {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          New whiteboard
+          New canvas
         </button>
       </div>
 
       {rows === null ? (
-        <div className="text-zinc-400 text-[14px]">Loading whiteboards…</div>
+        <div className="text-zinc-400 text-[14px]">Loading canvases…</div>
       ) : filtered.length === 0 ? (
         <EmptyTab
           icon={<Frame className="h-8 w-8 text-zinc-300" />}
-          title={query ? `No whiteboards match "${query}"` : "No whiteboards yet"}
+          title={query ? `No canvases match "${query}"` : "No canvases yet"}
           subtitle="Sketch flows, map architectures, brainstorm anything. Drop them into tasks, KRAs, or SOPs."
         />
       ) : (
@@ -405,7 +405,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
             <div key={b.id} className="relative group/wb">
             <button
               type="button"
-              onClick={() => router.push(`/whiteboards/${b.id}`)}
+              onClick={() => router.push(`/canvas/${b.id}`)}
               className="w-full text-left rounded-lg border border-zinc-200 bg-white overflow-hidden hover:border-zinc-300 hover:shadow-sm transition"
             >
               <div className="aspect-video bg-zinc-50 border-b border-zinc-100 relative overflow-hidden">

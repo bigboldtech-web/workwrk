@@ -70,7 +70,7 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
   // org's universal workspace — features of `workwrk-work`, not
   // separate "products". They were demoted out of PRODUCT_CATALOG so
   // the Apps Panel + Product Store don't show them as standalone
-  // tiles. The routes (/sops, /okrs, /meetings, /whiteboards, /kudos)
+  // tiles. The routes (/sops, /okrs, /meetings, /canvas, /kudos)
   // and sidebar entries remain — they're discovered by living inside
   // the Workspace section of the sidebar, not by browsing a catalog.
   // Agents that previously referenced these as productSlug (e.g.

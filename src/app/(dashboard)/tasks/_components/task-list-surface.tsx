@@ -250,7 +250,7 @@ const VIEW_CATALOG: ViewDef[] = [
   { id: "view-ai", kind: "doc", label: "Create with AI", Icon: Bot, swatch: "#D946EF" },
   { id: "view-dashboard", kind: "dashboard", label: "Dashboard", tag: "Report", Icon: BarChart3, swatch: "#EC4899" },
   { id: "view-table", kind: "table", label: "Table", Icon: Table2, swatch: "#10B981" },
-  { id: "view-whiteboard", kind: "whiteboard", label: "Whiteboard", Icon: Brush, swatch: "#FACC15" },
+  { id: "view-whiteboard", kind: "whiteboard", label: "Canvas", Icon: Brush, swatch: "#FACC15" },
   { id: "view-timeline", kind: "timeline", label: "Timeline", Icon: AlignLeft, swatch: "#F97316" },
   { id: "view-activity", kind: "activity", label: "Activity", tag: "Feed", Icon: Activity, swatch: "#0EA5E9" },
   { id: "view-workload", kind: "workload", label: "Workload", tag: "Capacity", Icon: GaugeCircle, swatch: "#14B8A6" },

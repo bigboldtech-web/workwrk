@@ -278,8 +278,8 @@ export async function GET(req: NextRequest) {
       type: "whiteboard" as const,
       id: w.id,
       title: w.name,
-      subtitle: "Whiteboard",
-      href: `/whiteboards/${w.id}`,
+      subtitle: "Canvas",
+      href: `/canvas/${w.id}`,
     })),
     ...users.map((u) => ({
       type: "person" as const,

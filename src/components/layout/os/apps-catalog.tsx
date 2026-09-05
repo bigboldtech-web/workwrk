@@ -184,9 +184,9 @@ async function createLibraryNote(ctx: CreateActionContext) {
   }
 }
 
-/** Library → New whiteboard. Same prompt + POST as the Whiteboards tab. */
+/** Library → New canvas. Same prompt + POST as the Whiteboards tab. */
 async function createLibraryWhiteboard(ctx: CreateActionContext) {
-  const name = (await ctx.prompt({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
+  const name = (await ctx.prompt({ title: "Canvas name?", defaultValue: "Untitled canvas" }))?.trim();
   if (!name) return;
   try {
     const res = await fetch("/api/whiteboards", {
@@ -197,7 +197,7 @@ async function createLibraryWhiteboard(ctx: CreateActionContext) {
     const data = await res.json().catch(() => null);
     const id: string | undefined = data?.whiteboard?.id;
     if (!res.ok || !id) throw new Error();
-    ctx.push(`/whiteboards/${id}`);
+    ctx.push(`/canvas/${id}`);
   } catch {
     ctx.toast("Couldn't create whiteboard");
   }
@@ -778,14 +778,14 @@ function HomeSidebar() {
                 );
               })}
               {total > 6 && favoriteWhiteboards.length > 0 ? (
-                <FavSubLabel>Whiteboards</FavSubLabel>
+                <FavSubLabel>Canvases</FavSubLabel>
               ) : null}
               {favoriteWhiteboards.map((w) => {
-                const active = pathname === `/whiteboards/${w.id}`;
+                const active = pathname === `/canvas/${w.id}`;
                 return (
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
-                      href={`/whiteboards/${w.id}`}
+                      href={`/canvas/${w.id}`}
                       className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
@@ -1033,7 +1033,7 @@ function LibrarySidebar() {
       <ul>
         <NavItem href="/library" Icon={LibraryIcon} label="All" />
         <NavItem href="/library?tab=notes" Icon={FileText} label="Notes" />
-        <NavItem href="/library?tab=whiteboards" Icon={Brush} label="Whiteboards" />
+        <NavItem href="/library?tab=whiteboards" Icon={Brush} label="Canvases" />
         <NavItem href="/library?tab=files" Icon={Folder} label="Files" />
       </ul>
       <SectionLabel>Favorites</SectionLabel>
@@ -1153,11 +1153,11 @@ export const APPS: AppEntry[] = [
     // once on arrival, so the rail "+" goes straight into creation.
     createActions: [{ label: "New sheet", icon: Table2, href: "/tables?new=1" }] },
   { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
-    matchPaths: ["/library", "/whiteboards", "/docs"], Sidebar: LibrarySidebar,
+    matchPaths: ["/library", "/canvas", "/docs"], Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,
     createActions: [
       { label: "New note", icon: FileText, description: "A standalone note in the Library", onSelect: createLibraryNote },
-      { label: "New whiteboard", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
+      { label: "New canvas", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
       { label: "Upload file", icon: Upload, description: "Drop a file into the Library", href: "/library?tab=files" },
     ] },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms",

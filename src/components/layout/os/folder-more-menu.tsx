@@ -244,13 +244,13 @@ function FolderMoreMenu({
     try {
       const res = await fetch("/api/whiteboards", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Untitled whiteboard", ...(spaceId ? { spaceId } : {}) }),
+        body: JSON.stringify({ name: "Untitled canvas", ...(spaceId ? { spaceId } : {}) }),
       });
       const d = await res.json().catch(() => null);
       if (!res.ok) { toast(d?.error ?? "Couldn't create whiteboard"); return; }
       refreshSidebar();
       const id = d?.whiteboard?.id ?? d?.id;
-      if (id) router.push(`/whiteboards/${id}`);
+      if (id) router.push(`/canvas/${id}`);
     } catch { toast("Couldn't create whiteboard"); }
   };
 
@@ -437,7 +437,7 @@ function FolderMoreMenu({
       <MenuSubmenu icon={Plus} label="Create new">
         <MenuItem icon={ListChecks} label="List" onClick={createList} />
         <MenuItem icon={FileText}   label="Doc" onClick={createDoc} />
-        <MenuItem icon={Brush}      label="Whiteboard" onClick={createWhiteboard} />
+        <MenuItem icon={Brush}      label="Canvas" onClick={createWhiteboard} />
       </MenuSubmenu>
       <MenuItem icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
       <MenuItem icon={Zap} label="Automations" onClick={() => soon("Automations")} />

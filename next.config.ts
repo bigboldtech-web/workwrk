@@ -14,6 +14,9 @@ const nextConfig: NextConfig = {
       { source: "/room/:id", destination: "/tlk/:id", permanent: false },
       { source: "/dashboards", destination: "/today", permanent: false },
       { source: "/dashboards/:id", destination: "/today", permanent: false },
+      // Whiteboards were renamed to Canvas — keep old links/bookmarks working.
+      { source: "/whiteboards", destination: "/canvas", permanent: false },
+      { source: "/whiteboards/:id", destination: "/canvas/:id", permanent: false },
     ];
   },
   /* config options here */

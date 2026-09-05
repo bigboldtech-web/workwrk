@@ -131,7 +131,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
       />
 
       <LinkSection
-        title="Whiteboards"
+        title="Canvases"
         Icon={Frame}
         items={boards}
         canEdit={canEdit}
@@ -172,7 +172,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
           await fetch(`/api/entity-links/${id}`, { method: "DELETE" });
           await load();
         }}
-        defaultHref={(targetId) => `/whiteboards/${targetId}`}
+        defaultHref={(targetId) => `/canvas/${targetId}`}
       />
 
       <FileLinkSection

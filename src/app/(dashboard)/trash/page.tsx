@@ -23,7 +23,7 @@ type Item = { id: string; entityType: string; entityId: string; label: string; d
 const TYPE_META: Record<string, { label: string; Icon: typeof FileText }> = {
   note: { label: "Note", Icon: PenLine },
   sop: { label: "SOP", Icon: BookCopy },
-  whiteboard: { label: "Whiteboard", Icon: FileText },
+  whiteboard: { label: "Canvas", Icon: FileText },
   table: { label: "Table", Icon: TableIcon },
   file: { label: "File", Icon: Paperclip },
   policy: { label: "Policy", Icon: ShieldCheck },

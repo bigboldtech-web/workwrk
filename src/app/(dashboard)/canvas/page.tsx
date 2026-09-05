@@ -87,7 +87,7 @@ export default function WhiteboardsPage() {
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
   async function createBoard() {
-    const name = (await promptDialog({ title: "Whiteboard name?", defaultValue: "Untitled whiteboard" }))?.trim();
+    const name = (await promptDialog({ title: "Canvas name?", defaultValue: "Untitled canvas" }))?.trim();
     if (!name) return;
     setCreating(true);
     try {
@@ -98,8 +98,8 @@ export default function WhiteboardsPage() {
       if (!res.ok) throw new Error();
       const data = await res.json();
       const wb: ApiWhiteboard = data.whiteboard ?? data.data ?? data;
-      router.push(`/whiteboards/${wb.id}`);
-    } catch { toast("Couldn't create whiteboard"); }
+      router.push(`/canvas/${wb.id}`);
+    } catch { toast("Couldn't create canvas"); }
     finally { setCreating(false); }
   }
 
@@ -142,7 +142,7 @@ export default function WhiteboardsPage() {
   return (
     <>
       <OsTitleBar
-        title="Whiteboards"
+        title="Canvases"
         Icon={Frame}
         iconGradient="linear-gradient(135deg, #a78b80, #8e7165)"
         description={boards === null ? "Loading…" : `${total} board${total === 1 ? "" : "s"} · ${grouped.length} categor${grouped.length === 1 ? "y" : "ies"}`}
@@ -158,18 +158,18 @@ export default function WhiteboardsPage() {
               />
             </div>
             <button type="button" className="wb__new" onClick={createBoard} disabled={creating}>
-              {creating ? <><Loader2 className="wb__spin" /> Creating…</> : <><Plus /> New whiteboard</>}
+              {creating ? <><Loader2 className="wb__spin" /> Creating…</> : <><Plus /> New canvas</>}
             </button>
           </div>
         }
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Frame} iconGradient={GRAD.redPink} title="Couldn't load whiteboards" subtitle={`API error: ${loadError}`} cta="Retry" />
+        <OsEmptyView Icon={Frame} iconGradient={GRAD.redPink} title="Couldn't load canvases" subtitle={`API error: ${loadError}`} cta="Retry" />
       ) : boards === null ? (
-        <div className="wb__loading">Loading whiteboards…</div>
+        <div className="wb__loading">Loading canvases…</div>
       ) : total === 0 ? (
-        <OsEmptyView Icon={Frame} iconGradient="linear-gradient(135deg, #a78b80, #8e7165)" title="Create your first Whiteboard" subtitle="Brainstorm, diagram, plan and more! A freeform canvas for you and your team." cta="New whiteboard" />
+        <OsEmptyView Icon={Frame} iconGradient="linear-gradient(135deg, #a78b80, #8e7165)" title="Create your first Canvas" subtitle="Brainstorm, diagram, plan and more! A freeform canvas for you and your team." cta="New canvas" />
       ) : filtered.length === 0 ? (
         <div className="wb__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
       ) : (
@@ -214,7 +214,7 @@ function Tile({ board, large }: { board: ApiWhiteboard; large?: boolean }) {
   const slug = board.productSlug ?? "general";
   const hue = SLUG_HUE[slug] ?? SLUG_HUE.general;
   return (
-    <Link href={`/whiteboards/${board.id}`} className={`wb-card ${large ? "is-large" : ""}`} style={{ ["--wb-hue" as string]: hue }}>
+    <Link href={`/canvas/${board.id}`} className={`wb-card ${large ? "is-large" : ""}`} style={{ ["--wb-hue" as string]: hue }}>
       <div className="wb-card__thumb">
         {board.thumbnail ? (
           <img src={board.thumbnail} alt={board.name} />

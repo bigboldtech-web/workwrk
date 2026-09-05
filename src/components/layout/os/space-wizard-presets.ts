@@ -80,7 +80,7 @@ export const MODULE_CATALOG: ModuleCatalogEntry[] = [
   { key: "KPI", label: "KPIs", blurb: "Metrics members are scored on", group: "WORKWRK_NATIVE", Icon: TrendingUp, color: MC.green, shownInWizard: true },
   { key: "SOP", label: "SOPs", blurb: "Required reading + acknowledgements", group: "WORKWRK_NATIVE", Icon: BookOpen, color: MC.amber, shownInWizard: true },
   { key: "NOTES", label: "Notes", blurb: "Embedded docs across tasks", group: "WORKWRK_NATIVE", Icon: FileText, color: MC.blue, shownInWizard: true },
-  { key: "WHITEBOARDS", label: "Whiteboards", blurb: "Excalidraw canvases anywhere", group: "WORKWRK_NATIVE", Icon: PenTool, color: MC.violet, shownInWizard: true },
+  { key: "WHITEBOARDS", label: "Canvases", blurb: "Infinite canvases anywhere", group: "WORKWRK_NATIVE", Icon: PenTool, color: MC.violet, shownInWizard: true },
   { key: "TIME_TRACKING", label: "Time Tracking", blurb: "Timers + manual entries", group: "WORKWRK_NATIVE", Icon: Clock, color: MC.orange, shownInWizard: true },
   { key: "CALENDAR_VIEW", label: "Calendar view", blurb: "Hierarchical work-visibility calendar", group: "WORKWRK_NATIVE", Icon: Calendar, color: MC.green, shownInWizard: true },
   { key: "REVIEWS", label: "Performance Reviews", blurb: "Weekly + quarterly cycles", group: "WORKWRK_NATIVE", Icon: Star, color: MC.violet, shownInWizard: false },

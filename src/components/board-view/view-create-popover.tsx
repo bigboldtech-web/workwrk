@@ -52,7 +52,7 @@ const POPULAR: ViewTile[] = [
 // File gallery) trail at the end. Colors match ClickUp's per-view palette.
 const SECONDARY: ViewTile[] = [
   { type: "TABLE",        label: "Table",         tag: undefined, Icon: Table2,       swatch: "#10B981", config: { grid: "monday" } },
-  { type: "WHITEBOARD",   label: "Whiteboard",    tag: undefined, Icon: Brush,        swatch: "#FACC15" },
+  { type: "WHITEBOARD",   label: "Canvas",    tag: undefined, Icon: Brush,        swatch: "#FACC15" },
   { type: "ACTIVITY",     label: "Activity",      tag: "Feed",    Icon: Activity,     swatch: "#0EA5E9" },
   { type: "WORKLOAD",     label: "Workload",      tag: "Capacity",Icon: GaugeCircle,  swatch: "#14B8A6" },
   { type: "WORKLOAD",     label: "Team",          tag: undefined, Icon: UsersIcon,    swatch: "#00C875", config: { variant: "team" } },

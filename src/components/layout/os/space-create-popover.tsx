@@ -146,14 +146,14 @@ function SpaceCreateMenu({
       const res = await fetch("/api/whiteboards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Untitled whiteboard", spaceId }),
+        body: JSON.stringify({ name: "Untitled canvas", spaceId }),
       });
       const data = await res.json();
       const id = data?.whiteboard?.id;
       if (!id) throw new Error();
       onCreated?.();
       refreshSidebar();
-      router.push(`/whiteboards/${id}`);
+      router.push(`/canvas/${id}`);
     } catch {
       toast("Couldn't create whiteboard");
     } finally {
@@ -234,7 +234,7 @@ function SpaceCreateMenu({
         variant="inset"
         icon={Brush}
         iconClassName="text-amber-500"
-        label="Whiteboard"
+        label="Canvas"
         busy={busyKind === "whiteboard"}
         onClick={createWhiteboard}
       />

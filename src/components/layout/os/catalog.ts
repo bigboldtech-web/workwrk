@@ -481,7 +481,7 @@ const MODULES: ModuleDef[] = [
     ],
     groups: genericGroups("SOP"),
   }),
-  stubModule({ id: "whiteboards", name: "Whiteboards", description: "Excalidraw-powered infinite canvas collaboration", Icon: PenTool, gradient: GRAD.purpleIndigo, newLabel: "New whiteboard" }),
+  stubModule({ id: "whiteboards", name: "Canvases", description: "Infinite canvas collaboration", Icon: PenTool, gradient: GRAD.purpleIndigo, newLabel: "New canvas" }),
   stubModule({ id: "docs", name: "Docs & notes", description: "Unified docs · can attach to any record", Icon: FileText, gradient: GRAD.tealGreen, newLabel: "New doc" }),
   stubModule({ id: "kudos", name: "Kudos", description: "Peer recognition with emoji reactions", Icon: HeartIcon, gradient: GRAD.redPink, newLabel: "Send kudos" }),
   stubModule({ id: "announcements", name: "Announcements", description: "Org broadcasts with acknowledgment tracking", Icon: Megaphone, gradient: GRAD.orangePink, newLabel: "New announcement" }),

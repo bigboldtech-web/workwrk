@@ -739,17 +739,17 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
 function WhiteboardTreeRow({ whiteboard }: { whiteboard: WhiteboardChild }) {
   const router = useRouter();
   const pathname = usePathname();
-  const isActive = pathname === `/whiteboards/${whiteboard.id}`;
+  const isActive = pathname === `/canvas/${whiteboard.id}`;
   return (
     <li className="group/wbrow relative">
       <div className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}>
         <button
           type="button"
-          onClick={() => router.push(`/whiteboards/${whiteboard.id}`)}
+          onClick={() => router.push(`/canvas/${whiteboard.id}`)}
           className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-          <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled whiteboard"}</span>
+          <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
         </button>
         {/* Hover cluster returns when whiteboard rows grow a real "..." menu;
             the retired quick-star alone painted an empty white sliver. */}
@@ -836,13 +836,13 @@ function FolderAddTrigger({
     try {
       const res = await fetch("/api/whiteboards", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Untitled whiteboard", spaceId }),
+        body: JSON.stringify({ name: "Untitled canvas", spaceId }),
       });
       const d = await res.json().catch(() => null);
       if (!res.ok) { toast(d?.error ?? "Couldn't create whiteboard"); return; }
       onCreated(); refreshSidebar();
       const id = d?.whiteboard?.id ?? d?.id;
-      if (id) router.push(`/whiteboards/${id}`);
+      if (id) router.push(`/canvas/${id}`);
     } catch { toast("Couldn't create whiteboard"); }
     finally { setCreating(null); }
   };
@@ -882,7 +882,7 @@ function FolderAddTrigger({
           <MenuItem icon={ListChecks}      iconClassName="text-emerald-500" label="List" onClick={createList} />
           <MenuItem icon={FileText}        iconClassName="text-blue-500"    label="Doc" onClick={createDoc} />
           <MenuItem icon={BarChart3}       iconClassName="text-sky-500"  label="Dashboard" onClick={() => soon("Dashboard")} />
-          <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Whiteboard" onClick={createWhiteboard} />
+          <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Canvas" onClick={createWhiteboard} />
           <MenuItem icon={ClipboardCheck}  iconClassName="text-teal-500"  label="Form" onClick={() => soon("Form")} />
           <MenuItem icon={FolderIcon}      iconClassName="text-amber-500"   label="Folder" onClick={createSubFolder} />
           <MenuSeparator />

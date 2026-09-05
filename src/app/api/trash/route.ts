@@ -46,7 +46,7 @@ export async function GET() {
   const items = [
     ...snaps,
     ...docs.map((d) => ({ id: `doc:${d.id}`, entityType: "note", entityId: d.id, label: d.title || "Untitled note", deletedByName: null, deletedAt: d.archivedAt })),
-    ...whiteboards.map((w) => ({ id: `wb:${w.id}`, entityType: "whiteboard", entityId: w.id, label: w.name || "Untitled whiteboard", deletedByName: null, deletedAt: w.archivedAt })),
+    ...whiteboards.map((w) => ({ id: `wb:${w.id}`, entityType: "whiteboard", entityId: w.id, label: w.name || "Untitled canvas", deletedByName: null, deletedAt: w.archivedAt })),
     ...contracts.map((c) => ({ id: `agr:${c.id}`, entityType: c.isTemplate ? "template" : "contract", entityId: c.id, label: c.title || "Untitled contract", deletedByName: null, deletedAt: c.archivedAt })),
   ].sort((a, b) => new Date(b.deletedAt!).getTime() - new Date(a.deletedAt!).getTime());
 
