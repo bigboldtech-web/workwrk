@@ -65,16 +65,19 @@ first-party-whiteboard work, not a parallel effort.
 
 ## Phased rollout
 
-| Phase | Scope |
-|------|-------|
-| **A — Rename + sidebar parity** | UI rename Whiteboard → Canvas; add the Space-sidebar "…"/right-click menu (rename/delete/share/duplicate/copy-link/move) so a Canvas is managed like a Doc. Lowest risk, immediate value (fixes the "can't delete from the space" gap). |
-| **B — Graph node** | Hydrate WHITEBOARD in `/api/entity-links`; "Link a Canvas" in the same pickers as Docs/SOPs; show linked Canvases on a task/doc/OKR. |
-| **C — Embed** | Canvas embed block in the Doc editor (inline read-only render); Canvas field type on tables. |
-| **D — Canvas-in-canvas** | A Canvas card element on the whiteboard (live thumbnail → opens it), reusing the work-graph element machinery (Phase 3 of the engine plan). |
-| **E — Full model rename (optional)** | Migrate `Whiteboard` → `Canvas` in Prisma + `/canvas/[id]` route with a redirect, once the concept is settled. |
+| Phase | Scope | Status |
+|------|-------|--------|
+| **A — Rename + sidebar parity** | UI rename Whiteboard → Canvas; add the Space-sidebar "…"/right-click menu (rename/delete/share/duplicate/copy-link/move) so a Canvas is managed like a Doc. Lowest risk, immediate value (fixes the "can't delete from the space" gap). | SHIPPED 2026-09-05 (c73d0c9) + `/canvas` route (b1a2661) |
+| **B — Graph node** | Hydrate WHITEBOARD in `/api/entity-links`; "Link a Canvas" in the same pickers as Docs/SOPs; show linked Canvases on a task/doc/OKR. | SHIPPED 2026-09-05 (dab6415) — hydration pre-existed; renamed the link-panel label whiteboard→canvas (+ correct plural), added a Canvases row to the OKR link panel |
+| **C — Embed** | Canvas embed block in the Doc editor (inline read-only render); Canvas field type on tables. | SHIPPED 2026-09-05 (5a8cefa) — extracted shared `src/lib/canvas/render.ts`; `CanvasPreview`; `canvas_card` Doc block; `LINKED_CANVAS` field type (catalog + fields API + FieldValue) |
+| **D — Canvas-in-canvas** | A Canvas card element on the whiteboard (live thumbnail → opens it), reusing the work-graph element machinery (Phase 3 of the engine plan). | SHIPPED 2026-09-05 (7608653) — `canvasCard` element + `drawCanvasCard`/`renderSceneInto` live thumbnail; card picker now offers tasks+docs+canvases; +1 scene test |
+| **E — Full model rename (optional)** | Migrate `Whiteboard` → `Canvas` in Prisma + `/canvas/[id]` route with a redirect, once the concept is settled. | DEFERRED (intentional). Route + user-facing label already done in A. Remaining E is an INTERNAL-ONLY table + `WHITEBOARD` enum rename on live Postgres: ~14 files use `prisma.whiteboard`, 20 call `/api/whiteboards`, 27 reference the enum. Hard-to-reverse live-DB migration, zero user-facing benefit → do only as a dedicated, carefully-migrated change on explicit request (data-integrity-paramount). |
 
-Start with **A** — it's the honest fix for what the user hit (no way to manage a
-Canvas from the Space) and it establishes the naming.
+A → B → C → D are done. **E is deliberately deferred**: its user-visible goals
+(the `/canvas` route + the "Canvas" name) already shipped in A, so all that
+remains is an internal Prisma table + enum rename — a hard-to-reverse migration
+against live whiteboard data with no user benefit. Do it later as its own
+carefully-migrated change if the internal naming ever needs to match.
 
 ## Open decisions
 
