@@ -48,7 +48,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, rectEdgePoint,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -153,6 +153,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<Box | null>(null);
   const [hoverBindId, setHoverBindId] = useState<string | null>(null); // shape a connector-in-progress will bind to
+  const [hoverDot, setHoverDot] = useState<{ x: number; y: number } | null>(null); // screen-space connection dot on a shape edge
   const [stroke, setStroke] = useState(DEFAULT_STROKE);
   const [fillColor, setFillColor] = useState("transparent");
   const [strokeW, setStrokeW] = useState(DEFAULT_STROKE_WIDTH);
@@ -299,7 +300,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         ctx.restore();
       }
     }
-  }, [scene, selectedIds, marquee, hoverBindId, vp, getImage, getLinkedScene]);
+    // connection dot: where the arrow will attach on the hovered shape's edge
+    if (hoverDot) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(hoverDot.x, hoverDot.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#0073EA";
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }, [scene, selectedIds, marquee, hoverBindId, hoverDot, vp, getImage, getLinkedScene]);
 
   // Redraw when the scene/viewport change, and when a pending image finishes
   // decoding (imgVersion bumps) so it replaces its placeholder.
@@ -379,6 +392,15 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     });
     bump();
   }, [onChange, bump, selectOne]);
+
+  // Place the connection dot on shape `shapeId`'s edge, toward world (tx,ty).
+  const updateHoverDot = useCallback((shapeId: string | null, tx: number, ty: number) => {
+    if (!shapeId) { setHoverDot(null); return; }
+    const shape = scene.elements.find((e) => e.id === shapeId);
+    if (!shape) { setHoverDot(null); return; }
+    const [ex, ey] = rectEdgePoint(shape, { x: tx, y: ty });
+    setHoverDot({ x: ex * vp.zoom + vp.x, y: ey * vp.zoom + vp.y });
+  }, [scene.elements, vp]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
     if (editing) return;
@@ -480,10 +502,11 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         multiRef.current = { id, downX: sx, downY: sy };
         dragRef.current = { kind: "path", id };
       } else {
-        // Multi-point mode (Excalidraw): each click adds a vertex. Clicking ON
-        // the last placed point finishes it; so do double-click / Enter / Escape.
-        // Ending on a shape binds. This branch only runs for CLICK-started
-        // arrows (a press-drag finishes on release, see onPointerUp).
+        // Multi-point mode (Excalidraw). Each click adds a vertex, EXCEPT:
+        //  - click on a bindable shape → magnet-connect to it + FINISH.
+        //  - click on the last placed point → FINISH.
+        // (double-click / Enter / Escape also finish.) A press-drag finishes on
+        // release (see onPointerUp).
         const mid = multiRef.current.id;
         const el = scene.elements.find((x) => x.id === mid);
         if (!el || !("points" in el)) { multiRef.current = null; dragRef.current = null; }
@@ -492,10 +515,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const lastFixed = pts[pts.length - 2]; // the floating end is pts[last]
           const lsx = lastFixed[0] * vp.zoom + vp.x, lsy = lastFixed[1] * vp.zoom + vp.y;
           const onLast = Math.hypot(sx - lsx, sy - lsy) <= HANDLE * 1.6;
+          const endHit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+          const onShape = !!endHit && isBindable(endHit) && endHit.id !== mid && endHit.id !== (el as PathElement).fromId;
           patchElement(mid, (x) => { if ("points" in x) { x.points[x.points.length - 1] = [world.x, world.y]; syncPathBounds(x as PathElement); } });
-          if (onLast) {
-            // clicked the last point → drop the coincident floating point + finish
-            patchElement(mid, (x) => { if ("points" in x && x.points.length > 2) { x.points.pop(); syncPathBounds(x as PathElement); } });
+          if (onShape || onLast) {
+            // magnet-connect to a shape, or close on the last point → finish
+            if (onLast) patchElement(mid, (x) => { if ("points" in x && x.points.length > 2) { x.points.pop(); syncPathBounds(x as PathElement); } });
             finishMultiArrow();
           } else {
             patchElement(mid, (x) => { if ("points" in x) { x.points.push([world.x, world.y]); syncPathBounds(x as PathElement); } });
@@ -547,10 +572,22 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       let hover: string | null = null;
       for (let i = scene.elements.length - 1; i >= 0; i--) { const c = scene.elements[i]; if (c.id === multiRef.current!.id || !isBindable(c)) continue; if (hitTest(c, w.x, w.y, 6 / vp.zoom)) { hover = c.id; break; } }
       setHoverBindId(hover);
+      updateHoverDot(hover, w.x, w.y);
       return;
     }
     const drag = dragRef.current;
-    if (!drag) return;
+    if (!drag) {
+      // Arrow/line tool idle-hover: show the connection dot on a shape under the
+      // cursor, so you can see where the arrow will attach (Excalidraw).
+      if (tool === "arrow" || tool === "line") {
+        const w = toWorld(msx, msy);
+        const shape = hitTopElement(scene, w.x, w.y, 8 / vp.zoom);
+        updateHoverDot(shape && isBindable(shape) ? shape.id : null, w.x, w.y);
+      } else if (hoverDot) {
+        setHoverDot(null);
+      }
+      return;
+    }
     const sx = msx, sy = msy;
     const world = toWorld(sx, sy);
 
@@ -575,6 +612,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           if (hitTest(cand, world.x, world.y, 6 / vp.zoom)) { hover = cand.id; break; }
         }
         setHoverBindId(hover);
+        updateHoverDot(hover, world.x, world.y);
       }
     } else if (drag.kind === "move") {
       const dx = world.x - drag.startX, dy = world.y - drag.startY;
@@ -630,7 +668,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       for (const el of scene.elements) if (elementInBox(el, box)) base.add(el.id);
       setSelectedIds(base);
     }
-  }, [patchElement, toWorld, scene.elements, vp]);
+  }, [patchElement, toWorld, scene, vp, tool, hoverDot, updateHoverDot]);
 
   const onPointerUp = useCallback(() => {
     // In multi-point arrow mode: a press-DRAG ends the arrow (quick 2-point or
@@ -641,6 +679,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       const moved = dist([lastPtrRef.current.sx, lastPtrRef.current.sy], [multiRef.current.downX, multiRef.current.downY]);
       if (moved > 5) finishMultiArrow();
       setHoverBindId(null);
+      setHoverDot(null);
       bump();
       return;
     }
@@ -721,6 +760,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       setMarquee(null); // selection was updated live in onPointerMove
     }
     setHoverBindId(null);
+    setHoverDot(null);
     // pan doesn't touch persisted elements — no onChange
     bump();
   }, [onChange, bump, selectOne, finishMultiArrow]);
@@ -1442,7 +1482,20 @@ function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x
       ctx.globalAlpha = 1;
     }
     if (el.type !== "freedraw" && pts.length >= 2) {
+      // Midpoint "grab to curve/bend" dots (Excalidraw's centre handles): a
+      // small hollow circle at each segment midpoint. Clicking one inserts a
+      // bend there (via hitSegment) and drags it.
+      ctx.lineWidth = 1.2;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const mx = (pts[i][0] + pts[i + 1][0]) / 2 * vp.zoom + vp.x;
+        const my = (pts[i][1] + pts[i + 1][1]) / 2 * vp.zoom + vp.y;
+        ctx.beginPath();
+        ctx.arc(mx, my, HANDLE / 2 - 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fill();
+        ctx.strokeStyle = "#0073EA"; ctx.stroke();
+      }
       // Editable vertices: a white square at each point (endpoints + every bend).
+      ctx.strokeStyle = "#0073EA";
       ctx.fillStyle = "#fff";
       ctx.lineWidth = 1.5;
       for (const p of pts) {
