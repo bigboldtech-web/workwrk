@@ -19,11 +19,12 @@ import {
 export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null, hideText = false) {
   ctx.save();
   ctx.globalAlpha = el.opacity;
-  // Rotate the whole element about its centre (contained by save/restore).
-  if (el.angle) {
+  // Rotate + mirror the whole element about its centre (contained by save/restore).
+  if (el.angle || el.flipX || el.flipY) {
     const cx = el.x + el.w / 2, cy = el.y + el.h / 2;
     ctx.translate(cx, cy);
-    ctx.rotate(el.angle);
+    if (el.angle) ctx.rotate(el.angle);
+    if (el.flipX || el.flipY) ctx.scale(el.flipX ? -1 : 1, el.flipY ? -1 : 1);
     ctx.translate(-cx, -cy);
   }
 

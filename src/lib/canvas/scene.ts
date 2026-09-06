@@ -46,6 +46,10 @@ export interface BaseElement {
   angle?: number;
   /** Group id — elements sharing one select/move/delete together (⌘G). */
   groupId?: string;
+  /** Mirror the element's content about its centre (box elements). Lines/arrows
+   *  flip by mirroring their points instead, so they don't use these. */
+  flipX?: boolean;
+  flipY?: boolean;
 }
 
 export type DashStyle = "solid" | "dashed" | "dotted";

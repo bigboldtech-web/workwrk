@@ -14,11 +14,12 @@ import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
-  MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight,
+  MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight, Zap,
   ChevronsUp, ChevronsDown, Copy as CopyIcon, Group as GroupIcon, Ungroup as UngroupIcon,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
+  FlipHorizontal2, FlipVertical2,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -102,7 +103,7 @@ async function loadScaledImage(file: File, maxDim: number): Promise<{ src: strin
 type Tool =
   | "select" | "hand"
   | "rect" | "ellipse" | "diamond" | "roundRect" | "triangle" | "parallelogram" | "cylinder" | "cloud"
-  | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame";
+  | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame" | "laser";
 
 const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
@@ -133,6 +134,7 @@ const TOOLS: { tool: Tool; Icon: typeof Square; label: string; key?: string; num
   { tool: "freedraw", Icon: Pencil, label: "Pen", key: "P", num: "7" },
   { tool: "text", Icon: TypeIcon, label: "Text", key: "T", num: "8" },
   { tool: "sticky", Icon: StickyNote, label: "Sticky note", key: "S", num: "9" },
+  { tool: "laser", Icon: Zap, label: "Laser pointer", key: "K" },
 ];
 const TOOL_BY_NUM: Record<string, Tool> = Object.fromEntries(
   TOOLS.filter((t) => t.num).map((t) => [t.num!, t.tool]),
@@ -236,6 +238,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const laserRef = useRef<{ x: number; y: number; t: number }[]>([]); // fading presenter trail (screen px)
+  const laserCanvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<Drag>(null);
   const multiRef = useRef<{ id: string; downX: number; downY: number } | null>(null); // in-progress multi-point arrow
   const lastPtrRef = useRef({ sx: 0, sy: 0 }); // last pointer pos (screen), for drag-vs-click
@@ -626,11 +630,46 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     }
   }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, align, toWorld, selectOne, patchElement, finishMultiArrow]);
 
+  // Laser pointer: a fading red presenter trail on an overlay canvas (not saved).
+  useEffect(() => {
+    const clear = () => { const c = laserCanvasRef.current; const ctx = c?.getContext("2d"); if (c && ctx) ctx.clearRect(0, 0, c.width, c.height); };
+    if (tool !== "laser") { laserRef.current = []; clear(); return; }
+    let raf = 0;
+    const loop = () => {
+      const c = laserCanvasRef.current, wrap = wrapRef.current;
+      if (c && wrap) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = wrap.clientWidth, h = wrap.clientHeight;
+        if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); c.style.width = `${w}px`; c.style.height = `${h}px`; }
+        const ctx = c.getContext("2d");
+        if (ctx) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          const now = performance.now();
+          const pts = laserRef.current.filter((p) => now - p.t < 650);
+          laserRef.current = pts;
+          ctx.lineCap = "round"; ctx.lineJoin = "round";
+          for (let i = 1; i < pts.length; i++) {
+            const age = (now - pts[i].t) / 650;
+            ctx.strokeStyle = `rgba(239,68,68,${1 - age})`;
+            ctx.lineWidth = 5 * (1 - age) + 1;
+            ctx.beginPath(); ctx.moveTo(pts[i - 1].x, pts[i - 1].y); ctx.lineTo(pts[i].x, pts[i].y); ctx.stroke();
+          }
+          if (pts.length) { const head = pts[pts.length - 1]; ctx.fillStyle = "rgba(239,68,68,0.95)"; ctx.beginPath(); ctx.arc(head.x, head.y, 4.5, 0, Math.PI * 2); ctx.fill(); }
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [tool]);
+
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current!;
     const mrect = canvas.getBoundingClientRect();
     const msx = e.clientX - mrect.left, msy = e.clientY - mrect.top;
     lastPtrRef.current = { sx: msx, sy: msy };
+    if (tool === "laser") { laserRef.current.push({ x: msx, y: msy, t: performance.now() }); return; }
     // Multi-point arrow: the floating end tracks the cursor (even between clicks).
     if (multiRef.current) {
       const w = toWorld(msx, msy);
@@ -1082,6 +1121,31 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const flipSelected = useCallback((axis: "x" | "y") => {
+    if (selectedIds.size === 0) return;
+    const sel = scene.elements.filter((el) => selectedIds.has(el.id));
+    const b = boundsOfElements(sel);
+    if (!b) return;
+    const c = axis === "x" ? b.x + b.w / 2 : b.y + b.h / 2; // mirror line (selection centre)
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: reflowElements(scene.elements.map((el) => {
+      if (!selectedIds.has(el.id)) return el;
+      if ("points" in el) {
+        // truly mirror a line/arrow by mirroring its points about the centre
+        const points = el.points.map((p) => (axis === "x" ? [2 * c - p[0], p[1]] : [p[0], 2 * c - p[1]]) as [number, number]);
+        const moved: PathElement = { ...el, points };
+        syncPathBounds(moved);
+        return moved;
+      }
+      // box: mirror its position about the centre + toggle the flip flag so its
+      // content mirrors too (asymmetric shapes actually flip).
+      return axis === "x"
+        ? { ...el, x: 2 * c - (el.x + el.w), flipX: !el.flipX }
+        : { ...el, y: 2 * c - (el.y + el.h), flipY: !el.flipY };
+    })) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
   const groupSelected = useCallback(() => {
     if (selectedIds.size < 2) return;
     const gid = genId();
@@ -1359,6 +1423,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         }}
         style={{ display: "block", touchAction: "none", cursor }}
       />
+      {/* laser-pointer overlay (presenter trail) — never intercepts pointers */}
+      <canvas ref={laserCanvasRef} style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4 }} />
       <input
         ref={fileRef}
         type="file"
@@ -1639,6 +1705,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           {hasSelection ? (
             <PanelSection label="Actions">
               <button type="button" title="Duplicate (⌘D)" onClick={() => duplicateSelected()} style={panelBtn(false)}><CopyIcon style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Flip horizontal" onClick={() => flipSelected("x")} style={panelBtn(false)}><FlipHorizontal2 style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Flip vertical" onClick={() => flipSelected("y")} style={panelBtn(false)}><FlipVertical2 style={{ width: 15, height: 15 }} /></button>
               {canGroup ? <button type="button" title="Group (⌘G)" onClick={() => groupSelected()} style={panelBtn(false)}><GroupIcon style={{ width: 15, height: 15 }} /></button> : null}
               {canUngroup ? <button type="button" title="Ungroup (⌘⇧G)" onClick={() => ungroupSelected()} style={panelBtn(false)}><UngroupIcon style={{ width: 15, height: 15 }} /></button> : null}
               <button type="button" title="Delete (⌫)" onClick={() => deleteSelected()} style={panelBtn(false)}><Trash2 style={{ width: 15, height: 15 }} /></button>
