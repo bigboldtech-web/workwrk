@@ -8,13 +8,14 @@ import {
   type CanvasCardElement,
   type CanvasScene,
   type PathElement,
+  type ShapeElement,
   type ArrowType,
   dashPattern,
   elbowPoints,
   sceneBounds,
 } from "./scene";
 
-export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null) {
+export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null, hideText = false) {
   ctx.save();
   ctx.globalAlpha = el.opacity;
   // Rotate the whole element about its centre (contained by save/restore).
@@ -165,16 +166,60 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     ctx.fillStyle = el.fill;
     roundRect(ctx, el.x, el.y, el.w, el.h, 8);
     ctx.fill();
-    ctx.fillStyle = "#1E293B";
-    ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
-    wrapText(ctx, el.text, el.x + 10, el.y + 10 + el.fontSize, el.w - 20, el.fontSize * 1.35, Infinity, el.align ?? "left");
+    if (!hideText) {
+      ctx.fillStyle = "#1E293B";
+      ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
+      wrapText(ctx, el.text, el.x + 10, el.y + 10 + el.fontSize, el.w - 20, el.fontSize * 1.35, Infinity, el.align ?? "left");
+    }
   } else if (el.type === "text") {
-    ctx.fillStyle = el.stroke;
-    ctx.textBaseline = "top";
-    ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
-    wrapText(ctx, el.text, el.x, el.y, el.w, el.fontSize * 1.35, Infinity, el.align ?? "left");
+    if (!hideText) {
+      ctx.fillStyle = el.stroke;
+      ctx.textBaseline = "top";
+      ctx.font = `${el.fontSize}px ui-sans-serif, system-ui, sans-serif`;
+      wrapText(ctx, el.text, el.x, el.y, el.w, el.fontSize * 1.35, Infinity, el.align ?? "left");
+    }
+  }
+  // Centred container label (Excalidraw): any shape may carry text.
+  if (!hideText && "text" in el && el.text && el.type !== "sticky" && el.type !== "text") {
+    drawShapeLabel(ctx, el as ShapeElement);
   }
   ctx.restore();
+}
+
+/** Draw a shape's optional centred text label (horizontally per align,
+ *  vertically centred within the shape box). */
+function drawShapeLabel(ctx: CanvasRenderingContext2D, el: ShapeElement): void {
+  if (!el.text) return;
+  const fs = el.fontSize ?? 16;
+  const pad = 8;
+  const maxW = Math.max(4, el.w - pad * 2);
+  ctx.fillStyle = "#1E293B";
+  ctx.font = `${fs}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.textBaseline = "top";
+  const lineH = fs * 1.3;
+  const lines = wrapLines(ctx, el.text, maxW);
+  const align = el.align ?? "center";
+  const anchorX = align === "left" ? el.x + pad : align === "right" ? el.x + el.w - pad : el.x + el.w / 2;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = align;
+  let y = el.y + el.h / 2 - (lines.length * lineH) / 2;
+  for (const l of lines) { ctx.fillText(l, anchorX, y); y += lineH; }
+  ctx.textAlign = prevAlign;
+}
+
+/** Word-wrap `text` to `maxW`, returning the lines (no drawing). */
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const lines: string[] = [];
+  for (const para of text.split("\n")) {
+    let line = "";
+    for (const word of para.split(" ")) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = word; }
+      else line = test;
+    }
+    lines.push(line);
+  }
+  return lines;
 }
 
 /** Trace a line/arrow into ctx following its arrowType (straight / elbow /

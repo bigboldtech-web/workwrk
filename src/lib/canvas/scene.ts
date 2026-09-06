@@ -65,6 +65,11 @@ export type ShapeType =
 
 export interface ShapeElement extends BaseElement {
   type: ShapeType;
+  /** Optional centred label inside the shape (Excalidraw container text) —
+   *  double-click the shape to edit. */
+  text?: string;
+  fontSize?: number;
+  align?: TextAlign;
 }
 
 /** line / arrow / freedraw — geometry lives in `points` (absolute world).

@@ -102,6 +102,8 @@ type Tool =
   | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame";
 
 const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
+// Element types that can carry a centred text label (double-click to edit).
+const SHAPE_LABEL_TYPES = new Set<string>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
 // `key` = letter shortcut, `num` = number shortcut (Excalidraw-style, for fast
 // flow-drawing). Both are shown as a hint on the tool and switch the tool.
@@ -280,7 +282,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     ctx.setTransform(vp.zoom * dpr, 0, 0, vp.zoom * dpr, vp.x * dpr, vp.y * dpr);
     for (const el of scene.elements) {
       if (el.type === "canvasCard") drawCanvasCard(ctx, el, getLinkedScene(el.whiteboardId), getImage);
-      else drawElement(ctx, el, getImage);
+      else drawElement(ctx, el, getImage, editing?.id === el.id);
     }
 
     // selection chrome in screen space: an outline per selected element, and
@@ -313,7 +315,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       ctx.stroke();
       ctx.restore();
     }
-  }, [scene, selectedIds, marquee, hoverBindId, hoverDot, vp, getImage, getLinkedScene]);
+  }, [scene, selectedIds, marquee, hoverBindId, hoverDot, vp, getImage, getLinkedScene, editing]);
 
   // Redraw when the scene/viewport change, and when a pending image finishes
   // decoding (imgVersion bumps) so it replaces its placeholder.
@@ -897,7 +899,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     const next = {
       ...scene,
       elements: scene.elements.map((el) => {
-        if (!selectedIds.has(el.id) || (el.type !== "text" && el.type !== "sticky")) return el;
+        if (!selectedIds.has(el.id) || (el.type !== "text" && el.type !== "sticky" && !SHAPE_LABEL_TYPES.has(el.type))) return el;
         // keep a text element's box height in step with its new line height
         return el.type === "text" ? { ...el, fontSize: size, h: size * 1.4 } : { ...el, fontSize: size };
       }),
@@ -912,7 +914,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     const next = {
       ...scene,
       elements: scene.elements.map((el) =>
-        selectedIds.has(el.id) && (el.type === "text" || el.type === "sticky") ? { ...el, align: a } : el,
+        selectedIds.has(el.id) && (el.type === "text" || el.type === "sticky" || SHAPE_LABEL_TYPES.has(el.type)) ? { ...el, align: a } : el,
       ),
     };
     commit(next, snapshot);
@@ -1079,6 +1081,13 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // image or our internal element copy both route through one place).
       if (e.key === "Delete" || e.key === "Backspace") { if (selectedIds.size > 0) { e.preventDefault(); deleteSelected(); } return; }
       if (e.key === "Escape") { setSelectedIds(new Set()); return; }
+      // Enter edits the selected shape/text/sticky's label (Excalidraw).
+      if (e.key === "Enter" && selectedIds.size === 1) {
+        const one = scene.elements.find((el) => selectedIds.has(el.id));
+        if (one && (one.type === "text" || one.type === "sticky" || one.type === "frame" || SHAPE_LABEL_TYPES.has(one.type))) {
+          e.preventDefault(); setEditing({ id: one.id }); return;
+        }
+      }
       if (e.key.startsWith("Arrow") && selectedIds.size > 0) {
         e.preventDefault();
         const step = e.shiftKey ? 10 : 1;
@@ -1139,6 +1148,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         if (x.id !== id) return x;
         if (x.type === "text" || x.type === "sticky") return { ...x, text: value };
         if (x.type === "frame") return { ...x, title: value.trim() || "Frame" };
+        if (SHAPE_LABEL_TYPES.has(x.type)) return { ...x, text: value }; // shape label (kept even if empty)
         return x;
       }) };
       onChange(next);
@@ -1165,7 +1175,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     || someSel((el) => el.type !== "text" && el.type !== "sticky" && el.type !== "image" && el.type !== "taskCard" && el.type !== "canvasCard");
   const secDash = secWidth && !someSel((el) => el.type === "frame"); // frames stay solid
   const secArrow = tool === "line" || tool === "arrow" || someSel((el) => el.type === "line" || el.type === "arrow");
-  const secText = tool === "text" || tool === "sticky" || someSel((el) => el.type === "text" || el.type === "sticky");
+  const secText = tool === "text" || tool === "sticky" || someSel((el) => el.type === "text" || el.type === "sticky" || SHAPE_LABEL_TYPES.has(el.type));
   const hasSelection = selectedIds.size > 0;
   const selOpacity = selEls.length > 0 ? selEls[0].opacity : 1;
 
@@ -1184,9 +1194,18 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame")) { selectOne(hit.id); setEditing({ id: hit.id }); }
+          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
           else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
+          else if (!hit) {
+            // double-click blank canvas → new text element, ready to type (Excalidraw)
+            const nid = genId();
+            const snap = cloneScene(scene);
+            const tel: CanvasElement = { id: nid, type: "text", x: world.x, y: world.y - fontSize / 2, w: 160, h: fontSize * 1.4, stroke, fill: "transparent", strokeWidth: 1, opacity: 1, text: "", fontSize, ...(align !== "left" ? { align } : {}) };
+            commit({ ...scene, elements: [...scene.elements, tel] }, snap);
+            selectOne(nid);
+            setEditing({ id: nid });
+          }
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
@@ -1233,6 +1252,30 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             background: editingEl.type === "sticky" ? editingEl.fill : "transparent",
             color: editingEl.type === "text" ? editingEl.stroke : "#1E293B",
             resize: "none", overflow: "hidden", fontFamily: "inherit",
+          }}
+        />
+      ) : null}
+
+      {/* shape label editing — a centred textarea over the shape */}
+      {editingEl && SHAPE_LABEL_TYPES.has(editingEl.type) ? (
+        <textarea
+          autoFocus
+          defaultValue={(editingEl as ShapeElement).text ?? ""}
+          onBlur={(e) => commitText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+          style={{
+            position: "absolute",
+            left: (editingEl.x + 4) * vp.zoom + vp.x,
+            top: editingEl.y * vp.zoom + vp.y,
+            width: Math.max(20, (editingEl.w - 8) * vp.zoom),
+            height: Math.max(24, editingEl.h * vp.zoom),
+            fontSize: ((editingEl as ShapeElement).fontSize ?? 16) * vp.zoom,
+            lineHeight: 1.3,
+            textAlign: (editingEl as ShapeElement).align ?? "center",
+            padding: 0, border: "none", outline: "none",
+            background: "transparent", color: "#1E293B",
+            resize: "none", overflow: "hidden", fontFamily: "inherit",
+            display: "grid", placeItems: "center",
           }}
         />
       ) : null}
