@@ -163,6 +163,8 @@ type Drag =
   | { kind: "resize"; id: string; handle: number; orig: CanvasElement }
   | { kind: "endpoint"; id: string; vi: number } // dragging a line/arrow vertex (0=start, last=end, middle=bend)
   | { kind: "rotate"; id: string } // rotating a box element about its centre
+  | { kind: "groupResize"; handle: number; bounds: { x: number; y: number; w: number; h: number }; orig: Map<string, CanvasElement> }
+  | { kind: "groupRotate"; cx: number; cy: number; start: number; orig: Map<string, CanvasElement> }
   | { kind: "marquee"; startX: number; startY: number; add: boolean; base: string[] }
   | null;
 
@@ -330,6 +332,26 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const selected = scene.elements.filter((e) => selectedIds.has(e.id));
     for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1 && !el.locked);
+    // Multi-selection: a group bounding box with corner + rotation handles that
+    // resize / rotate everything together.
+    if (selected.length >= 2) {
+      const gb = boundsOfElements(selected);
+      if (gb) {
+        const x = gb.x * vp.zoom + vp.x, y = gb.y * vp.zoom + vp.y, gw = gb.w * vp.zoom, gh = gb.h * vp.zoom;
+        ctx.save();
+        ctx.strokeStyle = "#0073EA"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+        ctx.strokeRect(x - 1, y - 1, gw + 2, gh + 2);
+        ctx.fillStyle = "#fff";
+        for (const [hx, hy] of handlePositions(x, y, gw, gh)) {
+          ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+          ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE);
+        }
+        const rx = x + gw / 2, ry = y - ROT_OFFSET;
+        ctx.beginPath(); ctx.moveTo(x + gw / 2, y); ctx.lineTo(rx, ry); ctx.stroke();
+        ctx.beginPath(); ctx.arc(rx, ry, HANDLE / 2 + 1, 0, Math.PI * 2); ctx.fillStyle = "#fff"; ctx.fill(); ctx.stroke();
+        ctx.restore();
+      }
+    }
     if (marquee) drawMarquee(ctx, marquee, vp);
     // connector bind target: a blue ring around the shape the arrow will attach to
     if (hoverBindId) {
@@ -489,6 +511,29 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             dragRef.current = { kind: "resize", id: sel.id, handle, orig: cloneEl(sel) };
             undoRef.current.push(cloneScene(scene));
             return;
+          }
+        }
+      } else if (selectedIds.size >= 2) {
+        // Group box handles: resize / rotate the whole selection.
+        const selEls2 = scene.elements.filter((el) => selectedIds.has(el.id));
+        const gb = boundsOfElements(selEls2);
+        if (gb && !selEls2.some((el) => el.locked)) {
+          const gx = gb.x * vp.zoom + vp.x, gy = gb.y * vp.zoom + vp.y, gw = gb.w * vp.zoom, gh = gb.h * vp.zoom;
+          const rrx = gx + gw / 2, rry = gy - ROT_OFFSET;
+          const origMap = new Map(selEls2.map((el) => [el.id, cloneEl(el)]));
+          if (Math.hypot(sx - rrx, sy - rry) <= HANDLE) {
+            const cx = gb.x + gb.w / 2, cy = gb.y + gb.h / 2;
+            dragRef.current = { kind: "groupRotate", cx, cy, start: Math.atan2(world.y - cy, world.x - cx), orig: origMap };
+            undoRef.current.push(cloneScene(scene));
+            return;
+          }
+          const corners = handlePositions(gx, gy, gw, gh);
+          for (let i = 0; i < corners.length; i++) {
+            if (Math.hypot(sx - corners[i][0], sy - corners[i][1]) <= HANDLE) {
+              dragRef.current = { kind: "groupResize", handle: i, bounds: gb, orig: origMap };
+              undoRef.current.push(cloneScene(scene));
+              return;
+            }
           }
         }
       }
@@ -767,6 +812,41 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         if (shift) a = Math.round(a / (Math.PI / 12)) * (Math.PI / 12); // snap to 15°
         el.angle = a;
       });
+    } else if (drag.kind === "groupResize") {
+      const { bounds, handle, orig } = drag;
+      const fx = handle === 0 || handle === 3 ? bounds.x + bounds.w : bounds.x; // opposite (fixed) corner x
+      const fy = handle === 0 || handle === 1 ? bounds.y + bounds.h : bounds.y; // opposite (fixed) corner y
+      const sxS = Math.max(4, Math.abs(world.x - fx)) / bounds.w;
+      const syS = Math.max(4, Math.abs(world.y - fy)) / bounds.h;
+      setScene((s) => ({ ...s, elements: reflowElements(s.elements.map((el) => {
+        const o = orig.get(el.id);
+        if (!o) return el;
+        const sp = (px: number, py: number): [number, number] => [fx + (px - fx) * sxS, fy + (py - fy) * syS];
+        if ("points" in o) {
+          const points = (o as PathElement).points.map((p) => sp(p[0], p[1]));
+          const c: PathElement = { ...(el as PathElement), points }; syncPathBounds(c); return c;
+        }
+        const [nx, ny] = sp(o.x, o.y);
+        const fs = (o as { fontSize?: number }).fontSize;
+        return { ...el, x: nx, y: ny, w: o.w * sxS, h: o.h * syS, ...(fs ? { fontSize: Math.max(6, fs * syS) } : {}) } as CanvasElement;
+      })) }));
+    } else if (drag.kind === "groupRotate") {
+      const { cx, cy, start, orig } = drag;
+      let delta = Math.atan2(world.y - cy, world.x - cx) - start;
+      if (e.shiftKey) delta = Math.round(delta / (Math.PI / 12)) * (Math.PI / 12);
+      const cos = Math.cos(delta), sin = Math.sin(delta);
+      const rot = (px: number, py: number): [number, number] => [cx + (px - cx) * cos - (py - cy) * sin, cy + (px - cx) * sin + (py - cy) * cos];
+      setScene((s) => ({ ...s, elements: reflowElements(s.elements.map((el) => {
+        const o = orig.get(el.id);
+        if (!o) return el;
+        if ("points" in o) {
+          // lines/arrows rotate by rotating their points (no angle → no double-rotate)
+          const points = (o as PathElement).points.map((p) => rot(p[0], p[1]));
+          const c: PathElement = { ...(el as PathElement), points }; syncPathBounds(c); return c;
+        }
+        const [ncx, ncy] = rot(o.x + o.w / 2, o.y + o.h / 2);
+        return { ...el, x: ncx - o.w / 2, y: ncy - o.h / 2, angle: (o.angle ?? 0) + delta };
+      })) }));
     } else if (drag.kind === "endpoint") {
       patchElement(drag.id, (el) => {
         if (!("points" in el)) return;
@@ -845,7 +925,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         onChange(next);
         return next;
       });
-    } else if (drag.kind === "move" || drag.kind === "resize" || drag.kind === "rotate") {
+    } else if (drag.kind === "move" || drag.kind === "resize" || drag.kind === "rotate" || drag.kind === "groupResize" || drag.kind === "groupRotate") {
       setScene((s) => { onChange(s); return s; });
     } else if (drag.kind === "endpoint") {
       // Re-bind (or free) a dragged END based on where it landed; a middle bend
