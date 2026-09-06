@@ -166,6 +166,19 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const [align, setAlign] = useState<TextAlign>("left");
   const [spaceDown, setSpaceDown] = useState(false); // hold-Space = temporary pan
   const [editing, setEditing] = useState<{ id: string } | null>(null);
+  // Reliable focus for the edit overlay: focus (+ size) the active field whenever
+  // editing begins — autoFocus alone is flaky when the field mounts on a click.
+  const editRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    if (!editing) return;
+    const el = editRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+    // grow a shape/label textarea to fit its current content
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [editing]);
   const clipboardRef = useRef<CanvasElement[]>([]);
   const selectOne = useCallback((id: string | null) => setSelectedIds(id ? new Set([id]) : new Set()), []);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1234,9 +1247,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       {/* text / sticky editing overlay */}
       {editingEl && (editingEl.type === "text" || editingEl.type === "sticky") ? (
         <textarea
-          autoFocus
+          ref={editRef}
           defaultValue={editingEl.text}
           onBlur={(e) => commitText(e.target.value)}
+          onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${t.scrollHeight}px`; }}
           onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
           style={{
             position: "absolute",
@@ -1256,28 +1270,38 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         />
       ) : null}
 
-      {/* shape label editing — a centred textarea over the shape */}
+      {/* shape label editing — a vertically-centred, auto-growing textarea that
+          sits over the shape (cursor starts at the centre and grows both ways) */}
       {editingEl && SHAPE_LABEL_TYPES.has(editingEl.type) ? (
-        <textarea
-          autoFocus
-          defaultValue={(editingEl as ShapeElement).text ?? ""}
-          onBlur={(e) => commitText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
-          style={{
-            position: "absolute",
-            left: (editingEl.x + 4) * vp.zoom + vp.x,
-            top: editingEl.y * vp.zoom + vp.y,
-            width: Math.max(20, (editingEl.w - 8) * vp.zoom),
-            height: Math.max(24, editingEl.h * vp.zoom),
-            fontSize: ((editingEl as ShapeElement).fontSize ?? 16) * vp.zoom,
-            lineHeight: 1.3,
-            textAlign: (editingEl as ShapeElement).align ?? "center",
-            padding: 0, border: "none", outline: "none",
-            background: "transparent", color: "#1E293B",
-            resize: "none", overflow: "hidden", fontFamily: "inherit",
-            display: "grid", placeItems: "center",
-          }}
-        />
+        <div style={{
+          position: "absolute",
+          left: editingEl.x * vp.zoom + vp.x,
+          top: editingEl.y * vp.zoom + vp.y,
+          width: editingEl.w * vp.zoom,
+          height: editingEl.h * vp.zoom,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <textarea
+            ref={editRef}
+            defaultValue={(editingEl as ShapeElement).text ?? ""}
+            onBlur={(e) => commitText(e.target.value)}
+            onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${t.scrollHeight}px`; }}
+            onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+            rows={1}
+            style={{
+              width: Math.max(20, (editingEl.w - 12) * vp.zoom),
+              maxHeight: (editingEl.h - 4) * vp.zoom,
+              fontSize: ((editingEl as ShapeElement).fontSize ?? 16) * vp.zoom,
+              lineHeight: 1.3,
+              textAlign: (editingEl as ShapeElement).align ?? "center",
+              padding: 0, margin: 0, border: "none", outline: "none",
+              background: "transparent", color: "#1E293B",
+              resize: "none", overflow: "hidden", fontFamily: "inherit",
+              pointerEvents: "auto",
+            }}
+          />
+        </div>
       ) : null}
 
       {/* frame title editing */}
