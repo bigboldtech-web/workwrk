@@ -30,8 +30,9 @@ import type { GoalLevel, Prisma } from "@/generated/prisma";
 // clients may still send "TEAM" — map it to DEPARTMENT, mirroring the
 // goal_audience_kra_weight migration; anything unrecognised is null.
 function normalizeGoalLevel(v: unknown): GoalLevel | null {
-  if (v === "TEAM") return "DEPARTMENT";
-  return v === "COMPANY" || v === "DEPARTMENT" || v === "INDIVIDUAL" ? v : null;
+  const s = typeof v === "string" ? v.toUpperCase() : v;
+  if (s === "TEAM") return "DEPARTMENT";
+  return s === "COMPANY" || s === "DEPARTMENT" || s === "INDIVIDUAL" ? (s as GoalLevel) : null;
 }
 
 export async function GET(req: NextRequest) {
@@ -48,6 +49,9 @@ export async function GET(req: NextRequest) {
   // department, their role). A filter WITHIN visibility, not a new door —
   // org-wide viewers get the same narrowing. Backs /okrs?mine=1.
   const mineOnly = url.searchParams.get("mine") === "1";
+  // ?team=1 — a manager's report tree: goals owned by (or audience-covering) a
+  // team member. Managers/org-wide only; a non-manager gets their normal view.
+  const teamOnly = url.searchParams.get("team") === "1";
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
@@ -101,6 +105,10 @@ export async function GET(req: NextRequest) {
         ...memberVisibilityOr({ id: callerId, departmentId: me?.departmentId, roleId: me?.roleId, tagIds: myTagIds }),
       ],
     });
+  }
+  if (teamOnly && (isManager(session) || orgWide)) {
+    const teamIds = await getTeamUserIds(orgId, callerId);
+    and.push({ OR: [{ ownerId: { in: teamIds } }, ...(await teamAudienceVisibilityOr(teamIds))] });
   }
   if (and.length > 0) where.AND = and;
 

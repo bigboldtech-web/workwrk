@@ -1075,15 +1075,20 @@ function ClipsSidebar() {
 /* ───────────────────────── Goals sidebar ───────────────────────── */
 
 function GoalsSidebar() {
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  const isManager = canAccessTier("manager", accessLevel);
   return (
     <>
       <ul>
-        <NavItem href="/okrs" Icon={Trophy} label="All Goals" />
+        {/* My Goals is primary: what I own or am assigned. Team Goals (my
+            report tree) is manager-only. Company objectives show as context
+            inside each view — no "All Goals" firehose. */}
         <NavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" />
+        {isManager ? <NavItem href="/okrs?team=1" Icon={Users} label="Team Goals" /> : null}
+        <NavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" />
         <NavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" />
       </ul>
-      <SectionLabel>Favorites</SectionLabel>
-      <EmptyState title="Star a Goal to see it here" />
     </>
   );
 }

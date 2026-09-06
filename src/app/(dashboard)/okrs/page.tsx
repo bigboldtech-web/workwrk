@@ -22,5 +22,6 @@ export default async function OkrsPage({
 }) {
   await requireGoalsPage();
   const sp = await searchParams;
-  return <OkrsClient initialNew={sp.new === "1"} mine={sp.mine === "1"} />;
+  const level = typeof sp.level === "string" ? sp.level : undefined;
+  return <OkrsClient initialNew={sp.new === "1"} mine={sp.mine === "1"} team={sp.team === "1"} level={level} />;
 }

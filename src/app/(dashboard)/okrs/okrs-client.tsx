@@ -100,11 +100,15 @@ function fmtDate(iso?: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export default function OkrsClient({ initialNew = false, mine = false }: {
+export default function OkrsClient({ initialNew = false, mine = false, team = false, level }: {
   /** ?new=1 — open the create modal on load (profile hero / sidebar link). */
   initialNew?: boolean;
   /** ?mine=1 — only goals the viewer carries (owner or resolved member). */
   mine?: boolean;
+  /** ?team=1 — a manager's report tree. */
+  team?: boolean;
+  /** ?level=company — only company-level objectives. */
+  level?: string;
 }) {
   const router = useRouter();
   const [okrs, setOkrs] = useState<ApiOkr[] | null>(null);
@@ -135,14 +139,18 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/okrs${mine ? "?mine=1" : ""}`);
+      const qs = new URLSearchParams();
+      if (mine) qs.set("mine", "1");
+      if (team) qs.set("team", "1");
+      if (level) qs.set("level", level);
+      const res = await fetch(`/api/okrs${qs.toString() ? `?${qs}` : ""}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setOkrs(data.data ?? (Array.isArray(data) ? data : []));
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
-  }, [mine]);
+  }, [mine, team, level]);
   useEffect(() => { void load(); }, [load]);
   const v = rowVersion("okrs");
   useEffect(() => { if (v > 0) void load(); }, [v, load]);
@@ -198,7 +206,7 @@ export default function OkrsClient({ initialNew = false, mine = false }: {
   return (
     <>
       <OsTitleBar
-        title="Goals"
+        title={team ? "Team Goals" : level === "company" || level === "COMPANY" ? "Company Goals" : mine ? "My Goals" : "Goals"}
         Icon={Target}
         iconGradient=""
         description={okrs === null ? "Loading…" : `${stats.total} goal${stats.total === 1 ? "" : "s"} · ${stats.active} active · ${stats.completed} completed`}
