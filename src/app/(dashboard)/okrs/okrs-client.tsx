@@ -25,7 +25,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Target, Plus, TrendingUp, AlertTriangle, CheckCircle2, Trophy,
-  Building2, Users, User as UserIcon, X, Clock,
+  Building2, Users, User as UserIcon, X, Clock, Activity,
   type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -70,6 +70,9 @@ type ApiOkr = {
   /** Whether THIS viewer may edit (owner / tree-manager / org-wide) —
    *  the exact PATCH /api/okrs gate; drives Edit + Assign owner. */
   canEdit?: boolean;
+  /** Automated effort summary (Team Goals, ?withEffort=1): hours + open tasks
+   *  + last activity, derived from the goal's linked-KRA tasks. */
+  effort?: { totalHours: number; tasksOpen: number; lastActivityAt: string | null };
 };
 
 const LEVEL_META: Record<OkrLevel, { label: string; chip: string; sub: string; Icon: LucideIcon }> = {
@@ -141,7 +144,7 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
     try {
       const qs = new URLSearchParams();
       if (mine) qs.set("mine", "1");
-      if (team) qs.set("team", "1");
+      if (team) { qs.set("team", "1"); qs.set("withEffort", "1"); }
       if (level) qs.set("level", level);
       const res = await fetch(`/api/okrs${qs.toString() ? `?${qs}` : ""}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -453,6 +456,15 @@ function GoalRow({ okr, showLevelChip, onDeleted, onEdit }: {
             style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, whiteSpace: "nowrap", color: "var(--os-ink-3, #a1a1aa)" }}
           >
             <Clock style={{ width: 11, height: 11 }} /> {CADENCE_LABEL[okr.checkInCadence]}
+          </span>
+        )}
+        {/* Effort (Team Goals): real work behind the goal, derived not reported. */}
+        {okr.effort && (okr.effort.totalHours > 0 || okr.effort.tasksOpen > 0) && (
+          <span
+            title={`${okr.effort.totalHours}h logged · ${okr.effort.tasksOpen} open task${okr.effort.tasksOpen === 1 ? "" : "s"}${okr.effort.lastActivityAt ? ` · last moved ${fmtDate(okr.effort.lastActivityAt)}` : ""}`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, whiteSpace: "nowrap", color: "var(--os-ink-2, #52525b)", background: "var(--os-surface-1, #f4f4f5)", borderRadius: 9999, padding: "2px 8px" }}
+          >
+            <Activity style={{ width: 11, height: 11 }} /> {okr.effort.totalHours}h · {okr.effort.tasksOpen} open
           </span>
         )}
         {/* Resolved audience — one shared goal, many contributors. */}

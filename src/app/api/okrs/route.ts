@@ -52,6 +52,9 @@ export async function GET(req: NextRequest) {
   // ?team=1 — a manager's report tree: goals owned by (or audience-covering) a
   // team member. Managers/org-wide only; a non-manager gets their normal view.
   const teamOnly = url.searchParams.get("team") === "1";
+  // ?withEffort=1 — attach a lightweight per-goal effort summary (hours / open
+  // tasks / last activity) derived from linked-KRA tasks. Used by Team Goals.
+  const withEffort = url.searchParams.get("withEffort") === "1";
 
   const where: Prisma.OKRWhereInput = { organizationId: orgId };
   const and: Prisma.OKRWhereInput[] = [];
@@ -191,6 +194,36 @@ export async function GET(req: NextRequest) {
     return deleteTeamIds.has(ownerId);
   };
 
+  // Batched effort (Team Goals): 2 queries for the whole list. Sum hours + open
+  // tasks + last activity from the Tasks under each goal's linked KRAs.
+  const effortByGoal = new Map<string, { totalHours: number; tasksOpen: number; lastActivityAt: Date | null }>();
+  if (withEffort && okrs.length > 0) {
+    const links = await prisma.entityLink.findMany({
+      where: { organizationId: orgId, sourceType: "OKR", sourceId: { in: okrs.map((o) => o.id) }, targetType: "KRA" },
+      select: { sourceId: true, targetId: true },
+    });
+    const kraToGoals = new Map<string, string[]>();
+    for (const l of links) kraToGoals.set(l.targetId, [...(kraToGoals.get(l.targetId) ?? []), l.sourceId]);
+    const kraIds = [...kraToGoals.keys()];
+    if (kraIds.length > 0) {
+      const tasks = await prisma.task.findMany({
+        where: { organizationId: orgId, kraId: { in: kraIds } },
+        select: { kraId: true, hoursSpent: true, status: true, completedAt: true, updatedAt: true },
+      });
+      for (const t of tasks) {
+        const act = t.completedAt ?? t.updatedAt;
+        for (const gid of (t.kraId ? kraToGoals.get(t.kraId) ?? [] : [])) {
+          const cur = effortByGoal.get(gid) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null };
+          cur.totalHours += t.hoursSpent ?? 0;
+          if (t.status !== "COMPLETED") cur.tasksOpen += 1;
+          if (act && (!cur.lastActivityAt || act > cur.lastActivityAt)) cur.lastActivityAt = act;
+          effortByGoal.set(gid, cur);
+        }
+      }
+      for (const e of effortByGoal.values()) e.totalHours = Math.round(e.totalHours * 10) / 10;
+    }
+  }
+
   const enriched = okrs.map((okr, i) => {
     const keyResults = groups[i];
     const rollup = goalRollupFor(rollupCtx, okr);
@@ -200,6 +233,7 @@ export async function GET(req: NextRequest) {
       owner: okr.ownerId ? ownerById.get(okr.ownerId) ?? null : null,
       canDelete: canDeleteOkr(okr.ownerId),
       canEdit: canEditOkr(okr.ownerId),
+      ...(withEffort ? { effort: effortByGoal.get(okr.id) ?? { totalHours: 0, tasksOpen: 0, lastActivityAt: null } } : {}),
       progress: rollup.progress,
       status: rollup.status,
       // "NONE" = nothing measurable and nothing hand-set — clients show
