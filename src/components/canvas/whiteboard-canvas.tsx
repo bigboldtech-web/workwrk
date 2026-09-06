@@ -16,6 +16,9 @@ import {
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
   MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight,
   ChevronsUp, ChevronsDown, Copy as CopyIcon, Group as GroupIcon, Ungroup as UngroupIcon,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -48,7 +51,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint, withGroupMembers,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint, withGroupMembers, boundsOfElements,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -497,6 +500,30 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           if (el && el.type === "frame") for (const c of frameChildren(scene.elements, el)) moveIdSet.add(c);
         }
         const moveIds = Array.from(moveIdSet);
+        if (e.altKey) {
+          // Alt/Option-drag = duplicate: drop fresh copies and drag THOSE, leaving
+          // the originals in place. Remap ids so copied groups + connectors stay
+          // internally wired (and don't point back at the originals).
+          const idMap = new Map<string, string>();
+          for (const id of moveIds) idMap.set(id, genId());
+          const groupMap = new Map<string, string>();
+          const remapGroup = (g: string | undefined) => { if (!g) return undefined; if (!groupMap.has(g)) groupMap.set(g, genId()); return groupMap.get(g); };
+          const copies = moveIds.map((id) => {
+            const base = cloneEl(scene.elements.find((e) => e.id === id)!);
+            if ("points" in base) {
+              return { ...base, id: idMap.get(id)!, groupId: remapGroup(base.groupId),
+                fromId: base.fromId && idMap.has(base.fromId) ? idMap.get(base.fromId) : undefined,
+                toId: base.toId && idMap.has(base.toId) ? idMap.get(base.toId) : undefined };
+            }
+            return { ...base, id: idMap.get(id)!, groupId: remapGroup(base.groupId) };
+          });
+          const newIds = copies.map((c) => c.id);
+          undoRef.current.push(cloneScene(scene));
+          setScene((s) => ({ ...s, elements: [...s.elements, ...copies] }));
+          setSelectedIds(new Set(newIds));
+          dragRef.current = { kind: "move", ids: newIds, startX: world.x, startY: world.y, origs: new Map(copies.map((c) => [c.id, cloneEl(c)])) };
+          return;
+        }
         const origs = new Map(moveIds.map((id) => [id, cloneEl(scene.elements.find((el) => el.id === id)!)]));
         dragRef.current = { kind: "move", ids: moveIds, startX: world.x, startY: world.y, origs };
         undoRef.current.push(cloneScene(scene));
@@ -1001,6 +1028,57 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           : { ...el, x: el.x + dx, y: el.y + dy };
       }),
     };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  // Move a single element by (dx,dy), carrying its points if it's a path.
+  const shifted = (el: CanvasElement, dx: number, dy: number): CanvasElement =>
+    "points" in el
+      ? { ...el, x: el.x + dx, y: el.y + dy, points: el.points.map((p) => [p[0] + dx, p[1] + dy] as [number, number]) }
+      : { ...el, x: el.x + dx, y: el.y + dy };
+
+  const alignSelected = useCallback((mode: "left" | "centerX" | "right" | "top" | "centerY" | "bottom") => {
+    if (selectedIds.size < 2) return;
+    const sel = scene.elements.filter((el) => selectedIds.has(el.id));
+    const b = boundsOfElements(sel);
+    if (!b) return;
+    const snapshot = cloneScene(scene);
+    const move = (el: CanvasElement): CanvasElement => {
+      let dx = 0, dy = 0;
+      if (mode === "left") dx = b.x - el.x;
+      else if (mode === "centerX") dx = (b.x + b.w / 2) - (el.x + el.w / 2);
+      else if (mode === "right") dx = (b.x + b.w) - (el.x + el.w);
+      else if (mode === "top") dy = b.y - el.y;
+      else if (mode === "centerY") dy = (b.y + b.h / 2) - (el.y + el.h / 2);
+      else dy = (b.y + b.h) - (el.y + el.h);
+      return shifted(el, dx, dy);
+    };
+    const next = { ...scene, elements: reflowElements(scene.elements.map((el) => (selectedIds.has(el.id) ? move(el) : el))) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const distributeSelected = useCallback((axis: "x" | "y") => {
+    if (selectedIds.size < 3) return;
+    const sel = scene.elements.filter((el) => selectedIds.has(el.id));
+    const startOf = (el: CanvasElement) => (axis === "x" ? el.x : el.y);
+    const sizeOf = (el: CanvasElement) => (axis === "x" ? el.w : el.h);
+    const sorted = [...sel].sort((a, b) => startOf(a) - startOf(b));
+    const first = sorted[0], last = sorted[sorted.length - 1];
+    const span = (startOf(last) + sizeOf(last)) - startOf(first);
+    const used = sorted.reduce((s, e) => s + sizeOf(e), 0);
+    const gap = (span - used) / (sorted.length - 1); // even gaps between edges
+    const moves = new Map<string, number>();
+    let cursor = startOf(first) + sizeOf(first) + gap;
+    for (let i = 1; i < sorted.length - 1; i++) {
+      moves.set(sorted[i].id, cursor - startOf(sorted[i]));
+      cursor += sizeOf(sorted[i]) + gap;
+    }
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: reflowElements(scene.elements.map((el) => {
+      const d = moves.get(el.id);
+      if (d === undefined) return el;
+      return shifted(el, axis === "x" ? d : 0, axis === "y" ? d : 0);
+    })) };
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
@@ -1526,6 +1604,18 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
                   <Icon style={{ width: 16, height: 16 }} />
                 </button>
               ))}
+            </PanelSection>
+          ) : null}
+          {canGroup ? (
+            <PanelSection label="Align">
+              <button type="button" title="Align left" onClick={() => alignSelected("left")} style={panelBtn(false)}><AlignStartVertical style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Align centre (H)" onClick={() => alignSelected("centerX")} style={panelBtn(false)}><AlignCenterVertical style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Align right" onClick={() => alignSelected("right")} style={panelBtn(false)}><AlignEndVertical style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Align top" onClick={() => alignSelected("top")} style={panelBtn(false)}><AlignStartHorizontal style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Align middle (V)" onClick={() => alignSelected("centerY")} style={panelBtn(false)}><AlignCenterHorizontal style={{ width: 15, height: 15 }} /></button>
+              <button type="button" title="Align bottom" onClick={() => alignSelected("bottom")} style={panelBtn(false)}><AlignEndHorizontal style={{ width: 15, height: 15 }} /></button>
+              {selectedIds.size >= 3 ? <button type="button" title="Distribute horizontally" onClick={() => distributeSelected("x")} style={panelBtn(false)}><AlignHorizontalDistributeCenter style={{ width: 15, height: 15 }} /></button> : null}
+              {selectedIds.size >= 3 ? <button type="button" title="Distribute vertically" onClick={() => distributeSelected("y")} style={panelBtn(false)}><AlignVerticalDistributeCenter style={{ width: 15, height: 15 }} /></button> : null}
             </PanelSection>
           ) : null}
           {hasSelection ? (
