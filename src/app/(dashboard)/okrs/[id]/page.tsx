@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { OkrLinkedWork } from "./okr-linked-work";
+import { GoalEffort } from "./goal-effort";
 import { GoalDetailMenu } from "./goal-detail-menu";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
@@ -425,6 +426,14 @@ export default async function OkrDetailPage(
             </ul>
           </section>
         )}
+
+        {/* Effort — automated signal derived from the goal's linked work */}
+        <section className="okrd-card">
+          <header><h2>Effort</h2></header>
+          <div className="okrd-card__cf">
+            <GoalEffort okrId={okr.id} />
+          </div>
+        </section>
 
         {/* Linked work */}
         <section className="okrd-card">
