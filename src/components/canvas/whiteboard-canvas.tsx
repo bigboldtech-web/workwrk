@@ -52,7 +52,7 @@ import {
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
-import { drawElement, drawCanvasCard, strokeConnectorPath } from "@/lib/canvas/render";
+import { drawElement, drawCanvasCard, strokeConnectorPath, wrapLines } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 
 /** A work-graph item the picker can drop onto the canvas as a live card
@@ -102,6 +102,18 @@ type Tool =
   | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame";
 
 const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
+
+// Offscreen 2D context used to measure a label's wrapped height so a shape can
+// grow to fit its text (created lazily; never rendered).
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function labelHeightFor(text: string, boxW: number, fontSize: number): number {
+  if (!text.trim()) return 0;
+  if (!_measureCtx && typeof document !== "undefined") _measureCtx = document.createElement("canvas").getContext("2d");
+  if (!_measureCtx) return 0;
+  _measureCtx.font = `${fontSize}px ui-sans-serif, system-ui, sans-serif`;
+  const lines = wrapLines(_measureCtx, text, Math.max(4, boxW - 16));
+  return lines.length * fontSize * 1.3 + 16; // + vertical padding
+}
 // Element types that can carry a centred text label (double-click to edit).
 const SHAPE_LABEL_TYPES = new Set<string>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
@@ -1157,13 +1169,26 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         onChange(next);
         return next;
       }
-      const next = { ...s, elements: s.elements.map((x) => {
+      let grewShape = false;
+      let elements = s.elements.map((x) => {
         if (x.id !== id) return x;
         if (x.type === "text" || x.type === "sticky") return { ...x, text: value };
         if (x.type === "frame") return { ...x, title: value.trim() || "Frame" };
-        if (SHAPE_LABEL_TYPES.has(x.type)) return { ...x, text: value }; // shape label (kept even if empty)
+        if (SHAPE_LABEL_TYPES.has(x.type)) {
+          // Grow the shape (keeping its centre) so the label always fits inside.
+          const sh = x as ShapeElement;
+          const needed = labelHeightFor(value, sh.w, sh.fontSize ?? 16);
+          if (needed > sh.h) {
+            grewShape = true;
+            const cy = sh.y + sh.h / 2;
+            return { ...sh, text: value, h: needed, y: cy - needed / 2 };
+          }
+          return { ...sh, text: value }; // shape label (kept even if empty)
+        }
         return x;
-      }) };
+      });
+      if (grewShape) elements = reflowElements(elements); // bound connectors follow the resized shape
+      const next = { ...s, elements };
       onChange(next);
       return next;
     });

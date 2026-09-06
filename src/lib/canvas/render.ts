@@ -208,7 +208,7 @@ function drawShapeLabel(ctx: CanvasRenderingContext2D, el: ShapeElement): void {
 }
 
 /** Word-wrap `text` to `maxW`, returning the lines (no drawing). */
-function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+export function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
   const lines: string[] = [];
   for (const para of text.split("\n")) {
     let line = "";
