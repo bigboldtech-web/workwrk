@@ -44,6 +44,8 @@ export interface BaseElement {
   dash?: DashStyle;
   /** Rotation in radians about the element centre. Absent/0 = upright. */
   angle?: number;
+  /** Group id — elements sharing one select/move/delete together (⌘G). */
+  groupId?: string;
 }
 
 export type DashStyle = "solid" | "dashed" | "dotted";
@@ -423,6 +425,18 @@ export function frameChildren(elements: CanvasElement[], frame: FrameElement): s
 }
 
 /** Does an element's bounding box overlap a world-space box (marquee select)? */
+/** Expand a selection to include every element that shares a groupId with any
+ *  already-selected element — so clicking/marqueeing one grouped element takes
+ *  the whole group. */
+export function withGroupMembers(elements: CanvasElement[], ids: Set<string>): Set<string> {
+  const groups = new Set<string>();
+  for (const el of elements) if (el.groupId && ids.has(el.id)) groups.add(el.groupId);
+  if (groups.size === 0) return ids;
+  const out = new Set(ids);
+  for (const el of elements) if (el.groupId && groups.has(el.groupId)) out.add(el.id);
+  return out;
+}
+
 export function elementInBox(el: CanvasElement, box: { x: number; y: number; w: number; h: number }): boolean {
   return el.x < box.x + box.w && el.x + el.w > box.x && el.y < box.y + box.h && el.y + el.h > box.y;
 }

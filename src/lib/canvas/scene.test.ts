@@ -19,6 +19,7 @@ import {
   reflowConnectors,
   sceneBounds,
   syncPathBounds,
+  withGroupMembers,
   type CanvasElement,
   type FrameElement,
   type PathElement,
@@ -186,6 +187,16 @@ describe("connectors", () => {
     const [dx, dy] = elementEdgePoint(diamond, { x: 150, y: 150 });
     expect(dx).toBeCloseTo(75, 5);
     expect(dy).toBeCloseTo(75, 5);
+  });
+
+  it("withGroupMembers expands a selection to whole groups", () => {
+    const a: ShapeElement = { ...rect("a", 0, 0, 10, 10), groupId: "g1" };
+    const b: ShapeElement = { ...rect("b", 20, 0, 10, 10), groupId: "g1" };
+    const c = rect("c", 40, 0, 10, 10); // ungrouped
+    const els = [a, b, c];
+    expect([...withGroupMembers(els, new Set(["a"]))].sort()).toEqual(["a", "b"]);       // one member → whole group
+    expect([...withGroupMembers(els, new Set(["c"]))]).toEqual(["c"]);                    // ungrouped stays alone
+    expect([...withGroupMembers(els, new Set(["a", "c"]))].sort()).toEqual(["a", "b", "c"]);
   });
 
   it("pathMidpoint is the halfway point by arc length", () => {

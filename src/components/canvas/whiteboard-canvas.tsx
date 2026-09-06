@@ -15,7 +15,7 @@ import {
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
   Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
   MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight,
-  ChevronsUp, ChevronsDown, Copy as CopyIcon,
+  ChevronsUp, ChevronsDown, Copy as CopyIcon, Group as GroupIcon, Ungroup as UngroupIcon,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -48,7 +48,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint, withGroupMembers,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -483,11 +483,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           // shift-click toggles membership; never starts a drag
           const ids = new Set(selectedIds);
           if (ids.has(hit.id)) ids.delete(hit.id); else ids.add(hit.id);
-          setSelectedIds(ids);
+          setSelectedIds(withGroupMembers(scene.elements, ids));
           return;
         }
         // click a member → move the whole group; click a non-member → select it
-        const ids = selectedIds.has(hit.id) ? selectedIds : new Set([hit.id]);
+        // (+ its group-mates, so a grouped element selects the whole group).
+        const ids = selectedIds.has(hit.id) ? selectedIds : withGroupMembers(scene.elements, new Set([hit.id]));
         if (!selectedIds.has(hit.id)) setSelectedIds(ids);
         // Dragging a frame drags its contents too (children captured now).
         const moveIdSet = new Set(ids);
@@ -704,7 +705,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       setMarquee(box);
       const base = new Set(drag.base);
       for (const el of scene.elements) if (elementInBox(el, box)) base.add(el.id);
-      setSelectedIds(base);
+      setSelectedIds(withGroupMembers(scene.elements, base)); // grab whole groups
     }
   }, [patchElement, toWorld, scene, vp, tool, hoverDot, updateHoverDot]);
 
@@ -1003,6 +1004,25 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const groupSelected = useCallback(() => {
+    if (selectedIds.size < 2) return;
+    const gid = genId();
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => (selectedIds.has(el.id) ? { ...el, groupId: gid } : el)) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const ungroupSelected = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    let changed = false;
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => {
+      if (selectedIds.has(el.id) && el.groupId) { changed = true; return { ...el, groupId: undefined }; }
+      return el;
+    }) };
+    if (changed) commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
   const reorderZ = useCallback((toFront: boolean) => {
     if (selectedIds.size === 0) return;
     const snapshot = cloneScene(scene);
@@ -1101,6 +1121,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
       if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); setSelectedIds(new Set(scene.elements.map((el) => el.id))); return; }
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSelected(); return; }
+      if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupSelected(); return; }
       if (mod && e.key.toLowerCase() === "c") { copySelected(); return; }
       // ⌘V is handled by the native paste listener below (so an OS-clipboard
       // image or our internal element copy both route through one place).
@@ -1131,7 +1152,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow, groupSelected, ungroupSelected]);
 
   // Native paste: an OS-clipboard image inserts an image; otherwise our
   // internal element copy (from ⌘C) is pasted. Ignored while editing text.
@@ -1217,6 +1238,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const secText = tool === "text" || tool === "sticky" || someSel((el) => el.type === "text" || el.type === "sticky" || SHAPE_LABEL_TYPES.has(el.type));
   const hasSelection = selectedIds.size > 0;
   const selOpacity = selEls.length > 0 ? selEls[0].opacity : 1;
+  const canGroup = selectedIds.size >= 2;
+  const canUngroup = selEls.some((el) => !!el.groupId);
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1526,6 +1549,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           {hasSelection ? (
             <PanelSection label="Actions">
               <button type="button" title="Duplicate (⌘D)" onClick={() => duplicateSelected()} style={panelBtn(false)}><CopyIcon style={{ width: 15, height: 15 }} /></button>
+              {canGroup ? <button type="button" title="Group (⌘G)" onClick={() => groupSelected()} style={panelBtn(false)}><GroupIcon style={{ width: 15, height: 15 }} /></button> : null}
+              {canUngroup ? <button type="button" title="Ungroup (⌘⇧G)" onClick={() => ungroupSelected()} style={panelBtn(false)}><UngroupIcon style={{ width: 15, height: 15 }} /></button> : null}
               <button type="button" title="Delete (⌫)" onClick={() => deleteSelected()} style={panelBtn(false)}><Trash2 style={{ width: 15, height: 15 }} /></button>
             </PanelSection>
           ) : null}
