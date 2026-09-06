@@ -104,8 +104,14 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
   ctx.setLineDash(dashPattern(el.dash, el.strokeWidth));
 
   if (el.type === "rect") {
-    if (el.fill !== "transparent") ctx.fillRect(el.x, el.y, el.w, el.h);
-    if (el.strokeWidth > 0) ctx.strokeRect(el.x, el.y, el.w, el.h);
+    if (el.edges === "round") {
+      roundRect(ctx, el.x, el.y, el.w, el.h, Math.min(16, el.w / 4, el.h / 4));
+      if (el.fill !== "transparent") ctx.fill();
+      if (el.strokeWidth > 0) ctx.stroke();
+    } else {
+      if (el.fill !== "transparent") ctx.fillRect(el.x, el.y, el.w, el.h);
+      if (el.strokeWidth > 0) ctx.strokeRect(el.x, el.y, el.w, el.h);
+    }
   } else if (el.type === "ellipse") {
     ctx.beginPath();
     ctx.ellipse(el.x + el.w / 2, el.y + el.h / 2, el.w / 2, el.h / 2, 0, 0, Math.PI * 2);

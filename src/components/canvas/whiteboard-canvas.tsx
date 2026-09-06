@@ -19,7 +19,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  FlipHorizontal2, FlipVertical2,
+  FlipHorizontal2, FlipVertical2, Lock, Unlock,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -321,7 +321,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     // resize handles only when exactly one is selected (group resize is later).
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const selected = scene.elements.filter((e) => selectedIds.has(e.id));
-    for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1);
+    for (const el of selected) drawSelection(ctx, el, vp, selected.length === 1 && !el.locked);
     if (marquee) drawMarquee(ctx, marquee, vp);
     // connector bind target: a blue ring around the shape the arrow will attach to
     if (hoverBindId) {
@@ -455,7 +455,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // Endpoint / resize handles — only when exactly one element is selected.
       if (selectedIds.size === 1) {
         const sel = scene.elements.find((el) => selectedIds.has(el.id));
-        if (sel && (sel.type === "line" || sel.type === "arrow")) {
+        if (sel && !sel.locked && (sel.type === "line" || sel.type === "arrow")) {
           const vi = hitVertex(sel, sx, sy, vp);
           if (vi !== -1) {
             dragRef.current = { kind: "endpoint", id: sel.id, vi };
@@ -470,7 +470,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
             dragRef.current = { kind: "endpoint", id: sel.id, vi: segIdx };
             return;
           }
-        } else if (sel) {
+        } else if (sel && !sel.locked) {
           if (hitRotateHandle(sel, sx, sy, vp)) {
             dragRef.current = { kind: "rotate", id: sel.id };
             undoRef.current.push(cloneScene(scene));
@@ -485,6 +485,12 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         }
       }
       const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+      if (hit && hit.locked) {
+        // clicking a locked element selects it (so you can Unlock in the panel)
+        // but never starts a move/resize.
+        setSelectedIds(new Set([hit.id]));
+        return;
+      }
       if (hit) {
         if (e.shiftKey) {
           // shift-click toggles membership; never starts a drag
@@ -1165,6 +1171,21 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     if (changed) commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const toggleLock = useCallback((locked: boolean) => {
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => (selectedIds.has(el.id) ? { ...el, locked } : el)) };
+    commit(next, snapshot);
+    if (locked) setSelectedIds(new Set()); // locked → drop the selection (Excalidraw)
+  }, [selectedIds, scene, commit]);
+
+  const applyEdges = useCallback((edges: "sharp" | "round") => {
+    if (selectedIds.size === 0) return;
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => (selectedIds.has(el.id) && el.type === "rect" ? { ...el, edges } : el)) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
   const reorderZ = useCallback((toFront: boolean) => {
     if (selectedIds.size === 0) return;
     const snapshot = cloneScene(scene);
@@ -1382,6 +1403,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const selOpacity = selEls.length > 0 ? selEls[0].opacity : 1;
   const canGroup = selectedIds.size >= 2;
   const canUngroup = selEls.some((el) => !!el.groupId);
+  const isLocked = selEls.some((el) => el.locked);
+  const hasRect = isShapeTool ? tool === "rect" : someSel((el) => el.type === "rect");
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1644,6 +1667,16 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               ))}
             </PanelSection>
           ) : null}
+          {hasRect ? (
+            <PanelSection label="Edges">
+              <button type="button" title="Sharp corners" onClick={() => applyEdges("sharp")} style={panelBtn(someSel((el) => el.type === "rect" && el.edges !== "round"))}>
+                <span style={{ width: 15, height: 12, border: "2px solid currentColor", borderRadius: 0 }} />
+              </button>
+              <button type="button" title="Round corners" onClick={() => applyEdges("round")} style={panelBtn(someSel((el) => el.type === "rect" && el.edges === "round"))}>
+                <span style={{ width: 15, height: 12, border: "2px solid currentColor", borderRadius: 5 }} />
+              </button>
+            </PanelSection>
+          ) : null}
           {secArrow ? (
             <PanelSection label="Arrow type">
               {ARROW_TYPES.map(({ type: at, Icon, label }) => (
@@ -1709,6 +1742,9 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               <button type="button" title="Flip vertical" onClick={() => flipSelected("y")} style={panelBtn(false)}><FlipVertical2 style={{ width: 15, height: 15 }} /></button>
               {canGroup ? <button type="button" title="Group (⌘G)" onClick={() => groupSelected()} style={panelBtn(false)}><GroupIcon style={{ width: 15, height: 15 }} /></button> : null}
               {canUngroup ? <button type="button" title="Ungroup (⌘⇧G)" onClick={() => ungroupSelected()} style={panelBtn(false)}><UngroupIcon style={{ width: 15, height: 15 }} /></button> : null}
+              {isLocked
+                ? <button type="button" title="Unlock" onClick={() => toggleLock(false)} style={panelBtn(true)}><Unlock style={{ width: 15, height: 15 }} /></button>
+                : <button type="button" title="Lock" onClick={() => toggleLock(true)} style={panelBtn(false)}><Lock style={{ width: 15, height: 15 }} /></button>}
               <button type="button" title="Delete (⌫)" onClick={() => deleteSelected()} style={panelBtn(false)}><Trash2 style={{ width: 15, height: 15 }} /></button>
             </PanelSection>
           ) : null}
@@ -1797,7 +1833,7 @@ function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
-    if (el.type !== "freedraw" && pts.length >= 2) {
+    if (el.type !== "freedraw" && pts.length >= 2 && !el.locked) {
       // Midpoint "grab to curve/bend" dots (Excalidraw's centre handles): a
       // small hollow circle at each segment midpoint. Clicking one inserts a
       // bend there (via hitSegment) and drags it.

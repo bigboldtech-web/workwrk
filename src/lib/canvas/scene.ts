@@ -50,6 +50,8 @@ export interface BaseElement {
    *  flip by mirroring their points instead, so they don't use these. */
   flipX?: boolean;
   flipY?: boolean;
+  /** Locked elements can't be moved/resized/rotated until unlocked. */
+  locked?: boolean;
 }
 
 export type DashStyle = "solid" | "dashed" | "dotted";
@@ -76,6 +78,8 @@ export interface ShapeElement extends BaseElement {
   text?: string;
   fontSize?: number;
   align?: TextAlign;
+  /** Corner style — "round" gives a rounded rectangle/diamond (default sharp). */
+  edges?: "sharp" | "round";
 }
 
 /** line / arrow / freedraw — geometry lives in `points` (absolute world).
