@@ -19,7 +19,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  FlipHorizontal2, FlipVertical2, Lock, Unlock,
+  FlipHorizontal2, FlipVertical2, Lock, Unlock, Link2, Download, ExternalLink,
 } from "lucide-react";
 
 const ARROW_TYPES: { type: ArrowType; Icon: typeof MoveRight; label: string }[] = [
@@ -42,6 +42,14 @@ const TEXT_ALIGNS: { align: TextAlign; Icon: typeof AlignLeft; label: string }[]
   { align: "right", Icon: AlignRight, label: "Right" },
 ];
 
+// Arrowhead options (glyph shown in the panel button).
+const HEAD_OPTS: { type: HeadType; glyph: string; label: string }[] = [
+  { type: "none", glyph: "—", label: "None" },
+  { type: "arrow", glyph: "→", label: "Arrow" },
+  { type: "triangle", glyph: "▶", label: "Triangle" },
+  { type: "dot", glyph: "●", label: "Dot" },
+];
+
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).
 const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
   { tool: "roundRect", Icon: Square, label: "Rounded rectangle" },
@@ -54,7 +62,7 @@ import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint, withGroupMembers, boundsOfElements,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
+  type ArrowType, type DashStyle, type TextAlign, type HeadType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
 import { drawElement, drawCanvasCard, strokeConnectorPath, wrapLines } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
@@ -976,6 +984,14 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
   }, [selectedIds, scene, commit]);
 
+  const applyHead = useCallback((which: "start" | "end", type: HeadType) => {
+    if (selectedIds.size === 0) return;
+    const key = which === "start" ? "startHead" : "endHead";
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => (selectedIds.has(el.id) && (el.type === "line" || el.type === "arrow") ? { ...el, [key]: type } : el)) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
   const applyDash = useCallback((d: DashStyle) => {
     setDash(d);
     if (selectedIds.size === 0) return;
@@ -1178,6 +1194,44 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
     commit(next, snapshot);
     if (locked) setSelectedIds(new Set()); // locked → drop the selection (Excalidraw)
   }, [selectedIds, scene, commit]);
+
+  const setLink = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    const cur = scene.elements.find((el) => selectedIds.has(el.id))?.link ?? "";
+    const url = window.prompt("Link URL (leave empty to remove):", cur);
+    if (url === null) return; // cancelled
+    const link = url.trim() || undefined;
+    const snapshot = cloneScene(scene);
+    const next = { ...scene, elements: scene.elements.map((el) => (selectedIds.has(el.id) ? { ...el, link } : el)) };
+    commit(next, snapshot);
+  }, [selectedIds, scene, commit]);
+
+  const exportPng = useCallback(() => {
+    const b = sceneBounds(scene);
+    if (!b) return;
+    const pad = 24, scale = 2;
+    const off = document.createElement("canvas");
+    off.width = Math.ceil((b.w + pad * 2) * scale);
+    off.height = Math.ceil((b.h + pad * 2) * scale);
+    const ctx = off.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, b.w + pad * 2, b.h + pad * 2);
+    ctx.translate(pad - b.x, pad - b.y);
+    for (const el of scene.elements) {
+      if (el.type === "canvasCard") drawCanvasCard(ctx, el, getLinkedScene(el.whiteboardId), getImage);
+      else drawElement(ctx, el, getImage);
+    }
+    off.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = "canvas.png";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }, "image/png");
+  }, [scene, getImage, getLinkedScene]);
 
   const applyEdges = useCallback((edges: "sharp" | "round") => {
     if (selectedIds.size === 0) return;
@@ -1405,6 +1459,10 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const canUngroup = selEls.some((el) => !!el.groupId);
   const isLocked = selEls.some((el) => el.locked);
   const hasRect = isShapeTool ? tool === "rect" : someSel((el) => el.type === "rect");
+  const soleSel = selEls.length === 1 ? selEls[0] : null; // for the open-link affordance
+  const selArrow = selEls.find((el) => el.type === "line" || el.type === "arrow") as PathElement | undefined;
+  const endHeadVal: HeadType = selArrow?.endHead ?? (selArrow?.type === "arrow" ? "arrow" : "none");
+  const startHeadVal: HeadType = selArrow?.startHead ?? "none";
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1448,6 +1506,20 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       />
       {/* laser-pointer overlay (presenter trail) — never intercepts pointers */}
       <canvas ref={laserCanvasRef} style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 4 }} />
+      {/* open-link affordance for a single linked element */}
+      {soleSel && soleSel.link && !editing ? (
+        <a href={soleSel.link} target="_blank" rel="noreferrer"
+          style={{
+            position: "absolute", zIndex: 7,
+            left: (soleSel.x + soleSel.w) * vp.zoom + vp.x - 8,
+            top: soleSel.y * vp.zoom + vp.y - 14,
+            display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px",
+            background: "#0073EA", color: "#fff", borderRadius: 8, fontSize: 12, fontWeight: 600,
+            textDecoration: "none", boxShadow: "0 3px 10px rgba(20,34,60,.2)", whiteSpace: "nowrap",
+          }}>
+          <ExternalLink style={{ width: 12, height: 12 }} /> Open
+        </a>
+      ) : null}
       <input
         ref={fileRef}
         type="file"
@@ -1686,6 +1758,22 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               ))}
             </PanelSection>
           ) : null}
+          {secArrow && selArrow ? (
+            <>
+              <PanelSection label="Arrowhead (end)">
+                {HEAD_OPTS.map(({ type, glyph, label }) => (
+                  <button key={type} type="button" title={`End: ${label}`} onClick={() => applyHead("end", type)}
+                    style={{ ...panelBtn(endHeadVal === type), fontSize: 15, fontWeight: 700 }}>{glyph}</button>
+                ))}
+              </PanelSection>
+              <PanelSection label="Arrowhead (start)">
+                {HEAD_OPTS.map(({ type, glyph, label }) => (
+                  <button key={type} type="button" title={`Start: ${label}`} onClick={() => applyHead("start", type)}
+                    style={{ ...panelBtn(startHeadVal === type), fontSize: 15, fontWeight: 700, transform: type === "arrow" || type === "triangle" ? "scaleX(-1)" : undefined }}>{glyph}</button>
+                ))}
+              </PanelSection>
+            </>
+          ) : null}
           {secText ? (
             <PanelSection label="Font size">
               {FONT_SIZES.map(({ label, size }) => (
@@ -1745,6 +1833,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
               {isLocked
                 ? <button type="button" title="Unlock" onClick={() => toggleLock(false)} style={panelBtn(true)}><Unlock style={{ width: 15, height: 15 }} /></button>
                 : <button type="button" title="Lock" onClick={() => toggleLock(true)} style={panelBtn(false)}><Lock style={{ width: 15, height: 15 }} /></button>}
+              <button type="button" title={selEls.some((el) => el.link) ? "Edit link" : "Add link"} onClick={() => setLink()} style={panelBtn(selEls.some((el) => !!el.link))}><Link2 style={{ width: 15, height: 15 }} /></button>
               <button type="button" title="Delete (⌫)" onClick={() => deleteSelected()} style={panelBtn(false)}><Trash2 style={{ width: 15, height: 15 }} /></button>
             </PanelSection>
           ) : null}
@@ -1799,6 +1888,8 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
         <button type="button" title="Undo (⌘Z)" onClick={undo} disabled={hist.u === 0} style={toolBtn(false)}><Undo2 style={{ width: 16, height: 16 }} /></button>
         <button type="button" title="Redo (⌘⇧Z)" onClick={redo} disabled={hist.r === 0} style={toolBtn(false)}><Redo2 style={{ width: 16, height: 16 }} /></button>
         <button type="button" title="Delete (⌫)" onClick={deleteSelected} disabled={selectedIds.size === 0} style={toolBtn(false)}><Trash2 style={{ width: 16, height: 16 }} /></button>
+        <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
+        <button type="button" title="Export as PNG" onClick={exportPng} style={toolBtn(false)}><Download style={{ width: 16, height: 16 }} /></button>
       </div>
 
       {/* zoom */}

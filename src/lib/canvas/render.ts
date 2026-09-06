@@ -10,6 +10,7 @@ import {
   type PathElement,
   type ShapeElement,
   type ArrowType,
+  type HeadType,
   dashPattern,
   elbowPoints,
   pathMidpoint,
@@ -167,8 +168,14 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     if (el.points.length > 0) {
       const head = strokeConnectorPath(ctx, el);
       ctx.stroke();
-      // the arrowhead is always solid — a dashed head reads as broken
-      if (el.type === "arrow" && head) { ctx.setLineDash([]); drawArrowhead(ctx, head[0], head[1], el.strokeWidth); }
+      // heads are always solid — a dashed head reads as broken
+      if (el.type !== "freedraw" && head && el.points.length >= 2) {
+        ctx.setLineDash([]);
+        const endType = el.endHead ?? (el.type === "arrow" ? "arrow" : "none");
+        const startType = el.startHead ?? "none";
+        if (endType !== "none") drawHead(ctx, endType, head[0], head[1], el.strokeWidth);
+        if (startType !== "none") drawHead(ctx, startType, el.points[1], el.points[0], el.strokeWidth);
+      }
     }
     if (!hideText && el.type !== "freedraw" && el.text) drawConnectorLabel(ctx, el);
   } else if (el.type === "sticky") {
@@ -305,15 +312,38 @@ export function strokeConnectorPath(ctx: CanvasRenderingContext2D, el: PathEleme
   return [pts[pts.length - 2], pts[pts.length - 1]];
 }
 
-export function drawArrowhead(ctx: CanvasRenderingContext2D, from: [number, number], to: [number, number], sw: number) {
+/** Draw an arrowhead of `type` at point `to`, aimed along from→to. */
+export function drawHead(ctx: CanvasRenderingContext2D, type: HeadType, from: [number, number], to: [number, number], sw: number) {
   const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
   const len = 8 + sw * 2;
-  ctx.beginPath();
-  ctx.moveTo(to[0], to[1]);
-  ctx.lineTo(to[0] - len * Math.cos(angle - Math.PI / 6), to[1] - len * Math.sin(angle - Math.PI / 6));
-  ctx.moveTo(to[0], to[1]);
-  ctx.lineTo(to[0] - len * Math.cos(angle + Math.PI / 6), to[1] - len * Math.sin(angle + Math.PI / 6));
-  ctx.stroke();
+  if (type === "arrow") {
+    ctx.beginPath();
+    ctx.moveTo(to[0], to[1]);
+    ctx.lineTo(to[0] - len * Math.cos(angle - Math.PI / 6), to[1] - len * Math.sin(angle - Math.PI / 6));
+    ctx.moveTo(to[0], to[1]);
+    ctx.lineTo(to[0] - len * Math.cos(angle + Math.PI / 6), to[1] - len * Math.sin(angle + Math.PI / 6));
+    ctx.stroke();
+  } else if (type === "triangle") {
+    const a1 = angle - Math.PI / 7, a2 = angle + Math.PI / 7;
+    ctx.beginPath();
+    ctx.moveTo(to[0], to[1]);
+    ctx.lineTo(to[0] - len * Math.cos(a1), to[1] - len * Math.sin(a1));
+    ctx.lineTo(to[0] - len * Math.cos(a2), to[1] - len * Math.sin(a2));
+    ctx.closePath();
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+  } else if (type === "dot") {
+    ctx.beginPath();
+    ctx.arc(to[0], to[1], sw + 2, 0, Math.PI * 2);
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fill();
+  } else if (type === "bar") {
+    const perp = angle + Math.PI / 2, b = len * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(to[0] + Math.cos(perp) * b, to[1] + Math.sin(perp) * b);
+    ctx.lineTo(to[0] - Math.cos(perp) * b, to[1] - Math.sin(perp) * b);
+    ctx.stroke();
+  }
 }
 
 export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

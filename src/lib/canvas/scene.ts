@@ -52,6 +52,8 @@ export interface BaseElement {
   flipY?: boolean;
   /** Locked elements can't be moved/resized/rotated until unlocked. */
   locked?: boolean;
+  /** Optional hyperlink; a linked element shows a badge and an "Open" affordance. */
+  link?: string;
 }
 
 export type DashStyle = "solid" | "dashed" | "dotted";
@@ -87,6 +89,7 @@ export interface ShapeElement extends BaseElement {
  *  another element, and the endpoint is recomputed from that element's edge
  *  (reflowConnectors) so the connector follows when the element moves. */
 export type ArrowType = "straight" | "elbow" | "curved";
+export type HeadType = "none" | "arrow" | "triangle" | "dot" | "bar";
 
 export interface PathElement extends BaseElement {
   type: "line" | "arrow" | "freedraw";
@@ -95,6 +98,10 @@ export interface PathElement extends BaseElement {
   toId?: string;
   /** line/arrow routing between endpoints (default straight). */
   arrowType?: ArrowType;
+  /** Arrowhead at each end. Absent → default per type (arrow: end="arrow",
+   *  start="none"; line: both "none"). */
+  startHead?: HeadType;
+  endHead?: HeadType;
   /** Where a bound end attaches, as an offset from the shape centre normalized
    *  by its half-size (roughly -1..1 per axis). Captured when it binds so the
    *  connection stays on the SIDE/corner you drew to (not snapped to centre)
