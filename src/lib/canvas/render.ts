@@ -12,6 +12,7 @@ import {
   type ArrowType,
   dashPattern,
   elbowPoints,
+  pathMidpoint,
   sceneBounds,
 } from "./scene";
 
@@ -162,6 +163,7 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
       // the arrowhead is always solid — a dashed head reads as broken
       if (el.type === "arrow" && head) { ctx.setLineDash([]); drawArrowhead(ctx, head[0], head[1], el.strokeWidth); }
     }
+    if (!hideText && el.type !== "freedraw" && el.text) drawConnectorLabel(ctx, el);
   } else if (el.type === "sticky") {
     ctx.fillStyle = el.fill;
     roundRect(ctx, el.x, el.y, el.w, el.h, 8);
@@ -180,10 +182,36 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     }
   }
   // Centred container label (Excalidraw): any shape may carry text.
-  if (!hideText && "text" in el && el.text && el.type !== "sticky" && el.type !== "text") {
+  if (!hideText && "text" in el && el.text && el.type !== "sticky" && el.type !== "text"
+      && el.type !== "line" && el.type !== "arrow" && el.type !== "freedraw") {
     drawShapeLabel(ctx, el as ShapeElement);
   }
   ctx.restore();
+}
+
+/** A centred label on a connector, sitting on a white pill at the line's
+ *  midpoint so the stroke doesn't cross the text (Excalidraw arrow label). */
+function drawConnectorLabel(ctx: CanvasRenderingContext2D, el: PathElement): void {
+  if (!el.text) return;
+  const [mx, my] = pathMidpoint(el.points);
+  const fs = el.fontSize ?? 14;
+  ctx.font = `${fs}px ui-sans-serif, system-ui, sans-serif`;
+  const lines = wrapLines(ctx, el.text, 240);
+  const lineH = fs * 1.3;
+  let maxW = 0;
+  for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+  const padX = 5, padY = 3;
+  const boxW = maxW + padX * 2, boxH = lines.length * lineH + padY * 2;
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#FFFFFF";
+  roundRect(ctx, mx - boxW / 2, my - boxH / 2, boxW, boxH, 4);
+  ctx.fill();
+  ctx.fillStyle = "#1E293B";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  let y = my - boxH / 2 + padY;
+  for (const l of lines) { ctx.fillText(l, mx, y); y += lineH; }
+  ctx.textAlign = "left";
 }
 
 /** Draw a shape's optional centred text label (horizontally per align,

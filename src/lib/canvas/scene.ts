@@ -91,6 +91,32 @@ export interface PathElement extends BaseElement {
    *  and follows the shape on move/resize. Absent → auto-anchor toward centre. */
   fromFocus?: [number, number];
   toFocus?: [number, number];
+  /** Optional centred label on the line (double-click the arrow to edit). */
+  text?: string;
+  fontSize?: number;
+}
+
+/** The point halfway along a polyline (by arc length) — where a connector's
+ *  label sits. */
+export function pathMidpoint(points: [number, number][]): [number, number] {
+  if (points.length === 0) return [0, 0];
+  if (points.length === 1) return points[0];
+  const segs: number[] = [];
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const d = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    segs.push(d);
+    total += d;
+  }
+  let half = total / 2;
+  for (let i = 0; i < segs.length; i++) {
+    if (half <= segs[i]) {
+      const t = segs[i] === 0 ? 0 : half / segs[i];
+      return [points[i][0] + (points[i + 1][0] - points[i][0]) * t, points[i][1] + (points[i + 1][1] - points[i][1]) * t];
+    }
+    half -= segs[i];
+  }
+  return points[points.length - 1];
 }
 
 /** Orthogonal (elbow) waypoints between two endpoints — an L or Z route. */

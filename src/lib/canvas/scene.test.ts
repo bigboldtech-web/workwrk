@@ -14,6 +14,7 @@ import {
   hitTopElement,
   isCanvasScene,
   normalizeBox,
+  pathMidpoint,
   rectEdgePoint,
   reflowConnectors,
   sceneBounds,
@@ -185,6 +186,12 @@ describe("connectors", () => {
     const [dx, dy] = elementEdgePoint(diamond, { x: 150, y: 150 });
     expect(dx).toBeCloseTo(75, 5);
     expect(dy).toBeCloseTo(75, 5);
+  });
+
+  it("pathMidpoint is the halfway point by arc length", () => {
+    expect(pathMidpoint([[0, 0], [100, 0]])).toEqual([50, 0]);          // straight
+    expect(pathMidpoint([[0, 0], [0, 100], [100, 100]])).toEqual([0, 100]); // L: 200 long, half at the corner
+    expect(pathMidpoint([[5, 5]])).toEqual([5, 5]);                     // single point
   });
 
   it("reflowConnectors keeps middle bends AND the sides you drew the ends on", () => {

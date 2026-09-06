@@ -48,7 +48,7 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
-  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint,
+  elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
   type ArrowType, type DashStyle, type TextAlign, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
 } from "@/lib/canvas/scene";
@@ -1109,7 +1109,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       // Enter edits the selected shape/text/sticky's label (Excalidraw).
       if (e.key === "Enter" && selectedIds.size === 1) {
         const one = scene.elements.find((el) => selectedIds.has(el.id));
-        if (one && (one.type === "text" || one.type === "sticky" || one.type === "frame" || SHAPE_LABEL_TYPES.has(one.type))) {
+        if (one && (one.type === "text" || one.type === "sticky" || one.type === "frame" || one.type === "line" || one.type === "arrow" || SHAPE_LABEL_TYPES.has(one.type))) {
           e.preventDefault(); setEditing({ id: one.id }); return;
         }
       }
@@ -1173,6 +1173,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       let elements = s.elements.map((x) => {
         if (x.id !== id) return x;
         if (x.type === "text" || x.type === "sticky") return { ...x, text: value };
+        if (x.type === "line" || x.type === "arrow") return { ...x, text: value }; // connector label
         if (x.type === "frame") return { ...x, title: value.trim() || "Frame" };
         if (SHAPE_LABEL_TYPES.has(x.type)) {
           // Grow the shape (keeping its centre) so the label always fits inside.
@@ -1232,7 +1233,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
+          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || hit.type === "line" || hit.type === "arrow" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
           else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
           else if (!hit) {
@@ -1328,6 +1329,32 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
           />
         </div>
       ) : null}
+
+      {/* connector label editing — a small centred textarea at the line midpoint */}
+      {editingEl && (editingEl.type === "line" || editingEl.type === "arrow") ? (() => {
+        const [mx, my] = pathMidpoint((editingEl as PathElement).points);
+        const fs = ((editingEl as PathElement).fontSize ?? 14) * vp.zoom;
+        return (
+          <textarea
+            ref={editRef}
+            defaultValue={(editingEl as PathElement).text ?? ""}
+            onBlur={(e) => commitText(e.target.value)}
+            onInput={(e) => { const t = e.currentTarget; t.style.height = "auto"; t.style.height = `${t.scrollHeight}px`; }}
+            onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+            rows={1}
+            style={{
+              position: "absolute",
+              left: mx * vp.zoom + vp.x - 70,
+              top: my * vp.zoom + vp.y - fs,
+              width: 140,
+              fontSize: fs, lineHeight: 1.3, textAlign: "center",
+              padding: "2px 4px", border: "none", outline: "2px solid #0073EA", borderRadius: 4,
+              background: "#fff", color: "#1E293B",
+              resize: "none", overflow: "hidden", fontFamily: "inherit",
+            }}
+          />
+        );
+      })() : null}
 
       {/* frame title editing */}
       {editingEl && editingEl.type === "frame" ? (
