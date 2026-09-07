@@ -15,9 +15,10 @@ import type { CanvasScene } from "@/lib/canvas/scene";
 const SYSTEM = `You are a principal software architect. Turn the user's description into a clean diagram. FIRST choose the diagram TYPE, then output ONLY a JSON object (no markdown, no prose) in that type's shape.
 
 CHOOSE THE TYPE:
-- "architecture" (default) — systems, services, data stores, how components connect.
-- "flowchart" — a process, algorithm, or decision flow ("flow", "steps", "if/then", "workflow").
-- "sequence" — an interaction over time between participants ("sequence", "request flow", "handshake", "who calls whom in what order").
+- "architecture" (default) — systems, services, data stores, how components connect (a static picture of the system).
+- "flowchart" — a process, algorithm, or decision flow: ordered STEPS a single actor/system walks through, with yes/no branches ("flow", "steps", "if/then", "workflow", "process", "logic").
+- "sequence" — messages exchanged BETWEEN several participants over time, where order and who-calls-whom matter ("sequence", "handshake", "protocol", "request/response between services").
+- Tie-breaker when a prompt just says "flow" (e.g. "signup flow", "notification flow"): if it's the STEPS one system takes, use "flowchart"; if it's MESSAGES between 2+ distinct participants, use "sequence". When genuinely unsure, prefer "flowchart" — it's the more intuitive default for a "flow".
 
 ARCHITECTURE / ER shape:
 { "type": "architecture", "title": "…",
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const prompt = typeof body?.prompt === "string" ? body.prompt : "";
   const priorSpec = isValidPrior(body?.priorSpec) ? body.priorSpec : null;
+  const forceType = ["architecture", "flowchart", "sequence"].includes(body?.forceType) ? (body.forceType as string) : null;
   if (!prompt.trim()) {
     return jsonError("Describe what you want to design.");
   }
@@ -98,9 +100,11 @@ export async function POST(req: NextRequest) {
   }
 
   // On a refine, hand the model the current spec + the change request.
-  const userContent = priorSpec
+  // forceType overrides the model's own type choice (the "redraw as…" buttons).
+  const base = priorSpec
     ? `CURRENT DIAGRAM:\n${JSON.stringify(priorSpec)}\n\nCHANGE REQUEST: ${prompt.trim()}`
     : prompt.trim();
+  const userContent = forceType ? `${base}\n\nRender this as a "${forceType}" diagram (use that exact type).` : base;
 
   try {
     const message = await createMessageWithFallback(ai.client, {
@@ -118,7 +122,8 @@ export async function POST(req: NextRequest) {
     if (!scene) {
       return jsonError("The AI didn't return any components. Try a more specific description.");
     }
-    return jsonSuccess({ scene, spec, title: (spec as { title?: string }).title ?? "Diagram" });
+    const type = forceType ?? ((spec as { type?: string }).type === "sequence" || (spec as { type?: string }).type === "flowchart" ? (spec as { type?: string }).type : "architecture");
+    return jsonSuccess({ scene, spec, type, title: (spec as { title?: string }).title ?? "Diagram" });
   } catch (err: unknown) {
     const msg = (err as { error?: { error?: { message?: string } }; message?: string })?.error?.error?.message
       || (err as { message?: string })?.message || "AI generation failed.";

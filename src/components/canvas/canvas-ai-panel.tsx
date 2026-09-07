@@ -18,6 +18,9 @@ import { parseSchema } from "@/lib/canvas/schema-import";
 // The AI (and templates) can produce any of the diagram shapes; the panel
 // keeps whichever one it last got, to seed the next refine.
 type PanelSpec = DiagramSpec | SequenceSpec;
+type DiagramType = "architecture" | "flowchart" | "sequence";
+const TYPE_LABEL: Record<DiagramType, string> = { architecture: "architecture diagram", flowchart: "flowchart", sequence: "sequence diagram" };
+const ALL_TYPES: DiagramType[] = ["architecture", "flowchart", "sequence"];
 type Turn = { role: "user" | "assistant"; text: string; error?: boolean };
 
 // A one-line, human summary of what a refine changed (added / removed nodes),
@@ -114,7 +117,9 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   // always reads the latest without re-subscribing.
   const lastSpecRef = useRef<PanelSpec | null>(null);
   const lastIdsRef = useRef<string[]>([]);
+  const lastPromptRef = useRef<string>(""); // the original description — lets "redraw as…" re-run with a forced type
   const [hasDiagram, setHasDiagram] = useState(false);
+  const [lastType, setLastType] = useState<DiagramType | null>(null);
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [thread]);
 
@@ -122,8 +127,8 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
     lastSpecRef.current = spec; lastIdsRef.current = ids; setHasDiagram(true);
   };
   const resetConversation = () => {
-    lastSpecRef.current = null; lastIdsRef.current = []; setHasDiagram(false);
-    setThread([]); setErr(null);
+    lastSpecRef.current = null; lastIdsRef.current = []; lastPromptRef.current = ""; setHasDiagram(false);
+    setLastType(null); setThread([]); setErr(null);
   };
 
   // One turn: fresh generate when there's no diagram yet, else refine the last
@@ -145,6 +150,7 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       const scene: CanvasScene | undefined = data?.data?.scene ?? data?.scene;
       const spec: PanelSpec | undefined = data?.data?.spec ?? data?.spec;
+      const type: DiagramType | undefined = data?.data?.type ?? data?.type;
       if (!scene || !Array.isArray(scene.elements)) throw new Error("No diagram returned.");
       let summary: string;
       if (prior && onReplace) {
@@ -153,12 +159,44 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
         if (spec) seed(spec, ids); else lastIdsRef.current = ids;
       } else {
         const ids = onApply(scene);
-        summary = `Designed “${data?.data?.title ?? data?.title ?? spec?.title ?? "diagram"}”.`;
+        lastPromptRef.current = p; // a fresh design → remember its prompt for "redraw as…"
+        summary = `Designed “${data?.data?.title ?? data?.title ?? spec?.title ?? "diagram"}”${type ? ` as a ${TYPE_LABEL[type]}` : ""}.`;
         if (spec) seed(spec, ids);
       }
+      if (type) setLastType(type);
       setThread((t) => [...t, { role: "assistant", text: summary }]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Generation failed.";
+      setErr(msg);
+      setThread((t) => [...t, { role: "assistant", text: msg, error: true }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Redraw the current design as a different diagram type (re-runs the original
+  // prompt with the type forced, and swaps the diagram in place).
+  const redrawAs = async (type: DiagramType) => {
+    const p = lastPromptRef.current;
+    if (!p || busy) return;
+    setBusy(true); setErr(null); setAnalysis(null); setSchema(null);
+    setThread((t) => [...t, { role: "user", text: `Redraw as ${TYPE_LABEL[type]}` }]);
+    try {
+      const res = await fetch("/api/canvas/generate", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ prompt: p, forceType: type }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      const scene: CanvasScene | undefined = data?.data?.scene ?? data?.scene;
+      const spec: PanelSpec | undefined = data?.data?.spec ?? data?.spec;
+      if (!scene || !Array.isArray(scene.elements)) throw new Error("No diagram returned.");
+      const ids = onReplace ? onReplace(lastIdsRef.current, scene) : onApply(scene);
+      if (spec) seed(spec, ids);
+      setLastType(type);
+      setThread((t) => [...t, { role: "assistant", text: `Redrawn as a ${TYPE_LABEL[type]}.` }]);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Redraw failed.";
       setErr(msg);
       setThread((t) => [...t, { role: "assistant", text: msg, error: true }]);
     } finally {
@@ -171,6 +209,8 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
     if (!t) return;
     setErr(null); setAnalysis(null); setSchema(null);
     const ids = onApply(t.build());
+    setLastType(id === "flowchart" ? "flowchart" : id === "sequence" ? "sequence" : "architecture");
+    lastPromptRef.current = ""; // template has no prompt to re-run for "redraw as…"
     seed(t.spec, ids); // a template can be refined too
     setThread([{ role: "assistant", text: `Added the ${t.label} template. Tell me how to change it.` }]);
   };
@@ -327,6 +367,19 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
         </button>
 
         {err && thread.length === 0 ? <p style={{ margin: 0, fontSize: 12.5, color: "#E11D48" }}>{err}</p> : null}
+
+        {/* Wrong format? Redraw the same design as another diagram type. */}
+        {!busy && hasDiagram && lastType && lastPromptRef.current ? (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 12, color: inkT.ink3 }}>
+            <span>Not the right format? Redraw as</span>
+            {ALL_TYPES.filter((tp) => tp !== lastType).map((tp) => (
+              <button key={tp} type="button" onClick={() => void redrawAs(tp)}
+                style={{ padding: "3px 8px", border: `1px solid ${inkT.line}`, borderRadius: 7, cursor: "pointer", background: inkT.surf1, color: inkT.ink2, fontSize: 12, fontWeight: 600 }}>
+                {tp === "architecture" ? "Architecture" : tp === "flowchart" ? "Flowchart" : "Sequence"}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         {!busy ? (
           <>
