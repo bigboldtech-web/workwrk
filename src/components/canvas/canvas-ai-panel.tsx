@@ -7,11 +7,12 @@
 //     walks through how it works or reviews it as a staff architect.
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check } from "lucide-react";
+import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check, ClipboardPaste } from "lucide-react";
 import type { CanvasScene } from "@/lib/canvas/scene";
 import { specToScene, type NodeKind, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { CANVAS_TEMPLATES } from "@/lib/canvas/templates";
 import { schemaFromScene, type SchemaExport } from "@/lib/canvas/schema-export";
+import { parseSchema } from "@/lib/canvas/schema-import";
 
 type Turn = { role: "user" | "assistant"; text: string; error?: boolean };
 
@@ -97,6 +98,9 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   const [schema, setSchema] = useState<SchemaExport | null>(null);
   const [schemaTab, setSchemaTab] = useState<"sql" | "prisma">("sql");
   const [copied, setCopied] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importErr, setImportErr] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   // The last diagram the AI produced (spec + the element ids it put on the
@@ -163,6 +167,20 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
     const ids = onApply(specToScene(t.spec));
     seed(t.spec, ids); // a template can be refined too
     setThread([{ role: "assistant", text: `Added the ${t.label} template. Tell me how to change it.` }]);
+  };
+
+  const doImport = () => {
+    const spec = parseSchema(importText);
+    if (!spec || spec.nodes.length === 0) {
+      setImportErr("Couldn't find any tables. Paste CREATE TABLE… statements or Prisma models.");
+      return;
+    }
+    setErr(null); setAnalysis(null); setSchema(null);
+    const ids = onApply(specToScene(spec));
+    seed(spec, ids); // the imported schema can be refined by chat too
+    const n = spec.nodes.length;
+    setThread([{ role: "assistant", text: `Imported ${n} table${n === 1 ? "" : "s"}. Tell me how to change it.` }]);
+    setImportOpen(false); setImportText(""); setImportErr(null);
   };
 
   const insertKit = (kind: NodeKind, label: string) => {
@@ -331,6 +349,39 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>
+                <ClipboardPaste style={{ width: 12, height: 12 }} /> Import schema
+              </span>
+              {!importOpen ? (
+                <button type="button" onClick={() => { setImportOpen(true); setImportErr(null); }}
+                  style={{ textAlign: "left", fontSize: 12.5, color: inkT.ink2, background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 8, padding: "7px 9px", cursor: "pointer" }}>
+                  Paste SQL DDL or a Prisma schema…
+                </button>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <textarea
+                    value={importText}
+                    onChange={(e) => setImportText(e.target.value)}
+                    placeholder={"CREATE TABLE users (\n  id uuid PRIMARY KEY,\n  ...\n);\n\n— or —\n\nmodel User { id String @id ... }"}
+                    rows={5}
+                    style={{ width: "100%", resize: "vertical", fontSize: 12, lineHeight: 1.4, padding: "8px 9px", border: `1px solid ${inkT.line}`, borderRadius: 9, outline: "none", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: inkT.ink, background: "var(--os-surface, #fff)" }}
+                  />
+                  {importErr ? <p style={{ margin: 0, fontSize: 12, color: "#E11D48" }}>{importErr}</p> : null}
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button type="button" onClick={doImport} disabled={!importText.trim()}
+                      style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 10px", border: "none", borderRadius: 9, cursor: importText.trim() ? "pointer" : "default", background: importText.trim() ? "#0073EA" : inkT.surf1, color: importText.trim() ? "#fff" : inkT.ink3, fontSize: 12.5, fontWeight: 600 }}>
+                      <ClipboardPaste style={{ width: 13, height: 13 }} /> Add to canvas
+                    </button>
+                    <button type="button" onClick={() => { setImportOpen(false); setImportText(""); setImportErr(null); }}
+                      style={{ padding: "7px 10px", border: `1px solid ${inkT.line}`, borderRadius: 9, cursor: "pointer", background: inkT.surf1, color: inkT.ink2, fontSize: 12.5, fontWeight: 600 }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
