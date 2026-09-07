@@ -10,6 +10,7 @@ import {
   type ShapeType,
   type PathElement,
   type FrameElement,
+  type HeadType,
   type TableElement,
   type TableField,
   emptyScene,
@@ -58,6 +59,20 @@ function styleFor(kind: NodeKind | undefined): { type: ShapeType; fill: string }
     case "note": return { type: "rect", fill: "#FEF9C3" };
     default: return { type: "roundRect", fill: "#FFFFFF" };
   }
+}
+
+/** One side of a "1:N" / "N:1" / "N:M" / "1:1" cardinality → an ER head.
+ *  "1"/"one" → the "one" bar; "N"/"M"/"*"/"many" → the crow's foot. */
+function sideHead(token: string | undefined): HeadType {
+  const t = (token ?? "").trim().toLowerCase();
+  if (/^(n|m|\*|many|\d{2,})$/.test(t) || t === "0..n" || t === "1..n") return "crowsfoot";
+  return "bar";
+}
+function cardinalityHeads(label: string | undefined): { start: HeadType; end: HeadType } | null {
+  if (!label) return null;
+  const m = label.match(/^\s*([0-9nm*.]+)\s*(?::|-|to|→|—)\s*([0-9nm*.]+)\s*$/i);
+  if (!m) return null;
+  return { start: sideHead(m[1]), end: sideHead(m[2]) };
 }
 
 /** Longest-path layering: each node's layer = the longest chain of edges leading
@@ -142,6 +157,7 @@ export function specToScene(spec: DiagramSpec): CanvasScene {
   }
 
   // Edges → arrows bound to both nodes (magnet); reflow snaps them to the edges.
+  const tableIds = new Set(nodes.filter(isTable).map((n) => n.id));
   const arrows: PathElement[] = [];
   for (const e of edges) {
     const fromId = idMap.get(e.from), toId = idMap.get(e.to);
@@ -149,10 +165,14 @@ export function specToScene(spec: DiagramSpec): CanvasScene {
     const a = boxOf.get(e.from)!, b = boxOf.get(e.to)!;
     const start: [number, number] = [a.x + a.w / 2, a.y + a.h / 2];
     const end: [number, number] = [b.x + b.w / 2, b.y + b.h / 2];
+    // Between two ER tables, render the relationship with crow's-foot heads
+    // read from the cardinality label ("1:N", "N:1", "N:M", "1:1"), not an arrow.
+    const erHeads = tableIds.has(e.from) && tableIds.has(e.to) ? cardinalityHeads(e.label) : null;
     const arrow: PathElement = {
       id: genId(), type: "arrow", x: start[0], y: start[1], w: 1, h: 1,
       stroke: "#475569", fill: "transparent", strokeWidth: 2, opacity: 1,
       points: [start, end], fromId, toId, arrowType: "straight",
+      ...(erHeads ? { startHead: erHeads.start, endHead: erHeads.end } : {}),
       ...(e.label ? { text: e.label, fontSize: 12 } : {}),
     };
     syncPathBounds(arrow);

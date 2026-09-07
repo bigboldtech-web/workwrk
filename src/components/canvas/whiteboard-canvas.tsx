@@ -48,6 +48,9 @@ const HEAD_OPTS: { type: HeadType; glyph: string; label: string }[] = [
   { type: "arrow", glyph: "→", label: "Arrow" },
   { type: "triangle", glyph: "▶", label: "Triangle" },
   { type: "dot", glyph: "●", label: "Dot" },
+  { type: "bar", glyph: "⊢", label: "One (ER)" },
+  { type: "crowsfoot", glyph: "⋔", label: "Many (ER)" },
+  { type: "crowsfoot-one", glyph: "⥻", label: "One-or-many (ER)" },
 ];
 
 // Extra flowchart shapes behind the toolbar's "More shapes" flyout (ClickUp).

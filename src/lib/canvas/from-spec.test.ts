@@ -63,10 +63,14 @@ describe("specToScene", () => {
     const users = tables.find((t) => (t as { name?: string }).name === "users") as { fields: unknown[]; h: number };
     expect(users.fields).toHaveLength(3);
     expect(users.h).toBeGreaterThan(30 + 3 * 20); // header + 3 rows
-    // the relationship connects both tables
+    // the relationship connects both tables with crow's-foot cardinality
     const arrows = scene.elements.filter((e) => e.type === "arrow");
     expect(arrows).toHaveLength(1);
-    expect((arrows[0] as { fromId?: string; toId?: string }).fromId).toBeTruthy();
+    const rel = arrows[0] as { fromId?: string; startHead?: string; endHead?: string };
+    expect(rel.fromId).toBeTruthy();
+    // "N:1": many on the from-side, one on the to-side
+    expect(rel.startHead).toBe("crowsfoot");
+    expect(rel.endHead).toBe("bar");
   });
 
   it("returns an empty scene for no nodes", () => {

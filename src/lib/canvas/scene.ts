@@ -90,7 +90,7 @@ export interface ShapeElement extends BaseElement {
  *  another element, and the endpoint is recomputed from that element's edge
  *  (reflowConnectors) so the connector follows when the element moves. */
 export type ArrowType = "straight" | "elbow" | "curved";
-export type HeadType = "none" | "arrow" | "triangle" | "dot" | "bar";
+export type HeadType = "none" | "arrow" | "triangle" | "dot" | "bar" | "crowsfoot" | "crowsfoot-one";
 
 export interface PathElement extends BaseElement {
   type: "line" | "arrow" | "freedraw";

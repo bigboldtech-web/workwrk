@@ -415,6 +415,25 @@ export function drawHead(ctx: CanvasRenderingContext2D, type: HeadType, from: [n
     ctx.moveTo(to[0] + Math.cos(perp) * b, to[1] + Math.sin(perp) * b);
     ctx.lineTo(to[0] - Math.cos(perp) * b, to[1] - Math.sin(perp) * b);
     ctx.stroke();
+  } else if (type === "crowsfoot" || type === "crowsfoot-one") {
+    // ER "many": three prongs converging at a point set back from the entity
+    // border and fanning out to touch it. "crowsfoot-one" adds the "one" bar.
+    const perp = angle + Math.PI / 2, b = len * 0.6;
+    const apex: [number, number] = [to[0] - len * Math.cos(angle), to[1] - len * Math.sin(angle)];
+    const feet: [number, number][] = [
+      to,
+      [to[0] + Math.cos(perp) * b, to[1] + Math.sin(perp) * b],
+      [to[0] - Math.cos(perp) * b, to[1] - Math.sin(perp) * b],
+    ];
+    ctx.beginPath();
+    for (const f of feet) { ctx.moveTo(apex[0], apex[1]); ctx.lineTo(f[0], f[1]); }
+    if (type === "crowsfoot-one") {
+      // a single "one" bar just beyond the fork's apex
+      const bx = to[0] - len * 1.5 * Math.cos(angle), by = to[1] - len * 1.5 * Math.sin(angle);
+      ctx.moveTo(bx + Math.cos(perp) * b * 0.8, by + Math.sin(perp) * b * 0.8);
+      ctx.lineTo(bx - Math.cos(perp) * b * 0.8, by - Math.sin(perp) * b * 0.8);
+    }
+    ctx.stroke();
   }
 }
 
