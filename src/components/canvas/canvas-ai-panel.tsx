@@ -7,10 +7,11 @@
 //     walks through how it works or reviews it as a staff architect.
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw } from "lucide-react";
+import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check } from "lucide-react";
 import type { CanvasScene } from "@/lib/canvas/scene";
 import { specToScene, type NodeKind, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { CANVAS_TEMPLATES } from "@/lib/canvas/templates";
+import { schemaFromScene, type SchemaExport } from "@/lib/canvas/schema-export";
 
 type Turn = { role: "user" | "assistant"; text: string; error?: boolean };
 
@@ -93,6 +94,9 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   const [thread, setThread] = useState<Turn[]>([]);
   const [analysis, setAnalysis] = useState<{ action: string; text: string } | null>(null);
   const [analyzing, setAnalyzing] = useState<"explain" | "critique" | null>(null);
+  const [schema, setSchema] = useState<SchemaExport | null>(null);
+  const [schemaTab, setSchemaTab] = useState<"sql" | "prisma">("sql");
+  const [copied, setCopied] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   // The last diagram the AI produced (spec + the element ids it put on the
@@ -172,11 +176,24 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
     ] }] }));
   };
 
+  const exportSchema = () => {
+    if (!getScene) return;
+    setErr(null); setAnalysis(null);
+    const result = schemaFromScene(getScene());
+    if (result.tableCount === 0) { setErr("Add ER tables to export a schema."); setSchema(null); return; }
+    setSchema(result); setSchemaTab("sql"); setCopied(false);
+  };
+  const copySchema = () => {
+    if (!schema) return;
+    const text = schemaTab === "sql" ? schema.sql : schema.prisma;
+    void navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); });
+  };
+
   const analyze = async (action: "explain" | "critique") => {
     if (!getScene || analyzing) return;
     const scene = getScene();
     if (!scene || scene.elements.length === 0) { setErr("Draw or generate a diagram first."); return; }
-    setAnalyzing(action); setErr(null); setAnalysis(null);
+    setAnalyzing(action); setErr(null); setAnalysis(null); setSchema(null);
     try {
       const res = await fetch("/api/canvas/analyze", {
         method: "POST",
@@ -346,11 +363,34 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                   <button type="button" onClick={() => void analyze("critique")} disabled={!!analyzing} style={smallBtn(!!analyzing)}>
                     {analyzing === "critique" ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <ShieldAlert style={{ width: 13, height: 13 }} />} Critique
                   </button>
+                  <button type="button" onClick={exportSchema} disabled={!!analyzing} style={smallBtn(!!analyzing)} title="Export ER tables as SQL / Prisma">
+                    <Code2 style={{ width: 13, height: 13 }} /> Schema
+                  </button>
                 </div>
                 {analysis ? (
                   <div style={{ background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 10, padding: "9px 11px", maxHeight: 240, overflowY: "auto" }}>
                     <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#6965db", marginBottom: 4 }}>{analysis.action === "critique" ? "Design review" : "How it works"}</div>
                     <Markdown text={analysis.text} />
+                  </div>
+                ) : null}
+                {schema ? (
+                  <div style={{ border: `1px solid ${inkT.line}`, borderRadius: 10, overflow: "hidden" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 8px", borderBottom: `1px solid ${inkT.line}`, background: inkT.surf1 }}>
+                      {(["sql", "prisma"] as const).map((tab) => (
+                        <button key={tab} type="button" onClick={() => { setSchemaTab(tab); setCopied(false); }}
+                          style={{ padding: "3px 8px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11.5, fontWeight: 600,
+                            background: schemaTab === tab ? "#0073EA" : "transparent", color: schemaTab === tab ? "#fff" : inkT.ink2 }}>
+                          {tab === "sql" ? "SQL" : "Prisma"}
+                        </button>
+                      ))}
+                      <span style={{ flex: 1 }} />
+                      <button type="button" onClick={copySchema} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", border: `1px solid ${inkT.line}`, borderRadius: 6, cursor: "pointer", fontSize: 11.5, fontWeight: 600, background: "var(--os-surface, #fff)", color: inkT.ink2 }}>
+                        {copied ? <Check style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />} {copied ? "Copied" : "Copy"}
+                      </button>
+                    </div>
+                    <pre style={{ margin: 0, padding: "9px 11px", maxHeight: 240, overflow: "auto", fontSize: 11.5, lineHeight: 1.5, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: inkT.ink, background: "var(--os-surface, #fff)", whiteSpace: "pre" }}>
+                      {schemaTab === "sql" ? schema.sql : schema.prisma}
+                    </pre>
                   </div>
                 ) : null}
               </div>
