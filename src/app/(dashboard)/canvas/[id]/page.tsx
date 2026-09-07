@@ -20,7 +20,8 @@ import { MorePortal } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { WhiteboardCanvas, type TaskSummary } from "@/components/canvas/whiteboard-canvas";
+import { WhiteboardCanvas, type TaskSummary, type WhiteboardCanvasHandle } from "@/components/canvas/whiteboard-canvas";
+import { CanvasAiPanel } from "@/components/canvas/canvas-ai-panel";
 import { isCanvasScene, emptyScene, type CanvasScene } from "@/lib/canvas/scene";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 import { STATUS_LOOKUP } from "@/lib/board-items-shared";
@@ -152,6 +153,7 @@ export default function WhiteboardCanvasPage() {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLButtonElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<WhiteboardCanvasHandle>(null); // imperative handle → AI panel drops a diagram in
   const { toast } = useOsToast();
   const confirm = useConfirm();
 
@@ -440,12 +442,16 @@ export default function WhiteboardCanvasPage() {
       {/* Canvas */}
       <div className="wbc__canvas">
         {useFirstParty ? (
-          <WhiteboardCanvas
-            initialScene={canvasInitial}
-            onChange={onCanvasSceneChange}
-            loadEntities={() => loadCanvasEntities(board.id)}
-            onOpenEntity={(href) => router.push(href)}
-          />
+          <>
+            <WhiteboardCanvas
+              ref={canvasRef}
+              initialScene={canvasInitial}
+              onChange={onCanvasSceneChange}
+              loadEntities={() => loadCanvasEntities(board.id)}
+              onOpenEntity={(href) => router.push(href)}
+            />
+            <CanvasAiPanel onApply={(scene) => canvasRef.current?.insertScene(scene)} />
+          </>
         ) : (
           <Excalidraw
             excalidrawAPI={(a) => setApi(a as unknown as ExcalidrawAPI)}

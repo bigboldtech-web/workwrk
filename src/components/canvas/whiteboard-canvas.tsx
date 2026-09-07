@@ -9,7 +9,7 @@
 // (create / move / resize / style / delete / text), and the parent's autosave
 // discipline (size-aware keepalive + ContentVersion) is untouched.
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, forwardRef } from "react";
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
@@ -177,7 +177,15 @@ export interface WhiteboardCanvasProps {
   onOpenEntity?: (href: string) => void;
 }
 
-export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenEntity }: WhiteboardCanvasProps) {
+/** Imperative handle — lets the page drop an AI-generated diagram onto the board. */
+export interface WhiteboardCanvasHandle {
+  insertScene: (generated: CanvasScene) => void;
+}
+
+export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProps>(function WhiteboardCanvas(
+  { initialScene, onChange, loadEntities, onOpenEntity },
+  ref,
+) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -1544,6 +1552,28 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
   const endHeadVal: HeadType = selArrow?.endHead ?? (selArrow?.type === "arrow" ? "arrow" : "none");
   const startHeadVal: HeadType = selArrow?.startHead ?? "none";
 
+  // Drop an AI-generated diagram onto the board: replace an empty board, else
+  // place it to the right of what's there, select it, and fit the view.
+  useImperativeHandle(ref, () => ({
+    insertScene: (generated: CanvasScene) => {
+      const snapshot = cloneScene(scene);
+      let incoming = generated.elements;
+      if (scene.elements.length > 0) {
+        const b = boundsOfElements(scene.elements);
+        const gb = boundsOfElements(incoming);
+        if (b && gb) {
+          const dx = (b.x + b.w + 140) - gb.x;
+          const dy = b.y - gb.y;
+          incoming = incoming.map((el) => shifted(el, dx, dy));
+        }
+      }
+      const next = { ...scene, elements: [...scene.elements, ...incoming] };
+      commit(next, snapshot);
+      setSelectedIds(new Set(incoming.map((el) => el.id)));
+      requestAnimationFrame(() => fitView());
+    },
+  }), [scene, commit, fitView]);
+
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
       <canvas
@@ -1980,7 +2010,7 @@ export function WhiteboardCanvas({ initialScene, onChange, loadEntities, onOpenE
       </div>
     </div>
   );
-}
+});
 
 function drawSelection(ctx: CanvasRenderingContext2D, el: CanvasElement, vp: { x: number; y: number; zoom: number }, withHandles: boolean) {
   ctx.save();

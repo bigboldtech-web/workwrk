@@ -1,0 +1,82 @@
+// POST /api/canvas/generate — the AI diagram feature.
+//
+// Body: { prompt: string }. Calls the org's Claude (shared or BYOK) to turn a
+// plain-language description into a semantic node/edge SPEC, then lays it out
+// into a real Canvas scene via specToScene (the model never touches pixels).
+// Returns { scene, title }.
+
+import { NextRequest } from "next/server";
+import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { specToScene, type DiagramSpec } from "@/lib/canvas/from-spec";
+
+const SYSTEM = `You are a principal software architect. Turn the user's description into a clean architecture / system-design diagram.
+
+Output ONLY a JSON object (no markdown, no prose) of this exact shape:
+{
+  "title": "short diagram title",
+  "nodes": [ { "id": "kebab-id", "label": "Human Label", "kind": "service", "group": "optional-group-id" } ],
+  "edges": [ { "from": "node-id", "to": "node-id", "label": "what flows / the call" } ],
+  "groups": [ { "id": "group-id", "label": "Group Label" } ]
+}
+
+Rules:
+- "kind" is one of: service, component, database, cache, queue, external, cloud, actor, user, gateway, decision, note. Pick the most accurate one for each node (a DB is "database", Redis is "cache", a third-party API is "external", the end user is "actor", an API gateway/load balancer is "gateway").
+- Give every node a short, specific label (e.g. "Orders API", "Postgres (orders)", "Stripe").
+- Direct edges the way data/requests FLOW, and label them with the call or data ("POST /orders", "read", "publish event"). Keep labels short.
+- Group related nodes with a "group" id and define each group in "groups" (e.g. "Backend", "Data", "Third-party"). Groups are optional but make big diagrams readable.
+- Aim for 5-15 nodes for a typical request — enough to be useful, not overwhelming. Prefer clarity over completeness.
+- Return ONLY the JSON.`;
+
+// A tiny canned example when no shared key is configured, so the feature never
+// hard-errors in a fresh env.
+const FALLBACK: DiagramSpec = {
+  title: "Example",
+  nodes: [
+    { id: "user", label: "User", kind: "actor" },
+    { id: "api", label: "API", kind: "service", group: "backend" },
+    { id: "db", label: "Database", kind: "database", group: "backend" },
+  ],
+  edges: [
+    { from: "user", to: "api", label: "request" },
+    { from: "api", to: "db", label: "read / write" },
+  ],
+  groups: [{ id: "backend", label: "Backend" }],
+};
+
+export async function POST(req: NextRequest) {
+  const { error, session } = await getSessionOrFail();
+  if (error) return error;
+  const orgId = getOrgId(session);
+  const { prompt } = await req.json().catch(() => ({ prompt: "" }));
+  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+    return jsonError("Describe what you want to design.");
+  }
+
+  const ai = await getAnthropicForOrg(orgId);
+  if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
+    return jsonSuccess({ scene: specToScene(FALLBACK), title: FALLBACK.title, fallback: true });
+  }
+
+  try {
+    const message = await ai.client.messages.create({
+      model: modelFor(ai, "claude-sonnet-4-20250514"),
+      max_tokens: 4000,
+      system: SYSTEM,
+      messages: [{ role: "user", content: prompt.trim() }],
+    });
+    const textBlock = message.content.find((b: { type: string }) => b.type === "text") as { text?: string } | undefined;
+    const text = textBlock?.text ?? "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) return jsonError("The AI didn't return a diagram. Try rephrasing.");
+    const spec = JSON.parse(match[0]) as DiagramSpec;
+    if (!Array.isArray(spec.nodes) || spec.nodes.length === 0) {
+      return jsonError("The AI didn't return any components. Try a more specific description.");
+    }
+    return jsonSuccess({ scene: specToScene(spec), title: spec.title ?? "Diagram" });
+  } catch (err: unknown) {
+    const msg = (err as { error?: { error?: { message?: string } }; message?: string })?.error?.error?.message
+      || (err as { message?: string })?.message || "AI generation failed.";
+    return jsonError(`AI generation failed: ${msg}`);
+  }
+}
