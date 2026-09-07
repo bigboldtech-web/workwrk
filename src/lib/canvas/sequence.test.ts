@@ -25,6 +25,12 @@ describe("sequenceToScene", () => {
     // a return message renders dashed
     const token = msgs.find((m) => (m as { text?: string }).text === "token") as { dash?: string };
     expect(token.dash).toBe("dashed");
+    // activation bars (rects on the lifelines) make "who is active" legible
+    const bars = scene.elements.filter((e) => e.type === "rect");
+    expect(bars.length).toBeGreaterThan(0);
+    // every bar sits centred on some participant's lifeline
+    const lifelineXs = scene.elements.filter((e) => e.type === "line").map((e) => e.x);
+    expect(bars.every((b) => lifelineXs.some((lx) => Math.abs((b.x + b.w / 2) - lx) < 0.5))).toBe(true);
   });
 
   it("draws a self-message as a loop and ignores unknown participants", () => {
