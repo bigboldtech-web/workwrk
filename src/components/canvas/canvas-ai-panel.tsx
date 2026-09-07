@@ -7,10 +7,24 @@
 //     walks through how it works or reviews it as a staff architect.
 
 import { useRef, useState } from "react";
-import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert } from "lucide-react";
+import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2 } from "lucide-react";
 import type { CanvasScene } from "@/lib/canvas/scene";
-import { specToScene } from "@/lib/canvas/from-spec";
+import { specToScene, type NodeKind } from "@/lib/canvas/from-spec";
 import { CANVAS_TEMPLATES } from "@/lib/canvas/templates";
+
+// Preset nodes for fast hand-drawing — each drops a pre-labelled, pre-styled
+// shape via the same specToScene mapping the AI uses, so a hand-built system
+// looks identical to a generated one.
+const SYSTEM_KIT: { kind: NodeKind; label: string; Icon: typeof Server }[] = [
+  { kind: "service", label: "Service", Icon: Server },
+  { kind: "gateway", label: "Gateway", Icon: Network },
+  { kind: "database", label: "Database", Icon: Database },
+  { kind: "cache", label: "Cache", Icon: Zap },
+  { kind: "queue", label: "Queue", Icon: ListOrdered },
+  { kind: "cloud", label: "Cloud", Icon: Cloud },
+  { kind: "actor", label: "User", Icon: User },
+  { kind: "external", label: "External", Icon: Globe },
+];
 
 const EXAMPLES = [
   "Design a URL shortener with a cache and rate limiter",
@@ -95,6 +109,17 @@ export function CanvasAiPanel({ onApply, getScene }: Props) {
     setErr(null); setAnalysis(null);
     onApply(specToScene(t.spec));
     setLastTitle(t.spec.title ?? t.label);
+  };
+
+  const insertKit = (kind: NodeKind, label: string) => {
+    setErr(null); setAnalysis(null);
+    onApply(specToScene({ nodes: [{ id: "n", label, kind }] }));
+  };
+  const insertTable = () => {
+    setErr(null); setAnalysis(null);
+    onApply(specToScene({ nodes: [{ id: "t", label: "Table", fields: [
+      { name: "id", type: "uuid", key: "pk" }, { name: "name", type: "text" }, { name: "created_at", type: "timestamp" },
+    ] }] }));
   };
 
   const analyze = async (action: "explain" | "critique") => {
@@ -218,6 +243,26 @@ export function CanvasAiPanel({ onApply, getScene }: Props) {
                     <span style={{ fontSize: 11, lineHeight: 1.3, color: inkT.ink3 }}>{t.blurb}</span>
                   </button>
                 ))}
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>
+                <Boxes style={{ width: 12, height: 12 }} /> System kit
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                {SYSTEM_KIT.map((k) => (
+                  <button key={k.kind + k.label} type="button" onClick={() => insertKit(k.kind, k.label)} title={`Add ${k.label}`}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 9, padding: "8px 4px", cursor: "pointer", color: inkT.ink2 }}>
+                    <k.Icon style={{ width: 15, height: 15 }} />
+                    <span style={{ fontSize: 10.5, fontWeight: 600 }}>{k.label}</span>
+                  </button>
+                ))}
+                <button type="button" onClick={insertTable} title="Add ER table"
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 9, padding: "8px 4px", cursor: "pointer", color: inkT.ink2 }}>
+                  <Table2 style={{ width: 15, height: 15 }} />
+                  <span style={{ fontSize: 10.5, fontWeight: 600 }}>Table</span>
+                </button>
               </div>
             </div>
 
