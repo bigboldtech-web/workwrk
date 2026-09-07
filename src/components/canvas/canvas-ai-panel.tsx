@@ -6,11 +6,26 @@
 //   • Explain / Critique — /api/canvas/analyze reads the current board and either
 //     walks through how it works or reviews it as a staff architect.
 
-import { useRef, useState } from "react";
-import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw } from "lucide-react";
 import type { CanvasScene } from "@/lib/canvas/scene";
-import { specToScene, type NodeKind } from "@/lib/canvas/from-spec";
+import { specToScene, type NodeKind, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { CANVAS_TEMPLATES } from "@/lib/canvas/templates";
+
+type Turn = { role: "user" | "assistant"; text: string; error?: boolean };
+
+// A one-line, human summary of what a refine changed (added / removed nodes),
+// computed client-side by diffing the prior and new spec node sets.
+function diffSummary(prev: DiagramSpec, next: DiagramSpec): string {
+  const p = new Map((prev.nodes ?? []).map((n) => [n.id, n.label]));
+  const q = new Map((next.nodes ?? []).map((n) => [n.id, n.label]));
+  const added = [...q].filter(([id]) => !p.has(id)).map(([, l]) => l);
+  const removed = [...p].filter(([id]) => !q.has(id)).map(([, l]) => l);
+  const parts: string[] = [];
+  if (added.length) parts.push(`added ${added.slice(0, 6).join(", ")}`);
+  if (removed.length) parts.push(`removed ${removed.slice(0, 6).join(", ")}`);
+  return parts.length ? `Updated: ${parts.join("; ")}.` : "Updated the diagram.";
+}
 
 // Preset nodes for fast hand-drawing — each drops a pre-labelled, pre-styled
 // shape via the same specToScene mapping the AI uses, so a hand-built system
@@ -33,7 +48,8 @@ const EXAMPLES = [
 ];
 
 type Props = {
-  onApply: (scene: CanvasScene) => void;
+  onApply: (scene: CanvasScene) => string[];
+  onReplace?: (oldIds: string[], scene: CanvasScene) => string[];
   getScene?: () => CanvasScene;
 };
 
@@ -69,35 +85,68 @@ function Markdown({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-export function CanvasAiPanel({ onApply, getScene }: Props) {
+export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   const [open, setOpen] = useState(false);
-  const [prompt, setPrompt] = useState("");
+  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [lastTitle, setLastTitle] = useState<string | null>(null);
+  const [thread, setThread] = useState<Turn[]>([]);
   const [analysis, setAnalysis] = useState<{ action: string; text: string } | null>(null);
   const [analyzing, setAnalyzing] = useState<"explain" | "critique" | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const threadRef = useRef<HTMLDivElement>(null);
+  // The last diagram the AI produced (spec + the element ids it put on the
+  // board) — the seed for the next refine. Refresh via refs so the async send
+  // always reads the latest without re-subscribing.
+  const lastSpecRef = useRef<DiagramSpec | null>(null);
+  const lastIdsRef = useRef<string[]>([]);
+  const [hasDiagram, setHasDiagram] = useState(false);
 
-  const generate = async (text: string) => {
+  useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [thread]);
+
+  const seed = (spec: DiagramSpec, ids: string[]) => {
+    lastSpecRef.current = spec; lastIdsRef.current = ids; setHasDiagram(true);
+  };
+  const resetConversation = () => {
+    lastSpecRef.current = null; lastIdsRef.current = []; setHasDiagram(false);
+    setThread([]); setErr(null);
+  };
+
+  // One turn: fresh generate when there's no diagram yet, else refine the last
+  // one in place (the AI edits the prior spec; we swap only its elements).
+  const send = async (text: string) => {
     const p = text.trim();
     if (!p || busy) return;
+    const prior = lastSpecRef.current;
     setBusy(true); setErr(null); setAnalysis(null);
+    setThread((t) => [...t, { role: "user", text: p }]);
+    setInput("");
     try {
       const res = await fetch("/api/canvas/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: p }),
+        body: JSON.stringify(prior ? { prompt: p, priorSpec: prior } : { prompt: p }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       const scene: CanvasScene | undefined = data?.data?.scene ?? data?.scene;
+      const spec: DiagramSpec | undefined = data?.data?.spec ?? data?.spec;
       if (!scene || !Array.isArray(scene.elements)) throw new Error("No diagram returned.");
-      onApply(scene);
-      setLastTitle(data?.data?.title ?? data?.title ?? "Diagram");
-      setPrompt("");
+      let summary: string;
+      if (prior && onReplace) {
+        const ids = onReplace(lastIdsRef.current, scene);
+        summary = spec ? diffSummary(prior, spec) : "Updated the diagram.";
+        if (spec) seed(spec, ids); else lastIdsRef.current = ids;
+      } else {
+        const ids = onApply(scene);
+        summary = `Designed “${data?.data?.title ?? data?.title ?? spec?.title ?? "diagram"}”.`;
+        if (spec) seed(spec, ids);
+      }
+      setThread((t) => [...t, { role: "assistant", text: summary }]);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Generation failed.");
+      const msg = e instanceof Error ? e.message : "Generation failed.";
+      setErr(msg);
+      setThread((t) => [...t, { role: "assistant", text: msg, error: true }]);
     } finally {
       setBusy(false);
     }
@@ -107,8 +156,9 @@ export function CanvasAiPanel({ onApply, getScene }: Props) {
     const t = CANVAS_TEMPLATES.find((x) => x.id === id);
     if (!t) return;
     setErr(null); setAnalysis(null);
-    onApply(specToScene(t.spec));
-    setLastTitle(t.spec.title ?? t.label);
+    const ids = onApply(specToScene(t.spec));
+    seed(t.spec, ids); // a template can be refined too
+    setThread([{ role: "assistant", text: `Added the ${t.label} template. Tell me how to change it.` }]);
   };
 
   const insertKit = (kind: NodeKind, label: string) => {
@@ -180,19 +230,38 @@ export function CanvasAiPanel({ onApply, getScene }: Props) {
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", borderBottom: `1px solid ${inkT.line}` }}>
         <Sparkles style={{ width: 15, height: 15, color: "#6965db" }} />
         <strong style={{ flex: 1, fontSize: 13.5, color: inkT.ink }}>Design with AI</strong>
+        {hasDiagram ? (
+          <button type="button" onClick={resetConversation} title="Start a new design" style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 24, padding: "0 8px", border: `1px solid ${inkT.line}`, background: inkT.surf1, borderRadius: 7, cursor: "pointer", color: inkT.ink2, fontSize: 11.5, fontWeight: 600 }}>
+            <RotateCcw style={{ width: 12, height: 12 }} /> New
+          </button>
+        ) : null}
         <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 26, height: 26, border: "none", background: "transparent", borderRadius: 7, cursor: "pointer", color: inkT.ink3 }}>
           <X style={{ width: 15, height: 15 }} />
         </button>
       </div>
 
       <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
+        {thread.length > 0 ? (
+          <div ref={threadRef} style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+            {thread.map((m, i) => (
+              <div key={i} style={{ alignSelf: m.role === "user" ? "flex-end" : "flex-start", maxWidth: "88%", fontSize: 12.5, lineHeight: 1.4, padding: "6px 10px", borderRadius: 10,
+                background: m.role === "user" ? "#0073EA" : m.error ? "rgba(225,29,72,.08)" : inkT.surf1,
+                color: m.role === "user" ? "#fff" : m.error ? "#E11D48" : inkT.ink2,
+                border: m.role === "user" ? "none" : `1px solid ${inkT.line}` }}>
+                {m.text}
+              </div>
+            ))}
+            {busy ? <div style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: inkT.ink3, padding: "4px 2px" }}><Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> {hasDiagram ? "Updating…" : "Designing…"}</div> : null}
+          </div>
+        ) : null}
+
         <textarea
           ref={taRef}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void generate(prompt); } }}
-          placeholder="Describe the system to design…"
-          rows={3}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey || !e.shiftKey) && e.key === "Enter") { e.preventDefault(); void send(input); } }}
+          placeholder={hasDiagram ? "Refine: add a cache, split the service, make the DB a cluster…" : "Describe the system to design…"}
+          rows={hasDiagram ? 2 : 3}
           disabled={busy}
           style={{
             width: "100%", resize: "none", fontSize: 13.5, lineHeight: 1.4, padding: "9px 10px",
@@ -202,34 +271,35 @@ export function CanvasAiPanel({ onApply, getScene }: Props) {
         />
         <button
           type="button"
-          onClick={() => void generate(prompt)}
-          disabled={busy || !prompt.trim()}
+          onClick={() => void send(input)}
+          disabled={busy || !input.trim()}
           style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
-            padding: "9px 12px", border: "none", borderRadius: 10, cursor: busy || !prompt.trim() ? "default" : "pointer",
-            background: busy || !prompt.trim() ? inkT.surf1 : "#0073EA",
-            color: busy || !prompt.trim() ? inkT.ink3 : "#fff", fontSize: 13.5, fontWeight: 600,
+            padding: "9px 12px", border: "none", borderRadius: 10, cursor: busy || !input.trim() ? "default" : "pointer",
+            background: busy || !input.trim() ? inkT.surf1 : "#0073EA",
+            color: busy || !input.trim() ? inkT.ink3 : "#fff", fontSize: 13.5, fontWeight: 600,
           }}
         >
           {busy ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Sparkles style={{ width: 14, height: 14 }} />}
-          {busy ? "Designing…" : "Generate"}
-          {!busy && prompt.trim() ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: 0.7, fontSize: 11 }}>⌘<CornerDownLeft style={{ width: 11, height: 11 }} /></span> : null}
+          {busy ? (hasDiagram ? "Updating…" : "Designing…") : (hasDiagram ? "Update" : "Generate")}
+          {!busy && input.trim() ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: 0.7, fontSize: 11 }}><CornerDownLeft style={{ width: 11, height: 11 }} /></span> : null}
         </button>
 
-        {err ? <p style={{ margin: 0, fontSize: 12.5, color: "#E11D48" }}>{err}</p> : null}
-        {lastTitle && !err && !analysis ? <p style={{ margin: 0, fontSize: 12.5, color: inkT.ink3 }}>Added “{lastTitle}” to the board.</p> : null}
+        {err && thread.length === 0 ? <p style={{ margin: 0, fontSize: 12.5, color: "#E11D48" }}>{err}</p> : null}
 
         {!busy ? (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>Try</span>
-              {EXAMPLES.map((ex) => (
-                <button key={ex} type="button" onClick={() => { setPrompt(ex); void generate(ex); }}
-                  style={{ textAlign: "left", fontSize: 12.5, color: inkT.ink2, background: inkT.surf1, border: "none", borderRadius: 8, padding: "7px 9px", cursor: "pointer" }}>
-                  {ex}
-                </button>
-              ))}
-            </div>
+            {!hasDiagram ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>Try</span>
+                {EXAMPLES.map((ex) => (
+                  <button key={ex} type="button" onClick={() => void send(ex)}
+                    style={{ textAlign: "left", fontSize: 12.5, color: inkT.ink2, background: inkT.surf1, border: "none", borderRadius: 8, padding: "7px 9px", cursor: "pointer" }}>
+                    {ex}
+                  </button>
+                ))}
+              </div>
+            ) : null}
 
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>

@@ -31,6 +31,7 @@ Rules:
 - Direct edges the way data/requests FLOW, and label them with the call, data, or relationship. Keep labels short.
 - Group related nodes with a "group" id and define each group in "groups" (e.g. "Backend", "Data", "Third-party"). Groups are optional but make big diagrams readable.
 - Aim for 5-15 nodes for a typical request — enough to be useful, not overwhelming. Prefer clarity over completeness.
+- REFINING: if the user message includes a CURRENT DIAGRAM (a JSON spec) followed by a change request, MODIFY that spec to satisfy the request and return the COMPLETE updated spec (not a diff). Keep the "id" of every node you keep EXACTLY the same so it stays in place; only add, remove, or edit what the request implies. Preserve unrelated nodes, edges, groups, and any "fields".
 - Return ONLY the JSON.`;
 
 // A tiny canned example when no shared key is configured, so the feature never
@@ -53,22 +54,30 @@ export async function POST(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const orgId = getOrgId(session);
-  const { prompt } = await req.json().catch(() => ({ prompt: "" }));
-  if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
+  const body = await req.json().catch(() => ({}));
+  const prompt = typeof body?.prompt === "string" ? body.prompt : "";
+  const priorSpec = body?.priorSpec && Array.isArray(body.priorSpec?.nodes) ? (body.priorSpec as DiagramSpec) : null;
+  if (!prompt.trim()) {
     return jsonError("Describe what you want to design.");
   }
 
   const ai = await getAnthropicForOrg(orgId);
   if (ai.source === "shared" && !process.env.ANTHROPIC_API_KEY) {
-    return jsonSuccess({ scene: specToScene(FALLBACK), title: FALLBACK.title, fallback: true });
+    const spec = priorSpec ?? FALLBACK;
+    return jsonSuccess({ scene: specToScene(spec), spec, title: spec.title ?? FALLBACK.title, fallback: true });
   }
+
+  // On a refine, hand the model the current spec + the change request.
+  const userContent = priorSpec
+    ? `CURRENT DIAGRAM:\n${JSON.stringify(priorSpec)}\n\nCHANGE REQUEST: ${prompt.trim()}`
+    : prompt.trim();
 
   try {
     const message = await ai.client.messages.create({
       model: modelFor(ai, "claude-sonnet-4-20250514"),
       max_tokens: 4000,
       system: SYSTEM,
-      messages: [{ role: "user", content: prompt.trim() }],
+      messages: [{ role: "user", content: userContent }],
     });
     const textBlock = message.content.find((b: { type: string }) => b.type === "text") as { text?: string } | undefined;
     const text = textBlock?.text ?? "";
@@ -78,7 +87,7 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(spec.nodes) || spec.nodes.length === 0) {
       return jsonError("The AI didn't return any components. Try a more specific description.");
     }
-    return jsonSuccess({ scene: specToScene(spec), title: spec.title ?? "Diagram" });
+    return jsonSuccess({ scene: specToScene(spec), spec, title: spec.title ?? "Diagram" });
   } catch (err: unknown) {
     const msg = (err as { error?: { error?: { message?: string } }; message?: string })?.error?.error?.message
       || (err as { message?: string })?.message || "AI generation failed.";

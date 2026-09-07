@@ -451,7 +451,8 @@ export default function WhiteboardCanvasPage() {
               onOpenEntity={(href) => router.push(href)}
             />
             <CanvasAiPanel
-              onApply={(scene) => canvasRef.current?.insertScene(scene)}
+              onApply={(scene) => canvasRef.current?.insertScene(scene) ?? []}
+              onReplace={(oldIds, scene) => canvasRef.current?.replaceGenerated(oldIds, scene) ?? []}
               getScene={() => canvasRef.current?.getScene() ?? emptyScene()}
             />
           </>

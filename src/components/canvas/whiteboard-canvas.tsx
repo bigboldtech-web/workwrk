@@ -184,7 +184,11 @@ export interface WhiteboardCanvasProps {
 
 /** Imperative handle — lets the page drop an AI-generated diagram onto the board. */
 export interface WhiteboardCanvasHandle {
-  insertScene: (generated: CanvasScene) => void;
+  /** Drop a generated diagram onto the board; returns the ids it inserted. */
+  insertScene: (generated: CanvasScene) => string[];
+  /** Refine: remove a prior generated set and drop the new diagram in its
+   *  place, leaving hand-drawn elements untouched. Returns the new ids. */
+  replaceGenerated: (oldIds: string[], generated: CanvasScene) => string[];
   /** The live scene — used by the AI panel to explain / critique the board. */
   getScene: () => CanvasScene;
 }
@@ -1574,19 +1578,37 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
     insertScene: (generated: CanvasScene) => {
       const snapshot = cloneScene(scene);
       let incoming = generated.elements;
+      // Place a fresh diagram to the right of whatever's already on the board.
       if (scene.elements.length > 0) {
         const b = boundsOfElements(scene.elements);
         const gb = boundsOfElements(incoming);
-        if (b && gb) {
-          const dx = (b.x + b.w + 140) - gb.x;
-          const dy = b.y - gb.y;
-          incoming = incoming.map((el) => shifted(el, dx, dy));
-        }
+        if (b && gb) incoming = incoming.map((el) => shifted(el, (b.x + b.w + 140) - gb.x, b.y - gb.y));
       }
       const next = { ...scene, elements: [...scene.elements, ...incoming] };
       commit(next, snapshot);
       setSelectedIds(new Set(incoming.map((el) => el.id)));
       requestAnimationFrame(() => fitView());
+      return incoming.map((el) => el.id);
+    },
+    replaceGenerated: (oldIds: string[], generated: CanvasScene) => {
+      const snapshot = cloneScene(scene);
+      const removeSet = new Set(oldIds);
+      const removed = scene.elements.filter((el) => removeSet.has(el.id));
+      const kept = scene.elements.filter((el) => !removeSet.has(el.id));
+      let incoming = generated.elements;
+      const gb = boundsOfElements(incoming);
+      // Anchor the refined diagram where the old one was; else fall back to
+      // placing it beside whatever's kept.
+      const anchor = boundsOfElements(removed) ?? (kept.length > 0 ? boundsOfElements(kept) : null);
+      if (gb && anchor) {
+        const dx = anchor.x - gb.x, dy = anchor.y - gb.y;
+        incoming = incoming.map((el) => shifted(el, dx, dy));
+      }
+      const next = { ...scene, elements: [...kept, ...incoming] };
+      commit(next, snapshot);
+      setSelectedIds(new Set(incoming.map((el) => el.id)));
+      requestAnimationFrame(() => fitView());
+      return incoming.map((el) => el.id);
     },
     getScene: () => scene,
   }), [scene, commit, fitView]);
