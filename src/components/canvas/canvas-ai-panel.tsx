@@ -10,17 +10,22 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check, ClipboardPaste } from "lucide-react";
 import type { CanvasScene } from "@/lib/canvas/scene";
 import { specToScene, type NodeKind, type DiagramSpec } from "@/lib/canvas/from-spec";
+import type { SequenceSpec } from "@/lib/canvas/sequence";
 import { CANVAS_TEMPLATES } from "@/lib/canvas/templates";
 import { schemaFromScene, type SchemaExport } from "@/lib/canvas/schema-export";
 import { parseSchema } from "@/lib/canvas/schema-import";
 
+// The AI (and templates) can produce any of the diagram shapes; the panel
+// keeps whichever one it last got, to seed the next refine.
+type PanelSpec = DiagramSpec | SequenceSpec;
 type Turn = { role: "user" | "assistant"; text: string; error?: boolean };
 
 // A one-line, human summary of what a refine changed (added / removed nodes),
 // computed client-side by diffing the prior and new spec node sets.
-function diffSummary(prev: DiagramSpec, next: DiagramSpec): string {
-  const p = new Map((prev.nodes ?? []).map((n) => [n.id, n.label]));
-  const q = new Map((next.nodes ?? []).map((n) => [n.id, n.label]));
+function diffSummary(prev: PanelSpec, next: PanelSpec): string {
+  const nodesOf = (s: PanelSpec) => ("nodes" in s ? s.nodes ?? [] : []);
+  const p = new Map(nodesOf(prev).map((n) => [n.id, n.label]));
+  const q = new Map(nodesOf(next).map((n) => [n.id, n.label]));
   const added = [...q].filter(([id]) => !p.has(id)).map(([, l]) => l);
   const removed = [...p].filter(([id]) => !q.has(id)).map(([, l]) => l);
   const parts: string[] = [];
@@ -45,8 +50,9 @@ const SYSTEM_KIT: { kind: NodeKind; label: string; Icon: typeof Server }[] = [
 
 const EXAMPLES = [
   "Design a URL shortener with a cache and rate limiter",
-  "Auth flow: client, API gateway, auth service, user DB, Redis sessions",
-  "Design the database schema for a booking app",
+  "Flowchart for an order refund approval process",
+  "Sequence diagram for OAuth login: client, app, auth server",
+  "Database schema for a booking app",
 ];
 
 type Props = {
@@ -106,13 +112,13 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   // The last diagram the AI produced (spec + the element ids it put on the
   // board) — the seed for the next refine. Refresh via refs so the async send
   // always reads the latest without re-subscribing.
-  const lastSpecRef = useRef<DiagramSpec | null>(null);
+  const lastSpecRef = useRef<PanelSpec | null>(null);
   const lastIdsRef = useRef<string[]>([]);
   const [hasDiagram, setHasDiagram] = useState(false);
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [thread]);
 
-  const seed = (spec: DiagramSpec, ids: string[]) => {
+  const seed = (spec: PanelSpec, ids: string[]) => {
     lastSpecRef.current = spec; lastIdsRef.current = ids; setHasDiagram(true);
   };
   const resetConversation = () => {
@@ -138,7 +144,7 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       const scene: CanvasScene | undefined = data?.data?.scene ?? data?.scene;
-      const spec: DiagramSpec | undefined = data?.data?.spec ?? data?.spec;
+      const spec: PanelSpec | undefined = data?.data?.spec ?? data?.spec;
       if (!scene || !Array.isArray(scene.elements)) throw new Error("No diagram returned.");
       let summary: string;
       if (prior && onReplace) {
@@ -163,8 +169,8 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   const applyTemplate = (id: string) => {
     const t = CANVAS_TEMPLATES.find((x) => x.id === id);
     if (!t) return;
-    setErr(null); setAnalysis(null);
-    const ids = onApply(specToScene(t.spec));
+    setErr(null); setAnalysis(null); setSchema(null);
+    const ids = onApply(t.build());
     seed(t.spec, ids); // a template can be refined too
     setThread([{ role: "assistant", text: `Added the ${t.label} template. Tell me how to change it.` }]);
   };

@@ -22,7 +22,9 @@ import {
 
 export type NodeKind =
   | "service" | "component" | "database" | "cache" | "queue"
-  | "external" | "cloud" | "actor" | "user" | "gateway" | "decision" | "note";
+  | "external" | "cloud" | "actor" | "user" | "gateway" | "decision" | "note"
+  // flowchart kinds
+  | "start" | "end" | "process" | "io";
 
 export interface NodeSpec {
   id: string; label: string; kind?: NodeKind; group?: string;
@@ -40,8 +42,10 @@ export interface DiagramSpec {
 
 const NODE_W = 190;
 const NODE_H = 76;
-const COL_GAP = 120;   // horizontal gap between layers
-const ROW_GAP = 40;    // vertical gap between nodes in a layer
+const COL_GAP = 120;   // LR: horizontal gap between layers
+const ROW_GAP = 40;    // LR: vertical gap between nodes in a layer
+const TB_COL_GAP = 64; // TB: horizontal gap between sibling nodes
+const TB_ROW_GAP = 68; // TB: vertical gap between layers (room for arrows/labels)
 const MARGIN = 80;     // top/left margin + room for group frames
 
 // kind → shape type + a soft fill so the diagram reads at a glance.
@@ -57,6 +61,11 @@ function styleFor(kind: NodeKind | undefined): { type: ShapeType; fill: string }
     case "gateway":
     case "decision": return { type: "diamond", fill: "#FEF3C7" };
     case "note": return { type: "rect", fill: "#FEF9C3" };
+    // flowchart shapes
+    case "start":
+    case "end": return { type: "roundRect", fill: "#DCFCE7" };   // terminator pill
+    case "process": return { type: "rect", fill: "#FFFFFF" };
+    case "io": return { type: "parallelogram", fill: "#E0F2FE" };
     default: return { type: "roundRect", fill: "#FFFFFF" };
   }
 }
@@ -92,53 +101,68 @@ function layerNodes(nodes: NodeSpec[], edges: EdgeSpec[]): Map<string, number> {
   return layer;
 }
 
-/** Build a laid-out Canvas scene from a semantic spec. */
-export function specToScene(spec: DiagramSpec): CanvasScene {
+/** Build a laid-out Canvas scene from a semantic spec. `direction` "LR" (default)
+ *  flows left-to-right (architecture); "TB" flows top-to-bottom (flowcharts). */
+export function specToScene(spec: DiagramSpec, opts?: { direction?: "LR" | "TB" }): CanvasScene {
   const scene = emptyScene();
   const nodes = spec.nodes ?? [];
   const edges = (spec.edges ?? []).filter((e) => e && e.from && e.to);
   if (nodes.length === 0) return scene;
+  const dir = opts?.direction === "TB" ? "TB" : "LR";
 
   const layer = layerNodes(nodes, edges);
   const maxLayer = Math.max(0, ...[...layer.values()]);
 
-  // Column-major placement: nodes grouped by layer, stacked vertically. Each
-  // column is vertically centred so the diagram looks balanced.
+  // Nodes grouped by layer; each layer laid out along the cross axis and
+  // centred so the diagram stays balanced.
   const byLayer: NodeSpec[][] = Array.from({ length: maxLayer + 1 }, () => []);
   for (const n of nodes) byLayer[layer.get(n.id) ?? 0].push(n);
 
   // A node is an ER TABLE when it declares fields.
   const isTable = (n: NodeSpec) => Array.isArray(n.fields) && n.fields.length > 0;
   const hOf = (n: NodeSpec) => (isTable(n) ? tableHeight(n.fields!.length) : NODE_H);
-  const colTotalH = byLayer.map((col) => col.reduce((s, n) => s + hOf(n), 0) + Math.max(0, col.length - 1) * ROW_GAP);
-  const colHeight = Math.max(1, ...colTotalH);
 
   const idMap = new Map<string, string>(); // spec id → element id
   const boxOf = new Map<string, { x: number; y: number; w: number; h: number }>();
   const elements: CanvasElement[] = [];
 
-  byLayer.forEach((col, li) => {
-    const x = MARGIN + li * (NODE_W + COL_GAP);
-    let cy = MARGIN + (colHeight - colTotalH[li]) / 2;
-    for (const n of col) {
-      const h = hOf(n);
-      const id = genId();
-      idMap.set(n.id, id);
-      boxOf.set(n.id, { x, y: cy, w: NODE_W, h });
-      if (isTable(n)) {
-        const table: TableElement = {
-          id, type: "table", x, y: cy, w: NODE_W, h,
-          stroke: "#334155", fill: "#FFFFFF", strokeWidth: 1.5, opacity: 1,
-          name: n.label, fields: (n.fields ?? []).map((f) => ({ name: f.name, type: f.type, key: f.key })),
-        };
-        elements.push(table);
-      } else {
-        const { type, fill } = styleFor(n.kind);
-        elements.push({ id, type, x, y: cy, w: NODE_W, h, stroke: "#1E293B", fill, strokeWidth: 2, opacity: 1, text: n.label, fontSize: 15, align: "center" } as ShapeElement);
-      }
-      cy += h + ROW_GAP;
+  const placeNode = (n: NodeSpec, x: number, y: number, h: number) => {
+    const id = genId();
+    idMap.set(n.id, id);
+    boxOf.set(n.id, { x, y, w: NODE_W, h });
+    if (isTable(n)) {
+      elements.push({
+        id, type: "table", x, y, w: NODE_W, h,
+        stroke: "#334155", fill: "#FFFFFF", strokeWidth: 1.5, opacity: 1,
+        name: n.label, fields: (n.fields ?? []).map((f) => ({ name: f.name, type: f.type, key: f.key })),
+      } as TableElement);
+    } else {
+      const { type, fill } = styleFor(n.kind);
+      elements.push({ id, type, x, y, w: NODE_W, h, stroke: "#1E293B", fill, strokeWidth: 2, opacity: 1, text: n.label, fontSize: 15, align: "center" } as ShapeElement);
     }
-  });
+  };
+
+  if (dir === "TB") {
+    // Layers stack top-to-bottom; nodes within a layer spread horizontally.
+    const rowTotalW = byLayer.map((row) => row.length * NODE_W + Math.max(0, row.length - 1) * TB_COL_GAP);
+    const rowW = Math.max(1, ...rowTotalW);
+    let y = MARGIN;
+    byLayer.forEach((row, li) => {
+      let cx = MARGIN + (rowW - rowTotalW[li]) / 2;
+      const rowH = Math.max(NODE_H, ...row.map(hOf));
+      for (const n of row) { placeNode(n, cx, y, hOf(n)); cx += NODE_W + TB_COL_GAP; }
+      y += rowH + TB_ROW_GAP;
+    });
+  } else {
+    // Layers march left-to-right; nodes within a layer stack vertically.
+    const colTotalH = byLayer.map((col) => col.reduce((s, n) => s + hOf(n), 0) + Math.max(0, col.length - 1) * ROW_GAP);
+    const colHeight = Math.max(1, ...colTotalH);
+    byLayer.forEach((col, li) => {
+      const x = MARGIN + li * (NODE_W + COL_GAP);
+      let cy = MARGIN + (colHeight - colTotalH[li]) / 2;
+      for (const n of col) { placeNode(n, x, cy, hOf(n)); cy += hOf(n) + ROW_GAP; }
+    });
+  }
 
   // Groups → frames, inserted at the FRONT (bottom z-order) so nodes sit on top.
   const frames: FrameElement[] = [];

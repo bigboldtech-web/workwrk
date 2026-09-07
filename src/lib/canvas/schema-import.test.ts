@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { parseSchema } from "./schema-import";
 import { schemaFromScene } from "./schema-export";
-import { specToScene } from "./from-spec";
 import { CANVAS_TEMPLATES } from "./templates";
 
-const erSpec = CANVAS_TEMPLATES.find((t) => t.id === "er-schema")!.spec;
+const erScene = () => CANVAS_TEMPLATES.find((t) => t.id === "er-schema")!.build();
 
 describe("parseSchema — SQL DDL", () => {
   it("parses tables, types, PK and FK", () => {
@@ -71,7 +70,7 @@ describe("parseSchema — Prisma", () => {
 
 describe("round-trip", () => {
   it("export → import reproduces the tables and relationships (SQL)", () => {
-    const scene = specToScene(erSpec);
+    const scene = erScene();
     const { sql } = schemaFromScene(scene);
     const spec = parseSchema(sql)!;
     expect(spec.nodes.map((n) => n.id).sort()).toEqual(["order_items", "orders", "products", "users"]);
@@ -82,7 +81,7 @@ describe("round-trip", () => {
   });
 
   it("export → import reproduces the tables and relationships (Prisma)", () => {
-    const scene = specToScene(erSpec);
+    const scene = erScene();
     const { prisma } = schemaFromScene(scene);
     const spec = parseSchema(prisma)!;
     expect(spec.nodes.length).toBe(4);

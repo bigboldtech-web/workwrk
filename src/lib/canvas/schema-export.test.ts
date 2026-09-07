@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { schemaFromScene } from "./schema-export";
-import { specToScene } from "./from-spec";
 import { CANVAS_TEMPLATES } from "./templates";
 import { emptyScene } from "./scene";
 
 describe("schemaFromScene", () => {
-  const erSpec = CANVAS_TEMPLATES.find((t) => t.id === "er-schema")!.spec;
+  const erScene = () => CANVAS_TEMPLATES.find((t) => t.id === "er-schema")!.build();
 
   it("emits CREATE TABLE with a primary key for each table", () => {
-    const { sql, tableCount } = schemaFromScene(specToScene(erSpec));
+    const { sql, tableCount } = schemaFromScene(erScene());
     expect(tableCount).toBe(4);
     expect(sql).toContain('CREATE TABLE "users"');
     expect(sql).toContain('CREATE TABLE "orders"');
@@ -19,7 +18,7 @@ describe("schemaFromScene", () => {
   });
 
   it("infers foreign keys from fk fields + the drawn relationships", () => {
-    const { sql } = schemaFromScene(specToScene(erSpec));
+    const { sql } = schemaFromScene(erScene());
     // orders.user_id → users.id
     expect(sql).toMatch(/FOREIGN KEY \("user_id"\) REFERENCES "users" \("id"\)/);
     // order_items.order_id → orders.id and product_id → products.id
@@ -28,7 +27,7 @@ describe("schemaFromScene", () => {
   });
 
   it("emits a Prisma schema with models, @id, and both relation sides", () => {
-    const { prisma } = schemaFromScene(specToScene(erSpec));
+    const { prisma } = schemaFromScene(erScene());
     expect(prisma).toContain("model User {");
     expect(prisma).toContain("model OrderItem {");
     expect(prisma).toMatch(/id String @id @db\.Uuid/);

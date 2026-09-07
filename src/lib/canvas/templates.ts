@@ -5,13 +5,18 @@
 // Pure + dependency-free (imports only the spec type), so it's safe to call
 // from the client and trivially unit-testable.
 
-import type { DiagramSpec } from "./from-spec";
+import { specToScene, type DiagramSpec } from "./from-spec";
+import { sequenceToScene, type SequenceSpec } from "./sequence";
+import type { CanvasScene } from "./scene";
 
 export interface CanvasTemplate {
   id: string;
   label: string;
   blurb: string;
-  spec: DiagramSpec;
+  /** The semantic spec (seeds the chat so a template can be refined). */
+  spec: DiagramSpec | SequenceSpec;
+  /** Lay the spec out into a scene (architecture LR, flowchart TB, sequence). */
+  build: () => CanvasScene;
 }
 
 // 1) Microservices — a gateway fronting independent services, each owning its
@@ -156,9 +161,50 @@ const ER_SCHEMA: DiagramSpec = {
   ],
 };
 
+// 5) Flowchart — a signup approval flow laid out top-to-bottom.
+const FLOWCHART: DiagramSpec = {
+  title: "Signup Flow",
+  nodes: [
+    { id: "start", label: "Sign up", kind: "start" },
+    { id: "validate", label: "Valid email?", kind: "decision" },
+    { id: "create", label: "Create account", kind: "process" },
+    { id: "verify", label: "Send verification", kind: "process" },
+    { id: "confirmed", label: "Confirmed?", kind: "decision" },
+    { id: "active", label: "Activate", kind: "process" },
+    { id: "reject", label: "Show error", kind: "end" },
+    { id: "done", label: "Done", kind: "end" },
+  ],
+  edges: [
+    { from: "start", to: "validate" },
+    { from: "validate", to: "create", label: "yes" },
+    { from: "validate", to: "reject", label: "no" },
+    { from: "create", to: "verify" },
+    { from: "verify", to: "confirmed" },
+    { from: "confirmed", to: "active", label: "yes" },
+    { from: "confirmed", to: "reject", label: "no" },
+    { from: "active", to: "done" },
+  ],
+};
+
+// 6) Sequence — an OAuth-style login interaction over time.
+const SEQUENCE: SequenceSpec = {
+  title: "Login Sequence",
+  participants: ["Client", "API", "Auth", "DB"],
+  messages: [
+    { from: "Client", to: "API", label: "POST /login" },
+    { from: "API", to: "Auth", label: "verify(credentials)" },
+    { from: "Auth", to: "DB", label: "find user" },
+    { from: "DB", to: "Auth", label: "user row", dashed: true },
+    { from: "Auth", to: "API", label: "token", dashed: true },
+    { from: "API", to: "Client", label: "200 + JWT", dashed: true },
+  ],
+};
+
 export const CANVAS_TEMPLATES: CanvasTemplate[] = [
-  { id: "microservices", label: "Microservices", blurb: "Gateway, services, per-service DBs, a queue and cache", spec: MICROSERVICES },
-  { id: "three-tier", label: "3-tier web app", blurb: "CDN, load balancer, app tier, primary + read replica", spec: THREE_TIER },
-  { id: "event-driven", label: "Event-driven", blurb: "Producers, an event bus and fan-out consumers", spec: EVENT_DRIVEN },
-  { id: "er-schema", label: "ER schema", blurb: "E-commerce tables with keys and cardinality", spec: ER_SCHEMA },
+  { id: "microservices", label: "Microservices", blurb: "Gateway, services, per-service DBs, a queue and cache", spec: MICROSERVICES, build: () => specToScene(MICROSERVICES) },
+  { id: "three-tier", label: "3-tier web app", blurb: "CDN, load balancer, app tier, primary + read replica", spec: THREE_TIER, build: () => specToScene(THREE_TIER) },
+  { id: "event-driven", label: "Event-driven", blurb: "Producers, an event bus and fan-out consumers", spec: EVENT_DRIVEN, build: () => specToScene(EVENT_DRIVEN) },
+  { id: "er-schema", label: "ER schema", blurb: "E-commerce tables with keys and cardinality", spec: ER_SCHEMA, build: () => specToScene(ER_SCHEMA) },
+  { id: "flowchart", label: "Flowchart", blurb: "A top-to-bottom process with decision branches", spec: FLOWCHART, build: () => specToScene(FLOWCHART, { direction: "TB" }) },
+  { id: "sequence", label: "Sequence", blurb: "Participants + time-ordered messages", spec: SEQUENCE, build: () => sequenceToScene(SEQUENCE) },
 ];

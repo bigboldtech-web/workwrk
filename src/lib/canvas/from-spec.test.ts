@@ -73,6 +73,33 @@ describe("specToScene", () => {
     expect(rel.endHead).toBe("bar");
   });
 
+  it("lays a flowchart out top-to-bottom with flow shapes", () => {
+    const scene = specToScene({
+      nodes: [
+        { id: "s", label: "Start", kind: "start" },
+        { id: "check", label: "Valid?", kind: "decision" },
+        { id: "save", label: "Save", kind: "process" },
+        { id: "err", label: "Error", kind: "end" },
+      ],
+      edges: [
+        { from: "s", to: "check" },
+        { from: "check", to: "save", label: "yes" },
+        { from: "check", to: "err", label: "no" },
+      ],
+    }, { direction: "TB" });
+    const byText = (t: string) => scene.elements.find((e) => (e as { text?: string }).text === t)!;
+    // top-to-bottom: start above the decision, which is above save/error
+    expect(byText("Start").y).toBeLessThan(byText("Valid?").y);
+    expect(byText("Valid?").y).toBeLessThan(byText("Save").y);
+    // flow shapes
+    expect(byText("Valid?").type).toBe("diamond");
+    expect(byText("Start").type).toBe("roundRect");
+    expect(byText("Save").type).toBe("rect");
+    // branch labels survive on the connectors
+    const arrows = scene.elements.filter((e) => e.type === "arrow");
+    expect(arrows.map((a) => (a as { text?: string }).text).filter(Boolean).sort()).toEqual(["no", "yes"]);
+  });
+
   it("returns an empty scene for no nodes", () => {
     expect(specToScene({ nodes: [] }).elements).toHaveLength(0);
   });
