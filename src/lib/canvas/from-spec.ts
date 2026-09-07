@@ -10,17 +10,24 @@ import {
   type ShapeType,
   type PathElement,
   type FrameElement,
+  type TableElement,
+  type TableField,
   emptyScene,
   genId,
   reflowConnectors,
   syncPathBounds,
+  tableHeight,
 } from "./scene";
 
 export type NodeKind =
   | "service" | "component" | "database" | "cache" | "queue"
   | "external" | "cloud" | "actor" | "user" | "gateway" | "decision" | "note";
 
-export interface NodeSpec { id: string; label: string; kind?: NodeKind; group?: string }
+export interface NodeSpec {
+  id: string; label: string; kind?: NodeKind; group?: string;
+  /** For database/ER nodes — makes this an entity TABLE instead of a shape. */
+  fields?: TableField[];
+}
 export interface EdgeSpec { from: string; to: string; label?: string }
 export interface GroupSpec { id: string; label?: string }
 export interface DiagramSpec {
@@ -84,8 +91,12 @@ export function specToScene(spec: DiagramSpec): CanvasScene {
   // column is vertically centred so the diagram looks balanced.
   const byLayer: NodeSpec[][] = Array.from({ length: maxLayer + 1 }, () => []);
   for (const n of nodes) byLayer[layer.get(n.id) ?? 0].push(n);
-  const tallest = Math.max(1, ...byLayer.map((col) => col.length));
-  const colHeight = tallest * NODE_H + (tallest - 1) * ROW_GAP;
+
+  // A node is an ER TABLE when it declares fields.
+  const isTable = (n: NodeSpec) => Array.isArray(n.fields) && n.fields.length > 0;
+  const hOf = (n: NodeSpec) => (isTable(n) ? tableHeight(n.fields!.length) : NODE_H);
+  const colTotalH = byLayer.map((col) => col.reduce((s, n) => s + hOf(n), 0) + Math.max(0, col.length - 1) * ROW_GAP);
+  const colHeight = Math.max(1, ...colTotalH);
 
   const idMap = new Map<string, string>(); // spec id → element id
   const boxOf = new Map<string, { x: number; y: number; w: number; h: number }>();
@@ -93,21 +104,25 @@ export function specToScene(spec: DiagramSpec): CanvasScene {
 
   byLayer.forEach((col, li) => {
     const x = MARGIN + li * (NODE_W + COL_GAP);
-    const used = col.length * NODE_H + (col.length - 1) * ROW_GAP;
-    const startY = MARGIN + (colHeight - used) / 2;
-    col.forEach((n, ri) => {
-      const y = startY + ri * (NODE_H + ROW_GAP);
-      const { type, fill } = styleFor(n.kind);
+    let cy = MARGIN + (colHeight - colTotalH[li]) / 2;
+    for (const n of col) {
+      const h = hOf(n);
       const id = genId();
       idMap.set(n.id, id);
-      boxOf.set(n.id, { x, y, w: NODE_W, h: NODE_H });
-      const el: ShapeElement = {
-        id, type, x, y, w: NODE_W, h: NODE_H,
-        stroke: "#1E293B", fill, strokeWidth: 2, opacity: 1,
-        text: n.label, fontSize: 15, align: "center",
-      };
-      elements.push(el);
-    });
+      boxOf.set(n.id, { x, y: cy, w: NODE_W, h });
+      if (isTable(n)) {
+        const table: TableElement = {
+          id, type: "table", x, y: cy, w: NODE_W, h,
+          stroke: "#334155", fill: "#FFFFFF", strokeWidth: 1.5, opacity: 1,
+          name: n.label, fields: (n.fields ?? []).map((f) => ({ name: f.name, type: f.type, key: f.key })),
+        };
+        elements.push(table);
+      } else {
+        const { type, fill } = styleFor(n.kind);
+        elements.push({ id, type, x, y: cy, w: NODE_W, h, stroke: "#1E293B", fill, strokeWidth: 2, opacity: 1, text: n.label, fontSize: 15, align: "center" } as ShapeElement);
+      }
+      cy += h + ROW_GAP;
+    }
   });
 
   // Groups → frames, inserted at the FRONT (bottom z-order) so nodes sit on top.

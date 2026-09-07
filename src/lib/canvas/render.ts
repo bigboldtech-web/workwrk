@@ -9,12 +9,15 @@ import {
   type CanvasScene,
   type PathElement,
   type ShapeElement,
+  type TableElement,
   type ArrowType,
   type HeadType,
   dashPattern,
   elbowPoints,
   pathMidpoint,
   sceneBounds,
+  TABLE_HEADER_H,
+  TABLE_ROW_H,
 } from "./scene";
 
 export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, getImage: (src: string) => HTMLImageElement | null, hideText = false) {
@@ -94,6 +97,12 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     ctx.textBaseline = "bottom";
     ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
     ctx.fillText(el.title || "Frame", el.x + 2, el.y - 6);
+    ctx.restore();
+    return;
+  }
+
+  if (el.type === "table") {
+    drawTable(ctx, el, hideText);
     ctx.restore();
     return;
   }
@@ -201,6 +210,69 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, ge
     drawShapeLabel(ctx, el as ShapeElement);
   }
   ctx.restore();
+}
+
+/** Draw a database/ER table: a titled header over typed field rows, with PK/FK
+ *  markers. Sized by the element box (h = header + rows). */
+function drawTable(ctx: CanvasRenderingContext2D, el: TableElement, hideText: boolean): void {
+  const { x, y, w, h } = el;
+  // body + border
+  ctx.fillStyle = "#FFFFFF";
+  roundRect(ctx, x, y, w, h, 8);
+  ctx.fill();
+  ctx.strokeStyle = "#334155";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  // header
+  ctx.save();
+  roundRect(ctx, x, y, w, h, 8);
+  ctx.clip();
+  ctx.fillStyle = "#334155";
+  ctx.fillRect(x, y, w, TABLE_HEADER_H);
+  ctx.restore();
+  if (!hideText) {
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "600 13.5px ui-sans-serif, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(el.name || "Table", x + 12, y + TABLE_HEADER_H / 2 + 1);
+  }
+  // rows
+  const fields = el.fields ?? [];
+  for (let i = 0; i < fields.length; i++) {
+    const ry = y + TABLE_HEADER_H + i * TABLE_ROW_H;
+    if (i > 0) {
+      ctx.strokeStyle = "#E2E8F0"; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x, ry); ctx.lineTo(x + w, ry); ctx.stroke();
+    }
+    if (hideText) continue;
+    const f = fields[i];
+    ctx.textBaseline = "middle";
+    // key badge
+    let nameX = x + 12;
+    if (f.key) {
+      const label = f.key === "pk" ? "PK" : "FK";
+      ctx.font = "700 9px ui-sans-serif, system-ui, sans-serif";
+      const bw = ctx.measureText(label).width + 8;
+      ctx.fillStyle = f.key === "pk" ? "#F59E0B" : "#0073EA";
+      roundRect(ctx, x + 10, ry + TABLE_ROW_H / 2 - 7, bw, 14, 4);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.fillText(label, x + 14, ry + TABLE_ROW_H / 2 + 1);
+      nameX = x + 10 + bw + 6;
+    }
+    ctx.font = `${f.key === "pk" ? "600 " : ""}12.5px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillStyle = "#1E293B";
+    ctx.textAlign = "left";
+    ctx.fillText(f.name, nameX, ry + TABLE_ROW_H / 2 + 1);
+    if (f.type) {
+      ctx.font = "12px ui-sans-serif, system-ui, sans-serif";
+      ctx.fillStyle = "#94A3B8";
+      ctx.textAlign = "right";
+      ctx.fillText(f.type, x + w - 12, ry + TABLE_ROW_H / 2 + 1);
+      ctx.textAlign = "left";
+    }
+  }
 }
 
 /** A centred label on a connector, sitting on a white pill at the line's

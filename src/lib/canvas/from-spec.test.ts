@@ -46,6 +46,29 @@ describe("specToScene", () => {
     expect((frame as { title?: string }).title).toBe("Services");
   });
 
+  it("emits an ER table for a node with fields", () => {
+    const scene = specToScene({
+      nodes: [
+        { id: "users", label: "users", kind: "database", fields: [
+          { name: "id", type: "uuid", key: "pk" },
+          { name: "email", type: "text" },
+          { name: "org_id", type: "uuid", key: "fk" },
+        ] },
+        { id: "orgs", label: "orgs", fields: [{ name: "id", type: "uuid", key: "pk" }] },
+      ],
+      edges: [{ from: "users", to: "orgs", label: "N:1" }],
+    });
+    const tables = scene.elements.filter((e) => e.type === "table");
+    expect(tables).toHaveLength(2);
+    const users = tables.find((t) => (t as { name?: string }).name === "users") as { fields: unknown[]; h: number };
+    expect(users.fields).toHaveLength(3);
+    expect(users.h).toBeGreaterThan(30 + 3 * 20); // header + 3 rows
+    // the relationship connects both tables
+    const arrows = scene.elements.filter((e) => e.type === "arrow");
+    expect(arrows).toHaveLength(1);
+    expect((arrows[0] as { fromId?: string; toId?: string }).fromId).toBeTruthy();
+  });
+
   it("returns an empty scene for no nodes", () => {
     expect(specToScene({ nodes: [] }).elements).toHaveLength(0);
   });

@@ -13,7 +13,7 @@ import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, u
 import {
   MousePointer2, Hand, Square, Circle, Diamond, Minus, ArrowRight,
   Pencil, Type as TypeIcon, StickyNote, ImagePlus, ListTodo, Search, Trash2, Undo2, Redo2, Plus, Minus as MinusIcon,
-  Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon,
+  Shapes, Triangle, Cloud, Database, RectangleHorizontal, Frame as FrameIcon, Table as TableIcon,
   MoveRight, CornerDownRight, Spline, AlignLeft, AlignCenter, AlignRight, Zap,
   ChevronsUp, ChevronsDown, Copy as CopyIcon, Group as GroupIcon, Ungroup as UngroupIcon,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
@@ -57,12 +57,14 @@ const SHAPE_FLYOUT: { tool: Tool; Icon: typeof Square; label: string }[] = [
   { tool: "parallelogram", Icon: RectangleHorizontal, label: "Parallelogram" },
   { tool: "cylinder", Icon: Database, label: "Cylinder / database" },
   { tool: "cloud", Icon: Cloud, label: "Cloud" },
+  { tool: "table", Icon: TableIcon, label: "Database table (ER)" },
 ];
 import {
   cloneScene, genId, hitTest, hitTopElement, normalizeBox, sceneBounds, syncPathBounds,
   elementInBox, reflowConnectors, frameChildren, isCanvasScene, emptyScene, elementEdgePoint, pathMidpoint, withGroupMembers, boundsOfElements,
   STROKE_COLORS, FILL_COLORS, STICKY_COLORS, DEFAULT_STROKE, DEFAULT_STROKE_WIDTH, DEFAULT_FONT_SIZE,
-  type ArrowType, type DashStyle, type TextAlign, type HeadType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement,
+  tableHeight,
+  type ArrowType, type DashStyle, type TextAlign, type HeadType, type CanvasElement, type CanvasScene, type FrameElement, type ImageElement, type PathElement, type ShapeElement, type TableElement, type TableField,
 } from "@/lib/canvas/scene";
 import { drawElement, drawCanvasCard, strokeConnectorPath, wrapLines } from "@/lib/canvas/render";
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
@@ -111,7 +113,7 @@ async function loadScaledImage(file: File, maxDim: number): Promise<{ src: strin
 type Tool =
   | "select" | "hand"
   | "rect" | "ellipse" | "diamond" | "roundRect" | "triangle" | "parallelogram" | "cylinder" | "cloud"
-  | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame" | "laser";
+  | "line" | "arrow" | "freedraw" | "text" | "sticky" | "frame" | "laser" | "table";
 
 const SHAPE_TOOLS = new Set<Tool>(["rect", "ellipse", "diamond", "roundRect", "triangle", "parallelogram", "cylinder", "cloud"]);
 
@@ -694,6 +696,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       setScene((s) => ({ ...s, elements: [el, ...s.elements] }));
       selectOne(id);
       dragRef.current = { kind: "draw", id, startX: world.x, startY: world.y };
+    } else if (tool === "table") {
+      const fields: TableField[] = [{ name: "id", type: "uuid", key: "pk" }, { name: "name", type: "text" }, { name: "created_at", type: "timestamp" }];
+      const el: TableElement = { id, type: "table", x: world.x, y: world.y, w: 200, h: tableHeight(fields.length), stroke: "#334155", fill: "#FFFFFF", strokeWidth: 1.5, opacity: 1, name: "Table", fields };
+      undoRef.current.push(snapshot);
+      setScene((s) => ({ ...s, elements: [...s.elements, el] }));
+      selectOne(id);
+      setEditing({ id }); // open the field editor immediately
+      setTool("select");
     }
   }, [editing, tool, scene, selectedIds, vp, stroke, fillColor, strokeW, arrowType, dash, fontSize, align, toWorld, selectOne, patchElement, finishMultiArrow]);
 
@@ -1435,7 +1445,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       // Enter edits the selected shape/text/sticky's label (Excalidraw).
       if (e.key === "Enter" && selectedIds.size === 1) {
         const one = scene.elements.find((el) => selectedIds.has(el.id));
-        if (one && (one.type === "text" || one.type === "sticky" || one.type === "frame" || one.type === "line" || one.type === "arrow" || SHAPE_LABEL_TYPES.has(one.type))) {
+        if (one && (one.type === "text" || one.type === "sticky" || one.type === "frame" || one.type === "line" || one.type === "arrow" || one.type === "table" || SHAPE_LABEL_TYPES.has(one.type))) {
           e.preventDefault(); setEditing({ id: one.id }); return;
         }
       }
@@ -1500,6 +1510,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         if (x.id !== id) return x;
         if (x.type === "text" || x.type === "sticky") return { ...x, text: value };
         if (x.type === "line" || x.type === "arrow") return { ...x, text: value }; // connector label
+        if (x.type === "table") { const { name, fields } = parseTableText(value); return { ...x, name, fields, h: tableHeight(fields.length) }; }
         if (x.type === "frame") return { ...x, title: value.trim() || "Frame" };
         if (SHAPE_LABEL_TYPES.has(x.type)) {
           // Grow the shape (keeping its centre) so the label always fits inside.
@@ -1589,7 +1600,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
-          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || hit.type === "line" || hit.type === "arrow" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
+          if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || hit.type === "line" || hit.type === "arrow" || hit.type === "table" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
           else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
           else if (!hit) {
@@ -1727,6 +1738,28 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
           />
         );
       })() : null}
+
+      {/* table editing — line 1 = name, then "field: type" (trailing * = PK, ^ = FK) */}
+      {editingEl && editingEl.type === "table" ? (
+        <textarea
+          ref={editRef}
+          defaultValue={tableToText(editingEl as TableElement)}
+          onBlur={(e) => commitText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+          spellCheck={false}
+          style={{
+            position: "absolute",
+            left: editingEl.x * vp.zoom + vp.x,
+            top: editingEl.y * vp.zoom + vp.y,
+            width: Math.max(160, editingEl.w * vp.zoom),
+            height: Math.max(80, editingEl.h * vp.zoom),
+            fontSize: 12.5 * vp.zoom, lineHeight: 1.5,
+            padding: "6px 8px", border: "none", outline: "2px solid #0073EA", borderRadius: 8,
+            background: "#fff", color: "#1E293B",
+            resize: "none", overflow: "auto", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+          }}
+        />
+      ) : null}
 
       {/* frame title editing */}
       {editingEl && editingEl.type === "frame" ? (
@@ -2214,6 +2247,29 @@ function cloneEl(el: CanvasElement): CanvasElement {
 
 function dist(a: [number, number], b: [number, number]): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
+}
+
+// A table edits as plain text: line 1 = table name, then one field per line as
+// "name: type", with a trailing "*" = primary key, "^" = foreign key.
+function tableToText(el: TableElement): string {
+  return [el.name, ...el.fields.map((f) => `${f.name}${f.type ? `: ${f.type}` : ""}${f.key === "pk" ? " *" : f.key === "fk" ? " ^" : ""}`)].join("\n");
+}
+function parseTableText(text: string): { name: string; fields: TableField[] } {
+  const lines = text.split("\n");
+  const name = (lines[0] ?? "").trim() || "Table";
+  const fields: TableField[] = [];
+  for (const raw of lines.slice(1)) {
+    let line = raw.trim();
+    if (!line) continue;
+    let key: "pk" | "fk" | undefined;
+    if (line.endsWith("*")) { key = "pk"; line = line.slice(0, -1).trim(); }
+    else if (line.endsWith("^")) { key = "fk"; line = line.slice(0, -1).trim(); }
+    const ci = line.indexOf(":");
+    const fname = (ci >= 0 ? line.slice(0, ci) : line).trim();
+    const ftype = ci >= 0 ? line.slice(ci + 1).trim() : "";
+    if (fname) fields.push({ name: fname, ...(ftype ? { type: ftype } : {}), ...(key ? { key } : {}) });
+  }
+  return { name, fields };
 }
 
 

@@ -26,6 +26,7 @@ export type ElementType =
   | "image"
   | "taskCard"
   | "canvasCard"
+  | "table"
   | "frame";
 
 /** Every element carries a world-space bounding box + shared style. */
@@ -194,6 +195,21 @@ export interface CanvasCardElement extends BaseElement {
   title: string;
 }
 
+/** A database / ER entity: a titled table of typed fields, with PK/FK markers.
+ *  Relationships are ordinary connectors bound to the table. */
+export interface TableField { name: string; type?: string; key?: "pk" | "fk" }
+export interface TableElement extends BaseElement {
+  type: "table";
+  name: string;
+  fields: TableField[];
+}
+export const TABLE_HEADER_H = 30;
+export const TABLE_ROW_H = 24;
+/** The height a table needs for its header + fields. */
+export function tableHeight(fieldCount: number): number {
+  return TABLE_HEADER_H + Math.max(1, fieldCount) * TABLE_ROW_H;
+}
+
 /** A labeled container. Rendered behind other elements; moving it moves the
  *  elements whose centre sits inside it (frameChildren). */
 export interface FrameElement extends BaseElement {
@@ -202,7 +218,7 @@ export interface FrameElement extends BaseElement {
 }
 
 export type CanvasElement =
-  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement | CanvasCardElement | FrameElement;
+  | ShapeElement | PathElement | TextElement | StickyElement | ImageElement | TaskCardElement | CanvasCardElement | TableElement | FrameElement;
 
 export interface Viewport {
   x: number; // pan offset in screen px
