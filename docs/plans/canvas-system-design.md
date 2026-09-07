@@ -82,14 +82,19 @@ model only reasons about the architecture, not geometry.
      v1: each generation is a fresh spec merged in; iterative editing of an existing
      spec is a fast follow.
 
-## Phased rollout
+## Phased rollout — ALL SHIPPED (2026-09-07)
 
-| Phase | Scope |
-|------|------|
-| **1 — AI generates a diagram** | The spec schema, `from-spec.ts` + layout, `/api/canvas/generate`, and the chat panel. Uses ONLY existing element types. This is the "wow" and ships first. |
-| **2 — System-design shape kit** | A palette category of real nodes (server, queue, load balancer, cache, API, cloud provider glyphs) as presets (labelled boxes with an icon), so hand-drawing a system is as fast as the AI. |
-| **3 — Database / ER diagrams** | A real `table` node (entity name + typed rows, PK/FK markers) + crow's-foot cardinality arrowheads. AI can target this for "design the schema". |
-| **4 — Templates & polish** | Starter templates (microservices, 3-tier web app, event-driven, ER schema); "explain this diagram" and "critique my architecture" AI actions. |
+| Phase | Scope | Status |
+|------|------|------|
+| **1 — AI generates a diagram** | The spec schema, `from-spec.ts` + layout, `/api/canvas/generate`, and the chat panel. Uses ONLY existing element types. This is the "wow" and ships first. | ✅ 5624738c |
+| **2 — System-design shape kit** | Preset nodes (Service/Gateway/Database/Cache/Queue/Cloud/User/External + ER Table) in the Design panel's "System kit", each dropping a pre-labelled, pre-styled shape via `specToScene` so hand-built == generated. | ✅ 1a07fa5a |
+| **3 — Database / ER diagrams** | Real `table` element (name + typed rows, PK/FK badges) + manual table tool/editor + crow's-foot cardinality heads (`crowsfoot` / `crowsfoot-one`), read from the edge's cardinality label. | ✅ 66ff3552 + 6ce70f84 |
+| **4 — Templates & polish** | 4 starter templates (microservices, 3-tier, event-driven, ER schema) via `lib/canvas/templates.ts`; "Explain" / "Critique" AI actions via `/api/canvas/analyze` (serializes the live board → Claude), rendered inline. | ✅ 9a04ab3b |
+
+Implementation notes: `from-spec.ts` owns kind→shape + layered auto-layout + ER
+cardinality; `templates.ts` is pure DiagramSpecs; `/api/canvas/analyze` describes
+the scene as semantic COMPONENTS/CONNECTIONS text (never pixels). All canvas libs
+vitest-covered (from-spec + templates + scene = 36 tests).
 
 ## Open decisions
 1. Layout engine: hand-rolled layered layout (no dep, good enough, CSP-safe) vs a lib.
