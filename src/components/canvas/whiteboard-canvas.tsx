@@ -185,6 +185,8 @@ export interface WhiteboardCanvasProps {
 /** Imperative handle — lets the page drop an AI-generated diagram onto the board. */
 export interface WhiteboardCanvasHandle {
   insertScene: (generated: CanvasScene) => void;
+  /** The live scene — used by the AI panel to explain / critique the board. */
+  getScene: () => CanvasScene;
 }
 
 export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProps>(function WhiteboardCanvas(
@@ -1586,6 +1588,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       setSelectedIds(new Set(incoming.map((el) => el.id)));
       requestAnimationFrame(() => fitView());
     },
+    getScene: () => scene,
   }), [scene, commit, fitView]);
 
   return (

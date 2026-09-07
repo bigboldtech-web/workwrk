@@ -450,7 +450,10 @@ export default function WhiteboardCanvasPage() {
               loadEntities={() => loadCanvasEntities(board.id)}
               onOpenEntity={(href) => router.push(href)}
             />
-            <CanvasAiPanel onApply={(scene) => canvasRef.current?.insertScene(scene)} />
+            <CanvasAiPanel
+              onApply={(scene) => canvasRef.current?.insertScene(scene)}
+              getScene={() => canvasRef.current?.getScene() ?? emptyScene()}
+            />
           </>
         ) : (
           <Excalidraw
