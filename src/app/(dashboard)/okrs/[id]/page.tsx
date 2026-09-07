@@ -25,6 +25,7 @@ import {
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { OkrLinkedWork } from "./okr-linked-work";
 import { GoalEffort } from "./goal-effort";
+import { GoalAssessment } from "./goal-assessment";
 import { GoalDetailMenu } from "./goal-detail-menu";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
@@ -426,6 +427,14 @@ export default async function OkrDetailPage(
             </ul>
           </section>
         )}
+
+        {/* On track? — automated verdict from the goal's live signals */}
+        <section className="okrd-card">
+          <header><h2>On track?</h2></header>
+          <div className="okrd-card__cf">
+            <GoalAssessment okrId={okr.id} />
+          </div>
+        </section>
 
         {/* Effort — automated signal derived from the goal's linked work */}
         <section className="okrd-card">
