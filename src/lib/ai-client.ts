@@ -70,3 +70,8 @@ export async function getAnthropicForOrg(organizationId: string): Promise<Resolv
 export function modelFor(resolved: Resolved, callerDefault: string = SHARED_FALLBACK_MODEL): string {
   return resolved.preferredModel || callerDefault;
 }
+
+// The model-availability fallback lives in the pure, dependency-free ai-fallback
+// module (so it's unit-testable without pulling prisma in). Re-exported here so
+// callers keep a single import surface.
+export { createMessageWithFallback, SAFE_FALLBACK_MODEL } from "./ai-fallback";

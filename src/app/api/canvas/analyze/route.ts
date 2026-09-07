@@ -7,7 +7,7 @@
 
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import type { CanvasScene, CanvasElement } from "@/lib/canvas/scene";
 
 const EXPLAIN = `You are a principal software architect explaining a system-design diagram to a teammate.
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const message = await ai.client.messages.create({
+    const message = await createMessageWithFallback(ai.client, {
       model: modelFor(ai, "claude-sonnet-4-6"),
       max_tokens: 1200,
       system: action === "critique" ? CRITIQUE : EXPLAIN,

@@ -7,7 +7,7 @@
 
 import { NextRequest } from "next/server";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
+import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 import { specToScene, type DiagramSpec } from "@/lib/canvas/from-spec";
 import { sequenceToScene, type SequenceSpec } from "@/lib/canvas/sequence";
 import type { CanvasScene } from "@/lib/canvas/scene";
@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
     : prompt.trim();
 
   try {
-    const message = await ai.client.messages.create({
+    const message = await createMessageWithFallback(ai.client, {
       model: modelFor(ai, "claude-sonnet-4-6"),
       max_tokens: 4000,
       system: SYSTEM,
