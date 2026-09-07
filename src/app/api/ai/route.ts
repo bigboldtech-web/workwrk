@@ -192,7 +192,7 @@ ${recentActivity.length > 0 ? recentActivity.map(a => `- [${a.createdAt.toISOStr
       response = generateFallbackResponse(query, users, departments, recentKPIs, sops);
     } else {
       const message = await ai.client.messages.create({
-        model: modelFor(ai, "claude-sonnet-4-20250514"),
+        model: modelFor(ai, "claude-sonnet-4-6"),
         max_tokens: 1500,
         system: `You are the AI assistant for WorkwrK, a Business Operating System. You help managers and leaders understand their organization's performance, identify issues, and make data-driven decisions.
 

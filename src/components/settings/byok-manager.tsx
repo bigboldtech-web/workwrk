@@ -26,7 +26,7 @@ interface KeyState {
 
 const MODELS = [
   { value: "", label: "Default (per-feature)" },
-  { value: "claude-sonnet-4-20250514", label: "Sonnet 4 (balanced)" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6 (balanced)" },
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5 (fast, cheap)" },
 ];
 

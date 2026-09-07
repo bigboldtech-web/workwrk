@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const message = await ai.client.messages.create({
-      model: modelFor(ai, "claude-sonnet-4-20250514"),
+      model: modelFor(ai, "claude-sonnet-4-6"),
       max_tokens: 1200,
       system: action === "critique" ? CRITIQUE : EXPLAIN,
       messages: [{ role: "user", content: describeScene(scene) }],

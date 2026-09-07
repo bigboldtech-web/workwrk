@@ -28,7 +28,7 @@ interface Resolved {
   preferredModel: string | null;
 }
 
-const SHARED_FALLBACK_MODEL = "claude-sonnet-4-20250514";
+const SHARED_FALLBACK_MODEL = "claude-sonnet-4-6";
 
 export async function getAnthropicForOrg(organizationId: string): Promise<Resolved> {
   const byok = await hasFeature(organizationId, "byok");
