@@ -5,9 +5,19 @@ import { slugify } from "@/lib/utils";
 import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
 import { validatePassword } from "@/lib/password-policy";
+import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
 
 export async function POST(req: Request) {
   try {
+    // Abuse guard: a single source can't script mass org/user creation.
+    const limit = rateLimit(`register:${ipFromRequest(req)}`, { max: 10, windowMs: 60 * 60 * 1000 });
+    if (!limit.ok) {
+      return NextResponse.json(
+        { error: "Too many sign-ups from this network. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
+      );
+    }
+
     const body = await req.json();
     const { organizationName: rawOrgName, firstName: rawFirst, lastName: rawLast, email, password } = body;
 

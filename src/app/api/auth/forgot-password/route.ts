@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { passwordResetTemplate } from "@/lib/email-templates";
+import { rateLimit, ipFromRequest } from "@/lib/rate-limit-memory";
 import crypto from "crypto";
 
 export async function POST(req: Request) {
@@ -16,6 +17,16 @@ export async function POST(req: Request) {
     const successResponse = NextResponse.json({
       message: "If an account with that email exists, we've sent a password reset link.",
     });
+
+    // Abuse guard: cap reset requests per target email and per source IP so
+    // nobody can bomb a victim's inbox with reset mail. Over the limit we return
+    // the SAME success message but send nothing — no signal, no email.
+    const ip = ipFromRequest(req);
+    const perEmail = rateLimit(`forgot:email:${email.toLowerCase()}`, { max: 5, windowMs: 15 * 60 * 1000 });
+    const perIp = rateLimit(`forgot:ip:${ip}`, { max: 20, windowMs: 60 * 60 * 1000 });
+    if (!perEmail.ok || !perIp.ok) {
+      return successResponse;
+    }
 
     const user = await prisma.user.findFirst({
       where: { email, deletedAt: null },
