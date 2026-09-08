@@ -15,6 +15,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
+import { computeGoalEffort } from "@/lib/goal-effort";
 import { getAnthropicForOrg, modelFor, createMessageWithFallback } from "@/lib/ai-client";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -105,28 +106,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const daysSinceCheckin = lastCheckIn != null ? Math.floor((now - lastCheckIn) / DAY_MS) : null;
   const isStale = !completed && (lastCheckIn == null || now - lastCheckIn > cadenceDays * DAY_MS);
 
-  // Effort from linked KRA work (compact version of /effort).
-  const links = await prisma.entityLink.findMany({
-    where: { organizationId: orgId, sourceType: "OKR", sourceId: id, targetType: "KRA" },
-    select: { targetId: true },
-  });
-  const kraIds = [...new Set(links.map((l) => l.targetId))];
-  let totalHours = 0, tasksDone = 0, tasksOpen = 0;
-  let lastActivityAt: Date | null = null;
-  if (kraIds.length) {
-    const tasks = await prisma.task.findMany({
-      where: { organizationId: orgId, kraId: { in: kraIds } },
-      select: { hoursSpent: true, status: true, completedAt: true, updatedAt: true },
-    });
-    for (const t of tasks) {
-      totalHours += t.hoursSpent ?? 0;
-      if (t.status === "COMPLETED") tasksDone += 1; else tasksOpen += 1;
-      const a = t.completedAt ?? t.updatedAt;
-      if (a && (!lastActivityAt || a > lastActivityAt)) lastActivityAt = a;
-    }
-  }
-  const hasLinkedWork = kraIds.length > 0;
-  totalHours = Math.round(totalHours * 10) / 10;
+  // Effort from all linked work (KRA tasks + board/space item time).
+  const effort = await computeGoalEffort(orgId, id);
+  const { hasLinkedWork, totalHours, tasksDone, tasksOpen, lastActivityAt } = effort;
 
   const suggestedVerdict = heuristicVerdict({ progress, measured, completed, pctTimeElapsed, isStale, hasLinkedWork });
 

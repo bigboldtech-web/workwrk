@@ -11,6 +11,7 @@ import { Activity, Clock, CheckCircle2, CircleDot } from "lucide-react";
 interface Effort {
   hasLinkedWork: boolean;
   linkedKras: number;
+  linkedBoards?: number;
   totalHours: number;
   tasksDone: number;
   tasksOpen: number;
@@ -52,7 +53,7 @@ export function GoalEffort({ okrId }: { okrId: string }) {
   if (!data.hasLinkedWork) {
     return (
       <p style={{ fontSize: 13, color: "var(--os-ink-3, #9aa3b2)", lineHeight: 1.5 }}>
-        No linked work yet. Link a KRA (below) and the effort behind this goal — hours logged, tasks moving, who&apos;s contributing — fills in automatically from that work.
+        No linked work yet. Link a KRA, Board or Space (below) and the effort behind this goal — hours logged, tasks moving, who&apos;s contributing — fills in automatically from that work.
       </p>
     );
   }
