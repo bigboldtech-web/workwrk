@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, Loader2,
+  Building2, Globe, Image as ImageIcon, Upload, Trash2, Sparkles, Loader2, X, Plus,
 } from "lucide-react";
 import { useRole } from "@/hooks/use-role";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -37,7 +37,7 @@ type IdentityState = {
   vision: string;
   about: string;
   industry: string;
-  values: string; // comma-separated in the UI; stored as string[]
+  values: string[]; // add/remove one at a time; stored as string[]
 };
 
 export default function IdentitySettingsPage() {
@@ -65,7 +65,7 @@ export default function IdentitySettingsPage() {
         vision: typeof profile.vision === "string" ? profile.vision : "",
         about: typeof profile.about === "string" ? profile.about : "",
         industry: typeof profile.industry === "string" ? profile.industry : "",
-        values: Array.isArray(profile.values) ? profile.values.join(", ") : "",
+        values: Array.isArray(profile.values) ? profile.values.filter((v: unknown): v is string => typeof v === "string" && v.trim().length > 0) : [],
       });
     } catch { setState(blank()); }
   }, []);
@@ -91,7 +91,7 @@ export default function IdentitySettingsPage() {
 
       // 2. Company profile via the top-level branch (runs sequentially so it
       //    reads the settings the step above just wrote — no lost update).
-      const values = state.values.split(",").map((v) => v.trim()).filter(Boolean);
+      const values = state.values.map((v) => v.trim()).filter(Boolean);
       const prof = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -244,7 +244,7 @@ export default function IdentitySettingsPage() {
             />
             <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[12.5px] text-zinc-600">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
-              <span>Your <strong>mission</strong> and <strong>values</strong> greet the whole team on the welcome screen every time they open WorkwrK (the mission always, a different value each time). They also ground AI KRA &amp; KPI generation.</span>
+              <span>Your <strong>mission</strong> and <strong>values</strong> become the loading screen: each time a page loads, the team sees one of them (mission and values take turns) for a couple of seconds. They also ground AI KRA &amp; KPI generation.</span>
             </div>
 
             <TextField
@@ -267,10 +267,8 @@ export default function IdentitySettingsPage() {
               placeholder="What the company does, who it serves, and how."
               onChange={(v) => set("about", v)}
             />
-            <TextField
-              label="Core values" value={state.values} disabled={!canEdit}
-              placeholder="Ownership, Craft, Candor"
-              hint="Comma-separated — add as many as you like. Shown to the team one at a time (rotating) on the welcome screen."
+            <ValuesField
+              values={state.values} disabled={!canEdit}
               onChange={(v) => set("values", v)}
             />
           </section>
@@ -296,7 +294,7 @@ export default function IdentitySettingsPage() {
 /* -------------------------------------------------------------------------- */
 
 function blank(): IdentityState {
-  return { name: "", domain: "", logo: null, mission: "", vision: "", about: "", industry: "", values: "" };
+  return { name: "", domain: "", logo: null, mission: "", vision: "", about: "", industry: "", values: [] };
 }
 
 async function errText(res: Response): Promise<string> {
@@ -335,6 +333,59 @@ function TextField({
         />
       </div>
       {hint && <p className="mt-1 text-[12px] text-zinc-400">{hint}</p>}
+    </div>
+  );
+}
+
+function ValuesField({
+  values, onChange, disabled,
+}: {
+  values: string[]; onChange: (v: string[]) => void; disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const add = () => {
+    const v = draft.trim();
+    if (!v) return;
+    if (values.some((x) => x.toLowerCase() === v.toLowerCase())) { setDraft(""); return; }
+    onChange([...values, v]);
+    setDraft("");
+  };
+  const remove = (i: number) => onChange(values.filter((_, idx) => idx !== i));
+
+  return (
+    <div>
+      <label className="mb-1 block text-[13px] font-medium text-zinc-700">Core values</label>
+      {values.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {values.map((v, i) => (
+            <span key={`${v}-${i}`} className="inline-flex items-center gap-1 rounded-full border border-zinc-200 bg-zinc-50 py-1 pl-2.5 pr-1.5 text-[13px] font-medium text-zinc-700">
+              {v}
+              {!disabled && (
+                <button type="button" onClick={() => remove(i)} aria-label={`Remove ${v}`}
+                  className="grid h-4 w-4 place-items-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      {!disabled && (
+        <div className="flex items-center gap-2">
+          <input
+            type="text" value={draft}
+            placeholder="Add a value and press Enter"
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+            className="h-8 flex-1 rounded-md border border-zinc-200 bg-white px-2.5 text-[13.5px] text-zinc-800 outline-none focus:border-[var(--os-brand,#0073EA)]"
+          />
+          <button type="button" onClick={add} disabled={!draft.trim()}
+            className="inline-flex h-8 items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 text-[13px] font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40">
+            <Plus className="h-3.5 w-3.5" /> Add
+          </button>
+        </div>
+      )}
+      <p className="mt-1 text-[12px] text-zinc-400">Add as many as you like. Mission + values take turns as the loading screen everyone sees on each page.</p>
     </div>
   );
 }
