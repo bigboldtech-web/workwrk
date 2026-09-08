@@ -31,6 +31,12 @@ type AuthIdentity = {
 const googleEnabled =
   !!process.env.GOOGLE_CLIENT_ID && !!process.env.GOOGLE_CLIENT_SECRET;
 
+// A real bcrypt hash used ONLY to burn the same ~bcrypt time on the
+// no-such-user branch as a wrong-password attempt spends, so login response
+// timing never reveals whether an email is registered (user enumeration).
+// Computed once at module load.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("timing-equalizer-not-a-real-password", 12);
+
 const providers = [
   CredentialsProvider({
     name: "credentials",
@@ -58,6 +64,9 @@ const providers = [
       });
 
       if (!user) {
+        // Spend the same bcrypt time as the wrong-password branch so an
+        // attacker can't tell a registered email from an unknown one by timing.
+        await bcrypt.compare(credentials.password, DUMMY_PASSWORD_HASH);
         recordLoginFailure(key);
         throw new Error("Invalid credentials");
       }

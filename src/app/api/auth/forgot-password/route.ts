@@ -30,18 +30,23 @@ export async function POST(req: Request) {
       data: { used: true },
     });
 
-    // Create new token (1 hour expiry)
-    const token = crypto.randomBytes(32).toString("hex");
+    // Create new token (1 hour expiry). Only the SHA-256 HASH is persisted —
+    // the raw token lives solely in the emailed link. So a DB leak yields
+    // useless hashes, never working reset links (the raw 256-bit value can't
+    // be recovered from its hash). reset-password hashes the submitted token
+    // the same way to look it up.
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
     await prisma.passwordResetToken.create({
       data: {
-        token,
+        token: tokenHash,
         email,
         expiresAt: new Date(Date.now() + 60 * 60 * 1000),
       },
     });
 
     const baseUrl = process.env.NEXTAUTH_URL || "http://localhost:3000";
-    const resetLink = `${baseUrl}/reset-password?token=${token}`;
+    const resetLink = `${baseUrl}/reset-password?token=${rawToken}`;
     const { subject, html } = passwordResetTemplate({
       resetLink,
       firstName: user.firstName,

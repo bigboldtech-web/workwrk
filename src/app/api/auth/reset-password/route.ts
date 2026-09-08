@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 
 export async function POST(req: Request) {
   try {
@@ -14,8 +15,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
     }
 
+    // Tokens are stored hashed (see forgot-password) — hash the submitted raw
+    // token the same way to find its row. An attacker with raw DB access holds
+    // only hashes, which don't produce a usable reset link.
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
     const resetToken = await prisma.passwordResetToken.findUnique({
-      where: { token },
+      where: { token: tokenHash },
     });
 
     if (!resetToken || resetToken.used || resetToken.expiresAt < new Date()) {
