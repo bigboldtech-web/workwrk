@@ -4,6 +4,15 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { prisma } from "./prisma";
 import type { AccessLevel } from "@/generated/prisma";
+import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
+
+// Best-effort client IP from proxy headers (behind nginx: x-forwarded-for).
+function clientIp(req: unknown): string | null {
+  const h = (req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers;
+  const raw = h?.["x-forwarded-for"] ?? h?.["x-real-ip"];
+  const val = Array.isArray(raw) ? raw[0] : raw;
+  return val ? val.split(",")[0].trim() : null;
+}
 
 // Google OAuth is only registered when the env vars are present. This
 // keeps local dev painless — the app still boots with only credentials
@@ -29,9 +38,18 @@ const providers = [
       email: { label: "Email", type: "email" },
       password: { label: "Password", type: "password" },
     },
-    async authorize(credentials) {
+    async authorize(credentials, req) {
       if (!credentials?.email || !credentials?.password) {
         throw new Error("Missing credentials");
+      }
+
+      // Brute-force guard: block further attempts once a source has failed too
+      // many times against this account (see login-throttle).
+      const key = throttleKey(clientIp(req), credentials.email);
+      const locked = loginLockRemaining(key);
+      if (locked > 0) {
+        const mins = Math.max(1, Math.ceil(locked / 60));
+        throw new Error(`Too many failed attempts. Try again in ${mins} minute${mins === 1 ? "" : "s"}.`);
       }
 
       const user = await prisma.user.findFirst({
@@ -40,13 +58,17 @@ const providers = [
       });
 
       if (!user) {
+        recordLoginFailure(key);
         throw new Error("Invalid credentials");
       }
 
       const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
       if (!isValid) {
+        recordLoginFailure(key);
         throw new Error("Invalid credentials");
       }
+      // Correct password — clear the failure counter for this source+account.
+      clearLoginFailures(key);
 
       // Offboarding must actually revoke access. Someone removed from the
       // company (deletedAt) or deactivated (INACTIVE) cannot sign in —

@@ -154,6 +154,15 @@ export function proxy(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  const res = NextResponse.next();
+
+  // Authenticated app pages must never be cached: after logout, the browser's
+  // Back button (bfcache/history) must not be able to re-show a dashboard the
+  // person is no longer entitled to see. Marketing pages are unaffected.
+  if (isAppPath(path)) {
+    res.headers.set("Cache-Control", "no-store, max-age=0, must-revalidate");
+  }
+
   // 4) Custom domain — stamp the request host into a header downstream code can
   //    read. Opt-in via CUSTOM_DOMAINS_ENABLED. Skip all of our OWN hosts.
   if (
@@ -163,12 +172,10 @@ export function proxy(req: NextRequest) {
     (!adminHost || !hostMatches(reqHost, adminHost)) &&
     (!marketingHost || !hostMatches(reqHost, marketingHost))
   ) {
-    const res = NextResponse.next();
     res.headers.set("x-workwrk-host", reqHost.split(":")[0].toLowerCase());
-    return res;
   }
 
-  return NextResponse.next();
+  return res;
 }
 
 export const config = {
