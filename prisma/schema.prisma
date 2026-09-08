@@ -457,6 +457,10 @@ model User {
   avatar       String?
   phone        String?
   dateOfBirth  DateTime?
+  // Bumped on sign-out and password reset; baked into the session JWT and
+  // compared on re-check, so a copied/stolen token is invalidated the moment
+  // the user logs out or resets, instead of lingering until natural expiry.
+  tokenVersion Int        @default(0)
   officeId     String?
   office       Office?    @relation(fields: [officeId], references: [id])
   status       UserStatus @default(ACTIVE)

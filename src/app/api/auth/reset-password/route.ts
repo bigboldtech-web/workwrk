@@ -35,10 +35,12 @@ export async function POST(req: Request) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Update password and mark token as used
+    // Update password and mark token as used. Bump tokenVersion so any session
+    // still holding the OLD credentials (e.g. an attacker who triggered the
+    // reset scenario) is invalidated the moment the password changes.
     await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
     });
 
     await prisma.passwordResetToken.update({

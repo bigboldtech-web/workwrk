@@ -117,6 +117,7 @@ const providers = [
         organizationId: org.id,
         organizationName: org.name,
         avatar: user.avatar,
+        tokenVersion: user.tokenVersion,
       };
     },
   }),
@@ -206,6 +207,7 @@ export const authOptions: NextAuthOptions = {
         token.firstName = u.firstName;
         token.lastName = u.lastName;
         token.avatar = u.avatar;
+        token.tokenVersion = (user as unknown as { tokenVersion?: number }).tokenVersion ?? 0;
       }
 
       // Google flow: first-time sign-in returns only minimal identity;
@@ -224,6 +226,7 @@ export const authOptions: NextAuthOptions = {
           token.firstName = dbUser.firstName;
           token.lastName = dbUser.lastName;
           token.avatar = dbUser.avatar;
+          token.tokenVersion = dbUser.tokenVersion;
         }
       }
 
@@ -238,10 +241,16 @@ export const authOptions: NextAuthOptions = {
       if (token.id && Date.now() - lastCheck > REVALIDATE_MS) {
         const account_ = await prisma.user.findUnique({
           where: { id: token.id as string },
-          select: { deletedAt: true, status: true, accessLevel: true },
+          select: { deletedAt: true, status: true, accessLevel: true, tokenVersion: true },
         });
         token.checkedAt = Date.now();
-        if (!account_ || account_.deletedAt || account_.status === "INACTIVE") {
+        const versionMismatch =
+          typeof token.tokenVersion === "number" && !!account_ && account_.tokenVersion !== token.tokenVersion;
+        if (!account_ || account_.deletedAt || account_.status === "INACTIVE" || versionMismatch) {
+          // Removed, deactivated, OR signed-out/reset elsewhere (bumped
+          // tokenVersion) — this token is dead. Grandfathered: a token issued
+          // before this field existed (no token.tokenVersion) is never revoked
+          // on version alone, so nobody is mass-logged-out by the rollout.
           token.revoked = true;
         } else {
           token.revoked = false;
@@ -287,6 +296,19 @@ export const authOptions: NextAuthOptions = {
         } satisfies Partial<AuthIdentity>);
       }
       return session;
+    },
+  },
+  events: {
+    // Real sign-out: bump the user's tokenVersion so EVERY other live token for
+    // them (another device, a copied cookie, a shared machine) is invalidated
+    // on its next re-check — not just the cookie cleared in this browser.
+    async signOut({ token }) {
+      const id = (token as { id?: string } | null)?.id;
+      if (id) {
+        await prisma.user
+          .update({ where: { id }, data: { tokenVersion: { increment: 1 } } })
+          .catch(() => {});
+      }
     },
   },
 };
