@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Calendar as CalendarIcon, Clock, Users, FileText, CheckSquare,
@@ -209,7 +210,7 @@ export default function MeetingsPage() {
       {loadError ? (
         <OsEmptyView Icon={CalendarIcon} iconGradient={GRAD.redPink} title="Couldn't load meetings" subtitle={`API error: ${loadError}.`} cta="Retry" />
       ) : meetings === null ? (
-        <div className="mtg__loading">Loading meetings…</div>
+        <div className="mtg__loading"><ValueLoader size={32} /></div>
       ) : total === 0 ? (
         <OsEmptyView Icon={CalendarIcon} iconGradient={GRAD.pinkPurple} title="No meetings yet" subtitle="Capture standups, 1:1s, quarterly reviews — pre-fill agenda, take notes inline, leave with action items already assigned." chips={["Standup", "1:1", "Weekly review", "Ad hoc"]} cta="New meeting" />
       ) : (

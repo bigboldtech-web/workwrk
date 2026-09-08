@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   CalendarDays, Plus, Search, MapPin, Users as UsersIcon, ExternalLink,
@@ -299,7 +300,7 @@ export default function EventsLibrary() {
         {loadError ? (
           <OsEmptyView Icon={CalendarDays} iconGradient={GRAD.redPink} title="Couldn't load events" subtitle={`API error: ${loadError}.`} cta="Retry" />
         ) : items === null ? (
-          <div className="evts__loading">Loading events…</div>
+          <div className="evts__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={CalendarDays}

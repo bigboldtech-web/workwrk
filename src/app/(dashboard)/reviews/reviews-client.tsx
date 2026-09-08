@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -213,7 +214,7 @@ export default function ReviewsPage() {
         {loadError ? (
           <OsEmptyView Icon={Award} iconGradient="linear-gradient(135deg, var(--os-c-red), var(--os-c-orange))" title="Couldn't load cycles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : cycles === null ? (
-          <div className="rvw__loading">Loading cycles…</div>
+          <div className="rvw__loading"><ValueLoader size={32} /></div>
         ) : !featured ? (
           <OsEmptyView
             Icon={Award}

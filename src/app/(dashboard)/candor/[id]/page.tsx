@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -141,7 +142,7 @@ export default function CandorDetailPage() {
   if (loadError) {
     body = <NotAvailable title="Couldn't load this session" subtitle={loadError} />;
   } else if (session === undefined) {
-    body = <div className="cnd-d__loading"><Loader2 className="cnd-d__spin" /> Loading…</div>;
+    body = <div className="cnd-d__loading"><ValueLoader size={32} /></div>;
   } else if (session === null) {
     body = (
       <NotAvailable
@@ -387,7 +388,7 @@ function ResultsView({ session, onMutate, toast }: { session: ApiCandor; onMutat
       {error ? (
         <NotAvailable title="Couldn't load results" subtitle={error} />
       ) : data === undefined ? (
-        <div className="cnd-d__loading"><Loader2 className="cnd-d__spin" /> Loading results…</div>
+        <div className="cnd-d__loading"><ValueLoader size={32} /></div>
       ) : total === 0 ? (
         <div className="cnd-d__blank cnd-d__blank--inline">
           <div className="cnd-d__blank-art"><BarChart3 /></div>

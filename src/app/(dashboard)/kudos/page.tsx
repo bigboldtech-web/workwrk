@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Heart, Plus, Hash, ChevronRight, Trophy, Sparkles, Users, Calendar as CalendarIcon,
@@ -187,7 +188,7 @@ export default function KudosPage() {
         {loadError ? (
           <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title="Couldn't load kudos" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="kud__loading">Loading…</div>
+          <div className="kud__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Heart}

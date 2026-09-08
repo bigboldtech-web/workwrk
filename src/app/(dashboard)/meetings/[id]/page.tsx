@@ -13,6 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -530,7 +531,7 @@ export default function MeetingDetailPage() {
 
   // ── Render ──────────────────────────────────────────────
   if (loading) {
-    return <div className="mtgr__loading"><Loader2 className="mtgr-spin" /> Loading meeting…</div>;
+    return <div className="mtgr__loading"><ValueLoader size={32} /></div>;
   }
   if (!meeting) {
     return (

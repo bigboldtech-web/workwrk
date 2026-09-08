@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -309,7 +310,7 @@ export default function RolesPage() {
         {loadError ? (
           <OsEmptyView Icon={Briefcase} iconGradient={C.red} title="Couldn't load roles" subtitle={`API error: ${loadError}.`} cta="Retry" />
         ) : roles === null ? (
-          <div className="rls__loading">Loading roles…</div>
+          <div className="rls__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Briefcase}

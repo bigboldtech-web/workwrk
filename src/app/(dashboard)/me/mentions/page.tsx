@@ -7,8 +7,9 @@
  */
 
 import { useEffect, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
-import { AtSign, FileText, BookCopy, Loader2 } from "lucide-react";
+import { AtSign, FileText, BookCopy } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { GRAD } from "@/components/layout/os/catalog";
@@ -67,7 +68,7 @@ export default function MentionsInboxPage() {
       {error ? (
         <OsEmptyView Icon={AtSign} iconGradient={GRAD.redPink} title="Couldn't load mentions" subtitle={`API error: ${error}`} cta="Retry" />
       ) : hits === null ? (
-        <div className="mention-inbox__loading"><Loader2 className="bedit__spin" /> Loading mentions…</div>
+        <div className="mention-inbox__loading"><ValueLoader size={32} /></div>
       ) : hits.length === 0 ? (
         <OsEmptyView
           Icon={AtSign}

@@ -24,6 +24,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Building2, Plus, Users, ChevronDown, ChevronRight, Search,
@@ -357,7 +358,7 @@ export default function DepartmentsPage() {
         {loadError ? (
           <OsEmptyView Icon={Building2} iconGradient={GRAD.redPink} title="Couldn't load departments" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
         ) : depts === null ? (
-          <div className="dept__loading">Loading…</div>
+          <div className="dept__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Building2}

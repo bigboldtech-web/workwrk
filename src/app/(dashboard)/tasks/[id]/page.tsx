@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useParams, useRouter } from "next/navigation";
 import {
   CheckSquare, ArrowLeft, Calendar as CalendarIcon, MessageCircle,
@@ -221,7 +222,7 @@ export default function TaskDetailPage() {
     return (
       <>
         <OsTitleBar title="Loading task…" Icon={CheckSquare} iconGradient={GRAD.bluePurple} showInvite={false} />
-        <div className="tdt__loading">Loading task…</div>
+        <div className="tdt__loading"><ValueLoader size={32} /></div>
       </>
     );
   }

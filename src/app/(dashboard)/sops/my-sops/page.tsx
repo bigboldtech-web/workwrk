@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   BookCopy, Clock, AlertCircle, CheckCircle2, FileText, ListChecks, Video,
@@ -132,7 +133,7 @@ export default function MySopsPage() {
         {loadError ? (
           <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
         ) : items === null ? (
-          <div className="mys__loading">Loading…</div>
+          <div className="mys__loading"><ValueLoader size={32} /></div>
         ) : (items ?? []).length === 0 ? (
           <OsEmptyView
             Icon={BookCopy}

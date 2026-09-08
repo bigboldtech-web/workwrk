@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { Trash2, FileText, RotateCcw, ArrowLeft, Loader2, Search } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -104,7 +105,7 @@ export default function NotesTrashPage() {
       {error ? (
         <OsEmptyView Icon={Trash2} iconGradient={GRAD.redPink} title="Couldn't load trash" subtitle={`API error: ${error}`} cta="Retry" />
       ) : rows === null ? (
-        <div className="docs__loading"><Loader2 className="bedit__spin" /> Loading trash…</div>
+        <div className="docs__loading"><ValueLoader size={32} /></div>
       ) : rows.length === 0 ? (
         <OsEmptyView Icon={Trash2} iconGradient={GRAD.tealGreen} title="Trash is empty" subtitle="Deleted notes show up here and stay restorable. Nothing is hard-deleted." cta="Open notes" />
       ) : filtered.length === 0 ? (

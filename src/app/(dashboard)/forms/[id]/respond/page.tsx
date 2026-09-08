@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
 import { FormInput, CheckCircle2, Loader2 } from "lucide-react";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -86,7 +87,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
     );
   }
   if (!form) {
-    return <div className="resp"><div className="resp__loading"><Loader2 className="resp__spin" /> Loading…</div></div>;
+    return <div className="resp"><div className="resp__loading"><ValueLoader size={32} /></div></div>;
   }
   if (submitted) {
     return (

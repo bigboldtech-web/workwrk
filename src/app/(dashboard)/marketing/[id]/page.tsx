@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useParams, useRouter } from "next/navigation";
 import {
   Megaphone, ArrowLeft, Share2, MoreHorizontal, Calendar as CalendarIcon,
@@ -186,7 +187,7 @@ export default function MarketingDetail() {
     return (
       <>
         <OsTitleBar title="Loading campaign…" Icon={Megaphone} iconGradient={GRAD.orangePink} showInvite={false} />
-        <div className="camp__loading">Loading campaign…</div>
+        <div className="camp__loading"><ValueLoader size={32} /></div>
       </>
     );
   }

@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Activity, Search, Hash, ChevronRight, User as UserIcon, Edit3, Trash2,
@@ -309,7 +310,7 @@ export default function AuditLogPage() {
         )}
 
         {rows === null ? (
-          <div className="adt__loading">Loading…</div>
+          <div className="adt__loading"><ValueLoader size={32} /></div>
         ) : errorMsg ? (
           <OsEmptyView
             Icon={Activity}

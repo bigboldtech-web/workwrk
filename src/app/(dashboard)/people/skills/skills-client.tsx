@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Sparkles, Search, ArrowLeft, ChevronDown, Star, TrendingUp,
@@ -180,7 +181,7 @@ export default function SkillsPage() {
         {loadError ? (
           <OsEmptyView Icon={Sparkles} iconGradient={GRAD.redPink} title="Couldn't load skills" subtitle={`API error: ${loadError}.`} cta="Retry" />
         ) : skills === null ? (
-          <div className="skl__loading">Loading skill matrix…</div>
+          <div className="skl__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Sparkles}

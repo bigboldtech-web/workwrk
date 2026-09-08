@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   BarChart, Plus, Search, Hash, ChevronRight, Activity, CheckCircle2, Edit3,
@@ -183,7 +184,7 @@ export default function SurveysPage() {
         {loadError ? (
           <OsEmptyView Icon={BarChart} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="srv__loading">Loading…</div>
+          <div className="srv__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={BarChart}

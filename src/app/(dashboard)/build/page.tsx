@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Hammer, Plus, Search, Hash, ChevronRight, Edit3, CheckCircle2, Sparkles,
@@ -148,7 +149,7 @@ export default function BuildPage() {
         {loadError ? (
           <OsEmptyView Icon={Hammer} iconGradient={GRAD.redPink} title="Couldn't load apps" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="bld__loading">Loading…</div>
+          <div className="bld__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Hammer}

@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   ShieldCheck, AlertCircle, TrendingUp, TrendingDown, Users as UsersIcon, Building,
@@ -93,7 +94,7 @@ export default function SopComplianceDashboard() {
         {loadError ? (
           <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
         ) : data === null ? (
-          <div className="cmpl__loading">Loading…</div>
+          <div className="cmpl__loading"><ValueLoader size={32} /></div>
         ) : (
           <>
             <div className="cmpl__kpis">

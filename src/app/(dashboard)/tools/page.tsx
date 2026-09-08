@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Wrench, Plus, Search, Hash, ChevronRight, ExternalLink, Lock, Users,
@@ -190,7 +191,7 @@ export default function ToolsPage() {
         {loadError ? (
           <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : rows === null ? (
-          <div className="tls__loading">Loading…</div>
+          <div className="tls__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Wrench}

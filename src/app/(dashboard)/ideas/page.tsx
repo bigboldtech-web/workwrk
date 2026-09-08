@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import {
   Lightbulb, ThumbsUp, MessageSquare, Plus, X, Trophy,
   Flame, Clock, Loader2,
@@ -225,7 +226,7 @@ export default function IdeasPage() {
         {loadError ? (
           <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.redPink} title="Couldn't load ideas" subtitle={`API error: ${loadError}`} cta="Retry" />
         ) : ideas === null ? (
-          <div className="ideas__loading">Loading…</div>
+          <div className="ideas__loading"><ValueLoader size={32} /></div>
         ) : total === 0 ? (
           <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.yellowOrange} title="No ideas yet" subtitle="Got a hunch? A fix? A what-if? Drop it in — even half-baked ones spark conversations." chips={["Product", "Process", "Culture", "Cost-cutting"]} cta="Share an idea" />
         ) : (

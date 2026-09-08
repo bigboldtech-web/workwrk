@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Megaphone, Plus, Target, DollarSign, Activity, CheckCircle2,
@@ -206,7 +207,7 @@ export default function MarketingPage() {
         {loadError ? (
           <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="Couldn't load campaigns" subtitle={`API error: ${loadError}.`} cta="Retry" />
         ) : campaigns === null ? (
-          <div className="mkt__loading">Loading campaigns…</div>
+          <div className="mkt__loading"><ValueLoader size={32} /></div>
         ) : campaigns.length === 0 ? (
           <OsEmptyView
             Icon={Megaphone}

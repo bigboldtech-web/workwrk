@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -191,7 +192,7 @@ export default function CandorPage() {
         {loadError ? (
           <OsEmptyView Icon={MessageCircleHeart} iconGradient={GRAD.redPink} title="Couldn't load sessions" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="cnd__loading">Loading…</div>
+          <div className="cnd__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={MessageCircleHeart}

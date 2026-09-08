@@ -27,6 +27,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
 import {
   Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
@@ -3392,7 +3393,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     : null;
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
-  if (!table || rows === null) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
+  if (!table || rows === null) return <div className="frmb__loading"><ValueLoader size={32} /></div>;
 
   const filterColDef = table.columns.find((c) => c.id === filterCol);
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;

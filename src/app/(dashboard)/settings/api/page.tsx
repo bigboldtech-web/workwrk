@@ -11,6 +11,7 @@
  * row, secret, and revocation round-trips the real backend. */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Key, Plus, Copy, Trash2, Hash, Activity, Clock, ShieldCheck,
@@ -272,7 +273,7 @@ export default function ApiKeysPage() {
             </div>
 
             {loading ? (
-              <div className="apk__loading"><Loader2 className="animate-spin" /> Loading keys…</div>
+              <div className="apk__loading"><ValueLoader size={32} /></div>
             ) : loadError ? (
               <div className="apk__no-match"><AlertTriangle /> {loadError}</div>
             ) : keys.length === 0 ? (

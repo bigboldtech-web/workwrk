@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import {
   Layers, ChevronUp, ChevronDown, Flame, Trash2, ArrowUpDown,
   Plus, AlertOctagon, UserMinus, Hourglass, ListChecks, Loader2,
@@ -228,7 +229,7 @@ export default function BacklogPage() {
       {loadError ? (
         <OsEmptyView Icon={Layers} iconGradient={GRAD.redPink} title="Couldn't load backlog" subtitle={`API error: ${loadError}`} cta="Retry" />
       ) : tasks === null ? (
-        <div className="bklg__loading">Loading backlog…</div>
+        <div className="bklg__loading"><ValueLoader size={32} /></div>
       ) : (
         <div className="bklg">
           {/* Stat strip */}

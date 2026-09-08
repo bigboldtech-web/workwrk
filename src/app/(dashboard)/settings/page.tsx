@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   SlidersHorizontal, Building2, Boxes, Award, Shield, BarChart3,
@@ -275,7 +276,7 @@ export default function SettingsPage() {
       {loadError ? (
         <OsEmptyView Icon={SlidersHorizontal} iconGradient={GRAD.redPink} title="Couldn't load settings" subtitle={`API error: ${loadError}.`} cta="Retry" />
       ) : data === null ? (
-        <div className="settings__loading">Loading settings…</div>
+        <div className="settings__loading"><ValueLoader size={32} /></div>
       ) : (
         <div className="settings">
           {sections.map((section) => (

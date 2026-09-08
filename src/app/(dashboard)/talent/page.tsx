@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Users2, Plus, Star, Award, AlertTriangle, Heart, Briefcase,
@@ -231,7 +232,7 @@ export default function TalentPage() {
         {loadError ? (
           <OsEmptyView Icon={Users2} iconGradient={GRAD.redPink} title="Couldn't load assessments" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : assessments === null ? (
-          <div className="tal__loading">Loading…</div>
+          <div className="tal__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Users2}

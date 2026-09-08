@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   ListChecks, Search, Hash, ChevronRight, AlertTriangle, CheckCircle2, Clock,
@@ -171,7 +172,7 @@ export default function ProcessRunsPage() {
         {loadError ? (
           <OsEmptyView Icon={ListChecks} iconGradient={GRAD.redPink} title="Couldn't load runs" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="prun__loading">Loading…</div>
+          <div className="prun__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={ListChecks}

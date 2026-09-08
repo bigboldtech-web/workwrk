@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Tag, Plus, Search, Hash, Trash2, Layers, Archive,
@@ -177,7 +178,7 @@ export default function TagManagerPage() {
         )}
 
         {tags === null ? (
-          <div className="tgm__loading">Loading…</div>
+          <div className="tgm__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView Icon={Tag} iconGradient={GRAD.pinkPurple} title="No tags yet" subtitle="Tags label items across modules (cost center, project, department, region)." chips={["Department", "Project", "Cost Center"]} cta="New tag" />
         ) : grouped.length === 0 ? (

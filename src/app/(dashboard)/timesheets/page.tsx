@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import {
   Clock, Plus, Calendar as CalendarIcon, CheckCircle2, XCircle,
   Send, RotateCcw, ChevronRight, Loader2, Play,
@@ -164,7 +165,7 @@ export default function TimesheetsPage() {
         {loadError ? (
           <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={loadError} cta="Retry" onCta={() => void load()} />
         ) : sheets === null ? (
-          <div className="tsh__loading">Loading…</div>
+          <div className="tsh__loading"><ValueLoader size={32} /></div>
         ) : filtered.length === 0 ? (
           <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets in this view" subtitle="Start a new week's timesheet to begin logging time entries." cta="Start this week" onCta={() => void startCurrentWeek()} />
         ) : (

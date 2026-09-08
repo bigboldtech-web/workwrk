@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Megaphone, Plus, Search, Hash, ChevronRight, Pin, AlertTriangle, CheckCircle2,
@@ -201,7 +202,7 @@ export default function AnnouncementsPage() {
         {loadError ? (
           <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
         ) : rows === null ? (
-          <div className="ann__loading">Loading…</div>
+          <div className="ann__loading"><ValueLoader size={32} /></div>
         ) : stats.total === 0 ? (
           <OsEmptyView
             Icon={Megaphone}

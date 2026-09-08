@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
 import {
   FormInput, Save, Globe, Lock, Link as LinkIcon, ArrowLeft,
@@ -214,7 +215,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const fieldMap = useMemo(() => new Map((form?.fields ?? []).map((f) => [f.id, f])), [form?.fields]);
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load form: {loadError}</div>;
-  if (!form) return <div className="frmb__loading"><Loader2 className="frmb__spin" /> Loading…</div>;
+  if (!form) return <div className="frmb__loading"><ValueLoader size={32} /></div>;
 
   return (
     <div className="frmb">
