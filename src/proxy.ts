@@ -1,39 +1,71 @@
 import { NextRequest, NextResponse } from "next/server";
 
 /**
- * Two routing concerns rolled into one proxy:
+ * Host routing for WorkwrK's three surfaces:
  *
- * 1. **Admin host split** — `/admin` lives on its own hostname
- *    (`admin.workwrk.com`) so customers on workwrk.com never even
- *    see it. Off when `ADMIN_HOST` env var is unset (so dev /
- *    preview environments don't break).
+ * 1. **Admin host split** — `/admin` lives on its own hostname (`ADMIN_HOST`)
+ *    so customers on the marketing/app hosts never see it. Off when unset.
  *
- * 2. **Custom domain → org resolution** (Enterprise white-label
- *    Phase W2). When a request arrives on a hostname that's not
- *    the canonical `workwrk.com` and not the admin host, we look
- *    up the matching `Organization.domain` and stamp the org id
- *    into a request header so downstream auth + branding can use
- *    it without re-querying.
+ * 2. **Marketing vs app split** — the marketing website lives on the apex
+ *    (`MARKETING_HOST`, e.g. workwrk.com) and the actual product lives on the
+ *    app host (`APP_HOST`, e.g. app.workwrk.com).
+ *      - SOFT split (default): only the app host's root lands in the app; every
+ *        other path resolves on either host.
+ *      - HARD split (opt-in via `HARD_HOST_SPLIT=true`): a marketing page only
+ *        answers on the marketing host and an app page only on the app host; a
+ *        page that lands on the wrong host is redirected (308) to the right one,
+ *        keeping the path and query. So workwrk.com/spaces/ceo redirects to
+ *        app.workwrk.com/spaces/ceo, and app.workwrk.com/pricing back to
+ *        workwrk.com/pricing.
  *
- *    Configuration:
- *      APP_HOST         = "workwrk.com"        (canonical app host)
- *      ADMIN_HOST       = "admin.workwrk.com"  (staff panel)
- *      CUSTOM_DOMAINS_ENABLED = "true"         (off by default)
+ * 3. **Custom domain → org resolution** (Enterprise white-label). Opt-in via
+ *    `CUSTOM_DOMAINS_ENABLED`.
  *
- *    Implementation note: this proxy runs in the Edge runtime,
- *    where Prisma can't be loaded. We resolve the org via a tiny
- *    `/api/internal/resolve-domain` endpoint that runs in the
- *    Node runtime — proxy just sets the header from a cached
- *    value. For now we pass through the host header and leave
- *    deeper resolution to the auth layer.
+ *    Config: APP_HOST, MARKETING_HOST, ADMIN_HOST, HARD_HOST_SPLIT,
+ *    CUSTOM_DOMAINS_ENABLED. Runs in the Edge runtime (no Prisma here).
  */
 
 const ADMIN_PATH_PREFIX = "/admin";
+
+// Pages that belong to the MARKETING site (the apex host). First path segment.
+const MARKETING_PREFIXES = new Set([
+  "about", "blog", "changelog", "compare", "contact", "cookies", "customers",
+  "demo", "developers", "do-not-sell", "faq", "features", "help-center",
+  "industries", "partners", "pricing", "privacy", "security", "terms",
+]);
+
+// Paths that must resolve on EITHER host and are never redirected: the API,
+// public token links (share/sign/meet/run), embeds, and framework/SEO files.
+const SHARED_PREFIXES = new Set([
+  "api", "embed", "meet", "run", "share", "sign", "_next",
+  "opengraph-image", "icon", "apple-icon", "twitter-image",
+]);
+
+function firstSeg(path: string): string {
+  return path.split("/")[1] ?? "";
+}
+function isSharedPath(path: string): boolean {
+  if (/\.[a-z0-9]+$/i.test(path)) return true; // any file: sitemap.xml, robots.txt, manifest, images
+  return SHARED_PREFIXES.has(firstSeg(path));
+}
+function isMarketingPath(path: string): boolean {
+  if (path === "/") return true;
+  return MARKETING_PREFIXES.has(firstSeg(path));
+}
 
 function hostMatches(reqHost: string, configured: string): boolean {
   // Strip port + protocol; compare case-insensitively.
   const norm = (s: string) => s.replace(/:\d+$/, "").toLowerCase();
   return norm(reqHost) === norm(configured);
+}
+
+// Cross-host redirect keeping the path + query, forced to https.
+function redirectToHost(req: NextRequest, host: string) {
+  const url = req.nextUrl.clone();
+  url.protocol = "https:";
+  url.host = host; // sets hostname and clears any inherited port
+  url.port = "";
+  return NextResponse.redirect(url, 308);
 }
 
 export function proxy(req: NextRequest) {
@@ -43,6 +75,7 @@ export function proxy(req: NextRequest) {
   const reqHost = req.headers.get("host") || "";
   const path = req.nextUrl.pathname;
   const customDomainsEnabled = process.env.CUSTOM_DOMAINS_ENABLED === "true";
+  const hardSplit = process.env.HARD_HOST_SPLIT === "true";
 
   // 1) Admin host split — opt-in via env.
   if (adminHost) {
@@ -72,22 +105,32 @@ export function proxy(req: NextRequest) {
     }
   }
 
-  // 1b) App host — the product host's root lands in the app, not on the
-  //     marketing landing. Opt-in via APP_HOST. Soft split: every other path
-  //     still resolves on either host; a hard split (marketing 404s on app.,
-  //     app 404s on apex) is a later phase.
+  // 2) HARD marketing/app split — opt-in via HARD_HOST_SPLIT. Never touches
+  //    shared paths (API, public token links, embeds, files).
+  if (hardSplit && appHost && marketingHost && !isSharedPath(path)) {
+    const onMarketing = hostMatches(reqHost, marketingHost);
+    const onApp = hostMatches(reqHost, appHost);
+
+    // An app route that landed on the marketing host → send it to the app host.
+    if (onMarketing && !isMarketingPath(path)) {
+      return redirectToHost(req, appHost);
+    }
+    // A marketing route that landed on the app host → send it to marketing.
+    // (Root "/" is left to the app-root redirect below.)
+    if (onApp && path !== "/" && isMarketingPath(path)) {
+      return redirectToHost(req, marketingHost);
+    }
+  }
+
+  // 3) App host root lands in the app, not the marketing landing. Opt-in via APP_HOST.
   if (appHost && hostMatches(reqHost, appHost) && path === "/") {
     const url = req.nextUrl.clone();
     url.pathname = "/today";
     return NextResponse.redirect(url);
   }
 
-  // 2) Custom domain — stamp the request host into a header that
-  //    downstream code can read. Opt-in via CUSTOM_DOMAINS_ENABLED.
-  //    Skip ALL of our OWN hosts (app, admin, and the marketing apex) — only
-  //    a genuine customer white-label domain should be resolved here. The
-  //    marketing-host exclusion matters once APP_HOST moves off the apex,
-  //    otherwise workwrk.com itself gets treated as a custom domain.
+  // 4) Custom domain — stamp the request host into a header downstream code can
+  //    read. Opt-in via CUSTOM_DOMAINS_ENABLED. Skip all of our OWN hosts.
   if (
     customDomainsEnabled &&
     reqHost &&

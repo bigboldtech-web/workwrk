@@ -45,7 +45,6 @@ export function MarketingFooter() {
               ["Features",  "/features"],
               ["Pricing",   "/pricing"],
               ["Changelog", "/changelog"],
-              ["Roadmap",   "/roadmap"],
               ["Demo",      "/demo"],
             ]}
           />

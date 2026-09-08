@@ -254,7 +254,6 @@ function ResourcesMenu() {
     { label: "Help Center", desc: "Guides, troubleshooting, onboarding", href: "/help-center" },
     { label: "Blog",        desc: "Operator playbooks + product news",   href: "/blog" },
     { label: "Changelog",   desc: "What shipped, week by week",          href: "/changelog" },
-    { label: "Roadmap",     desc: "What's next on the build",            href: "/roadmap" },
     { label: "Developers",  desc: "API, SDKs, embeds",                   href: "/developers" },
     { label: "Security",    desc: "How we keep your data safe",          href: "/security" },
     { label: "FAQ",         desc: "Quick answers to common questions",   href: "/faq" },
