@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
+import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 
 // GET: Fetch invitation details by token
 export async function GET(req: NextRequest) {
@@ -47,12 +48,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "All fields are required" }, { status: 400 });
     }
 
-    if (password.length < 8) {
-      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
-    }
-
     const invitation = await prisma.invitation.findUnique({
       where: { token },
+      include: { organization: { select: { settings: true } } },
     });
 
     if (!invitation) {
@@ -65,6 +63,12 @@ export async function POST(req: Request) {
 
     if (invitation.expiresAt < new Date()) {
       return NextResponse.json({ error: "This invitation has expired" }, { status: 400 });
+    }
+
+    // Enforce the inviting org's password policy on the chosen password.
+    const pwError = validatePassword(password, policyFromOrgSettings(invitation.organization?.settings));
+    if (pwError) {
+      return NextResponse.json({ error: pwError }, { status: 400 });
     }
 
     // Check if user already exists in this org

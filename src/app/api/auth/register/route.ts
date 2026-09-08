@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
 import { sendEmail } from "@/lib/email";
 import { welcomeTemplate } from "@/lib/email-templates";
+import { validatePassword } from "@/lib/password-policy";
 
 export async function POST(req: Request) {
   try {
@@ -27,11 +28,10 @@ export async function POST(req: Request) {
       );
     }
 
-    if (password.length < 8) {
-      return NextResponse.json(
-        { error: "Password must be at least 8 characters" },
-        { status: 400 }
-      );
+    // New org has no policy yet → the default (>=8, uppercase, number).
+    const pwError = validatePassword(password);
+    if (pwError) {
+      return NextResponse.json({ error: pwError }, { status: 400 });
     }
 
     // Check if org slug already exists

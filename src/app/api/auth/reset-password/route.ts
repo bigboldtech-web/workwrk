@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
+import { validatePassword, policyFromOrgSettings } from "@/lib/password-policy";
 
 export async function POST(req: Request) {
   try {
@@ -9,10 +10,6 @@ export async function POST(req: Request) {
 
     if (!token || !password) {
       return NextResponse.json({ error: "Token and password are required" }, { status: 400 });
-    }
-
-    if (password.length < 8) {
-      return NextResponse.json({ error: "Password must be at least 8 characters" }, { status: 400 });
     }
 
     // Tokens are stored hashed (see forgot-password) — hash the submitted raw
@@ -32,10 +29,17 @@ export async function POST(req: Request) {
 
     const user = await prisma.user.findFirst({
       where: { email: resetToken.email, deletedAt: null },
+      include: { organization: { select: { settings: true } } },
     });
 
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Enforce the org's password policy on the new password.
+    const pwError = validatePassword(password, policyFromOrgSettings(user.organization?.settings));
+    if (pwError) {
+      return NextResponse.json({ error: pwError }, { status: 400 });
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
