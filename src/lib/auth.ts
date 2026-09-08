@@ -2,9 +2,37 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
+import { verifySync } from "otplib";
 import { prisma } from "./prisma";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
+
+// TOTP verification at login — mirrors the enrolment route (otplib, ±1 step of
+// clock-drift leeway) so a code that enrolled will validate here.
+const MFA_TOLERANCE: [number, number] = [1, 1];
+function verifyTotpCode(code: string, secret: string): boolean {
+  try {
+    return !!verifySync({ token: code, secret, epochTolerance: MFA_TOLERANCE })?.valid;
+  } catch {
+    return false;
+  }
+}
+// Backup codes are one-time: a match is CONSUMED (removed from the stored set)
+// so the same code can never be replayed.
+async function verifyAndConsumeBackupCode(
+  userId: string,
+  code: string,
+  hashed: string[],
+): Promise<boolean> {
+  for (let i = 0; i < hashed.length; i++) {
+    if (await bcrypt.compare(code, hashed[i])) {
+      const remaining = hashed.filter((_, idx) => idx !== i);
+      await prisma.user.update({ where: { id: userId }, data: { mfaBackupCodes: remaining } });
+      return true;
+    }
+  }
+  return false;
+}
 
 // Best-effort client IP from proxy headers (behind nginx: x-forwarded-for).
 function clientIp(req: unknown): string | null {
@@ -43,6 +71,9 @@ const providers = [
     credentials: {
       email: { label: "Email", type: "email" },
       password: { label: "Password", type: "password" },
+      // Second factor (TOTP or a backup code). Sent only on the follow-up
+      // submit after the client is told MFA_REQUIRED.
+      mfaCode: { label: "Authentication code", type: "text" },
     },
     async authorize(credentials, req) {
       if (!credentials?.email || !credentials?.password) {
@@ -76,7 +107,29 @@ const providers = [
         recordLoginFailure(key);
         throw new Error("Invalid credentials");
       }
-      // Correct password — clear the failure counter for this source+account.
+
+      // Second factor. Enforced only when ENFORCE_MFA_AT_LOGIN=true AND this
+      // user enrolled — so the flag OFF is exactly today's behaviour, and even
+      // ON it only affects people who opted into MFA. The password was already
+      // correct here, so requesting the code is NOT a failed attempt; only a
+      // wrong code counts toward the lockout.
+      if (process.env.ENFORCE_MFA_AT_LOGIN === "true" && user.mfaEnabled && user.mfaSecret) {
+        const code = (credentials.mfaCode || "").trim();
+        if (!code) {
+          // Signal the client to collect a code and resubmit email+password+code.
+          throw new Error("MFA_REQUIRED");
+        }
+        const totpOk = verifyTotpCode(code, user.mfaSecret);
+        const backupOk = totpOk
+          ? false
+          : await verifyAndConsumeBackupCode(user.id, code, user.mfaBackupCodes);
+        if (!totpOk && !backupOk) {
+          recordLoginFailure(key);
+          throw new Error("Invalid authentication code");
+        }
+      }
+
+      // Correct password (and second factor, if required) — clear the counter.
       clearLoginFailures(key);
 
       // Offboarding must actually revoke access. Someone removed from the
