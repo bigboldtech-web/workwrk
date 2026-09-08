@@ -244,7 +244,7 @@ export default function IdentitySettingsPage() {
             />
             <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[12.5px] text-zinc-600">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
-              <span>This profile feeds AI KRA &amp; KPI generation. The richer it is, the more relevant the suggested accountabilities.</span>
+              <span>Your <strong>mission</strong> and <strong>values</strong> greet the whole team on the welcome screen every time they open WorkwrK (the mission always, a different value each time). They also ground AI KRA &amp; KPI generation.</span>
             </div>
 
             <TextField
@@ -270,7 +270,7 @@ export default function IdentitySettingsPage() {
             <TextField
               label="Core values" value={state.values} disabled={!canEdit}
               placeholder="Ownership, Craft, Candor"
-              hint="Comma-separated. Used as context for AI-generated KRAs."
+              hint="Comma-separated — add as many as you like. Shown to the team one at a time (rotating) on the welcome screen."
               onChange={(v) => set("values", v)}
             />
           </section>

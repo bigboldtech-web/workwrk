@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { applyDensity, getInitialDensity } from "@/lib/density";
 import { DotsLoaderScreen } from "@/components/brand/dots-loader";
+import { MissionSplash } from "@/components/brand/mission-splash";
 import "./os.css";
 
 export default function DashboardLayout({
@@ -61,6 +62,8 @@ export default function DashboardLayout({
         <TourProvider>
           <OsShell>{children}</OsShell>
           <ScreenProtection />
+          {/* Mission + a rotating value greet the team on each app open */}
+          <MissionSplash />
         </TourProvider>
       </DialogProvider>
     </ToastProvider>
