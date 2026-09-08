@@ -244,7 +244,7 @@ export default function IdentitySettingsPage() {
             />
             <div className="-mt-1 flex items-start gap-1.5 rounded-md bg-[color-mix(in_srgb,var(--os-brand,#0073EA)_8%,transparent)] px-3 py-2 text-[12.5px] text-zinc-600">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--os-brand,#0073EA)]" />
-              <span>Your <strong>mission</strong> and <strong>values</strong> become the loading screen: each time a page loads, the team sees one of them (mission and values take turns) for a couple of seconds. They also ground AI KRA &amp; KPI generation.</span>
+              <span>Your <strong>mission</strong> and <strong>values</strong> become the loading screen: when the app opens (and periodically as people work), the team sees one of them — mission and values take turns — for a moment. They also ground AI KRA &amp; KPI generation.</span>
             </div>
 
             <TextField
@@ -385,7 +385,7 @@ function ValuesField({
           </button>
         </div>
       )}
-      <p className="mt-1 text-[12px] text-zinc-400">Add as many as you like. Mission + values take turns as the loading screen everyone sees on each page.</p>
+      <p className="mt-1 text-[12px] text-zinc-400">Add as many as you like. Mission + values take turns as the loading screen the team sees when they open the app.</p>
     </div>
   );
 }

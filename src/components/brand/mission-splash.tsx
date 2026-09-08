@@ -16,13 +16,17 @@ type Culture = { orgName: string; logo: string | null; mission: string; values: 
 type Item = { kind: "mission" | "value"; text: string; color: string };
 
 const VALUE_COLORS = ["#579BFC", "#00C875", "#FFCB00", "#E2445C"]; // YBRG accents
-const HOLD_MS = 2000; // how long the screen stays up per load
+const HOLD_MS = 1600;              // how long the screen stays up per show (snappy)
 const FADE_MS = 380;
+const NAV_THROTTLE_MS = 10 * 60 * 1000; // during a session, re-show on nav at most this often
 const IDX_KEY = "wwk_mission_rotate_idx";
 
 // Fetched once per full app load; reused across client navigations so nav is
-// instant (no per-nav round-trip).
+// instant (no per-nav round-trip). `lastShownAt` throttles navigation shows so
+// people see the mission on every app open + periodically as they work — never
+// a gate on every click.
 let cultureCache: Culture | null | undefined;
+let lastShownAt = 0;
 
 function buildPool(c: Culture): Item[] {
   const pool: Item[] = [];
@@ -59,6 +63,7 @@ export function MissionSplash() {
     const pool = poolRef.current;
     if (!pool.length) return;
     clearTimers();
+    lastShownAt = Date.now();
     setItem(pool[nextIndex(pool.length)]);
     setPhase("in");
     timers.current.push(setTimeout(() => setPhase("out"), HOLD_MS));
@@ -86,11 +91,13 @@ export function MissionSplash() {
     return () => { active = false; clearTimers(); };
   }, [showNext]);
 
-  // Every navigation shows the next item (skip the initial render — handled above).
+  // Navigation re-shows the next item, but at most once per NAV_THROTTLE_MS so
+  // it's periodic reinforcement, not a gate on every click. (Initial app-open
+  // show is handled above and always fires.)
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    if (readyRef.current) showNext();
+    if (readyRef.current && Date.now() - lastShownAt >= NAV_THROTTLE_MS) showNext();
   }, [pathname, showNext]);
 
   useEffect(() => {
