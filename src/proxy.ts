@@ -61,6 +61,31 @@ const SHARED_PREFIXES = new Set([
   "opengraph-image", "icon", "apple-icon", "twitter-image",
 ]);
 
+// App pages a signed-OUT visitor must still reach (they ARE app routes, but the
+// edge auth gate must never bounce them — that would trap a user on the way to
+// signing in). Everything else under APP_PREFIXES needs a session.
+const AUTH_PUBLIC_PREFIXES = new Set([
+  "login", "register", "forgot-password", "reset-password", "verify-email",
+]);
+function isAuthPublicPath(path: string): boolean {
+  return AUTH_PUBLIC_PREFIXES.has(firstSeg(path));
+}
+
+// Does the request carry a NextAuth session cookie? We check PRESENCE only —
+// never decode, never touch the secret — so a genuinely signed-in browser
+// (which always sends this cookie) can never be locked out by the edge gate.
+// Covers both the secure-prefixed prod name and the plain dev name, plus the
+// chunked `.0`/`.1` variants NextAuth uses for oversized tokens.
+function hasSessionCookie(req: NextRequest): boolean {
+  const bases = ["__Secure-next-auth.session-token", "next-auth.session-token"];
+  for (const c of req.cookies.getAll()) {
+    for (const b of bases) {
+      if (c.name === b || c.name.startsWith(b + ".")) return true;
+    }
+  }
+  return false;
+}
+
 function firstSeg(path: string): string {
   return path.split("/")[1] ?? "";
 }
@@ -151,6 +176,27 @@ export function proxy(req: NextRequest) {
   if (appHost && hostMatches(reqHost, appHost) && path === "/") {
     const url = req.nextUrl.clone();
     url.pathname = "/today";
+    return NextResponse.redirect(url);
+  }
+
+  // 3.5) Edge auth gate — opt-in via AUTH_EDGE_GATE. Send an unauthenticated
+  //      request for a protected app page straight to /login at the edge, BEFORE
+  //      the app bundle ships and flashes a loader (the dashboard layout gates
+  //      client-side today, so the whole shell loads first). Presence-only cookie
+  //      check: a valid session always carries the cookie, so this can't lock a
+  //      real user out; a stale/forged cookie slips past here but is still
+  //      rejected by the session callback downstream (defense in depth).
+  if (
+    process.env.AUTH_EDGE_GATE === "true" &&
+    isAppPath(path) &&
+    !isAuthPublicPath(path) &&
+    !hasSessionCookie(req)
+  ) {
+    const callbackUrl = path + (req.nextUrl.search || "");
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = "";
+    url.searchParams.set("callbackUrl", callbackUrl);
     return NextResponse.redirect(url);
   }
 
