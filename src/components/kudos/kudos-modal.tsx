@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Search, Heart, Sparkles } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
+import { useCultureValues } from "@/lib/use-culture";
 
 interface Person {
   id: string;
@@ -22,7 +23,9 @@ interface Person {
   department?: { name: string } | null;
 }
 
-const COMPANY_VALUES = [
+// Fallback list only — used until the org has set its own values in
+// Settings → Identity. Recognition should reinforce the COMPANY's real values.
+const FALLBACK_VALUES = [
   "Customer First",
   "Ownership",
   "Teamwork",
@@ -51,6 +54,10 @@ export function KudosModal({
   const [sending, setSending] = useState(false);
   const [loadingPeople, setLoadingPeople] = useState(false);
   const { success: toastSuccess, error: toastError } = useToast();
+  // The company's real values (set in Settings → Identity); falls back to a
+  // generic list only until they're configured.
+  const orgValues = useCultureValues();
+  const values = orgValues.length ? orgValues : FALLBACK_VALUES;
 
   const fetchPeople = useCallback(async () => {
     setLoadingPeople(true);
@@ -216,7 +223,7 @@ export function KudosModal({
             <div className="space-y-2">
               <Label>Company Value <span className="text-muted text-xs font-normal">(optional)</span></Label>
               <div className="flex flex-wrap gap-2">
-                {COMPANY_VALUES.map((value) => (
+                {values.map((value) => (
                   <Badge
                     key={value}
                     variant={selectedValue === value ? "default" : "outline"}

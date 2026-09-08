@@ -38,6 +38,20 @@ export function nextRotateIndex(len: number): number {
   } catch { return 0; }
 }
 
+/** The org's configured values (empty until loaded / if none set). For places
+ *  that offer the values as choices — e.g. tagging a kudos with a value lived. */
+export function useCultureValues(): string[] {
+  const [values, setValues] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    void fetchCulture().then((c) => {
+      if (active && c) setValues(c.values.filter((v) => v && v.trim()).map((v) => v.trim()));
+    });
+    return () => { active = false; };
+  }, []);
+  return values;
+}
+
 /** A single rotating culture line for a loading state — a VALUE by default
  *  (short, tasteful); pass includeMission to also draw the (longer) mission.
  *  Empty string until culture loads, and stays empty if none is configured so

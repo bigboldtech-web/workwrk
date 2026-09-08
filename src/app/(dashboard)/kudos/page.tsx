@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ValueLoader } from "@/components/brand/value-loader";
+import { useCultureValues } from "@/lib/use-culture";
 import Link from "next/link";
 import {
   Heart, Plus, Hash, ChevronRight, Trophy, Sparkles, Users, Calendar as CalendarIcon,
@@ -69,6 +70,7 @@ export default function KudosPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [activeValue, setActiveValue] = useState<string | null>(null);
+  const orgValues = useCultureValues();
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -195,7 +197,7 @@ export default function KudosPage() {
             iconGradient={GRAD.redPink}
             title="No kudos yet"
             subtitle="Recognize a teammate's work. Pick a company value to reinforce the behavior you want to celebrate."
-            chips={["Customer First", "Ownership", "Teamwork", "Boldness"]}
+            chips={orgValues.length ? orgValues.slice(0, 5) : ["Customer First", "Ownership", "Teamwork", "Boldness"]}
             cta="Send kudos"
           />
         ) : filtered.length === 0 ? (
