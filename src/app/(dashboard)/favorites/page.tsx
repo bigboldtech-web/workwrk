@@ -12,6 +12,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Star, MessageSquare, ChevronRight, Pin, PinOff, Clock, Sparkles,
@@ -103,7 +104,7 @@ export default function FavoritesPage() {
       {loadError ? (
         <OsEmptyView Icon={Star} iconGradient={GRAD.redPink} title="Couldn't load favorites" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
       ) : rows === null ? (
-        <div className="fav__loading">Loading favorites…</div>
+        <div className="fav__loading"><ValueLoader size={32} /></div>
       ) : rows.length === 0 ? (
         <OsEmptyView Icon={Star} iconGradient={GRAD.yellowOrange} title="No favorites yet" subtitle="Pin a Sidekick chat or star a board item to keep it one click away. Cross-module starring is shipping soon." chips={["Pinned chats", "Recent", "Quick access"]} cta="Open Sidekick" onCta={() => askSidekick()} />
       ) : (

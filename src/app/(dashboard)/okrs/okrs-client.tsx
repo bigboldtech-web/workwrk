@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -223,7 +224,7 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
       {loadError ? (
         <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load goals" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => { setLoadError(null); void load(); }} />
       ) : okrs === null ? (
-        <div className="okrs__loading">Loading goals…</div>
+        <div className="okrs__loading"><ValueLoader size={32} /></div>
       ) : stats.total === 0 ? (
         mine ? (
           <OsEmptyView Icon={Trophy} iconGradient={BRAND} title="No goals assigned to you" subtitle="Goals you own or contribute to show up here. Create one, or clear the filter to browse the whole org." cta="New goal" onCta={() => newGoal("INDIVIDUAL")} />

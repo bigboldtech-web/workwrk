@@ -1,14 +1,16 @@
-// Route-transition loading state for every dashboard page. Renders inside
-// the OsShell canvas slot (rail + sidebar stay mounted), so the os.css
-// theme catchalls apply. Do NOT use DotsLoaderScreen here — its
-// min-h-screen + hardcoded background would paint over the shell.
+// Route-transition loading state for every dashboard page — shown on every
+// navigation while the target page loads. Uses ValueLoader so each transition
+// surfaces a company value (falls back to plain dots when none is set). Renders
+// inside the OsShell canvas slot (rail + sidebar stay mounted), so the os.css
+// theme catchalls apply. Do NOT use a min-h-screen full loader here — it would
+// paint over the shell.
 
-import { DotsLoader } from "@/components/brand/dots-loader";
+import { ValueLoader } from "@/components/brand/value-loader";
 
 export default function Loading() {
   return (
     <div className="min-h-full flex items-center justify-center py-24">
-      <DotsLoader size={40} label="Loading" />
+      <ValueLoader size={40} />
     </div>
   );
 }

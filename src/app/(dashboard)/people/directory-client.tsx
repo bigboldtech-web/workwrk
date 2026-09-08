@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Users, Search, Briefcase, MapPin,
@@ -310,7 +311,7 @@ export default function PeopleDirectoryPage() {
         {loadError ? (
           <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-sm text-zinc-500">Couldn&rsquo;t load people — {loadError}</div>
         ) : users === null ? (
-          <div className="text-sm text-zinc-400 py-8 text-center">Loading directory…</div>
+          <div className="py-8 flex items-center justify-center"><ValueLoader size={30} /></div>
         ) : filter === "former" ? (
           formerFiltered.length === 0 ? (
             <div className="border border-zinc-200 rounded-xl px-6 py-10 text-center text-sm text-zinc-500">

@@ -15,6 +15,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -167,7 +168,7 @@ export default function WhiteboardsPage() {
       {loadError ? (
         <OsEmptyView Icon={Frame} iconGradient={GRAD.redPink} title="Couldn't load canvases" subtitle={`API error: ${loadError}`} cta="Retry" />
       ) : boards === null ? (
-        <div className="wb__loading">Loading canvases…</div>
+        <div className="wb__loading"><ValueLoader size={32} /></div>
       ) : total === 0 ? (
         <OsEmptyView Icon={Frame} iconGradient="linear-gradient(135deg, #a78b80, #8e7165)" title="Create your first Canvas" subtitle="Brainstorm, diagram, plan and more! A freeform canvas for you and your team." cta="New canvas" />
       ) : filtered.length === 0 ? (

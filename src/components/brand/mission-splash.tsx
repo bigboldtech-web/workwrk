@@ -11,21 +11,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { DotsLoader } from "./dots-loader";
+import { fetchCulture, nextRotateIndex, type Culture } from "@/lib/use-culture";
 
-type Culture = { orgName: string; logo: string | null; mission: string; values: string[] };
 type Item = { kind: "mission" | "value"; text: string; color: string };
 
 const VALUE_COLORS = ["#579BFC", "#00C875", "#FFCB00", "#E2445C"]; // YBRG accents
 const HOLD_MS = 1600;              // how long the screen stays up per show (snappy)
 const FADE_MS = 380;
 const NAV_THROTTLE_MS = 10 * 60 * 1000; // during a session, re-show on nav at most this often
-const IDX_KEY = "wwk_mission_rotate_idx";
 
-// Fetched once per full app load; reused across client navigations so nav is
-// instant (no per-nav round-trip). `lastShownAt` throttles navigation shows so
-// people see the mission on every app open + periodically as they work — never
-// a gate on every click.
-let cultureCache: Culture | null | undefined;
+// `lastShownAt` throttles navigation shows so people see the mission on every
+// app open + periodically as they work — never a gate on every click. Culture
+// itself is fetched once via the shared cache in @/lib/use-culture.
 let lastShownAt = 0;
 
 function buildPool(c: Culture): Item[] {
@@ -33,14 +30,6 @@ function buildPool(c: Culture): Item[] {
   if (c.mission) pool.push({ kind: "mission", text: c.mission, color: "#ffffff" });
   c.values.forEach((v, i) => pool.push({ kind: "value", text: v, color: VALUE_COLORS[i % VALUE_COLORS.length] }));
   return pool;
-}
-function nextIndex(len: number): number {
-  if (len <= 0) return 0;
-  try {
-    const cur = parseInt(window.localStorage.getItem(IDX_KEY) || "0", 10) || 0;
-    window.localStorage.setItem(IDX_KEY, String((cur + 1) % 1_000_000));
-    return cur % len;
-  } catch { return 0; }
 }
 
 export function MissionSplash() {
@@ -64,30 +53,22 @@ export function MissionSplash() {
     if (!pool.length) return;
     clearTimers();
     lastShownAt = Date.now();
-    setItem(pool[nextIndex(pool.length)]);
+    setItem(pool[nextRotateIndex(pool.length)]);
     setPhase("in");
     timers.current.push(setTimeout(() => setPhase("out"), HOLD_MS));
     timers.current.push(setTimeout(() => setPhase("idle"), HOLD_MS + FADE_MS));
   }, []);
 
-  // Load culture once, then show the first item.
+  // Load culture once (shared cache), then show the first item.
   useEffect(() => {
     let active = true;
-    const apply = (c: Culture) => {
-      if (!active) return;
+    void fetchCulture().then((c) => {
+      if (!active || !c) return;
       setMeta({ orgName: c.orgName, logo: c.logo });
       poolRef.current = buildPool(c);
       readyRef.current = true;
       showNext();
-    };
-    if (cultureCache !== undefined) {
-      if (cultureCache) apply(cultureCache);
-      return () => { active = false; clearTimers(); };
-    }
-    fetch("/api/organization/culture")
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("load"))))
-      .then((j) => { const c: Culture = j.data ?? j; cultureCache = c; apply(c); })
-      .catch(() => { cultureCache = null; });
+    });
     return () => { active = false; clearTimers(); };
   }, [showNext]);
 

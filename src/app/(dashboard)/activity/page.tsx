@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Activity, FormInput, Table as TableIcon, LayoutGrid, FileText, HardDrive,
@@ -174,7 +175,7 @@ export default function ActivityPage() {
       {loadError ? (
         <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
       ) : rows === null ? (
-        <div className="actfeed__loading">Loading activity…</div>
+        <div className="actfeed__loading"><ValueLoader size={32} /></div>
       ) : rows.length === 0 ? (
         <OsEmptyView Icon={Activity} iconGradient={GRAD.orangePink} title="No activity yet" subtitle="As your team uses WorkwrK — creating tasks, posting updates, moving deals — every action shows up here in real time." chips={["Tasks", "Deals", "Tickets", "Onboarding"]} cta="Explore modules" />
       ) : (

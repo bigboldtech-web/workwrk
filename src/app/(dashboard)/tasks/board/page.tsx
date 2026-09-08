@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ValueLoader } from "@/components/brand/value-loader";
 import {
   KanbanSquare, Plus, Flame, Loader2, Clock, UserMinus,
   CheckSquare, Activity,
@@ -177,7 +178,7 @@ export default function SprintBoardPage() {
       {loadError ? (
         <OsEmptyView Icon={KanbanSquare} iconGradient={GRAD.redPink} title="Couldn't load board" subtitle={`API error: ${loadError}`} cta="Retry" />
       ) : tasks === null ? (
-        <div className="spbd__loading">Loading board…</div>
+        <div className="spbd__loading"><ValueLoader size={32} /></div>
       ) : (
         <div className="spbd">
           {/* Workload heatmap */}
