@@ -34,6 +34,26 @@ const MARKETING_PREFIXES = new Set([
   "industries", "partners", "pricing", "privacy", "security", "terms",
 ]);
 
+// Pages that belong to the APP (the product host) — the (dashboard), (auth) and
+// onboarding route segments. ONLY these redirect off the marketing host; an
+// unknown path is NOT assumed to be an app route, so a typo / deleted page on
+// workwrk.com shows the marketing 404 instead of being bounced to app.
+const APP_PREFIXES = new Set([
+  // (dashboard)
+  "account", "activity", "agents", "agreements", "ai", "analytics", "announcements",
+  "assets", "assigned-comments", "automation", "autopilot", "boards", "build",
+  "calendar", "candor", "canvas", "clock", "dashboard", "docs", "everything",
+  "favorites", "files", "folders", "forms", "ideas", "imports", "inbox",
+  "integrations", "item", "kra-kpi", "kudos", "library", "marketing", "me",
+  "meetings", "notetaker", "okrs", "organization", "people", "planner", "policies",
+  "process-runs", "reviews", "settings", "sidekick", "sops", "spaces", "store",
+  "surveys", "tables", "talent", "tasks", "team", "templates", "timesheets",
+  "tlk", "today", "tools", "trash",
+  // (auth) + onboarding
+  "login", "register", "forgot-password", "reset-password", "verify-email",
+  "welcome", "onboard", "setup",
+]);
+
 // Paths that must resolve on EITHER host and are never redirected: the API,
 // public token links (share/sign/meet/run), embeds, and framework/SEO files.
 const SHARED_PREFIXES = new Set([
@@ -51,6 +71,9 @@ function isSharedPath(path: string): boolean {
 function isMarketingPath(path: string): boolean {
   if (path === "/") return true;
   return MARKETING_PREFIXES.has(firstSeg(path));
+}
+function isAppPath(path: string): boolean {
+  return APP_PREFIXES.has(firstSeg(path));
 }
 
 function hostMatches(reqHost: string, configured: string): boolean {
@@ -111,8 +134,10 @@ export function proxy(req: NextRequest) {
     const onMarketing = hostMatches(reqHost, marketingHost);
     const onApp = hostMatches(reqHost, appHost);
 
-    // An app route that landed on the marketing host → send it to the app host.
-    if (onMarketing && !isMarketingPath(path)) {
+    // A KNOWN app route that landed on the marketing host → send it to the app
+    // host. Unknown paths are left to the marketing host (its own 404), so a
+    // typo or removed page never bounces the visitor into the app.
+    if (onMarketing && isAppPath(path)) {
       return redirectToHost(req, appHost);
     }
     // A marketing route that landed on the app host → send it to marketing.
