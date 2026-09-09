@@ -13186,6 +13186,35 @@ table.os-tbl {
 .acs__policy-value { color: var(--os-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
 .acs__policy-value.is-on { color: var(--os-c-green); }
 
+/* Account · Security — sessions + activity (added with self-service controls) */
+.acs__sessions { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.acs__sessions-copy { min-width: 0; font-size: 12.5px; color: var(--os-ink-3); line-height: 1.5; }
+.acs__danger-btn {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  height: 34px; padding: 0 14px; border-radius: 9px; cursor: pointer;
+  font-size: 13px; font-weight: 700; font-family: var(--os-font);
+  color: var(--os-c-red);
+  background: color-mix(in srgb, var(--os-c-red) 6%, var(--os-surface-1));
+  border: 1px solid color-mix(in srgb, var(--os-c-red) 30%, var(--os-line));
+}
+.acs__danger-btn:hover { background: color-mix(in srgb, var(--os-c-red) 12%, var(--os-surface-1)); }
+.acs__danger-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.acs__danger-btn svg { width: 13px; height: 13px; }
+.acs__act { display: flex; flex-direction: column; }
+.acs__act-row { display: grid; grid-template-columns: 30px 1fr auto; gap: 11px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--os-line); }
+.acs__act-row:last-child { border-bottom: none; }
+.acs__act-icon {
+  width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--os-surface-1); border: 1px solid var(--os-line); color: var(--os-ink-2);
+}
+.acs__act-icon.is-warn { color: var(--os-c-orange); background: color-mix(in srgb, var(--os-c-orange) 8%, var(--os-surface-1)); border-color: color-mix(in srgb, var(--os-c-orange) 26%, var(--os-line)); }
+.acs__act-icon svg { width: 14px; height: 14px; }
+.acs__act-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.acs__act-desc { font-size: 13.5px; font-weight: 600; color: var(--os-ink); }
+.acs__act-sub { font-size: 12px; color: var(--os-ink-3); font-variant-numeric: tabular-nums; }
+.acs__act-time { font-size: 12px; color: var(--os-ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.acs__act-empty { padding: 18px 4px; font-size: 13px; color: var(--os-ink-3); text-align: center; }
+
 /* Assets — replace inline header with OsTitleBar; tweak ast wrapper */
 .ast__head-actions { display: flex; gap: 6px; align-items: center; }
 .ast__nav-link {

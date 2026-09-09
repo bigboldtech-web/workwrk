@@ -6,6 +6,15 @@ import { verifySync } from "otplib";
 import { prisma } from "./prisma";
 import type { AccessLevel } from "@/generated/prisma";
 import { throttleKey, loginLockRemaining, recordLoginFailure, clearLoginFailures } from "./login-throttle";
+import { logActivity } from "./activity";
+
+// User-agent off NextAuth's internal request (headers is a plain object here).
+function userAgentOf(req: unknown): string | null {
+  const h = (req as { headers?: Record<string, string | string[] | undefined> } | undefined)?.headers;
+  const raw = h?.["user-agent"];
+  const val = Array.isArray(raw) ? raw[0] : raw;
+  return val ?? null;
+}
 
 // TOTP verification at login — mirrors the enrolment route (otplib, ±1 step of
 // clock-drift leeway) so a code that enrolled will validate here.
@@ -169,6 +178,18 @@ const providers = [
         throw new Error("This workspace is scheduled for deletion. It's recoverable for 30 days — contact WorkwrK support to restore it.");
       }
 
+      // Security activity: record the successful sign-in now that every check
+      // (password, second factor, account + workspace status) has passed.
+      void logActivity({
+        type: "login",
+        actorId: user.id,
+        organizationId: org.id,
+        description: "Signed in",
+        ipAddress: clientIp(req),
+        userAgent: userAgentOf(req),
+        severity: "info",
+      });
+
       return {
         id: user.id,
         email: user.email,
@@ -231,6 +252,12 @@ const crossSubdomainCookies: NextAuthOptions["cookies"] = COOKIE_DOMAIN
 export const authOptions: NextAuthOptions = {
   session: {
     strategy: "jwt",
+    // ~12h idle timeout. The token lives 12h and is refreshed on activity
+    // (updateAge), so an active user rolls forward and only a session left
+    // idle for 12h expires. Replaces the NextAuth 30-day default, which had
+    // no idle window at all.
+    maxAge: 12 * 60 * 60,
+    updateAge: 30 * 60,
   },
   cookies: crossSubdomainCookies,
   pages: {
@@ -335,6 +362,10 @@ export const authOptions: NextAuthOptions = {
           token.organizationId = fresh.organizationId;
           token.organizationName = fresh.organization.name;
           token.accessLevel = fresh.accessLevel;
+          // Sync tokenVersion too: a self password-change bumps it and then
+          // calls session.update(), so THIS session (the one that made the
+          // change) stays valid while every OTHER session is revoked.
+          token.tokenVersion = fresh.tokenVersion;
         }
       }
       return token;
@@ -365,11 +396,21 @@ export const authOptions: NextAuthOptions = {
     // them (another device, a copied cookie, a shared machine) is invalidated
     // on its next re-check — not just the cookie cleared in this browser.
     async signOut({ token }) {
-      const id = (token as { id?: string } | null)?.id;
+      const t = token as { id?: string; organizationId?: string } | null;
+      const id = t?.id;
       if (id) {
         await prisma.user
           .update({ where: { id }, data: { tokenVersion: { increment: 1 } } })
           .catch(() => {});
+        if (t?.organizationId) {
+          void logActivity({
+            type: "logout",
+            actorId: id,
+            organizationId: t.organizationId,
+            description: "Signed out",
+            severity: "info",
+          });
+        }
       }
     },
   },

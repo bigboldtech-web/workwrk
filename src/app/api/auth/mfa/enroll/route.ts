@@ -5,9 +5,12 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail,
   getUserId,
+  getOrgId,
   jsonError,
   jsonSuccess,
 } from "@/lib/api-helpers";
+import { logAuditEvent } from "@/lib/activity";
+import { ipFromRequest } from "@/lib/rate-limit-memory";
 
 // One 30-second step of leeway on either side to absorb clock drift.
 const VERIFY_TOLERANCE: [number, number] = [1, 1];
@@ -92,6 +95,16 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  void logAuditEvent({
+    type: "mfa_enabled",
+    actorId: userId,
+    organizationId: getOrgId(session),
+    description: "Two-factor authentication enabled",
+    ipAddress: ipFromRequest(req),
+    userAgent: req.headers.get("user-agent"),
+    severity: "warning",
+  });
+
   return jsonSuccess({
     enabled: true,
     backupCodes,
@@ -129,6 +142,17 @@ export async function DELETE(req: NextRequest) {
     where: { id: userId },
     data: { mfaEnabled: false, mfaSecret: null, mfaBackupCodes: [] },
   });
+
+  void logAuditEvent({
+    type: "mfa_disabled",
+    actorId: userId,
+    organizationId: getOrgId(session),
+    description: "Two-factor authentication disabled",
+    ipAddress: ipFromRequest(req),
+    userAgent: req.headers.get("user-agent"),
+    severity: "warning",
+  });
+
   return jsonSuccess({ disabled: true });
 }
 
