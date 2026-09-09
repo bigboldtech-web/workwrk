@@ -35,13 +35,21 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (mfaRequired && !mfaCode.trim()) {
+      setError("Enter the code from your authenticator app.");
+      return;
+    }
     setLoading(true);
     setError("");
+    // IMPORTANT: only include mfaCode when we actually have one. Passing
+    // `mfaCode: undefined` to signIn is NOT the same as omitting it —
+    // next-auth serialises the options via URLSearchParams, which turns
+    // undefined into the literal string "undefined", and the server would
+    // then treat that as a (wrong) code instead of "no code yet".
     const result = await signIn("credentials", {
       email,
       password,
-      // Only sent on the second step, once the server has asked for it.
-      mfaCode: mfaRequired ? mfaCode.trim() : undefined,
+      ...(mfaRequired ? { mfaCode: mfaCode.trim() } : {}),
       redirect: false,
     });
 

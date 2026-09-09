@@ -123,7 +123,11 @@ const providers = [
       // correct here, so requesting the code is NOT a failed attempt; only a
       // wrong code counts toward the lockout.
       if (process.env.ENFORCE_MFA_AT_LOGIN === "true" && user.mfaEnabled && user.mfaSecret) {
-        const code = (credentials.mfaCode || "").trim();
+        // Guard against a client that serialised a missing code as the literal
+        // "undefined"/"null" string (e.g. signIn passed mfaCode: undefined) —
+        // treat those as "no code yet", not as a wrong code.
+        const rawCode = (credentials.mfaCode || "").trim();
+        const code = rawCode === "undefined" || rawCode === "null" ? "" : rawCode;
         if (!code) {
           // Signal the client to collect a code and resubmit email+password+code.
           throw new Error("MFA_REQUIRED");
