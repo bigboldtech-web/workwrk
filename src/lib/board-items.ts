@@ -57,6 +57,7 @@ function rowFrom(it: {
   title: string;
   status: string | null;
   ownerId: string | null;
+  assigneeIds?: string[];
   groupKey: string | null;
   position: number;
   metadata: unknown;
@@ -82,6 +83,7 @@ function rowFrom(it: {
     title: it.title,
     status: it.status,
     ownerId: it.ownerId,
+    assigneeIds: it.assigneeIds ?? (it.ownerId ? [it.ownerId] : []),
     groupKey: it.groupKey,
     position: it.position,
     metadata: (it.metadata as Record<string, unknown>) ?? {},
@@ -353,6 +355,8 @@ export interface CreateBoardItemInput {
   title: string;
   status?: string;
   ownerId?: string;
+  /** Multi-assignee. When given, wins over ownerId; ownerId is synced to [0]. */
+  assigneeIds?: string[];
   groupKey?: string;
   metadata?: Record<string, unknown>;
   /** Phase 58 dates — ISO strings or Date; coerced before Prisma. */
@@ -372,6 +376,23 @@ export interface CreateBoardItemInput {
 }
 
 /**
+ * Normalize an assignee set: dedupe + drop empties, and keep ownerId (the
+ * primary/DRI) in sync as the FIRST assignee. If assigneeIds isn't given we
+ * fall back to the legacy single ownerId, so old callers still work.
+ */
+export function resolveAssignees(
+  assigneeIds: string[] | undefined,
+  ownerId: string | null | undefined,
+): { assigneeIds: string[]; ownerId: string | null } {
+  let ids = Array.isArray(assigneeIds)
+    ? assigneeIds.filter((x): x is string => typeof x === "string" && x.length > 0)
+    : undefined;
+  if (ids === undefined) ids = ownerId ? [ownerId] : [];
+  ids = Array.from(new Set(ids));
+  return { assigneeIds: ids, ownerId: ids[0] ?? null };
+}
+
+/**
  * Append a new item to the end of a board. Position = max + 1024 to
  * preserve room for fractional inserts later. Generates a synthetic
  * itemId so the unique (itemType, itemId) constraint holds.
@@ -379,6 +400,8 @@ export interface CreateBoardItemInput {
 export async function createBoardItem(input: CreateBoardItemInput): Promise<BoardItemRow> {
   const trimmed = input.title.trim();
   if (!trimmed) throw new Error("Title is required");
+
+  const createAssignees = resolveAssignees(input.assigneeIds, input.ownerId);
 
   // A subtask's parent MUST live on the same board (and org). Without this
   // check a caller could pass any item id and create a cross-board parent/
@@ -416,7 +439,8 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
       itemId: id,
       title: trimmed,
       status: input.status ?? "TO_DO",
-      ownerId: input.ownerId ?? null,
+      ownerId: createAssignees.ownerId,
+      assigneeIds: createAssignees.assigneeIds,
       groupKey: input.groupKey ?? null,
       position,
       startAt: input.startAt == null ? null : new Date(input.startAt),
@@ -431,9 +455,9 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
   const tags = input.tagIds?.length
     ? await syncItemTags(input.organizationId, created.id, input.tagIds, input.actorId ?? null)
     : [];
-  const owner = input.ownerId
+  const owner = createAssignees.ownerId
     ? await prisma.user.findUnique({
-        where: { id: input.ownerId },
+        where: { id: createAssignees.ownerId },
         select: { id: true, firstName: true, lastName: true, avatar: true },
       })
     : null;
@@ -453,6 +477,8 @@ export interface UpdateBoardItemInput {
   title?: string;
   status?: string | null;
   ownerId?: string | null;
+  /** Multi-assignee. When present it wins; ownerId is synced to [0]. */
+  assigneeIds?: string[];
   groupKey?: string | null;
   position?: number;
   metadata?: Record<string, unknown>;
@@ -491,7 +517,16 @@ export async function updateBoardItem(
     data.title = trimmed;
   }
   if (patch.status !== undefined) data.status = patch.status;
-  if (patch.ownerId !== undefined) data.ownerId = patch.ownerId;
+  // Assignees — assigneeIds wins; either path keeps ownerId synced to [0].
+  if (patch.assigneeIds !== undefined) {
+    const a = resolveAssignees(patch.assigneeIds, patch.ownerId);
+    data.assigneeIds = a.assigneeIds;
+    data.ownerId = a.ownerId;
+  } else if (patch.ownerId !== undefined) {
+    const a = resolveAssignees(undefined, patch.ownerId);
+    data.assigneeIds = a.assigneeIds;
+    data.ownerId = a.ownerId;
+  }
   if (patch.groupKey !== undefined) data.groupKey = patch.groupKey;
   if (patch.position !== undefined) data.position = patch.position;
   if (patch.metadata !== undefined) data.metadata = patch.metadata as object;

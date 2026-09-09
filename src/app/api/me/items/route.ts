@@ -26,7 +26,8 @@ export async function GET(req: Request) {
   const raw = await prisma.item.findMany({
     where: {
       organizationId: u.organizationId,
-      ownerId: u.id,
+      // Any task I'm an assignee of — primary owner OR one of several assignees.
+      OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
       archivedAt: null,
     },
     select: {

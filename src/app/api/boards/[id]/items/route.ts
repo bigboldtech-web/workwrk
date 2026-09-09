@@ -37,6 +37,7 @@ const createSchema = z.object({
   title: z.string().min(1).max(280),
   status: z.string().max(40).optional(),
   ownerId: z.string().min(1).nullable().optional(),
+  assigneeIds: z.array(z.string().min(1)).max(50).optional(),
   groupKey: z.string().max(80).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   // Phase 58 — optional scheduling on create.
@@ -78,6 +79,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       title: parsed.data.title,
       status: parsed.data.status,
       ownerId: parsed.data.ownerId ?? undefined,
+      assigneeIds: parsed.data.assigneeIds,
       groupKey: parsed.data.groupKey,
       metadata: parsed.data.metadata,
       startAt: parsed.data.startAt ?? null,

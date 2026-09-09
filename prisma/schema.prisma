@@ -4429,7 +4429,11 @@ model Item {
   itemId         String
   title          String
   status         String?
+  // Primary assignee (the DRI) — kept in sync with assigneeIds[0] so all the
+  // existing ownerId reads (board rows, My Work, KRA effort, scores) keep
+  // working. assigneeIds is the full set for multi-assignee tasks.
   ownerId        String?
+  assigneeIds    String[]     @default([])
   groupKey       String?
   position       Float        @default(0)
   archivedAt     DateTime?
@@ -4483,6 +4487,7 @@ model Item {
   @@index([itemType])
   @@index([itemTypeId])
   @@index([ownerId])
+  @@index([assigneeIds], type: Gin)
 }
 
 enum WorkType {

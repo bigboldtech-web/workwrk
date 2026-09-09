@@ -172,7 +172,10 @@ export interface BoardItemRow {
   id: string;
   title: string;
   status: string | null;
+  /** Primary assignee (DRI) — always equals assigneeIds[0]. */
   ownerId: string | null;
+  /** Multi-assignee: the full set of assignee user ids (incl. the primary). */
+  assigneeIds: string[];
   groupKey: string | null;
   position: number;
   metadata: Record<string, unknown>;

@@ -24,10 +24,12 @@ async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel:
   if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  // The assignee (owner) of a task always reaches it — and can update it —
-  // even without membership of its List. Assigning a task grants access to
-  // that task, so an assignee is never locked out of their own work.
-  if (item.ownerId === c.userId) return { item, canEdit: true };
+  // Any assignee (primary owner OR anyone in assigneeIds) always reaches the
+  // task — and can update it — even without membership of its List. Assigning
+  // a task grants access to it, so no assignee is locked out of their own work.
+  if (item.ownerId === c.userId || item.assigneeIds.includes(c.userId)) {
+    return { item, canEdit: true };
+  }
   // Otherwise gate via the parent Board (which composes Space + visibility).
   const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
   if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
@@ -194,6 +196,7 @@ const patchSchema = z.object({
   title: z.string().min(1).max(280).optional(),
   status: z.string().max(40).nullable().optional(),
   ownerId: z.string().min(1).nullable().optional(),
+  assigneeIds: z.array(z.string().min(1)).max(50).optional(),
   groupKey: z.string().max(80).nullable().optional(),
   position: z.number().finite().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
