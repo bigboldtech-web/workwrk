@@ -24,7 +24,11 @@ async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel:
   if (!item || item.organizationId !== c.organizationId) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
-  // Phase 23b — gate via parent Board (which composes Space + Board.visibility).
+  // The assignee (owner) of a task always reaches it — and can update it —
+  // even without membership of its List. Assigning a task grants access to
+  // that task, so an assignee is never locked out of their own work.
+  if (item.ownerId === c.userId) return { item, canEdit: true };
+  // Otherwise gate via the parent Board (which composes Space + visibility).
   const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
   if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   const canEdit = await canContributeBoard(item.boardId, c.userId, c.accessLevel);

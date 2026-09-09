@@ -1,16 +1,17 @@
-// GET /api/me/items — items assigned to the viewer across all visible
-// boards. Optional ?status=open|done|all (default open: any non-DONE
-// status, including null). Sorted by dueAt asc nulls last, then position.
+// GET /api/me/items — items assigned to the viewer. Optional
+// ?status=open|done|all (default open: any non-DONE status, including null).
+// Sorted by dueAt asc nulls last, then position.
 //
-// Phase 90. Powers the /today personal list and any future "my work"
-// surface. Visibility is composed per board via getBoardForReader so
-// items in boards the viewer lost access to silently drop.
+// Phase 90. Powers the /today personal list and any future "my work" surface.
+// These are all tasks the viewer is the assignee of, so they ALWAYS belong
+// here: being assigned a task grants access to that task even if you aren't a
+// member of its List. (Board access no longer filters this list — that
+// silently hid people's own assigned work.)
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getBoardForReader } from "@/lib/board";
 import { isDoneStatusName } from "@/lib/board-items-shared";
 
 export async function GET(req: Request) {
@@ -52,20 +53,15 @@ export async function GET(req: Request) {
   if (filteredByStatus.length === 0) return NextResponse.json({ items: [] });
 
   const boardIds = Array.from(new Set(filteredByStatus.map((it) => it.boardId)));
-  const accessLevel = u.accessLevel ?? "EMPLOYEE";
-  const readable = await Promise.all(
-    boardIds.map(async (bid) => ((await getBoardForReader(bid, u.id!, accessLevel)) ? bid : null)),
-  );
-  const readableSet = new Set(readable.filter((x): x is string => x !== null));
-
+  // Fetch the board only for display (name/list) — assignment already grants
+  // access, so we never drop a task the viewer owns.
   const boards = await prisma.board.findMany({
-    where: { id: { in: Array.from(readableSet) } },
+    where: { id: { in: boardIds }, organizationId: u.organizationId },
     select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true },
   });
   const boardById = new Map(boards.map((b) => [b.id, b]));
 
   const items = filteredByStatus
-    .filter((it) => readableSet.has(it.boardId))
     .map((it) => ({
       id: it.id,
       title: it.title,
