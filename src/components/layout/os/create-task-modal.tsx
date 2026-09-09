@@ -709,6 +709,9 @@ export function CreateTaskModal() {
       });
       if (!res.ok) throw new Error("Failed to create from template");
       const { item } = await res.json();
+      if (item?.id) {
+        try { window.dispatchEvent(new CustomEvent("workwrk:item-created", { detail: { boardId: selectedList.id, item } })); } catch {}
+      }
       const subs = Array.isArray(tpl.config.subtasks) ? (tpl.config.subtasks as string[]) : [];
       if (subs.length && item?.id) {
         await Promise.all(
@@ -759,6 +762,10 @@ export function CreateTaskModal() {
         throw new Error(data?.error ?? "Failed to create task");
       }
       const { item } = await res.json();
+      // Let an open board showing this list drop the row in instantly.
+      if (item?.id) {
+        try { window.dispatchEvent(new CustomEvent("workwrk:item-created", { detail: { boardId: selectedList.id, item } })); } catch {}
+      }
       // Create subtasks (best-effort) under the new parent.
       const titles = subtasks.map((t) => t.trim()).filter(Boolean);
       if (titles.length && item?.id) {

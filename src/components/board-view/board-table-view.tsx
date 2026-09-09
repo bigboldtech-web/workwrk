@@ -292,6 +292,23 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     else setItems(fresh);
   }, [onItemsRefreshed]);
 
+  // Instant cross-surface insert: the top-right "+ task" modal (and any other
+  // creator) fires `workwrk:item-created` after a create. If it landed on THIS
+  // board, drop the row in immediately instead of waiting on router.refresh()'s
+  // server round-trip. reportCreated tracks it so the resync can't drop it
+  // before the next server snapshot includes it.
+  useEffect(() => {
+    const onCreated = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { boardId?: string; item?: BoardItemRow } | undefined;
+      const item = detail?.item;
+      if (!item || detail?.boardId !== boardId) return;
+      setItems((prev) => (prev.some((r) => r.id === item.id) ? prev : [...prev, item]));
+      reportCreated(item);
+    };
+    window.addEventListener("workwrk:item-created", onCreated);
+    return () => window.removeEventListener("workwrk:item-created", onCreated);
+  }, [boardId, reportCreated]);
+
   // Column widths (resizable) — one fixed px per column keyed by column id
   // ("name", "status", "owner", "due", …). The Name column is the flexible
   // one: by default it fills whatever the meta columns leave, and dragging any
