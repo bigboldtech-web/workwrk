@@ -7,7 +7,7 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { archiveBoardItem, getBoardItemRow, updateBoardItem, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { moveToTrash } from "@/lib/trash";
-import { canEditBoard, getBoardForReader } from "@/lib/board";
+import { canContributeBoard, getBoardForReader } from "@/lib/board";
 import { parseBoardSchema } from "@/lib/field-catalog";
 import { getBoardStatuses } from "@/lib/board-items-shared";
 import { applyTimeOfDay, nextOccurrenceAfter, occurrenceKey, parseRecurrence } from "@/lib/recurrence";
@@ -27,7 +27,7 @@ async function loadAndGateRead(itemId: string, c: { userId: string; accessLevel:
   // Phase 23b — gate via parent Board (which composes Space + Board.visibility).
   const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
   if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditBoard(item.boardId, c.userId, c.accessLevel);
+  const canEdit = await canContributeBoard(item.boardId, c.userId, c.accessLevel);
   return { item, canEdit };
 }
 
@@ -111,7 +111,7 @@ async function loadAndGate(itemId: string, c: { userId: string; accessLevel: str
   }
   const board = await getBoardForReader(item.boardId, c.userId, c.accessLevel);
   if (!board) return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
-  const canEdit = await canEditBoard(item.boardId, c.userId, c.accessLevel);
+  const canEdit = await canContributeBoard(item.boardId, c.userId, c.accessLevel);
   if (!canEdit) return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   return { item };
 }

@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
+import { canContributeBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { notifyItemAssigned } from "@/lib/notify-item";
 
@@ -61,8 +61,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!board || board.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // Creating a task is CONTENT, not board management — a Space/Board MEMBER
+  // may do it (canContributeBoard), only GUESTs are blocked.
+  const canWrite = await canContributeBoard(id, c.userId, c.accessLevel);
+  if (!canWrite) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

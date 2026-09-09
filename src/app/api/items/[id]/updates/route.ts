@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { canContributeSpace, getSpaceForReader } from "@/lib/space";
 import { createUpdate, listUpdates } from "@/lib/item-thread";
 import { filterNotifyUsers } from "@/lib/notify-prefs";
 import { prisma } from "@/lib/prisma";
@@ -101,9 +101,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const gate = await loadItemForRead(id, c);
   if ("error" in gate) return gate.error;
-  // Posting requires edit access — keeps random readers from spraying
-  // comments into Spaces they only have read on.
-  const canEdit = await canEditSpace(gate.spaceId, c.userId, c.accessLevel);
+  // Posting a comment is CONTENT — a Space/Board MEMBER may, a read-only
+  // GUEST may not (keeps random readers from spraying comments).
+  const canEdit = await canContributeSpace(gate.spaceId, c.userId, c.accessLevel);
   if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

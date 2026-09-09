@@ -616,6 +616,16 @@ export async function getBoardForReader(
   // Org admins always read.
   if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return board;
 
+  // Explicit board grant (ANY role, incl. GUEST) → read. This is the
+  // list-level share: someone added straight to this board can see it even
+  // without Space membership, regardless of visibility. Additive, never
+  // subtractive.
+  const directGrant = await prisma.boardMember.findUnique({
+    where: { boardId_userId: { boardId, userId } },
+    select: { id: true },
+  });
+  if (directGrant) return board;
+
   // Private-folder cascade: a board inside a PRIVATE folder is hidden from
   // everyone but the folder owner (admins already returned above), regardless
   // of the board's own visibility.
@@ -692,6 +702,48 @@ export async function canEditBoard(
 
   if (!board.spaceId) return false;
   return canEditSpace(board.spaceId, userId, accessLevel ?? undefined);
+}
+
+/**
+ * CONTENT-write access — create / edit / delete tasks and comment. This is the
+ * "can a MEMBER make changes" gate, deliberately looser than canEditBoard
+ * (which MANAGES the board: fields, settings, members, delete). A GUEST is
+ * read-only; MEMBER / ADMIN / OWNER on the board OR the parent Space
+ * contribute; org admins and the board owner always do. Additive: the most
+ * permissive grant wins. A PRIVATE board is reachable only by an explicit
+ * (non-guest) board grant — Space membership doesn't pierce it.
+ */
+export async function canContributeBoard(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<boolean> {
+  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
+  const board = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { spaceId: true, visibility: true, ownerId: true },
+  });
+  if (!board) return false;
+  if (board.ownerId === userId) return true;
+
+  // A non-guest board grant contributes. (A GUEST board grant is read-only,
+  // but doesn't REMOVE any Space-derived write below — additive.)
+  const bm = await prisma.boardMember.findUnique({
+    where: { boardId_userId: { boardId, userId } },
+    select: { role: true },
+  });
+  if (bm && bm.role !== "GUEST") return true;
+
+  // PRIVATE = board-grant-only; Space membership does not pierce it.
+  if (board.visibility === "PRIVATE") return false;
+
+  // WORKSPACE / ORG board → a non-guest Space member contributes.
+  if (!board.spaceId) return false;
+  const sm = await prisma.spaceMember.findUnique({
+    where: { spaceId_userId: { spaceId: board.spaceId, userId } },
+    select: { role: true },
+  });
+  return !!sm && sm.role !== "GUEST";
 }
 
 /**

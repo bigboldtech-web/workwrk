@@ -216,6 +216,21 @@ export async function canEditSpace(spaceId: string, userId: string, accessLevel?
   return member?.role === "OWNER" || member?.role === "ADMIN";
 }
 
+/**
+ * CONTENT-write check — can this user create/edit content in the Space (tasks,
+ * comments), as opposed to MANAGING it (members, settings, structure, which
+ * stay on canEditSpace = OWNER/ADMIN). A plain MEMBER contributes; a GUEST is
+ * read-only. This is what lets a Space "member" actually make changes.
+ */
+export async function canContributeSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
+  if (isOrgAdminAccessLevel(accessLevel)) return true;
+  const member = await prisma.spaceMember.findUnique({
+    where: { spaceId_userId: { spaceId, userId } },
+    select: { role: true },
+  });
+  return !!member && member.role !== "GUEST";
+}
+
 export interface CreateSpaceInput {
   organizationId: string;
   userId: string;

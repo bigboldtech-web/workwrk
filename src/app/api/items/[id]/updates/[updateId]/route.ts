@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canEditSpace } from "@/lib/space";
+import { canContributeSpace } from "@/lib/space";
 import { deleteUpdate, editUpdate, getUpdate } from "@/lib/item-thread";
 import { prisma } from "@/lib/prisma";
 
@@ -71,7 +71,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
       select: { board: { select: { spaceId: true } } },
     });
     if (!item?.board.spaceId) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const canEdit = await canEditSpace(item.board.spaceId, c.userId, c.accessLevel);
+    const canEdit = await canContributeSpace(item.board.spaceId, c.userId, c.accessLevel);
     if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   await deleteUpdate(updateId);
