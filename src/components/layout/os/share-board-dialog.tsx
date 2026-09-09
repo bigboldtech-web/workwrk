@@ -55,11 +55,13 @@ const VISIBILITY_OPTIONS: { value: Visibility; label: string; blurb: string; Ico
   { value: "ORG",       label: "Org-wide",       blurb: "Looser — every member of the org", Icon: Globe },
 ];
 
+// Labelled by what the role can DO, since that's what people are choosing:
+// Member = read + write, Guest = read only.
 const ROLE_OPTIONS: { value: BoardRole; label: string }[] = [
   { value: "OWNER",   label: "Owner" },
-  { value: "ADMIN",   label: "Admin" },
-  { value: "MEMBER",  label: "Member" },
-  { value: "GUEST",   label: "Guest" },
+  { value: "ADMIN",   label: "Can manage" },
+  { value: "MEMBER",  label: "Can edit" },
+  { value: "GUEST",   label: "View only" },
 ];
 
 function displayName(u: UserOption): string {
@@ -247,8 +249,6 @@ export function ShareBoardDialog({
 
   if (!boardId) return null;
 
-  const membersNeeded = visibility === "PRIVATE";
-
   return (
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogContent className="max-w-[520px] p-0 gap-0">
@@ -289,12 +289,10 @@ export function ShareBoardDialog({
               );
             })}
           </div>
-          {!membersNeeded ? (
-            <div className="mt-2 text-[12px] text-zinc-500 inline-flex items-start gap-1.5">
-              <Info className="h-3 w-3 mt-0.5 shrink-0" />
-              The members list below only applies when visibility is set to Private.
-            </div>
-          ) : null}
+          <div className="mt-2 text-[12px] text-zinc-500 inline-flex items-start gap-1.5">
+            <Info className="h-3 w-3 mt-0.5 shrink-0" />
+            Anyone you add below gets access to <span className="font-medium">this list</span> — even without access to the Space. <span className="font-medium">Can edit</span> to work on it, <span className="font-medium">View only</span> to just see it.
+          </div>
         </div>
 
         <div className="px-6 pb-3 border-t border-zinc-100 pt-4">
@@ -352,9 +350,7 @@ export function ShareBoardDialog({
             <div className="text-[13px] text-zinc-400">Loading…</div>
           ) : members.length === 0 ? (
             <div className="text-[13px] text-zinc-400">
-              {membersNeeded
-                ? "No members yet — add someone above. Board owner + Space OWNER always retain access."
-                : "Only matters when visibility is Private."}
+              No one added to this list yet. Add someone above to give them direct access — the Space&apos;s own members keep their access either way.
             </div>
           ) : (
             <ul className="rounded-lg border border-zinc-200 divide-y divide-zinc-100 max-h-[260px] overflow-y-auto">
