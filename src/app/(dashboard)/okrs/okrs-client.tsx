@@ -27,6 +27,7 @@ import { useRouter } from "next/navigation";
 import {
   Target, Plus, TrendingUp, AlertTriangle, CheckCircle2, Trophy,
   Building2, Users, User as UserIcon, X, Clock, Activity,
+  ChevronRight, ChevronDown,
   type LucideIcon,
 } from "lucide-react";
 import { OsTitleBar } from "@/components/layout/os/title-bar";
@@ -104,6 +105,87 @@ function fmtDate(iso?: string | null): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function ownerDisplayName(owner: ApiOkr["owner"]): string {
+  if (!owner) return "Unassigned";
+  const n = `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim();
+  return n || owner.email || "Unassigned";
+}
+
+/** Per-report rollup for the manager evaluation view — everything derived from
+ *  the ?team=1&withEffort=1 goals, never self-reported. */
+type PersonRollup = {
+  ownerId: string | null;
+  owner: ApiOkr["owner"];
+  goals: ApiOkr[];
+  count: number;
+  avgProgress: number;
+  measuredCount: number;
+  totalHours: number;
+  openTasks: number;
+  onTrack: number;
+  attention: number;
+  completed: number;
+  lastActivityAt: string | null;
+  stalling: boolean;
+  verdict: OkrStatus | "NONE";
+};
+
+const STALL_DAYS = 14;
+
+function buildPersonRollups(okrs: ApiOkr[]): PersonRollup[] {
+  const now = Date.now();
+  const map = new Map<string, PersonRollup>();
+  for (const o of okrs) {
+    const key = o.ownerId ?? "__unassigned__";
+    let r = map.get(key);
+    if (!r) {
+      r = {
+        ownerId: o.ownerId ?? null, owner: o.owner ?? null, goals: [], count: 0,
+        avgProgress: 0, measuredCount: 0, totalHours: 0, openTasks: 0,
+        onTrack: 0, attention: 0, completed: 0, lastActivityAt: null,
+        stalling: false, verdict: "NONE",
+      };
+      map.set(key, r);
+    }
+    r.goals.push(o);
+    r.count += 1;
+    if (o.progressSource !== "NONE") r.measuredCount += 1;
+    r.totalHours += o.effort?.totalHours ?? 0;
+    r.openTasks += o.effort?.tasksOpen ?? 0;
+    if (o.status === "ON_TRACK") r.onTrack += 1;
+    else if (o.status === "AT_RISK" || o.status === "BEHIND") r.attention += 1;
+    else if (o.status === "COMPLETED") r.completed += 1;
+    const la = o.effort?.lastActivityAt ?? null;
+    if (la && (!r.lastActivityAt || la > r.lastActivityAt)) r.lastActivityAt = la;
+    // "Stalling": an OPEN goal that is behind, or whose linked work hasn't moved
+    // in two weeks — the honest "needs a nudge" signal for a manager.
+    if (o.status !== "COMPLETED") {
+      if (o.status === "BEHIND") r.stalling = true;
+      else if (la && now - new Date(la).getTime() > STALL_DAYS * 86_400_000) r.stalling = true;
+    }
+  }
+  const rollups = Array.from(map.values());
+  for (const r of rollups) {
+    const measured = r.goals.filter((g) => g.progressSource !== "NONE");
+    r.avgProgress = measured.length
+      ? Math.round(measured.reduce((a, g) => a + Math.max(0, Math.min(100, g.progress)), 0) / measured.length)
+      : 0;
+    r.verdict = r.goals.some((g) => g.status === "BEHIND") ? "BEHIND"
+      : r.goals.some((g) => g.status === "AT_RISK") ? "AT_RISK"
+      : r.count > 0 && r.goals.every((g) => g.status === "COMPLETED") ? "COMPLETED"
+      : r.goals.some((g) => g.status === "ON_TRACK") ? "ON_TRACK"
+      : "NONE";
+  }
+  // Managers want problems on top: people who are stalling or have at-risk /
+  // behind goals sort first, then alphabetically.
+  rollups.sort((a, b) => {
+    const rank = (r: PersonRollup) => (r.stalling || r.attention > 0 ? 0 : 1);
+    if (rank(a) !== rank(b)) return rank(a) - rank(b);
+    return ownerDisplayName(a.owner).localeCompare(ownerDisplayName(b.owner));
+  });
+  return rollups;
+}
+
 export default function OkrsClient({ initialNew = false, mine = false, team = false, level }: {
   /** ?new=1 — open the create modal on load (profile hero / sidebar link). */
   initialNew?: boolean;
@@ -138,6 +220,9 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
   // Edit mode of the SAME modal (ClickUp reuses one surface; so do we).
   // focusOwner lands the user straight in the Owner picker ("Assign owner").
   const [editing, setEditing] = useState<{ goal: ApiOkr; focusOwner?: boolean } | null>(null);
+  // Team Goals only: "By person" is the manager evaluation rollup (each report's
+  // goals + effort + on-track + stalling); "By level" is the classic grouping.
+  const [teamView, setTeamView] = useState<"person" | "level">("person");
   const { rowVersion } = useOsShell();
   const { toast } = useOsToast();
 
@@ -205,6 +290,14 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
       : (okrs ?? []);
     for (const o of src) m.get(o.level)?.push(o);
     return m;
+  }, [okrs, attentionOnly]);
+
+  // Manager evaluation rollup — one entry per report (Team Goals view).
+  const byPerson = useMemo(() => {
+    const src = attentionOnly
+      ? (okrs ?? []).filter((o) => o.status === "AT_RISK" || o.status === "BEHIND")
+      : (okrs ?? []);
+    return buildPersonRollups(src);
   }, [okrs, attentionOnly]);
 
   return (
@@ -277,6 +370,32 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
             />
           </section>
 
+          {team && (
+            <div className="okrs__teamtoggle" role="tablist" aria-label="Team goals view">
+              <button type="button" role="tab" aria-selected={teamView === "person"} className={teamView === "person" ? "is-on" : ""} onClick={() => setTeamView("person")}>
+                <Users /> By person
+              </button>
+              <button type="button" role="tab" aria-selected={teamView === "level"} className={teamView === "level" ? "is-on" : ""} onClick={() => setTeamView("level")}>
+                <Target /> By level
+              </button>
+            </div>
+          )}
+
+          {team && teamView === "person" ? (
+            byPerson.length === 0 ? (
+              <div className="okrs__group okrs__group--empty">No goals across your team yet.</div>
+            ) : (
+              byPerson.map((r) => (
+                <PersonRollupCard
+                  key={r.ownerId ?? "__unassigned__"}
+                  rollup={r}
+                  onDeleted={handleDeleted}
+                  onEdit={(goal, opts) => setEditing({ goal, focusOwner: opts?.focusOwner })}
+                />
+              ))
+            )
+          ) : (
+          <>
           {/* One card per level */}
           {LEVEL_ORDER.map((level) => {
             const meta = LEVEL_META[level];
@@ -318,6 +437,8 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
               </section>
             );
           })}
+          </>
+          )}
         </div>
       )}
 
@@ -505,5 +626,71 @@ function GoalRow({ okr, showLevelChip, onDeleted, onEdit }: {
         triggerClassName="okr-row__menu-btn"
       />
     </div>
+  );
+}
+
+/* Manager evaluation: one card per report, with their goals rolled up
+ * (count, avg progress, effort hours, open tasks, overall verdict) and a
+ * "needs a nudge" flag when something is behind or has gone quiet. Expands to
+ * the person's actual goal rows. People who need attention auto-expand and
+ * sort to the top (buildPersonRollups). */
+function PersonRollupCard({ rollup, onDeleted, onEdit }: {
+  rollup: PersonRollup;
+  onDeleted: (id: string) => void;
+  onEdit: (goal: ApiOkr, opts?: { focusOwner?: boolean }) => void;
+}) {
+  const [open, setOpen] = useState(rollup.stalling || rollup.attention > 0);
+  const owner = rollup.owner?.id
+    ? {
+        id: rollup.owner.id,
+        firstName: rollup.owner.firstName ?? null,
+        lastName: rollup.owner.lastName ?? null,
+        avatar: rollup.owner.avatar ?? null,
+        email: rollup.owner.email ?? null,
+      }
+    : null;
+  const verdict = rollup.verdict !== "NONE" ? STATUS_META[rollup.verdict] : null;
+  const plural = (n: number, s: string) => `${n} ${s}${n === 1 ? "" : "s"}`;
+  const parts = [plural(rollup.count, "goal")];
+  if (rollup.measuredCount > 0) parts.push(`${rollup.avgProgress}% avg`);
+  if (rollup.totalHours > 0) parts.push(`${rollup.totalHours}h effort`);
+  if (rollup.openTasks > 0) parts.push(plural(rollup.openTasks, "open task"));
+  if (rollup.lastActivityAt) parts.push(`last moved ${fmtDate(rollup.lastActivityAt)}`);
+
+  return (
+    <section className={`okr-person${rollup.stalling ? " is-stalling" : ""}`}>
+      <button type="button" className="okr-person__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="okr-person__chev">{open ? <ChevronDown /> : <ChevronRight />}</span>
+        {owner ? <PersonAvatar person={owner} size={30} /> : <span className="okr-person__avatar-none"><UserIcon /></span>}
+        <span className="okr-person__id">
+          <span className="okr-person__name">{ownerDisplayName(rollup.owner)}</span>
+          <span className="okr-person__meta">{parts.join(" · ")}</span>
+        </span>
+        <span className="okr-person__spacer" />
+        {rollup.stalling && (
+          <span className="okr-person__flag" title="A goal is behind or its work hasn't moved in two weeks">
+            <AlertTriangle /> Needs a nudge
+          </span>
+        )}
+        {verdict && (
+          <span className="okr-person__verdict" style={{ color: verdict.color, background: `${verdict.color}1a` }}>
+            {verdict.label}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="okr-person__goals">
+          {rollup.goals.map((o) => (
+            <GoalRow
+              key={o.id}
+              okr={o}
+              showLevelChip
+              onDeleted={() => onDeleted(o.id)}
+              onEdit={(opts) => onEdit(o, opts)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
