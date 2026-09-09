@@ -19,7 +19,7 @@ import type { LucideIcon } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { RecurrenceRule } from "@/lib/recurrence";
 import type { FieldDef } from "@/lib/field-catalog";
-import { AssigneePicker } from "./assignee-picker";
+import { MultiAssigneePicker } from "./assignee-picker";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
@@ -36,6 +36,7 @@ export type DetailPatch = Partial<Pick<BoardItemRow, "title" | "status">> & {
   startAt?: string | null;
   dueAt?: string | null;
   ownerId?: string | null;
+  assigneeIds?: string[];
   priority?: string | null;
   tagIds?: string[];
   itemTypeId?: string | null;
@@ -173,15 +174,22 @@ export function BoardItemDetail({
           <StatusPicker value={item.status} statuses={statusOptions} canEdit={canEdit} onChange={(v) => onPatch({ status: v })} />
         </FieldRow>
         <FieldRow icon={Users} label="Assignees">
-          <AssigneePicker
-            value={item.owner ? { ...item.owner, email: null } : null}
-            canEdit={canEdit}
-            onChange={(person) =>
-              onPatch(
-                { ownerId: person?.id ?? null },
-                { owner: person ? { id: person.id, firstName: person.firstName ?? "", lastName: person.lastName ?? "", avatar: person.avatar } : null },
-              )
+          <MultiAssigneePicker
+            value={
+              item.assignees && item.assignees.length
+                ? item.assignees.map((a) => ({ id: a.id, firstName: a.firstName, lastName: a.lastName, avatar: a.avatar, email: a.email ?? null }))
+                : item.owner
+                  ? [{ id: item.owner.id, firstName: item.owner.firstName, lastName: item.owner.lastName, avatar: item.owner.avatar, email: null }]
+                  : []
             }
+            canEdit={canEdit}
+            onChange={(people) => {
+              const assignees = people.map((p) => ({ id: p.id, firstName: p.firstName ?? "", lastName: p.lastName ?? "", avatar: p.avatar }));
+              onPatch(
+                { assigneeIds: people.map((p) => p.id) },
+                { assigneeIds: people.map((p) => p.id), assignees, owner: assignees[0] ?? null },
+              );
+            }}
           />
         </FieldRow>
         <FieldRow icon={CalendarDays} label="Dates">

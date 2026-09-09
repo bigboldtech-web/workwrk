@@ -43,13 +43,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const gate = await loadAndGateRead(id, c);
   if ("error" in gate) return gate.error;
-  const [owner, tagAssignments] = await Promise.all([
+  const [owner, assigneeUsers, tagAssignments] = await Promise.all([
     gate.item.ownerId
       ? prisma.user.findUnique({
           where: { id: gate.item.ownerId },
           select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
         })
       : Promise.resolve(null),
+    gate.item.assigneeIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: gate.item.assigneeIds } },
+          select: { id: true, firstName: true, lastName: true, avatar: true, email: true },
+        })
+      : Promise.resolve([]),
     prisma.tagAssignment.findMany({
       where: { entityType: "BOARD_ITEM", entityId: gate.item.id },
       include: { tag: { select: { id: true, name: true, color: true, archived: true } } },
@@ -79,6 +85,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       createdAt: gate.item.createdAt,
       updatedAt: gate.item.updatedAt,
       owner,
+      assigneeIds: gate.item.assigneeIds,
+      // Resolved assignees, ordered primary-first to match assigneeIds.
+      assignees: gate.item.assigneeIds
+        .map((aid) => assigneeUsers.find((u) => u.id === aid))
+        .filter((u): u is (typeof assigneeUsers)[number] => Boolean(u)),
     },
     // Board context so a standalone detail page (no board host) can
     // render custom fields + the right status palette + breadcrumb.

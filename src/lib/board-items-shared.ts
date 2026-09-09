@@ -224,4 +224,7 @@ export interface BoardItemRow {
    *  view can list/create subtasks against the board. */
   boardId?: string | null;
   owner?: { id: string; firstName: string; lastName: string; avatar: string | null } | null;
+  /** Resolved assignees (primary first), when the fetch path provides them.
+   *  ownerId/owner is always assignees[0]. */
+  assignees?: { id: string; firstName: string; lastName: string; avatar: string | null; email?: string | null }[];
 }
