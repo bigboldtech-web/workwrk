@@ -12,8 +12,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   Bell, BellOff, BookUser, ChevronDown, ChevronRight, ExternalLink, Hash,
-  LogOut, MessageCircle, Phone, Plus, Search, Star, Users, Video, X,
+  LogOut, Megaphone, MessageCircle, Phone, Plus, Search, Star, Users, Video, X,
 } from "lucide-react";
+import { canAccessTier } from "./access-tiers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
@@ -264,6 +265,14 @@ export function ChatSidebar() {
       >
         <BookUser className="h-4 w-4 text-zinc-500" /> Directory
       </Link>
+      {canAccessTier("hr-admin", (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "") ? (
+        <Link
+          href="/announcements"
+          className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-[14px] text-zinc-700 hover:bg-zinc-50"
+        >
+          <Megaphone className="h-4 w-4 text-zinc-500" /> Announcements
+        </Link>
+      ) : null}
       <div className="flex items-center gap-1.5 mb-2">
         <button
           type="button"

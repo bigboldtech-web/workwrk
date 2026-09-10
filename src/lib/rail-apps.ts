@@ -151,6 +151,9 @@ export function visibleRailApps(opts: {
     orderApps(
       catalog.filter((app) => {
         if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
+        // Folded into a hub — kept in the catalog + reachable by route/search/
+        // launcher, but not its own rail icon.
+        if (app.offRail && !app.alwaysPinned) return false;
         // Premium module: hidden unless the org has it ACTIVE. Applied in both
         // the primary and the last-ditch fallback resolve, so a pathological
         // all-hidden config can't resurface a disabled module.

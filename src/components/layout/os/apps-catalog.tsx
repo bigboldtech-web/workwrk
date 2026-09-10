@@ -8,7 +8,12 @@
 
 import Link from "next/link";
 import { ChatSidebar } from "./chat-sidebar";
+import { canAccessTier, MANAGER_LEVELS, type AccessTier } from "./access-tiers";
 import { useCallback, useEffect, useRef, useState } from "react";
+// Re-exported so existing consumers (rail-apps.ts) keep importing the access
+// ladder from the catalog while the definitions live in ./access-tiers.
+export { canAccessTier };
+export type { AccessTier };
 import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock, CircleUser,
@@ -45,7 +50,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
 /** Access tiers reused by app entries and per-action gates. */
-export type AccessTier = "manager" | "hr-admin" | "org-admin";
+// AccessTier is defined in ./access-tiers and re-exported above.
 
 /**
  * Shell helpers handed to a CreateAction's `onSelect` so catalog-level
@@ -97,6 +102,13 @@ export interface AppEntry {
   /** Hidden in the More-popover catalog (e.g. the "More" tile itself). */
   hideFromCatalog?: boolean;
   /**
+   * Folded into a hub — kept in the catalog (still reachable by route, the
+   * More launcher, and search) but NOT shown as its own rail icon. Its links
+   * live inside the hub's secondary sidebar instead. This is how the rail is
+   * trimmed to a handful of hubs without losing any feature.
+   */
+  offRail?: boolean;
+  /**
    * Feeds the global CreateMenu's "Space" row (Home only, today).
    * Either a route (href) or a custom-event name the app's Sidebar
    * component listens for.
@@ -137,25 +149,7 @@ export interface AppEntry {
   requiredAccess?: AccessTier;
 }
 
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
-  "MANAGER", "TEAM_LEAD", "HR",
-]);
-const HR_ADMIN_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "HR",
-]);
-const ORG_ADMIN_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN",
-]);
-
-/** Tier check shared by app-level and per-CreateAction access gates. */
-export function canAccessTier(tier: AccessTier | undefined, accessLevel: string | null | undefined): boolean {
-  if (!tier) return true;
-  if (!accessLevel) return false;
-  if (tier === "manager") return MANAGER_LEVELS.has(accessLevel);
-  if (tier === "hr-admin") return HR_ADMIN_LEVELS.has(accessLevel);
-  return ORG_ADMIN_LEVELS.has(accessLevel);
-}
+// MANAGER_LEVELS + canAccessTier now live in ./access-tiers (imported above).
 
 export function canAccessApp(app: AppEntry, accessLevel: string | null | undefined): boolean {
   return canAccessTier(app.requiredAccess, accessLevel);
@@ -892,6 +886,7 @@ function HomeSidebar() {
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
         <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
+        <NavItem href="/okrs" Icon={Trophy} label="Goals" active={pathname.startsWith("/okrs") || pathname.startsWith("/goals")} />
         <MoreNavItem />
       </ul>
 
@@ -958,13 +953,29 @@ function CalendarSidebar() {
 /* ───────────────────────── AI sidebar ───────────────────────── */
 
 function AiSidebar() {
+  const pathname = usePathname() || "";
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  const isManager = canAccessTier("manager", accessLevel);
   return (
-    <ul>
-      <NavItem href="/sidekick" Icon={Sparkles} label="Ask Sidekick" />
-      <NavItem href="/sidekick/history" Icon={MessageSquare} label="History" />
-      <NavItem href="/sidekick/prompts" Icon={FileText} label="Prompts" />
-      <NavItem href="/agents" Icon={Sparkles} label="Agents" />
-    </ul>
+    <>
+      <ul>
+        <NavItem href="/sidekick" Icon={Sparkles} label="Ask Sidekick" />
+        <NavItem href="/sidekick/history" Icon={MessageSquare} label="History" />
+        <NavItem href="/sidekick/prompts" Icon={FileText} label="Prompts" />
+        <NavItem href="/agents" Icon={Sparkles} label="Agents" />
+      </ul>
+      {isManager ? (
+        <>
+          <SectionLabel>Automation</SectionLabel>
+          <ul>
+            <NavItem href="/automation/workflows" Icon={Workflow} label="Workflows" active={pathname.startsWith("/automation/workflows")} />
+            <NavItem href="/automation/templates" Icon={LayoutTemplate} label="Templates" active={pathname.startsWith("/automation/templates")} />
+            <NavItem href="/automation/connections" Icon={Plug} label="Connections" active={pathname.startsWith("/automation/connections")} />
+          </ul>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -1019,7 +1030,20 @@ function TeamsSidebar() {
           <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
         ) : null}
         <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={pathname === "/team/workload"} />
+        {canAccessTier("hr-admin", accessLevel) ? (
+          <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={pathname.startsWith("/reviews") || pathname.startsWith("/talent")} />
+        ) : null}
       </ul>
+      {canAccessTier("hr-admin", accessLevel) ? (
+        <>
+          <SectionLabel>Culture</SectionLabel>
+          <ul>
+            <NavItem href="/candor" Icon={MessageSquare} label="Candor" active={pathname.startsWith("/candor")} />
+            <NavItem href="/kudos" Icon={ThumbsUp} label="Kudos" active={pathname.startsWith("/kudos")} />
+            <NavItem href="/surveys" Icon={FileSpreadsheet} label="Surveys" active={pathname.startsWith("/surveys")} />
+          </ul>
+        </>
+      ) : null}
     </>
   );
 }
@@ -1107,6 +1131,31 @@ function TimesheetsSidebar() {
   );
 }
 
+/* ───────────────────────── Settings sidebar (workspace + folded ops) ───────────────────────── */
+
+function SettingsSidebar() {
+  const pathname = usePathname() || "";
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
+  return (
+    <>
+      <ul>
+        <NavItem href="/settings" Icon={SettingsIcon} label="Workspace settings" active={pathname === "/settings"} />
+        <NavItem href="/account/security" Icon={ShieldCheck} label="Account · Security" active={pathname.startsWith("/account")} />
+      </ul>
+      <SectionLabel>Operations</SectionLabel>
+      <ul>
+        <NavItem href="/build" Icon={Wrench} label="Build apps" active={pathname.startsWith("/build")} />
+        <NavItem href="/store" Icon={ShoppingBag} label="Marketplace" active={pathname.startsWith("/store")} />
+        {isHrAdmin ? <NavItem href="/tools" Icon={HardDrive} label="Tools & SaaS" active={pathname.startsWith("/tools")} /> : null}
+        {isHrAdmin ? <NavItem href="/assets" Icon={Boxes} label="Assets" active={pathname.startsWith("/assets")} /> : null}
+        {isHrAdmin ? <NavItem href="/trash" Icon={Trash2} label="Trash" active={pathname.startsWith("/trash")} /> : null}
+      </ul>
+    </>
+  );
+}
+
 /* ───────────────────────── catalog ─────────────────────────
  * Apps are grouped by `category` for the More popover. `defaultPinned`
  * decides which icons render in the rail for new users; users override
@@ -1121,36 +1170,37 @@ function TimesheetsSidebar() {
 export const APPS: AppEntry[] = [
   // ── Core (always pinned by default) ──────────────────────────
   { key: "home", label: "Work", Icon: Home, defaultHref: "/today",
-    matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files"],
+    matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files", "/okrs", "/goals"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" },
     // Home is the OS-wide catch-all — it keeps the global create menu.
     createActions: "global" },
   { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
-    matchPaths: ["/calendar", "/planner"], Sidebar: CalendarSidebar,
+    matchPaths: ["/calendar", "/planner", "/timesheets"], Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
   { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick",
-    matchPaths: ["/sidekick", "/agents"], Sidebar: AiSidebar,
+    matchPaths: ["/sidekick", "/agents", "/automation"], Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
   { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk",
-    matchPaths: ["/tlk"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+    matchPaths: ["/tlk", "/announcements"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },
     ] },
   { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
-    matchPaths: ["/team", "/people", "/organization", "/kra-kpi"],
+    matchPaths: ["/team", "/people", "/organization", "/kra-kpi", "/reviews", "/talent", "/candor", "/kudos", "/surveys"],
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
     requiredAccess: "manager",
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
-    matchPaths: ["/docs"], Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
+    matchPaths: ["/docs", "/library", "/canvas", "/notetaker", "/clips", "/sops", "/process-runs", "/policies", "/agreements"],
+    Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     // DocsSidebar listens for this event and runs its "New page" flow.
     createActions: [{ label: "New doc", icon: FileText, event: "docs-new-page" }] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables",
-    matchPaths: ["/tables"], category: "Core", defaultPinned: true,
+    matchPaths: ["/tables", "/forms"], category: "Core", defaultPinned: true,
     // TablesSidebar lists every worksheet (like Docs lists docs); the old
     // single "All tables" link survives as a secondary row inside it.
     Sidebar: TablesSidebar,
@@ -1280,11 +1330,9 @@ export const APPS: AppEntry[] = [
   // Settings, a bad config could lock the org out of the page that fixes
   // configs. Everyone gets the door; the Admin sections gate inside it.
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
-    matchPaths: ["/settings", "/account"], category: "Workspace", alwaysPinned: true,
-    Sidebar: linksSidebar([
-      { href: "/settings",         label: "Workspace settings", Icon: SettingsIcon },
-      { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },
-    ]) },
+    matchPaths: ["/settings", "/account", "/tools", "/assets", "/build", "/store", "/trash"],
+    category: "Workspace", alwaysPinned: true,
+    Sidebar: SettingsSidebar },
   // Org-wide recycle bin — one place to recover anything deleted (60-day window).
   { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash",
     matchPaths: ["/trash"], category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
@@ -1292,6 +1340,23 @@ export const APPS: AppEntry[] = [
       { href: "/trash", label: "All deleted items", Icon: Trash2 },
     ]) },
 ];
+
+// Rail consolidation: these apps are FOLDED into a hub — still in the catalog,
+// still reachable by route / the More launcher / search, but not their own rail
+// icon. Their links live inside the hub's secondary sidebar (see each hub's
+// matchPaths above + Sidebar component). Marked in one place so the entries stay
+// readable. The 8 rail hubs = home, planner, ai, chat, teams, docs, tables,
+// settings (everything below folds into one of them).
+const FOLDED_INTO_HUB: ReadonlySet<string> = new Set([
+  "goals", "timesheets",                    // → Work / Planner
+  "library", "clips", "sops", "policies", "agreements", // → Docs
+  "reviews", "candor", "kudos", "surveys",  // → Teams
+  "announcements",                          // → Talk
+  "forms",                                  // → Tables
+  "automation",                             // → AI
+  "tools", "assets", "build", "store", "trash", // → Settings
+]);
+for (const a of APPS) if (FOLDED_INTO_HUB.has(a.key)) a.offRail = true;
 
 /** Apps to render in the rail when the user hasn't customised yet. */
 export const DEFAULT_PINNED_KEYS: string[] = APPS.filter((a) => a.defaultPinned).map((a) => a.key);
@@ -1313,7 +1378,11 @@ export const CATEGORY_ORDER: string[] = [
 ];
 
 export function findAppForPath(pathname: string): AppEntry | undefined {
+  // Skip folded (offRail) apps: their routes belong to the HUB they fold into,
+  // so the hub's matchPaths (which include those routes) win and the hub stays
+  // highlighted while you're on a folded page.
   return APPS.find((a) =>
+    !a.offRail &&
     a.matchPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`)),
   );
 }

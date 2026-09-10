@@ -13,8 +13,10 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
   FileText, User, Users, Lock, Archive, NotebookPen, Star, BookOpen,
-  MoreHorizontal, ChevronRight, Plus, type LucideIcon,
+  MoreHorizontal, ChevronRight, Plus, Brush, Folder, Video, ScrollText,
+  ShieldCheck, FileSignature, type LucideIcon,
 } from "lucide-react";
+import { canAccessTier } from "./access-tiers";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh } from "./sidebar-refresh";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
@@ -40,6 +42,8 @@ export function DocsSidebar() {
   const { query } = useSidebarSearch();
   const { data: session } = useSession();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
   const noteMenu = useNoteMenu();
 
   const [docs, setDocs] = useState<DocRow[] | null>(null);
@@ -146,6 +150,23 @@ export function DocsSidebar() {
         })}
       </ul>
 
+      {/* Content — Library (notes/canvases/files) + Clips, folded into Docs */}
+      <SectionLabel>Content</SectionLabel>
+      <ul className="flex flex-col gap-0.5">
+        <HubLink href="/library?tab=notes" Icon={FileText} label="Notes" active={pathname.startsWith("/library")} />
+        <HubLink href="/library?tab=whiteboards" Icon={Brush} label="Canvases" />
+        <HubLink href="/library?tab=files" Icon={Folder} label="Files" />
+        <HubLink href="/notetaker" Icon={Video} label="Clips" active={pathname.startsWith("/notetaker") || pathname.startsWith("/clips")} />
+      </ul>
+
+      {/* Process — SOPs / Policies / Contracts */}
+      <SectionLabel>Process</SectionLabel>
+      <ul className="flex flex-col gap-0.5">
+        <HubLink href="/sops" Icon={ScrollText} label="SOPs" active={pathname.startsWith("/sops") || pathname.startsWith("/process-runs")} />
+        {isHrAdmin ? <HubLink href="/policies" Icon={ShieldCheck} label="Policies" active={pathname.startsWith("/policies")} /> : null}
+        {isHrAdmin ? <HubLink href="/agreements" Icon={FileSignature} label="Contracts" active={pathname.startsWith("/agreements")} /> : null}
+      </ul>
+
       {/* Favorites */}
       <SectionLabel>Favorites</SectionLabel>
       {favorites.length === 0 ? (
@@ -193,6 +214,23 @@ export function DocsSidebar() {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="px-2 pt-4 pb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">{children}</div>;
+}
+
+// A plain nav row for a folded app's link — matches the primary nav styling.
+function HubLink({ href, label, Icon, active }: { href: string; label: string; Icon: LucideIcon; active?: boolean }) {
+  return (
+    <li>
+      <Link
+        href={href}
+        className={`flex items-center gap-2 h-8 px-2 rounded-md text-[14px] ${
+          active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+        }`}
+      >
+        <Icon className="w-4 h-4 text-zinc-500 shrink-0" />
+        <span className="flex-1 truncate">{label}</span>
+      </Link>
+    </li>
+  );
 }
 
 function EmptyCard({ Icon, text }: { Icon: LucideIcon; text: string }) {

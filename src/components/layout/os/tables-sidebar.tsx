@@ -12,7 +12,7 @@ import { createUntitledSheet } from "@/lib/sheet-new";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutGrid, Pencil, Plus, Table2, Trash2 } from "lucide-react";
+import { ClipboardCheck, LayoutGrid, Pencil, Plus, Table2, Trash2 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh, notifyTablesChanged } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
@@ -213,7 +213,7 @@ export function TablesSidebar() {
         </MorePortal>
       ) : null}
 
-      {/* Secondary escape hatch back to the card overview. */}
+      {/* Secondary escape hatch back to the card overview + folded Forms. */}
       <div className="mt-3 border-t border-zinc-100 pt-2">
         <Link
           href="/tables"
@@ -223,6 +223,15 @@ export function TablesSidebar() {
         >
           <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
           <span>All tables</span>
+        </Link>
+        <Link
+          href="/forms"
+          className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
+            pathname.startsWith("/forms") ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+          }`}
+        >
+          <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
+          <span>Forms</span>
         </Link>
       </div>
     </div>
