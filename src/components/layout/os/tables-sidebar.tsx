@@ -227,11 +227,18 @@ export function TablesSidebar() {
         <Link
           href="/forms"
           className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
-            pathname.startsWith("/forms") ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+            pathname === "/forms" ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
           }`}
         >
           <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
-          <span>Forms</span>
+          <span>All Forms</span>
+        </Link>
+        <Link
+          href="/forms?mine=1"
+          className="flex items-center gap-2 h-7 px-2 rounded-md text-[13px] text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+        >
+          <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
+          <span>My Forms</span>
         </Link>
       </div>
     </div>

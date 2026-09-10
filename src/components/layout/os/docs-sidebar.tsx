@@ -14,7 +14,7 @@ import { useSession } from "next-auth/react";
 import {
   FileText, User, Users, Lock, Archive, NotebookPen, Star, BookOpen,
   MoreHorizontal, ChevronRight, Plus, Brush, Folder, Video, ScrollText,
-  ShieldCheck, FileSignature, type LucideIcon,
+  ShieldCheck, FileSignature, Workflow, BarChart3, Trash2, type LucideIcon,
 } from "lucide-react";
 import { canAccessTier } from "./access-tiers";
 import { useSidebarSearch } from "./sidebar-search-context";
@@ -150,21 +150,34 @@ export function DocsSidebar() {
         })}
       </ul>
 
-      {/* Content — Library (notes/canvases/files) + Clips, folded into Docs */}
+      {/* Content — Library (all/notes/canvases/files) + Clips, folded into Docs.
+          Every link the Library and Clips sidebars had is kept. */}
       <SectionLabel>Content</SectionLabel>
       <ul className="flex flex-col gap-0.5">
-        <HubLink href="/library?tab=notes" Icon={FileText} label="Notes" active={pathname.startsWith("/library")} />
+        <HubLink href="/library" Icon={BookOpen} label="Library — all" active={pathname === "/library"} />
+        <HubLink href="/library?tab=notes" Icon={FileText} label="Notes" />
         <HubLink href="/library?tab=whiteboards" Icon={Brush} label="Canvases" />
         <HubLink href="/library?tab=files" Icon={Folder} label="Files" />
-        <HubLink href="/notetaker" Icon={Video} label="Clips" active={pathname.startsWith("/notetaker") || pathname.startsWith("/clips")} />
+        <HubLink href="/notetaker" Icon={Video} label="All Clips" active={pathname.startsWith("/notetaker") || pathname.startsWith("/clips")} />
+        <HubLink href="/notetaker?mine=1" Icon={Video} label="My Clips" />
       </ul>
 
-      {/* Process — SOPs / Policies / Contracts */}
+      {/* Process — SOPs / Policies / Contracts. Every link their sidebars had is kept. */}
       <SectionLabel>Process</SectionLabel>
       <ul className="flex flex-col gap-0.5">
-        <HubLink href="/sops" Icon={ScrollText} label="SOPs" active={pathname.startsWith("/sops") || pathname.startsWith("/process-runs")} />
-        {isHrAdmin ? <HubLink href="/policies" Icon={ShieldCheck} label="Policies" active={pathname.startsWith("/policies")} /> : null}
-        {isHrAdmin ? <HubLink href="/agreements" Icon={FileSignature} label="Contracts" active={pathname.startsWith("/agreements")} /> : null}
+        <HubLink href="/sops" Icon={ScrollText} label="All SOPs" active={pathname === "/sops"} />
+        <HubLink href="/sops/my-sops" Icon={ScrollText} label="My SOPs" active={pathname.startsWith("/sops/my-sops")} />
+        <HubLink href="/process-runs" Icon={Workflow} label="Run history" active={pathname.startsWith("/process-runs")} />
+        <HubLink href="/sops/compliance" Icon={ShieldCheck} label="SOP compliance" active={pathname.startsWith("/sops/compliance")} />
+        {isHrAdmin ? (
+          <>
+            <HubLink href="/policies" Icon={ShieldCheck} label="All policies" active={pathname === "/policies"} />
+            <HubLink href="/policies/compliance" Icon={BarChart3} label="Policy compliance" active={pathname.startsWith("/policies/compliance")} />
+            <HubLink href="/agreements" Icon={FileSignature} label="All contracts" active={pathname === "/agreements"} />
+            <HubLink href="/agreements?view=templates" Icon={Folder} label="Contract templates" />
+            <HubLink href="/agreements?view=trash" Icon={Trash2} label="Contract trash" />
+          </>
+        ) : null}
       </ul>
 
       {/* Favorites */}

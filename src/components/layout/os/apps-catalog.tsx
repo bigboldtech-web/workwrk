@@ -33,7 +33,7 @@ import {
   MessageCircle, Hash, Table2 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
@@ -298,6 +298,72 @@ function MoreNavItem() {
         </>
       ) : null}
     </li>
+  );
+}
+
+// Goals, folded into Work: the same collapsible group shape as "My Wrk", so
+// nothing the old Goals sidebar offered is lost — My / Team (managers) /
+// Company Goals + My KRAs & KPIs. Views are ?mine / ?team / ?level=company on
+// /okrs, so the active row is read from the query string.
+function GoalsGroup({ pathname }: { pathname: string }) {
+  const sp = useSearchParams();
+  const { data: session } = useSession();
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
+  const isManager = canAccessTier("manager", accessLevel);
+  const onGoals = pathname.startsWith("/okrs") || pathname.startsWith("/goals");
+  const view = !onGoals ? null
+    : sp.get("mine") === "1" ? "mine"
+    : sp.get("team") === "1" ? "team"
+    : (sp.get("level") || "").toLowerCase() === "company" ? "company"
+    : "all";
+  const [expanded, setExpanded] = useState(onGoals || pathname === "/people/me");
+
+  return (
+    <>
+      <li className="relative group/goalrow">
+        <Link
+          href="/okrs"
+          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
+            view === "all"
+              ? "bg-zinc-200/70 text-zinc-900 font-medium"
+              : "text-zinc-700 hover:bg-white/80"
+          }`}
+        >
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500" aria-hidden>
+            <Trophy className="h-4 w-4 transition-opacity group-hover/goalrow:opacity-0" />
+          </span>
+          <span className="min-w-0 flex-1 truncate">Goals</span>
+        </Link>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          aria-label={expanded ? "Collapse Goals" : "Expand Goals"}
+          className="absolute left-2 top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded-md bg-zinc-200/80 text-zinc-600 opacity-0 transition-opacity hover:text-zinc-900 group-hover/goalrow:opacity-100 focus-visible:opacity-100"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </button>
+      </li>
+      {expanded ? (
+        <li>
+          <ul className="ml-[18px] border-l border-zinc-200/70 pl-2">
+            <SubNavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" active={view === "mine"} iconTint="#0073EA" />
+            {isManager ? (
+              <SubNavItem href="/okrs?team=1" Icon={Users} label="Team Goals" active={view === "team"} iconTint="#16a34a" />
+            ) : null}
+            <SubNavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" active={view === "company"} iconTint="#f59e0b" />
+            <SubNavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" active={pathname === "/people/me"} iconTint="#e2445c" />
+          </ul>
+        </li>
+      ) : null}
+    </>
   );
 }
 
@@ -886,7 +952,7 @@ function HomeSidebar() {
         <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
         <MyTasksGroup pathname={pathname} />
         <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
-        <NavItem href="/okrs" Icon={Trophy} label="Goals" active={pathname.startsWith("/okrs") || pathname.startsWith("/goals")} />
+        <GoalsGroup pathname={pathname} />
         <MoreNavItem />
       </ul>
 
@@ -971,6 +1037,9 @@ function AiSidebar() {
           <ul>
             <NavItem href="/automation/workflows" Icon={Workflow} label="Workflows" active={pathname.startsWith("/automation/workflows")} />
             <NavItem href="/automation/templates" Icon={LayoutTemplate} label="Templates" active={pathname.startsWith("/automation/templates")} />
+            <NavItem href="/automation/health" Icon={Activity} label="Health" active={pathname.startsWith("/automation/health")} />
+            <NavItem href="/automation/usage" Icon={GaugeCircle} label="Usage" active={pathname.startsWith("/automation/usage")} />
+            <NavItem href="/automation/logs" Icon={ScrollText} label="Logs" active={pathname.startsWith("/automation/logs")} />
             <NavItem href="/automation/connections" Icon={Plug} label="Connections" active={pathname.startsWith("/automation/connections")} />
           </ul>
         </>
@@ -1031,7 +1100,10 @@ function TeamsSidebar() {
         ) : null}
         <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={pathname === "/team/workload"} />
         {canAccessTier("hr-admin", accessLevel) ? (
-          <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={pathname.startsWith("/reviews") || pathname.startsWith("/talent")} />
+          <>
+            <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={pathname.startsWith("/reviews")} />
+            <NavItem href="/talent" Icon={Award} label="Talent (9-box)" active={pathname.startsWith("/talent")} />
+          </>
         ) : null}
       </ul>
       {canAccessTier("hr-admin", accessLevel) ? (
