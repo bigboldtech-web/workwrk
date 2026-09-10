@@ -54,8 +54,11 @@ jobs:
 
             # Build runs scripts/deploy-migrations.mjs (prisma migrate deploy
             # with advisory-lock retry) + prisma generate + next build.
+            # Tee to a persistent log so a failed build is diagnosable over SSH
+            # even without the Actions logs. pipefail keeps the real exit code so
+            # script_stop still aborts the deploy (no pm2 reload) on failure.
             echo "==> Building (includes DB migrations)"
-            npm run build
+            npm run build 2>&1 | tee /www/wwwroot/workwrk.com/deploy-build.log
 
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
