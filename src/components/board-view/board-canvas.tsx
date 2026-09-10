@@ -6,7 +6,7 @@
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { CircleDot, Settings2 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
@@ -280,6 +280,46 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const handleItemsRefreshed = useCallback((fresh: BoardItemRow[]) => {
     setItems(fresh);
   }, []);
+
+  // Live updates (light polling): every ~12s while the tab is visible, pull the
+  // board's items and fold in what teammates changed — new tasks they added and
+  // rows they edited (only when the server copy is strictly NEWER, so a row
+  // you're mid-editing is never clobbered). It never removes a row here, so an
+  // optimistic add that hasn't reached the server yet can't be dropped. Also
+  // fires immediately when you switch back to the tab. (SSE can replace this
+  // later for instant push.)
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      try {
+        const res = await fetch(`/api/boards/${boardId}/items`, { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const fresh: BoardItemRow[] = Array.isArray(data?.items) ? data.items : [];
+        if (cancelled) return;
+        setItems((prev) => {
+          const freshById = new Map(fresh.map((r) => [r.id, r]));
+          const prevIds = new Set(prev.map((r) => r.id));
+          const ts = (r: BoardItemRow) => (r.updatedAt ? new Date(r.updatedAt).getTime() : 0);
+          let changed = false;
+          const next = prev.map((r) => {
+            const f = freshById.get(r.id);
+            if (f && ts(f) > ts(r)) { changed = true; return f; }
+            return r;
+          });
+          for (const f of fresh) {
+            if (!prevIds.has(f.id)) { next.push(f); changed = true; }
+          }
+          return changed ? next : prev;
+        });
+      } catch { /* transient — next tick retries */ }
+    };
+    const id = setInterval(() => void poll(), 12000);
+    const onVis = () => { if (document.visibilityState === "visible") void poll(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { cancelled = true; clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+  }, [boardId]);
 
   const handleItemArchived = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
