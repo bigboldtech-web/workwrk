@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Mic, X, Copy, RotateCcw, Square, StickyNote, CheckSquare } from "lucide-react";
 import { useOsToast } from "./toast";
-import { useOsShell } from "./shell-context";
+import { useLayer, useOsShell } from "./shell-context";
 
 /** ProseMirror-ish doc body from plain text — one paragraph per line.
  *  Mirrors NotepadPanel.textToContent so a voice note reads back exactly
@@ -79,14 +79,13 @@ export function VoiceCapturePopover() {
 
   useEffect(() => {
     function onTool(e: Event) { if ((e as CustomEvent).detail === "voice") start(); }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") { stop(); setOpen(false); } }
     window.addEventListener("workwrk:tool", onTool as EventListener);
-    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("workwrk:tool", onTool as EventListener);
-      window.removeEventListener("keydown", onKey);
     };
   }, [start, stop]);
+  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener here.
+  useLayer(open, { id: "voice-capture", kind: "popover", close: () => { stop(); setOpen(false); } });
 
   if (!open) return null;
   const text = (finalText + (interim ? " " + interim : "")).trim();

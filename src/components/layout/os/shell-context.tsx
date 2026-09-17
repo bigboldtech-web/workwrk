@@ -1,12 +1,31 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { getApp, type AppEntry } from "./apps-catalog";
 import { canAccessTier, parseOrgAppsConfig, visibleRailApps, type OrgAppsConfig } from "@/lib/rail-apps";
 import { hubDefaultHref, isHubKey, type HubKey } from "@/lib/nav/route-hub";
 import { MODULE_APP_KEYS } from "@/lib/modules";
+import { apiFetch } from "@/lib/api-fetch";
+import { readLastAppPath, recordLastAppPath, serverLastAppPath, subscribeLastAppPath } from "@/lib/settings-nav";
+import type { EffectivePreferences } from "@/lib/preferences";
+
+/**
+ * LayerStack (spec-shell.md sections 1.5 and 2.1): every open overlay
+ * registers itself; Esc closes the most recently registered one and nothing
+ * else. No kind ordering, no z-index tie-break. A layer may refuse to close
+ * (`canClose` false): the Session-expired dialog, a dirty form that opens its
+ * confirm as a new layer instead.
+ */
+export type LayerKind = "palette" | "drawer" | "modal" | "panel" | "popover" | "dialog" | "splash";
+export interface LayerEntry {
+  id: string;
+  kind: LayerKind;
+  close: () => void;
+  canClose?: () => boolean;
+}
+export type CloseTopLayerResult = "closed" | "refused" | "none";
 
 /** Options for opening the Template Center. `kind` scopes the browser to
  *  one template type (e.g. LIST from the create-list modal); `applyContext`
@@ -225,6 +244,27 @@ type ShellState = {
    */
   bumpRowVersion: (moduleId: string) => void;
   rowVersion: (moduleId: string) => number;
+
+  /** LayerStack: register an open overlay; returns the unregister. */
+  registerLayer: (entry: LayerEntry) => () => void;
+  /** Esc's one rule: close the top layer. */
+  closeTopLayer: () => CloseTopLayerResult;
+  /** How many layers are open (re-renders subscribers on change). */
+  layerCount: number;
+  /** The kind on top, for consumers that adapt (the shortcuts listener). */
+  topLayerKind: LayerKind | null;
+
+  /**
+   * The last pathname (+ search) outside /settings and /account, mirrored to
+   * sessionStorage["workwrk:shell:last-app-path"] so closeSettings() has a
+   * fallback after a hard refresh inside a door (settings spec section 8.3).
+   */
+  lastAppPath: string | null;
+
+  /** Boot-time preferences fetch failed with a non-401 error; null when fine. */
+  prefsError: string | null;
+  /** Re-run the preferences fetch (the shell's ErrorState Retry). */
+  refetchPrefs: () => void;
 };
 
 const Ctx = createContext<ShellState | null>(null);
@@ -249,7 +289,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   // SessionProvider wraps the whole app (src/components/layout/providers.tsx),
   // so useSession is safe here.
   const { data: session } = useSession();
-  const router = useRouter();
+  const pathname = usePathname();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidekickOpen, setSidekickOpen] = useState(false);
@@ -282,6 +322,51 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [presenceStatus, setPresenceStatusState] = useState<PresenceStatus>(DEFAULT_PRESENCE);
   const [statusModalOpen, setStatusModalOpen] = useState(false);
   const [mutedNotifications, setMutedNotificationsState] = useState(false);
+  const [prefsError, setPrefsError] = useState<string | null>(null);
+  const [prefsVersion, setPrefsVersion] = useState(0);
+  // lastAppPath: the last pathname outside the settings takeover, kept in
+  // sessionStorage by settings-nav so a hard refresh inside a door still has
+  // an exit; read as an external store (null during SSR and hydration).
+  const lastAppPath = useSyncExternalStore(subscribeLastAppPath, readLastAppPath, serverLastAppPath);
+
+  // ── LayerStack ──────────────────────────────────────────────────
+  // The stack lives in a ref so closeTopLayer (called from the one window
+  // keydown listener) always sees the current top synchronously. The two
+  // values consumers render, count and top kind, are a state snapshot taken
+  // whenever the stack changes, so nothing reads the ref during render.
+  const layersRef = useRef<LayerEntry[]>([]);
+  const [layerSnapshot, setLayerSnapshot] = useState<{ count: number; top: LayerKind | null }>({ count: 0, top: null });
+  const snapshotLayers = useCallback(() => {
+    const list = layersRef.current;
+    const top = list[list.length - 1]?.kind ?? null;
+    setLayerSnapshot((prev) => (prev.count === list.length && prev.top === top ? prev : { count: list.length, top }));
+  }, []);
+  const registerLayer = useCallback((entry: LayerEntry) => {
+    layersRef.current = [...layersRef.current.filter((l) => l.id !== entry.id), entry];
+    snapshotLayers();
+    return () => {
+      if (layersRef.current.some((l) => l.id === entry.id)) {
+        layersRef.current = layersRef.current.filter((l) => l.id !== entry.id);
+        snapshotLayers();
+      }
+    };
+  }, [snapshotLayers]);
+  const closeTopLayer = useCallback((): CloseTopLayerResult => {
+    const top = layersRef.current[layersRef.current.length - 1];
+    if (!top) return "none";
+    if (top.canClose && !top.canClose()) return "refused";
+    top.close();
+    return "closed";
+  }, []);
+  const layerCount = layerSnapshot.count;
+  const topLayerKind = layerSnapshot.top;
+
+  // Record every app pathname (recordLastAppPath ignores the doors itself);
+  // the store notifies the reader above.
+  useEffect(() => {
+    if (!pathname) return;
+    recordLastAppPath(pathname, window.location.search);
+  }, [pathname]);
 
   useEffect(() => {
     const storageTimer = window.setTimeout(() => {
@@ -327,33 +412,40 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     // Reconcile with server-stored preference (syncs across devices).
     // Server is the source of truth when present; localStorage is a
     // cached read-through so the rail doesn't flash on first paint.
+    // Through apiFetch (spec-shell section 1.7): a 401 here surfaces the
+    // SessionExpiredDialog instead of leaving the rail in its pre-fetch
+    // state forever; any other failure is kept as `prefsError` for the
+    // shell to render, never swallowed.
     let alive = true;
     const loadServerPrefs = async () => {
-      try {
-        const res = await fetch("/api/preferences", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = await res.json();
-        const sidebar = data?.effective?.sidebar;
-        if (!alive || !sidebar) return;
-        if (typeof sidebar.iconsOnly === "boolean") {
-          setIconsOnlyState(sidebar.iconsOnly);
-          try { window.localStorage.setItem(ICONS_ONLY_KEY, sidebar.iconsOnly ? "1" : "0"); } catch {}
-        }
-        // Org ACCESS config for the rail. parseOrgAppsConfig is tolerant
-        // of stale payloads that don't carry sidebar.apps yet (absent →
-        // {} → access-filtered catalog default). The workwrk:prefs-changed
-        // listener below refetches, so an admin save in the Settings door
-        // updates this tab's rail immediately (other tabs and users pick it up on their next load — window CustomEvents are same-tab only) without a reload.
-        setRailConfig(parseOrgAppsConfig(sidebar.apps));
-        // Premium module entitlement, org-level. Absent on a stale payload →
-        // [] → modules stay hidden until a fresh payload carries them.
-        const activeAppKeys = data?.effective?.modules?.activeAppKeys;
-        setActiveModuleKeys(
-          Array.isArray(activeAppKeys) && activeAppKeys.every((k: unknown) => typeof k === "string")
-            ? activeAppKeys
-            : [],
-        );
-      } catch {}
+      const r = await apiFetch<{ effective?: Partial<EffectivePreferences> }>("/api/preferences", { cache: "no-store" });
+      if (!alive) return;
+      if (!r.ok) {
+        // 401 has already been announced by apiFetch; anything else is ours.
+        if (r.status !== 401) setPrefsError(r.error);
+        return;
+      }
+      setPrefsError(null);
+      const sidebar = r.data?.effective?.sidebar;
+      if (!sidebar) return;
+      if (typeof sidebar.iconsOnly === "boolean") {
+        setIconsOnlyState(sidebar.iconsOnly);
+        try { window.localStorage.setItem(ICONS_ONLY_KEY, sidebar.iconsOnly ? "1" : "0"); } catch {}
+      }
+      // Org ACCESS config for the rail. parseOrgAppsConfig is tolerant
+      // of stale payloads that don't carry sidebar.apps yet (absent →
+      // {} → access-filtered catalog default). The workwrk:prefs-changed
+      // listener below refetches, so an admin save in the Settings door
+      // updates this tab's rail immediately (other tabs and users pick it up on their next load — window CustomEvents are same-tab only) without a reload.
+      setRailConfig(parseOrgAppsConfig(sidebar.apps));
+      // Premium module entitlement, org-level. Absent on a stale payload →
+      // [] → modules stay hidden until a fresh payload carries them.
+      const activeAppKeys = r.data?.effective?.modules?.activeAppKeys;
+      setActiveModuleKeys(
+        Array.isArray(activeAppKeys) && activeAppKeys.every((k: unknown) => typeof k === "string")
+          ? activeAppKeys
+          : [],
+      );
     };
     void loadServerPrefs();
     const onPrefsChanged = () => void loadServerPrefs();
@@ -363,7 +455,9 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(storageTimer);
       window.removeEventListener("workwrk:prefs-changed", onPrefsChanged);
     };
-  }, []);
+  }, [prefsVersion]);
+
+  const refetchPrefs = useCallback(() => setPrefsVersion((v) => v + 1), []);
 
   const setIconsOnly = useCallback((v: boolean) => {
     setIconsOnlyState(v);
@@ -565,52 +659,18 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
     try { window.localStorage.setItem(MUTED_NOTIFS_KEY, v ? "1" : "0"); } catch {}
   }, []);
 
+  // The global keyboard map moved to src/lib/shortcuts.ts, dispatched by the
+  // one window listener in shell-shortcuts.tsx (spec-shell section 1.8).
+  // The palette and the item drawer are layers, so Esc closes them through
+  // the LayerStack (topmost first) instead of a hard-coded branch here.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.shiftKey && e.key.toLowerCase() === "k") {
-        // Cmd/Ctrl+Shift+K → quick task. Replaces the old Cmd+T chord, which
-        // Chrome/Safari swallow for "new tab" and never deliver to the page —
-        // so the advertised shortcut silently did nothing. ⇧K sits next to the
-        // ⌘K search chord and is free in the target browsers.
-        e.preventDefault();
-        setCreateTaskPreselect(null);
-        setCreateTaskOpen(true);
-      } else if (meta && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPaletteOpen((v) => !v);
-      } else if (meta && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        setSidekickOpen((v) => !v);
-      } else if (meta && e.key.toLowerCase() === "b") {
-        // Cmd+B → toggle secondary sidebar (matches common app shortcuts).
-        e.preventDefault();
-        setSidebarCollapsedState((v) => {
-          const next = !v;
-          try { window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? "1" : "0"); } catch {}
-          return next;
-        });
-      } else if (meta && /^[1-9]$/.test(e.key)) {
-        // Cmd+1..9 → jump to the Nth rail app (org order). It NAVIGATES now:
-        // the chrome follows the URL, so a chord that only wrote a stored key
-        // would be a no-op. Reopens a collapsed sidebar, the way a rail click
-        // does. (spec-shell §1.8 replaces the chord itself with "G n" later.)
-        const idx = parseInt(e.key, 10) - 1;
-        const app = railApps[idx];
-        if (app) {
-          e.preventDefault();
-          setSidebarCollapsedState(false);
-          try { window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, "0"); } catch {}
-          router.push(hubHref(app.key));
-        }
-      } else if (e.key === "Escape") {
-        setPaletteOpen(false);
-        setOpenItem(null);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [railApps, hubHref, router]);
+    if (!paletteOpen) return;
+    return registerLayer({ id: "palette", kind: "palette", close: () => setPaletteOpen(false) });
+  }, [paletteOpen, registerLayer]);
+  useEffect(() => {
+    if (!openItem) return;
+    return registerLayer({ id: "item-drawer", kind: "drawer", close: () => setOpenItem(null) });
+  }, [openItem, registerLayer]);
 
   const value = useMemo<ShellState>(
     () => ({
@@ -633,8 +693,11 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned,
       presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal,
       mutedNotifications, setMutedNotifications,
+      registerLayer, closeTopLayer, layerCount, topLayerKind,
+      lastAppPath,
+      prefsError, refetchPrefs,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, railApps, launcherApps, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, appsGridOpen, openAppsGrid, closeAppsGrid, railApps, launcherApps, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, iconsOnly, setIconsOnly, profileToolPins, toggleProfileToolPin, setProfileToolPins, isProfileToolPinned, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedNotifications, setMutedNotifications, registerLayer, closeTopLayer, layerCount, topLayerKind, lastAppPath, prefsError, refetchPrefs],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
@@ -644,4 +707,36 @@ export function useOsShell() {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useOsShell must be used within OsShellProvider");
   return ctx;
+}
+
+/**
+ * Register an overlay as a layer while `open` is true. Esc then closes it
+ * through the LayerStack, topmost first; the component registers a layer
+ * instead of its own keydown listener (spec-shell section 1.5). Safe to call
+ * outside the provider (no-op), so a component mounted above OsShell, such
+ * as the Session-expired dialog, can share the code path.
+ */
+export function useLayer(open: boolean, entry: Omit<LayerEntry, "id"> & { id?: string }): void {
+  const ctx = useContext(Ctx);
+  const register = ctx?.registerLayer;
+  // The latest close/canClose live in refs, refreshed after every render, so
+  // the registered layer never re-registers when the caller's callbacks change.
+  const closeRef = useRef(entry.close);
+  const canCloseRef = useRef(entry.canClose);
+  useEffect(() => {
+    closeRef.current = entry.close;
+    canCloseRef.current = entry.canClose;
+  });
+  const autoId = useId();
+  const id = entry.id ?? `layer-${autoId}`;
+  const kind = entry.kind;
+  useEffect(() => {
+    if (!open || !register) return;
+    return register({
+      id,
+      kind,
+      close: () => closeRef.current(),
+      canClose: () => (canCloseRef.current ? canCloseRef.current() : true),
+    });
+  }, [open, register, id, kind]);
 }

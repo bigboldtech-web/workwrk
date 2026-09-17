@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLayer } from "./shell-context";
 import { X, ChevronRight, Loader2, CircleDot } from "lucide-react";
 
 interface WorkItem { id: string; title: string; status: string | null; dueAt: string | null; priority: string | null; board: string | null; url: string }
@@ -39,14 +40,13 @@ export function MyWorkPanel() {
     function onTool(e: Event) {
       if ((e as CustomEvent).detail === "my-work") { setOpen(true); load(); }
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
     window.addEventListener("workwrk:tool", onTool as EventListener);
-    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("workwrk:tool", onTool as EventListener);
-      window.removeEventListener("keydown", onKey);
     };
   }, [load]);
+  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener here.
+  useLayer(open, { id: "my-work-panel", kind: "panel", close: () => setOpen(false) });
 
   if (!open) return null;
 

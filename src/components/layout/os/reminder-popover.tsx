@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { X, AlarmClock, Loader2 } from "lucide-react";
 import { useOsToast } from "./toast";
+import { useLayer } from "./shell-context";
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 function toLocalInput(d: Date) {
@@ -37,14 +38,13 @@ export function ReminderPopover() {
         setTitle(""); setWhen(toLocalInput(inHour())); setEmail(false); setOpen(true);
       }
     }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
     window.addEventListener("workwrk:tool", onTool as EventListener);
-    window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("workwrk:tool", onTool as EventListener);
-      window.removeEventListener("keydown", onKey);
     };
   }, []);
+  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener here.
+  useLayer(open, { id: "reminder-popover", kind: "popover", close: () => setOpen(false) });
 
   async function create() {
     if (!title.trim() || saving) return;

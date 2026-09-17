@@ -9,7 +9,9 @@
 //      the org's value (admin can freeze keys against user override).
 
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { getActiveModuleAppKeys } from "@/lib/entitlements";
+import { deepMergePatch } from "@/lib/preferences-schema";
 // Type-only on purpose: rail-apps.ts imports the client apps-catalog at
 // runtime, and this module is server code — a value import would drag the
 // whole client component graph into every API route bundle.
@@ -23,6 +25,12 @@ export interface SidebarPref {
   order: string[];            // user's chosen order for navigable items
   iconsOnly: boolean;         // collapsed (icons only) vs labeled
   sectionsOrder: string[];    // order of sidebar sections ("favorites", "spaces", ...)
+  // Settings spec 9.2: personal sidebar state moving out of localStorage.
+  width?: number;
+  collapsed?: boolean;
+  quickTools?: string[];
+  collapsedSections?: string[];
+  hiddenSections?: string[];
   // 2026-08-22 ACCESS system — the org rail config (which apps the rail
   // shows, in what order, with what tier floors). Meaningful on the ORG
   // row (OrgPreference.sidebarDefault) ONLY; a copy on a user row is
@@ -68,7 +76,19 @@ export interface HomePref {
   notifications?: {
     inbox?: Record<string, boolean>;
     email?: Record<string, boolean>; // includes the "master" switch key
+    /** Inbox display prefs (was a stripped top-level `inbox` key; settings spec 7.3). */
+    inboxView?: { showAll?: boolean; groupByDate?: boolean; sortNewest?: boolean; mode?: "fullscreen" | "inline" };
+    mutedUntil?: string | null;
+    quietHours?: { start?: string; end?: string; days?: number[]; enabled?: boolean };
+    muted?: string[];
+    desktop?: boolean;
+    reminderEmail?: boolean;
   };
+  /** The key My Tasks writes (settings spec 9.3 widening; same shape as taskCardLayout). */
+  taskCardLayoutV3?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
+  locale?: { language?: string; timezone?: string; weekStart?: number; dateFormat?: string; timeFormat?: "12h" | "24h" };
+  ui?: { reducedMotion?: boolean; showUpcoming?: boolean; dismissed?: string[]; contrast?: "normal" | "high" };
+  work?: { savedFilters?: unknown[]; pinnedViews?: string[]; surface?: Record<string, unknown> };
   // Recently-viewed Docs (Docs hub "Recent" tab + "Date viewed" column).
   // MRU-ordered, ISO timestamps, capped at 20. Written by
   // /api/me/recent-docs on every successful doc load.
@@ -78,9 +98,12 @@ export interface HomePref {
 export interface ThemePref {
   appearance: "LIGHT" | "DARK" | "AUTO";
   accent: string;             // one of the brand accents: "mint" | "purple" | ...
+  /** Navy (default) or Light chrome (spec-shell 1.9); absent = navy. */
+  chrome?: "navy" | "light";
 }
 
-export type DensityPref = "compact" | "cozy";
+/** Data-row density (design-system 3.2): comfortable 44 / cozy 36 / compact 32. */
+export type DensityPref = "compact" | "cozy" | "comfortable";
 
 export interface EffectivePreferences {
   sidebar: SidebarPref;
@@ -123,7 +146,14 @@ export const DEFAULT_THEME: ThemePref = {
   accent: "workwrk",
 };
 
-export const DEFAULT_DENSITY: DensityPref = "cozy";
+// Comfortable 44 is the shipped default (design-system 0.3 row 1, 3.2);
+// stored "cozy" and "compact" rows keep their meaning (36 / 32).
+export const DEFAULT_DENSITY: DensityPref = "comfortable";
+
+/** The Json column boundary: the typed pref shapes are plain JSON by construction. */
+function asJson(v: unknown): Prisma.InputJsonValue | undefined {
+  return v === undefined || v === null ? undefined : (v as Prisma.InputJsonValue);
+}
 
 // ── Locked-keys dot-path helpers ──────────────────────────────────
 
@@ -260,14 +290,18 @@ export interface UpdateUserPreferenceInput {
 
 export async function setUserPreference(userId: string, patch: UpdateUserPreferenceInput) {
   const existing = await prisma.userPreference.findUnique({ where: { userId } });
+  // Deep merge (src/lib/preferences-schema.ts): plain objects recurse, arrays
+  // and scalars replace. A PATCH of `home.notifications.inboxView` therefore
+  // keeps `home.notifications.inbox` and `.email`; the previous one-level
+  // spread replaced the whole `notifications` object and lost them.
   const sidebar = patch.sidebar
-    ? { ...(existing?.sidebar as SidebarPref | null ?? DEFAULT_SIDEBAR), ...patch.sidebar }
+    ? deepMergePatch(existing?.sidebar as SidebarPref | null ?? DEFAULT_SIDEBAR, patch.sidebar as Record<string, unknown>)
     : (existing?.sidebar ?? undefined);
   const home = patch.home
-    ? { ...(existing?.home as HomePref | null ?? DEFAULT_HOME), ...patch.home }
+    ? deepMergePatch(existing?.home as HomePref | null ?? DEFAULT_HOME, patch.home as Record<string, unknown>)
     : (existing?.home ?? undefined);
   const theme = patch.theme
-    ? { ...(existing?.theme as ThemePref | null ?? DEFAULT_THEME), ...patch.theme }
+    ? deepMergePatch(existing?.theme as ThemePref | null ?? DEFAULT_THEME, patch.theme as Record<string, unknown>)
     : (existing?.theme ?? undefined);
   const density = patch.density ?? existing?.density ?? undefined;
 
@@ -275,15 +309,15 @@ export async function setUserPreference(userId: string, patch: UpdateUserPrefere
     where: { userId },
     create: {
       userId,
-      sidebar: sidebar ?? undefined,
-      home: home ?? undefined,
-      theme: theme ?? undefined,
+      sidebar: asJson(sidebar),
+      home: asJson(home),
+      theme: asJson(theme),
       density: density ?? null,
     },
     update: {
-      sidebar: sidebar ?? undefined,
-      home: home ?? undefined,
-      theme: theme ?? undefined,
+      sidebar: asJson(sidebar),
+      home: asJson(home),
+      theme: asJson(theme),
       density: density ?? null,
     },
   });
@@ -314,16 +348,16 @@ export async function setOrgPreference(organizationId: string, patch: UpdateOrgP
     where: { organizationId },
     create: {
       organizationId,
-      sidebarDefault: sidebar ?? undefined,
-      homeDefault: home ?? undefined,
-      themeDefault: theme ?? undefined,
+      sidebarDefault: asJson(sidebar),
+      homeDefault: asJson(home),
+      themeDefault: asJson(theme),
       densityDefault: density ?? null,
       lockedKeys: patch.lockedKeys ?? [],
     },
     update: {
-      sidebarDefault: sidebar ?? undefined,
-      homeDefault: home ?? undefined,
-      themeDefault: theme ?? undefined,
+      sidebarDefault: asJson(sidebar),
+      homeDefault: asJson(home),
+      themeDefault: asJson(theme),
       densityDefault: density ?? null,
       ...(patch.lockedKeys !== undefined ? { lockedKeys: patch.lockedKeys } : {}),
     },

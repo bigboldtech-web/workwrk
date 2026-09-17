@@ -2,6 +2,7 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import { ACCESS_LEGACY_ALLOWLIST } from "./eslint-access-allowlist.mjs";
+import { designSystemPlugin } from "./eslint-design-system.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -51,6 +52,63 @@ const eslintConfig = defineConfig([
             "The member tables are the engine's store. Read them through loadFacts()/accessibleIds() and write them through src/lib/access/grants.ts.",
         },
       ],
+    },
+  },
+  // ── Design system (docs/plans/ui-refresh/design-system.md 8.4) ──
+  //
+  // A local plugin, not more `no-restricted-syntax` entries: a second
+  // object setting that rule for overlapping files would replace the G7
+  // options above rather than merge with them. Scope is the product:
+  // src/app/(dashboard) and src/components. Exempt: src/components/brand
+  // (the only place the four dots may live), src/app/(marketing) and the
+  // marketing code that lives under src/components (landing/, marketing/,
+  // bento/, pricing/), which keeps its own smaller sheet.
+  //
+  // Severity schedule: every rule that fails on today's code starts as a
+  // warning and flips to "error" with the step that clears it:
+  //   no-grey-utilities       -> error at refresh step 5 (colour sweep)
+  //   no-arbitrary-text-size  -> error at refresh step 2 (type codemod)
+  //   no-banned-radius-shadow -> error at refresh step 4 (primitives)
+  //   no-brand-dots           -> error now (zero hits at the token step)
+  {
+    files: ["src/app/(dashboard)/**/*.ts", "src/app/(dashboard)/**/*.tsx", "src/components/**/*.ts", "src/components/**/*.tsx"],
+    ignores: [
+      "src/components/brand/**",
+      "src/components/landing/**",
+      "src/components/marketing/**",
+      "src/components/bento/**",
+      "src/components/pricing/**",
+      // Canvas is covered by the narrower block below (its colour literals
+      // are user data drawn on the whiteboard, not chrome).
+      "src/components/canvas/**",
+    ],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: {
+      "workwrk-ds/no-grey-utilities": "warn",
+      "workwrk-ds/no-arbitrary-text-size": "warn",
+      "workwrk-ds/no-banned-radius-shadow": "warn",
+      "workwrk-ds/no-brand-dots": "error",
+    },
+  },
+  // The whiteboard: exempt from the grey / raw-hex rule only (its palette
+  // is user content), every other design rule still applies.
+  {
+    files: ["src/components/canvas/**/*.ts", "src/components/canvas/**/*.tsx"],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: {
+      "workwrk-ds/no-arbitrary-text-size": "warn",
+      "workwrk-ds/no-banned-radius-shadow": "warn",
+      "workwrk-ds/no-brand-dots": "error",
+    },
+  },
+  // The dot quarantine also covers the app outside the product scope
+  // (auth, onboard, api): only brand/ and (marketing) may reference them.
+  {
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    ignores: ["src/components/brand/**", "src/app/(marketing)/**"],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: {
+      "workwrk-ds/no-brand-dots": "error",
     },
   },
   {

@@ -2,12 +2,92 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Readability lift (2026-08-20): the whole product ran 1px+ too small on a
-   13px base. Hard px sizes were rescaled one step up (10->11 ... 13.5->14.5,
-   floor 10px), body base is 14px, and text-xs rises with the same step. */
+/* ── Type scale utilities (design-system 2.2, 8.3) ──────────────────
+   The four NEW named sizes land now: text-row 15/22, text-micro 11/14
+   (600, +0.06em), text-rail 10/12 (500), text-prose 15/24.
+
+   The five standard names are NOT re-bound yet. The spec maps text-xs to
+   12/16, text-sm 13/18, text-base 14/20, text-lg 16/22 and text-xl 22/28,
+   but ~1,600 existing call sites use those names at today's meaning (an
+   existing `text-xs` is the 13px of the 2026-08-20 readability lift and
+   maps to the new `text-sm`, not to a shrunken `text-xs`). The type
+   codemod (design-system 8.2, refresh step 2) renames those call sites
+   and flips these five values in the same change:
+     --text-xs: 0.75rem;    --text-xs--line-height: 1rem;
+     --text-sm: 0.8125rem;  --text-sm--line-height: 1.125rem;
+     --text-base: 0.875rem; --text-base--line-height: 1.25rem;
+     --text-lg: 1rem;       --text-lg--line-height: 1.375rem;
+     --text-xl: 1.375rem;   --text-xl--line-height: 1.75rem;
+   Until then text-xs keeps the readability-lift value below. */
 @theme {
   --text-xs: 0.8125rem;
   --text-xs--line-height: 1.25rem;
+
+  --text-row: 0.9375rem;
+  --text-row--line-height: 1.375rem;
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: 0.875rem;
+  --text-micro--font-weight: 600;
+  --text-micro--letter-spacing: 0.06em;
+  --text-rail: 0.625rem;
+  --text-rail--line-height: 0.75rem;
+  --text-rail--font-weight: 500;
+  --text-prose: 0.9375rem;
+  --text-prose--line-height: 1.5rem;
+}
+
+/* ── Token aliases for Tailwind (design-system 8.3) ─────────────────
+   Components write `bg-app border-line text-ink-2`, never
+   `bg-white border-zinc-200 text-zinc-500`. Inline so each utility reads
+   the --os-* variable at the element, which is what makes `.dark` and
+   html[data-chrome] rebinding reach it. The variables themselves live in
+   src/app/(dashboard)/tokens.css.
+
+   Radius aliases (--radius-xs/sm/md/lg -> var(--os-r-*)) are deferred
+   with the type codemod: re-binding `rounded-md` from 6 to 8 and
+   `rounded-lg` from 8 to 12 today would move every existing rounded-*
+   call site in the product and on the marketing site. */
+@theme inline {
+  --color-app: var(--os-canvas);
+  --color-raised: var(--os-surface);
+  --color-subtle: var(--os-surface-1);
+  --color-hover: var(--os-surface-hov);
+  --color-active: var(--os-surface-2);
+  --color-selected: var(--os-selected);
+  --color-selected-hov: var(--os-selected-hov);
+  --color-line: var(--os-line);
+  --color-line-soft: var(--os-line-soft);
+  --color-line-strong: var(--os-line-strong);
+  --color-ink: var(--os-ink);
+  --color-ink-2: var(--os-ink-2);
+  --color-ink-strong: var(--os-ink-strong);
+  --color-ink-3: var(--os-ink-3);
+  --color-ink-4: var(--os-ink-4);
+  --color-ink-inv: var(--os-ink-inv);
+  --color-brand: var(--os-brand);
+  --color-brand-hover: var(--os-brand-hover);
+  --color-brand-pressed: var(--os-brand-pressed);
+  --color-brand-deep: var(--os-brand-deep);
+  --color-brand-soft: var(--os-brand-soft);
+  --color-focus: var(--os-focus);
+  --color-success-bg: var(--os-success-bg);
+  --color-success-text: var(--os-success-text);
+  --color-success-solid: var(--os-success-solid);
+  --color-warning-bg: var(--os-warning-bg);
+  --color-warning-text: var(--os-warning-text);
+  --color-warning-solid: var(--os-warning-solid);
+  --color-danger-bg: var(--os-danger-bg);
+  --color-danger-text: var(--os-danger-text);
+  --color-danger-solid: var(--os-danger-solid);
+  --color-chrome: var(--os-chrome-bg);
+  --color-chrome-hov: var(--os-chrome-hov);
+  --color-chrome-fg: var(--os-chrome-fg);
+  --color-chrome-fg-2: var(--os-chrome-fg-2);
+  --color-chrome-line: var(--os-chrome-line);
+  --color-chrome-pill: var(--os-chrome-pill);
+  --color-chrome-pill-fg: var(--os-chrome-pill-fg);
+  --color-side: var(--os-side-bg);
+  --color-side-pill: var(--os-side-pill);
 }
 
 /* Tailwind 4 preflight gives <button> the ARROW cursor (a v3→v4 change).
@@ -35,9 +115,11 @@
  *   --surface-2           [legacy alias] still used by ~18 components;
  *                         migrate progressively in Phase D
  *
- * Single accent: violet (the brand). No teal/pink/lime/rose as accents.
- * Hue chips on icons still use the rainbow tokens below — those are
- * categorical decoration, not semantic state.
+ * Single accent: the brand blue #0073EA, in both themes (the dark block
+ * used to switch these to violet; there is no purple anywhere now).
+ * The in-app source of truth is src/app/(dashboard)/tokens.css; the
+ * shadcn-style set below is a legacy layer still read by ~20 components
+ * and goes in the Phase 5 sweep.
  *
  * Four signal colors locked: success/warning/danger/info. Use these
  * for every status indicator (badges, banners, callouts). Don't reach
@@ -142,13 +224,26 @@
   --m-ease:        cubic-bezier(0.22, 1, 0.36, 1);
   --m-duration-md: 400ms;
   --m-duration-lg: 700ms;
+
+  /* Font-variable aliases for the dropped families (one release). The
+     root layout loads only --font-inter and --font-mono now; ~30 files
+     (ui/avatar, ui/dropdown-menu, the landing scenes) still reference the
+     old names inline. Delete with the Phase 5 sweep. */
+  --font-outfit: var(--font-inter);
+  --font-figtree: var(--font-inter);
+  --font-geist: var(--font-inter);
+  --font-syne: var(--font-inter);
+  --font-instrument-serif: var(--font-inter);
+  --font-geist-mono: var(--font-mono);
 }
 
 .dark {
   /* "Bluish dark" — surfaces have a faint cool blue tint so the UI
-   * doesn't feel as flat as pure neutral. The accent stays violet so
-   * existing components don't need to change. */
-  --color-background: #0B0E15;
+   * doesn't feel as flat as pure neutral. The accent stays the brand
+   * blue; accent-as-text lifts to blue-400 for contrast on near-black. */
+  /* The body ground equals the product canvas (--os-canvas in dark), so an
+     overscroll or a gap never shows a second near-black. */
+  --color-background: #101215;
   --color-foreground: #fafafa;
   --color-surface: #141821;
   --color-surface-2: #1A1F2B;
@@ -156,13 +251,13 @@
   --color-border: rgba(255, 255, 255, 0.08);
   --color-muted: #a0a0a0;
   --color-muted-2: #707070;
-  --color-accent: #8b5cf6;
-  --color-accent-light: #a78bfa;
-  --accent: #8b5cf6;
-  --accent-strong: #c4b5fd;
-  --accent-soft: rgba(139, 92, 246, 0.16);
+  --color-accent: #0073EA;
+  --color-accent-light: #4D9CFF;
+  --accent: #0073EA;
+  --accent-strong: #4D9CFF;
+  --accent-soft: rgba(0, 115, 234, 0.16);
   --accent-contrast: #ffffff;
-  --accent-glow: 0 6px 18px -6px rgba(139, 92, 246, 0.55);
+  --accent-glow: 0 6px 18px -6px rgba(0, 115, 234, 0.55);
 
   --surface: #141821;
   --surface-elevated: #1A1F2B;
@@ -253,8 +348,8 @@ html.night .dark\:border-neutral-700 { border-color: rgba(255,255,255,0.10) !imp
   --color-muted-2: var(--color-muted-2);
   --color-accent: var(--color-accent);
   --color-accent-light: var(--color-accent-light);
-  --font-sans: var(--font-outfit);
-  --font-mono: var(--font-mono);
+  --font-sans: var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* === Bento design system === */
   --color-bento-bg: #0a0a0a;
@@ -276,6 +371,8 @@ html.night .dark\:border-neutral-700 { border-color: rgba(255,255,255,0.10) !imp
   --color-violet-accent: #a67dff;
   --color-mint-accent: #5eead4;
 
+  /* font-geist / font-geist-mono utilities resolve to Inter / JetBrains
+     Mono through the :root aliases above. */
   --font-geist: var(--font-geist);
   --font-geist-mono: var(--font-geist-mono);
 }
@@ -316,7 +413,7 @@ html.night .dark\:border-neutral-700 { border-color: rgba(255,255,255,0.10) !imp
 body {
   background: var(--color-background);
   color: var(--color-foreground);
-  font-family: var(--font-outfit), sans-serif;
+  font-family: var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
 }
 

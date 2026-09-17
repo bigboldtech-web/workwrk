@@ -37,7 +37,7 @@ import {
   FileText,
   Target,
 } from "lucide-react";
-import { useOsShell } from "./shell-context";
+import { useLayer, useOsShell } from "./shell-context";
 import { usePrompt } from "@/components/ui/dialog-provider";
 import { useRouter } from "next/navigation";
 import { Chip, StatusChip } from "@/components/ui/chip";
@@ -420,6 +420,20 @@ export function CreateTaskModal() {
     setNotice(null);
     closeCreateTask();
   }, [clearFields, closeCreateTask]);
+
+  // One stack, one Esc (spec-shell 1.9): the modal is a layer, so the
+  // shell's single keydown listener closes it topmost-first instead of the
+  // modal owning a listener of its own. An inline picker open inside it is
+  // click-away only (not a layer), so the first Esc closes that picker and
+  // the next one closes the modal.
+  useLayer(createTaskOpen, {
+    id: "create-task-modal",
+    kind: "modal",
+    close: () => {
+      if (openMenu) setOpenMenu(null);
+      else resetAndClose();
+    },
+  });
 
   const grouped = useMemo(() => {
     const q = listSearch.trim().toLowerCase();

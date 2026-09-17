@@ -11,6 +11,8 @@
     "db:audit-migrations": "node scripts/audit-baselined-migrations.mjs",
     "start": "next start",
     "lint": "eslint",
+    "lint:css": "node scripts/lint-css-tokens.mjs",
+    "lint:contrast": "node scripts/check-token-contrast.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

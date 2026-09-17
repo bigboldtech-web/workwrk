@@ -15,10 +15,11 @@
 // splits and half the connections miss events — swap this for Postgres
 // LISTEN/NOTIFY (no new infra) before ever scaling out.
 
-export type RealtimeEvent =
-  | { type: "message"; conversationId: string }
-  | { type: "notification" }
-  | { type: "call"; conversationId: string };
+// The event contract (names + payload types) lives in ./realtime-events.ts
+// (spec-shell section 1.11); the three legacy producers below are members of
+// that union and keep publishing exactly what they publish today.
+import type { RealtimeEvent } from "./realtime-events";
+export type { RealtimeEvent };
 
 export interface RealtimeConn {
   userId: string;

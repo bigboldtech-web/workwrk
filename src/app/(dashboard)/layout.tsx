@@ -11,6 +11,9 @@ import { useEffect, useState } from "react";
 import { applyDensity, getInitialDensity } from "@/lib/density";
 import { DotsLoader } from "@/components/brand/dots-loader";
 import { MissionSplash } from "@/components/brand/mission-splash";
+import { APP_ROOT_ID, SessionExpiredDialog, SessionIdleWarning } from "@/components/layout/os/session-expired-dialog";
+import { apiFetch } from "@/lib/api-fetch";
+import { currentLoginUrl } from "@/lib/session-expiry";
 import "./os.css";
 
 // The dark ground the boot backdrop and MissionSplash share, so the splash
@@ -29,23 +32,37 @@ export default function DashboardLayout({
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.push("/login");
+      // Spec-shell 1.10 rule 2: keep where the person was. The login page
+      // reads `callbackUrl` and returns there after sign-in.
+      router.push(currentLoginUrl());
     }
   }, [status, router]);
 
   useEffect(() => {
-    if (status === "authenticated") {
-      fetch("/api/setup")
-        .then((res) => res.json())
-        .then((data) => {
-          if (!data.setupCompleted) {
-            router.push("/onboard");
-          } else {
-            setSetupChecked(true);
-          }
-        })
-        .catch(() => setSetupChecked(true));
-    }
+    if (status !== "authenticated") return;
+    let alive = true;
+    // Today's first boot call, kept until Phase 1 switches to /api/boot, but
+    // through apiFetch: a 401 now surfaces the Session-expired dialog (it
+    // used to fall through to /onboard because the HTTP status was never
+    // checked). Only a real `setupCompleted: false` answer sends anyone to
+    // /onboard. What is NOT yet spec 1.12: a non-401 failure is still
+    // treated as "setup complete" exactly as the old catch branch did; the
+    // boot ErrorState for that case arrives with the /api/boot switch-over.
+    void apiFetch<{ setupCompleted?: boolean }>("/api/setup").then((r) => {
+      if (!alive) return;
+      if (!r.ok) {
+        if (r.status !== 401) setSetupChecked(true);
+        return;
+      }
+      if (r.data && r.data.setupCompleted === false) {
+        router.push("/onboard");
+      } else {
+        setSetupChecked(true);
+      }
+    });
+    return () => {
+      alive = false;
+    };
   }, [status, router]);
 
   useEffect(() => {
@@ -76,30 +93,36 @@ export default function DashboardLayout({
     <ToastProvider>
       <DialogProvider>
         <TourProvider>
-          {ready ? (
-            <>
-              <OsShell>{children}</OsShell>
-              <ScreenProtection />
-            </>
-          ) : (
-            <div
-              aria-hidden
-              style={{
-                position: "fixed",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: BOOT_BG,
-              }}
-            >
-              {showFallback && <DotsLoader />}
-            </div>
-          )}
-          {/* Mission + a rotating value ARE the loader — one continuous splash
-              from first paint through boot, then it fades to reveal the page.
-              Always mounted so it never restarts across the boot→ready swap. */}
-          <MissionSplash />
+          {/* #app-root is what the Session-expired dialog makes inert
+              (spec-shell 2.15); the dialog itself portals outside it. */}
+          <div id={APP_ROOT_ID} style={{ display: "contents" }}>
+            {ready ? (
+              <>
+                <OsShell>{children}</OsShell>
+                <ScreenProtection />
+              </>
+            ) : (
+              <div
+                aria-hidden
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: BOOT_BG,
+                }}
+              >
+                {showFallback && <DotsLoader />}
+              </div>
+            )}
+            {/* Mission + a rotating value ARE the loader — one continuous splash
+                from first paint through boot, then it fades to reveal the page.
+                Always mounted so it never restarts across the boot→ready swap. */}
+            <MissionSplash />
+          </div>
+          <SessionExpiredDialog />
+          <SessionIdleWarning />
         </TourProvider>
       </DialogProvider>
     </ToastProvider>

@@ -36,6 +36,8 @@ import {
   HelpCircle, Trash2, LogOut, Pin, PinOff, CircleUser,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
+import { openShortcutsOverlay } from "./shell-shortcuts";
+import { isSettingsRoute, rememberSettingsOrigin } from "@/lib/settings-nav";
 import { PROFILE_TOOLS, type ToolAction } from "./profile-tools";
 import { useOsToast } from "./toast";
 
@@ -84,6 +86,9 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
   if (!open) return null;
 
   const goto = (href: string) => {
+    // Into a door: record where the person came from so Back / Close / Esc
+    // return here (settings spec 8.3, the origin rule).
+    if (isSettingsRoute(href)) rememberSettingsOrigin();
     router.push(href);
     onClose();
   };
@@ -202,7 +207,7 @@ export function ProfileMenu({ open, onClose, anchorRef }: Props) {
         <MenuRow icon={Settings}     label="Settings"           onClick={() => goto("/settings")} />
         <MenuRow icon={Bell}         label="Notifications"      onClick={() => goto("/inbox")} />
         <MenuRow icon={Palette}      label="Themes"             onClick={() => goto("/settings?tab=themes")} />
-        <MenuRow icon={Command}      label="Keyboard shortcuts" onClick={() => goto("/settings?tab=shortcuts")} />
+        <MenuRow icon={Command}      label="Keyboard shortcuts" onClick={() => { openShortcutsOverlay(); onClose(); }} />
         <MenuRow icon={HelpCircle}   label="Help"               onClick={() => window.open("https://workwrk.com/help", "_blank")} />
       </div>
 

@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { X, SmilePlus, CornerDownLeft } from "lucide-react";
-import { useOsShell, type PresenceStatus } from "./shell-context";
+import { useLayer, useOsShell, type PresenceStatus } from "./shell-context";
 
 type Preset = { emoji: string; label: string; expiry: string };
 
@@ -55,11 +55,8 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
   );
   const [emoji, setEmoji] = useState<string | null>(() => presenceStatus.emoji);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener here.
+  useLayer(true, { id: "set-status-modal", kind: "modal", close: onClose });
 
   const applyPreset = (p: Preset) => {
     const status: PresenceStatus = {

@@ -13,6 +13,7 @@ import { useSession } from "next-auth/react";
 import { X, Plus, ChevronLeft, Loader2, FileText } from "lucide-react";
 import type { BnDocJSON } from "@/components/docs/blocknote-canvas";
 import type { Block as LegacyBlock } from "@/components/docs/block-editor";
+import { useLayer } from "./shell-context";
 
 // BlockNoteCanvas statically imports heavy editor CSS — load its chunk only
 // when a note is actually opened (this panel is mounted on every page).
@@ -194,11 +195,9 @@ export function NotepadPanel() {
   // additionally flushes its pending edit on unmount.)
   const closePanel = useCallback(() => { flushPending(); setOpen(false); }, [flushPending]);
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") closePanel(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [closePanel]);
+  // Esc goes through the LayerStack (spec-shell section 1.5), not a listener
+  // here; closePanel still flushes the pending edit first.
+  useLayer(open, { id: "notepad-panel", kind: "panel", close: closePanel });
 
   if (!open) return null;
 

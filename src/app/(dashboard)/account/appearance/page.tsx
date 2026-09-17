@@ -13,7 +13,7 @@ import { Palette, Loader2, Check, Sun, Moon, Monitor } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Appearance = "LIGHT" | "DARK" | "AUTO";
-type Density = "compact" | "cozy";
+type Density = "compact" | "cozy" | "comfortable";
 
 type ThemeState = { appearance: Appearance; accent: string };
 
@@ -38,9 +38,11 @@ const APPEARANCE_CARDS: Array<{ value: Appearance; label: string; Icon: React.Co
   { value: "AUTO", label: "Auto", Icon: Monitor },
 ];
 
+// Comfortable 44 (default) / Cozy 36 / Compact 32 (design-system 3.2).
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
-  { value: "compact", label: "Compact" },
+  { value: "comfortable", label: "Comfortable" },
   { value: "cozy", label: "Cozy" },
+  { value: "compact", label: "Compact" },
 ];
 
 export default function AppearancePage() {
@@ -63,10 +65,10 @@ export default function AppearancePage() {
         appearance: t?.appearance ?? "LIGHT",
         accent: t?.accent ?? "mint",
       });
-      setDensity(data.effective?.density ?? "cozy");
+      setDensity(data.effective?.density ?? "comfortable");
     } catch {
       setTheme({ appearance: "LIGHT", accent: "mint" });
-      setDensity("cozy");
+      setDensity("comfortable");
       toast("Couldn't load appearance settings");
     }
   }, [toast]);

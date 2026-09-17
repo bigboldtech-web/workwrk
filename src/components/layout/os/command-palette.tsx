@@ -58,6 +58,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useOsShell } from "./shell-context";
+import { shortcutHint } from "@/lib/shortcuts";
 import { AskAiButton } from "./ask-ai-button";
 import { APPS, type AppEntry } from "./apps-catalog";
 
@@ -128,10 +129,12 @@ type Item = TaskItem | DocItem | PersonItem | SpaceItem | ActionItem | NavItem |
 /* ─── Static discovery rows (all resolve to real routes) ─── */
 
 const NAVIGATE: NavItem[] = [
-  { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",   shortcut: "G T" },
-  { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",   shortcut: "G I" },
-  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)",    href: "/tasks",   shortcut: "G K" },
-  { kind: "navigate", id: "n-meet",   label: "Planner",     Icon: CalendarDays, color: "var(--os-c-orange)", href: "/planner", shortcut: "G M" },
+  // Hints come from the registry (src/lib/shortcuts.ts) so a row never
+  // advertises a chord nothing listens for ("G T", "G K", "G M" were dead).
+  { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",   shortcut: shortcutHint("go-home") },
+  { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",   shortcut: shortcutHint("go-inbox") },
+  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)",    href: "/tasks" },
+  { kind: "navigate", id: "n-meet",   label: "Planner",     Icon: CalendarDays, color: "var(--os-c-orange)", href: "/planner" },
   { kind: "navigate", id: "n-okrs",   label: "Goals",       Icon: Target,       color: "var(--os-c-blue)",   href: "/okrs" },
   { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-blue)",   href: "/store" },
   { kind: "navigate", id: "n-set",    label: "Settings",    Icon: Settings,     color: "var(--os-c-brown)",  href: "/settings" },

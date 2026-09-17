@@ -101,7 +101,10 @@ export default function InboxPage() {
       const res = await fetch("/api/preferences");
       if (!res.ok) return;
       const data = await res.json();
-      const p = data?.effective?.inbox;
+      // Stored under home.notifications.inboxView (settings spec 7.3). The
+      // old top-level `inbox` key was stripped by the PATCH schema, so these
+      // prefs never persisted.
+      const p = data?.effective?.home?.notifications?.inboxView;
       if (p) {
         setPrefs({ ...DEFAULT_PREFS, ...p });
       }
@@ -116,7 +119,7 @@ export default function InboxPage() {
       void fetch("/api/preferences", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inbox: next }),
+        body: JSON.stringify({ home: { notifications: { inboxView: next } } }),
       });
       return next;
     });

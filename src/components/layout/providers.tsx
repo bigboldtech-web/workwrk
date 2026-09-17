@@ -30,9 +30,18 @@ export function Providers({
 
   return (
     <SessionProvider>
+      {/* next-themes stamps `.dark` AND data-theme="light|dark" before
+          hydration from its localStorage key, which ThemeApplier keeps in
+          sync with the stored preference (setTheme light / dark / system).
+          A first visit follows the OS: the token layer's
+          prefers-color-scheme guard (:root:not([data-theme="light"])) and
+          the class then agree. The product default is LIGHT; a "dark"
+          default here painted every light user a full dark frame on each
+          cold load. Marketing and auth force bg-white on their own roots
+          and are unaffected. */}
       <ThemeProvider
-        attribute="class"
-        defaultTheme="dark"
+        attribute={["class", "data-theme"]}
+        defaultTheme="system"
         enableSystem
         themes={["light", "dark", "night"]}
       >

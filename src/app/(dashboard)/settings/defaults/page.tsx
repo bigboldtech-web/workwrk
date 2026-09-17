@@ -31,7 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Appearance = "LIGHT" | "DARK" | "AUTO";
-type Density = "compact" | "cozy";
+type Density = "compact" | "cozy" | "comfortable";
 
 // Brand-safe subset of the customize-panel / appearance accent list
 // (src/components/layout/os/customize-panel.tsx ACCENT_OPTIONS). The banned
@@ -53,9 +53,11 @@ const APPEARANCE_CARDS: Array<{ value: Appearance; label: string; Icon: LucideIc
   { value: "AUTO",  label: "Auto",  Icon: Monitor },
 ];
 
+// Comfortable 44 (default) / Cozy 36 / Compact 32 (design-system 3.2).
 const DENSITY_OPTIONS: Array<{ value: Density; label: string }> = [
-  { value: "compact", label: "Compact" },
-  { value: "cozy",    label: "Cozy" },
+  { value: "comfortable", label: "Comfortable" },
+  { value: "cozy",        label: "Cozy" },
+  { value: "compact",     label: "Compact" },
 ];
 
 // Each lock toggle owns the canonical dot-path(s) the effective-prefs merge
@@ -79,7 +81,7 @@ const LOCK_GROUPS: Array<{
   {
     key: "density",
     label: "Density",
-    desc: "Freezes compact vs. cozy spacing to the org default. The per-member density control is disabled.",
+    desc: "Freezes row density to the org default. The per-member density control is disabled.",
     Icon: Rows3,
     paths: ["density"],
   },
@@ -128,11 +130,11 @@ export default function DefaultsPage() {
       setState({
         appearance: p?.themeDefault?.appearance ?? "LIGHT",
         accent: p?.themeDefault?.accent ?? "workwrk",
-        density: p?.densityDefault ?? "cozy",
+        density: p?.densityDefault ?? "comfortable",
         lockedKeys: p?.lockedKeys ?? [],
       });
     } catch {
-      setState({ appearance: "LIGHT", accent: "workwrk", density: "cozy", lockedKeys: [] });
+      setState({ appearance: "LIGHT", accent: "workwrk", density: "comfortable", lockedKeys: [] });
       toast("Couldn't load org defaults");
     }
   }, [toast]);

@@ -1,7 +1,10 @@
 /* ═════════════════════════════════════════════════════════════════
  * WorkwrK OS — ClickUp-style compact design system
  * All scoped to `.workwrk-os` so marketing site is untouched.
+ * Tokens live in ./tokens.css (the one token file); this sheet only
+ * consumes them.
  * ═════════════════════════════════════════════════════════════════ */
+@import "./tokens.css";
 
 /* Popover panels render via createPortal to <body>, outside `.workwrk-os`, so
  * the global `.workwrk-os button` reset doesn't reach them — native buttons then
@@ -28,111 +31,9 @@
   opacity: 0.35;
 }
 
-/* Tokens live on :root TOO so portaled UI (createPortal to document.body —
-   MorePortal menus, DatePlanner, Radix dialogs, toasts) resolves var(--os-*)
-   instead of computing to transparent (the "invisible button" class of bug).
-   .workwrk-os re-declares them so accent overrides keep their precedence. */
-:root,
-.workwrk-os {
-  /* Brand — default; per-accent overrides below key off
-     `:root[data-accent="<key>"]` so the CustomizePanel theme picker
-     re-paints chrome instantly (set by ThemeApplier on <html>). */
-  --os-brand:        #0073EA;
-  --os-brand-hover:  #0060B9;
-  --os-brand-soft:   #E6F1FB;
-  --os-brand-deep:   #1F76C2;
-  --os-brand-dark:   #292F4C;
-  /* Rail tone was only defined per-accent — before ThemeApplier's async
-     prefs fetch lands (or if it fails) every var(--os-brand-rail) consumer
-     painted transparent. Default = the blue accent's rail. */
-  --os-brand-rail:   #1A2C4A;
-  /* Accent-as-TEXT: rail-dark in light mode, flipped light in dark
-     (see the dark override in the dark block). Use this instead of
-     text-[var(--os-brand-rail)] — rail text is invisible on dark. */
-  --os-brand-ink:    var(--os-brand-rail);
-
-  /* Status / label palette — Monday signature */
-  --os-c-green:      #00C875;
-  --os-c-orange:     #FDAB3D;
-  --os-c-red:        #E2445C;
-  --os-c-yellow:     #FFCB00;
-  --os-c-blue:       #579BFC;
-  --os-c-purple:     #0073EA; /* legacy alias, banned hue retired -> brand blue */
-  --os-c-pink:       #E2445C; /* legacy alias -> signal red */
-  --os-c-indigo:     #1F76C2; /* legacy alias -> deep blue */
-  --os-c-teal:       #66CCC2;
-  --os-c-lime:       #037F4C; /* legacy alias -> sage */
-  --os-c-brown:      #7F5347;
-  --os-c-sage:       #037F4C;
-  --os-c-gray:       #C4C4C4;
-  --os-c-darkgray:   #808080;
-
-  /* Surfaces */
-  --os-canvas:       #FFFFFF;
-  /* Base card/popover surface. Used ~465× as `background: var(--os-surface)`
-     but was never defined — so every floating menu (block "turn into",
-     pickers, popovers) rendered TRANSPARENT and let the text behind bleed
-     through. Defining it white makes those menus solid. */
-  --os-surface:      #FFFFFF;
-  --os-surface-1:    #F6F7FB;
-  --os-surface-2:    #ECEEF5;
-  --os-surface-3:    #E6E9EF;
-  --os-surface-hov:  #F0F3FA;
-  --os-row-hov:      #F8F9FD;
-
-  /* Borders */
-  --os-line:         #E6E9EF;
-  --os-line-soft:    #F0F2F7;
-  --os-line-strong:  #D0D4DC;
-
-  /* Ink */
-  --os-ink:          #323338;
-  --os-ink-2:        #676879;
-  --os-ink-3:        #9699A6;
-  --os-ink-4:        #C4C7D4;
-
-  /* Radii */
-  --os-r-xs: 4px;
-  --os-r-sm: 6px;
-  --os-r-md: 8px;
-  --os-r-lg: 12px;
-  --os-r-xl: 16px;
-  --os-r-pill: 999px;
-
-  /* Shadows */
-  --os-shadow-card:  0 3px 10px rgba(0,0,0,0.055), 0 0 0 1px rgba(0,0,0,0.035);
-  --os-shadow-pop:   0 10px 26px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.06);
-  --os-shadow-rest:  0 1px 0 rgba(0,0,0,0.04);
-
-  /* Layout */
-  --os-rail-w: 60px;
-  --os-side-w: 260px;
-  --os-top-h: 32px;
-  --os-title-h: 40px;
-  --os-tabs-h: 34px;
-  --os-filter-h: 34px;
-
-  /* Density */
-  --os-page-pad: 12px;
-  --os-card-pad: 12px;
-  --os-row-h: 28px;
-  --os-row-h-lg: 32px;
-  --os-control-h: 26px;
-  --os-control-h-sm: 22px;
-  --os-popover-w: 300px;
-
-  /* Type */
-  --os-font: var(--font-figtree), 'Figtree', -apple-system, BlinkMacSystemFont, sans-serif;
-
-  font-family: var(--os-font);
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--os-ink);
-  background: var(--os-canvas);
-  letter-spacing: -0.005em;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+/* The --os-* token block that used to live here (brand, palette, surfaces,
+   borders, ink, radii, shadows, layout, density, type) moved to
+   ./tokens.css, imported at the top of this file. Declare nothing here. */
 
 /* Reset within scope (don't fight globals.css) */
 .workwrk-os, .workwrk-os *, .workwrk-os *::before, .workwrk-os *::after {
@@ -187,26 +88,9 @@
 .workwrk-os .os-no-scrollbar::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .workwrk-os ::selection { background: var(--os-brand-soft); color: var(--os-brand-deep); }
 
-/* ─────────── Accent overrides — keyed by ThemeApplier ────────────
-   When the user picks an accent in the CustomizePanel, ThemeApplier
-   writes `data-accent="<key>"` on <html>. We override --os-brand
-   inside `.workwrk-os` so every existing rule that reads --os-brand
-   re-paints. `-soft` is a 14% tint of the same hue; `-hover` is
-   ~12% darker; `-deep` matches `-hover` for readable foregrounds. */
-/* `--os-brand-rail` is the desaturated dark form used for the left
-   app rail — ClickUp paints the rail with a much darker version of
-   the accent so it looks composed in both light and dark themes
-   without screaming the full-saturation brand at the user. */
-:root[data-accent="mint"], :root[data-accent="mint"] .workwrk-os { --os-brand: #3AB39E; --os-brand-hover: #2E9080; --os-brand-soft: #E0F2EE; --os-brand-deep: #2E9080; --os-brand-rail: #18352F; }
-:root[data-accent="black"], :root[data-accent="black"] .workwrk-os { --os-brand: #1F2024; --os-brand-hover: #111317; --os-brand-soft: #E6E7EA; --os-brand-deep: #111317; --os-brand-rail: #1F2024; }
-:root[data-accent="grape"], :root[data-accent="grape"] .workwrk-os { --os-brand: #7C3AED; --os-brand-hover: #6328C8; --os-brand-soft: #EFE7FC; --os-brand-deep: #6328C8; --os-brand-rail: #2A1A47; }
-:root[data-accent="blue"], :root[data-accent="blue"] .workwrk-os { --os-brand: #0073EA; --os-brand-hover: #0060B9; --os-brand-soft: #E6F1FB; --os-brand-deep: #1F76C2; --os-brand-rail: #1A2C4A; }
-:root[data-accent="pink"], :root[data-accent="pink"] .workwrk-os { --os-brand: #EC4899; --os-brand-hover: #D63584; --os-brand-soft: #FCE2EF; --os-brand-deep: #D63584; --os-brand-rail: #3F1A2C; }
-:root[data-accent="violet"], :root[data-accent="violet"] .workwrk-os { --os-brand: #A855F7; --os-brand-hover: #8B3FDB; --os-brand-soft: #F1E4FD; --os-brand-deep: #8B3FDB; --os-brand-rail: #2E1A47; }
-:root[data-accent="indigo"], :root[data-accent="indigo"] .workwrk-os { --os-brand: #6366F1; --os-brand-hover: #4F52D8; --os-brand-soft: #E5E6FB; --os-brand-deep: #4F52D8; --os-brand-rail: #1F1F4A; }
-:root[data-accent="orange"], :root[data-accent="orange"] .workwrk-os { --os-brand: #F59E0B; --os-brand-hover: #D58503; --os-brand-soft: #FCEFCE; --os-brand-deep: #D58503; --os-brand-rail: #3A2812; }
-:root[data-accent="teal"], :root[data-accent="teal"] .workwrk-os { --os-brand: #14B8A6; --os-brand-hover: #0F968A; --os-brand-soft: #D6F3F0; --os-brand-deep: #0F968A; --os-brand-rail: #14302E; }
-:root[data-accent="bronze"], :root[data-accent="bronze"] .workwrk-os { --os-brand: #A78B6C; --os-brand-hover: #8A7253; --os-brand-soft: #F1EAE0; --os-brand-deep: #8A7253; --os-brand-rail: #3F332A; }
+/* The per-accent `:root[data-accent]` overrides were deleted with the
+   accent picker: there is one brand blue, and the frame is chosen with
+   html[data-chrome] (see tokens.css). */
 
 /* ─── Icons-only sidebar mode (toggled in CustomizePanel → Navigation) ─── */
 .os-side__scroll[data-icons-only="1"] .os-side__item-text,
@@ -449,17 +333,16 @@
   font-size: 14.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 120ms, transform 120ms;
+  transition: background var(--os-dur-fast);
   width: 100%;
 }
-.os-side__item:hover { background: var(--os-surface-1); }
-.os-side__item:active { transform: scale(0.98); }
+.os-side__item:hover { background: var(--os-surface-hov); }
+/* Active = the grey sidebar pill. No blue, no transform (design-system 4.2). */
 .os-side__item.is-active {
-  background: var(--os-brand-soft);
-  color: var(--os-brand);
-  font-weight: 600;
+  background: var(--os-side-pill);
+  color: var(--os-ink);
+  font-weight: 500;
 }
-.os-side__item.is-active .os-side__item-icon { transform: scale(1.06); }
 .os-side__item-icon {
   width: 26px; height: 26px;
   border-radius: 7px;
@@ -1167,7 +1050,7 @@
 
 /* Label color helpers (also used for widget head dots) */
 .os-c-green   { background: var(--os-c-green); }
-.os-c-orange  { background: var(--os-c-orange); }
+.os-c-orange  { background: var(--os-c-orange); color: var(--os-ink); }
 .os-c-red     { background: var(--os-c-red); }
 .os-c-blue    { background: var(--os-c-blue); }
 .os-c-teal    { background: var(--os-c-teal); }
@@ -1540,57 +1423,45 @@
 /* Dark-mode coverage gaps the existing :root.dark block missed.
    These hit Tailwind utilities used inside the command palette body so
    the popover doesn't show pale grey bands or near-invisible borders. */
-:root.dark .workwrk-os .text-zinc-600 { color: #C7CCD4 !important; }
-:root.dark .workwrk-os .text-zinc-300 { color: #4B5260 !important; }
-:root.dark .workwrk-os .border-zinc-100 { border-color: #1F242C !important; }
-:root.dark .workwrk-os .bg-zinc-50\/50 { background: rgba(27, 31, 38, 0.6) !important; }
-:root.dark .workwrk-os .bg-zinc-100\/50 { background: rgba(31, 35, 41, 0.6) !important; }
+:root.dark .workwrk-os .text-zinc-600 { color: var(--os-ink-strong) !important; }
+:root.dark .workwrk-os .text-zinc-300 { color: var(--os-ink-4) !important; }
+:root.dark .workwrk-os .border-zinc-100 { border-color: var(--os-line) !important; }
+:root.dark .workwrk-os .bg-zinc-50\/50 { background: color-mix(in srgb, var(--os-surface-hov) 60%, transparent) !important; }
+:root.dark .workwrk-os .bg-zinc-50\/60 { background: color-mix(in srgb, var(--os-surface-hov) 70%, transparent) !important; }
+:root.dark .workwrk-os .bg-zinc-100\/50 { background: color-mix(in srgb, var(--os-surface-2) 60%, transparent) !important; }
 
 /* ═══════════════════════════════════════════════════════════════
    Brain panel — DARK MODE
    ───────────────────────────────────────────────────────────────
-   Strategy: re-bind --os-canvas / --os-ink / etc. *inside* .os-sk
-   only. Every os-sk__* rule above uses these tokens, so the whole
-   panel flips automatically without per-rule overrides. Scoped to
-   .os-sk so the rest of the OS keeps its existing dark plumbing.
+   The panel used to re-bind --os-canvas / --os-ink / etc. inside
+   .os-sk only. Dark is now a global token rebinding (tokens.css), so
+   the panel inherits it; only the few tweaks below remain.
    ═══════════════════════════════════════════════════════════════ */
 :root.dark .workwrk-os .os-sk {
-  --os-canvas:       #14171D;
-  --os-surface:      #1B1F26;
-  --os-surface-1:    #1B1F26;
-  --os-surface-2:    #232831;
-  --os-surface-3:    #2A2F38;
-  --os-line:         #2A2F38;
-  --os-line-soft:    #232831;
-  --os-line-strong:  #3A4150;
-  --os-ink:          #E5E7EB;
-  --os-ink-2:        #C7CCD4;
-  --os-ink-3:        #8E94A0;
-  --os-ink-4:        #6B7280;
-  border-color: #2A2F38;
+  border-color: var(--os-line-strong);
 }
 /* The brand-soft token is tuned for light backgrounds (very pale tint).
    In dark mode that becomes nearly invisible behind the icon, so we
    substitute a more saturated brand tint just for these surfaces. */
 :root.dark .workwrk-os .os-sk .os-sk__iconbtn.is-on,
 :root.dark .workwrk-os .os-sk .os-sk__sec-icon {
-  background: color-mix(in srgb, var(--os-brand) 28%, #1B1F26);
-  color: #FFFFFF;
+  background: color-mix(in srgb, var(--os-brand) 28%, var(--os-surface));
+  color: var(--os-ink-inv);
 }
 /* Greet gradient — saturate it so the card actually reads as a card on
    the dark panel background instead of fading into it. */
 :root.dark .workwrk-os .os-sk__greet {
   background: linear-gradient(135deg,
-    color-mix(in srgb, var(--os-brand) 30%, #14171D),
-    color-mix(in srgb, var(--os-c-blue)   18%, #14171D));
-  border-color: color-mix(in srgb, var(--os-brand) 30%, #2A2F38);
+    color-mix(in srgb, var(--os-brand) 30%, var(--os-canvas)),
+    color-mix(in srgb, var(--os-c-blue) 18%, var(--os-canvas)));
+  border-color: color-mix(in srgb, var(--os-brand) 30%, var(--os-line));
 }
 /* User bubble pops off the dark surface — keep brand bg + white text. */
-:root.dark .workwrk-os .os-sk__bubble--user { color: #FFFFFF; }
+:root.dark .workwrk-os .os-sk__bubble--user { color: var(--os-ink-inv); }
 /* Inline code inside AI bubbles — light backgrounds disappear in dark. */
 :root.dark .workwrk-os .os-sk__bubble--ai code {
   background: rgba(255,255,255,0.10);
-  color: #E5E7EB;
+  color: var(--os-ink);
 }
 .os-sk__head {
   padding: 14px 18px;
@@ -2106,7 +1977,7 @@ table.os-tbl {
   border-color: transparent transparent rgba(255,255,255,0.55) transparent;
 }
 .os-cell-status.s-done    { background: var(--os-c-green); }
-.os-cell-status.s-working { background: var(--os-c-orange); }
+.os-cell-status.s-working { background: var(--os-c-orange); color: var(--os-ink); }
 .os-cell-status.s-stuck   { background: var(--os-c-red); }
 .os-cell-status.s-progress{ background: var(--os-c-blue); }
 .os-cell-status.s-review  { background: var(--os-c-teal); }
@@ -2443,7 +2314,7 @@ table.os-tbl {
 }
 .os-kcard__date svg { width: 11px; height: 11px; }
 .os-kcard__date.is-overdue { color: var(--os-c-red); }
-.os-kcard__date.is-today { color: var(--os-c-orange); }
+.os-kcard__date.is-today { color: var(--os-warning-text); }
 .os-kcol__add {
   margin-top: 8px;
   padding: 6px 8px;
@@ -2950,7 +2821,7 @@ table.os-tbl {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--os-c-orange);
+  color: var(--os-warning-text);
   margin-bottom: 12px;
 }
 .os-mkt__hero h2 {
@@ -3341,7 +3212,7 @@ table.os-tbl {
   margin-left: 4px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--os-c-orange);
+  color: var(--os-warning-text);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -4602,7 +4473,7 @@ table.os-tbl {
 }
 .my-tasks__col-head-l svg { width: 14px; height: 14px; }
 .my-tasks__col--overdue .my-tasks__col-head-l svg { color: var(--os-c-red); }
-.my-tasks__col--today   .my-tasks__col-head-l svg { color: var(--os-c-orange); }
+.my-tasks__col--today   .my-tasks__col-head-l svg { color: var(--os-warning-text); }
 .my-tasks__col--done    .my-tasks__col-head-l svg { color: var(--os-c-green); }
 .my-tasks__col-count {
   font-size: 12px;
@@ -4615,7 +4486,7 @@ table.os-tbl {
   font-variant-numeric: tabular-nums;
 }
 .my-tasks__col--overdue .my-tasks__col-count { color: var(--os-c-red); border-color: color-mix(in srgb, var(--os-c-red) 30%, var(--os-line)); }
-.my-tasks__col--today   .my-tasks__col-count { color: var(--os-c-orange); border-color: color-mix(in srgb, var(--os-c-orange) 30%, var(--os-line)); }
+.my-tasks__col--today   .my-tasks__col-count { color: var(--os-warning-text); border-color: color-mix(in srgb, var(--os-c-orange) 30%, var(--os-line)); }
 .my-tasks__col--done    .my-tasks__col-count { color: var(--os-c-green); border-color: color-mix(in srgb, var(--os-c-green) 30%, var(--os-line)); }
 
 .my-tasks__col-body {
@@ -16412,9 +16283,9 @@ table.os-tbl {
   box-shadow: 0 14px 40px rgba(0,0,0,0.16), 0 0 0 0.5px rgba(0,0,0,0.04) !important;
 }
 :root.dark .bn-menu-dropdown, :root.dark .bn-drag-handle-menu {
-  background: #1f2229 !important;
-  color: #e8eaed !important;
-  border-color: rgba(255,255,255,0.1) !important;
+  background: var(--os-surface) !important;
+  color: var(--os-ink) !important;
+  border-color: var(--os-line) !important;
   box-shadow: 0 18px 44px rgba(0,0,0,0.55) !important;
 }
 .bn-menu-item {
@@ -31695,73 +31566,73 @@ table.os-tbl {
 
 :root.dark .workwrk-os {
   /* Shell base — the dark "page" that the floating cards sit on. */
-  background: #0F1115;
-  color: #E5E7EB;
+  background: var(--os-canvas);
+  color: var(--os-ink);
 }
 
 /* Topbar header is now a transparent flex container; its 3 child cards
  * (.bg-white) get repainted by the catchall .bg-white rule below. Leaving
  * the header background alone makes the gaps between the cards show the
  * page bg, which is the whole point of the cards layout. */
-:root.dark .workwrk-os > header { color: #E5E7EB; }
+:root.dark .workwrk-os > header { color: var(--os-ink); }
 :root.dark .workwrk-os > header .text-zinc-900,
-:root.dark .workwrk-os > header .text-zinc-700 { color: #E5E7EB !important; }
-:root.dark .workwrk-os > header .text-zinc-600 { color: #C7CCD4 !important; }
-:root.dark .workwrk-os > header .text-zinc-500 { color: #9BA1AC !important; }
-:root.dark .workwrk-os > header .text-zinc-400 { color: #6B7280 !important; }
-:root.dark .workwrk-os > header .bg-zinc-100 { background: #1B1F26 !important; }
-:root.dark .workwrk-os > header .hover\:bg-zinc-100:hover { background: #232831 !important; }
-:root.dark .workwrk-os > header .hover\:bg-zinc-200:hover { background: #2A2F38 !important; }
-:root.dark .workwrk-os > header .border-zinc-200 { border-color: #232831 !important; }
+:root.dark .workwrk-os > header .text-zinc-700 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os > header .text-zinc-600 { color: var(--os-ink-strong) !important; }
+:root.dark .workwrk-os > header .text-zinc-500 { color: var(--os-ink-2) !important; }
+:root.dark .workwrk-os > header .text-zinc-400 { color: var(--os-ink-3) !important; }
+:root.dark .workwrk-os > header .bg-zinc-100 { background: var(--os-surface-hov) !important; }
+:root.dark .workwrk-os > header .hover\:bg-zinc-100:hover { background: var(--os-surface-2) !important; }
+:root.dark .workwrk-os > header .hover\:bg-zinc-200:hover { background: var(--os-line-strong) !important; }
+:root.dark .workwrk-os > header .border-zinc-200 { border-color: var(--os-line) !important; }
 
 /* App rail — labels mode (icons-only stays brand-colored automatically) */
 :root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) {
-  background: #14171D !important;
-  border-color: #232831 !important;
+  background: var(--os-surface) !important;
+  border-color: var(--os-line) !important;
 }
 :root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .text-zinc-600,
-:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .text-zinc-500 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .text-zinc-500 { color: var(--os-ink-strong) !important; }
 :root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .hover\:bg-zinc-50:hover,
-:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .hover\:bg-zinc-100:hover { background: #1B1F26 !important; }
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .hover\:bg-zinc-100:hover { background: var(--os-surface-hov) !important; }
 :root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .border-zinc-100,
-:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .border-zinc-200 { border-color: #232831 !important; }
+:root.dark .workwrk-os aside[class*="w-[56px]"]:not([style*="background"]) .border-zinc-200 { border-color: var(--os-line) !important; }
 
 /* Secondary sidebar — when in labels mode (data-branded="0") */
 :root.dark .workwrk-os aside[data-branded="0"] {
-  background: #14171D !important;
-  border-color: #232831 !important;
+  background: var(--os-surface) !important;
+  border-color: var(--os-line) !important;
 }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-900 { color: #E5E7EB !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-800 { color: #DDE2E8 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: #C7CCD4 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: #9BA1AC !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-400 { color: #6B7280 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .bg-zinc-100 { background: #1F2329 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-50:hover { background: #1B1F26 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-100:hover { background: #232831 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-900 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-800 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: var(--os-ink-strong) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: var(--os-ink-2) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-400 { color: var(--os-ink-3) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .bg-zinc-100 { background: var(--os-surface-2) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-50:hover { background: var(--os-surface-hov) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .hover\:bg-zinc-100:hover { background: var(--os-surface-2) !important; }
 :root.dark .workwrk-os aside[data-branded="0"] .border-zinc-100,
-:root.dark .workwrk-os aside[data-branded="0"] .border-zinc-200 { border-color: #232831 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .border-zinc-200 { border-color: var(--os-line) !important; }
 
 /* Notification banner already uses brand colors; leave alone */
 
 /* Main canvas slot — slightly lighter than the page so the rounded card
  * reads as a distinct surface against the dark page bg. */
 :root.dark .workwrk-os main {
-  background: #14171D !important;
-  border-color: #232831 !important;
-  color: #E5E7EB;
+  background: var(--os-surface) !important;
+  border-color: var(--os-line) !important;
+  color: var(--os-ink);
 }
 
 /* Hover preview / More popover float on a white card — match dark */
-:root.dark .workwrk-os .bg-white:not(button) { background: #14171D !important; }
-:root.dark .workwrk-os .border-zinc-200 { border-color: #232831 !important; }
-:root.dark .workwrk-os .text-zinc-900 { color: #E5E7EB !important; }
-:root.dark .workwrk-os .text-zinc-800 { color: #DDE2E8 !important; }
-:root.dark .workwrk-os .text-zinc-700 { color: #C7CCD4 !important; }
-:root.dark .workwrk-os .text-zinc-500 { color: #9BA1AC !important; }
-:root.dark .workwrk-os .text-zinc-400 { color: #6B7280 !important; }
-:root.dark .workwrk-os .bg-zinc-50 { background: #1B1F26 !important; }
-:root.dark .workwrk-os .bg-zinc-100 { background: #1F2329 !important; }
+:root.dark .workwrk-os .bg-white:not(button) { background: var(--os-surface) !important; }
+:root.dark .workwrk-os .border-zinc-200 { border-color: var(--os-line) !important; }
+:root.dark .workwrk-os .text-zinc-900 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os .text-zinc-800 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os .text-zinc-700 { color: var(--os-ink-strong) !important; }
+:root.dark .workwrk-os .text-zinc-500 { color: var(--os-ink-2) !important; }
+:root.dark .workwrk-os .text-zinc-400 { color: var(--os-ink-3) !important; }
+:root.dark .workwrk-os .bg-zinc-50 { background: var(--os-surface-hov) !important; }
+:root.dark .workwrk-os .bg-zinc-100 { background: var(--os-surface-2) !important; }
 
 /* ── Dark gap-fills (2026-08-06 contrast audit) ────────────────────
  * The catchalls above missed several utility families, producing
@@ -31772,62 +31643,50 @@ table.os-tbl {
  *   2. zinc-200 solids + alpha variants (sidebar active pills).
  *   3. hover:* fills + text-zinc-600 outside the header/aside scopes.
  */
-:root.dark .workwrk-os button.bg-white { background: #1F2329 !important; }
+:root.dark .workwrk-os button.bg-white { background: var(--os-surface-2) !important; }
 :root.dark .workwrk-os .bg-zinc-200,
 :root.dark .workwrk-os .bg-zinc-200\/70,
-:root.dark .workwrk-os .bg-zinc-200\/95 { background: #2A2F38 !important; }
+:root.dark .workwrk-os .bg-zinc-200\/95 { background: var(--os-line-strong) !important; }
 :root.dark .workwrk-os .hover\:bg-white\/80:hover,
-:root.dark .workwrk-os .hover\:bg-zinc-50:hover { background: rgba(255,255,255,0.06) !important; }
+:root.dark .workwrk-os .hover\:bg-zinc-50:hover { background: var(--os-surface-hov) !important; }
 :root.dark .workwrk-os .hover\:bg-zinc-100:hover,
 :root.dark .workwrk-os .hover\:bg-zinc-200\/70:hover,
 :root.dark .workwrk-os .hover\:bg-zinc-200\/60:hover,
-:root.dark .workwrk-os .hover\:bg-zinc-200:hover { background: rgba(255,255,255,0.09) !important; }
-:root.dark .workwrk-os .text-zinc-600 { color: #C7CCD4 !important; }
+:root.dark .workwrk-os .hover\:bg-zinc-200:hover { background: var(--os-surface-2) !important; }
+:root.dark .workwrk-os .text-zinc-600 { color: var(--os-ink-strong) !important; }
 :root.dark .workwrk-os .hover\:text-zinc-900:hover,
-:root.dark .workwrk-os .hover\:text-zinc-700:hover { color: #E5E7EB !important; }
+:root.dark .workwrk-os .hover\:text-zinc-700:hover { color: var(--os-ink) !important; }
 
 /* Whiteboards — the library cards + canvas bar are token-painted
  * (var(--os-canvas)) and the dark strategy doesn't flip tokens, so
  * they stayed glaring light cards on the dark shell. */
-:root.dark .workwrk-os .wb-card { background: #1B1F26 !important; border-color: #232831 !important; }
-:root.dark .workwrk-os .wb-card__name { color: #E5E7EB; }
-:root.dark .workwrk-os .wb-card__meta, :root.dark .workwrk-os .wb-card__time { color: #9BA1AC; }
-:root.dark .workwrk-os .wb-card__placeholder { color: #3A404B; }
-:root.dark .workwrk-os .wb-card__slug { background: #2A2F38; color: #C7CCD4; }
-:root.dark .workwrk-os .wbc__bar { background: #14171D !important; border-color: #232831 !important; }
-:root.dark .workwrk-os .wbc__title { color: #E5E7EB; }
-:root.dark .workwrk-os .wb__new { background: #E5E7EB !important; color: #111317 !important; }
-:root.dark .workwrk-os .wb__new:hover:not(:disabled) { background: #F4F4F5 !important; }
+:root.dark .workwrk-os .wb-card { background: var(--os-surface-hov) !important; border-color: var(--os-line) !important; }
+:root.dark .workwrk-os .wb-card__name { color: var(--os-ink); }
+:root.dark .workwrk-os .wb-card__meta, :root.dark .workwrk-os .wb-card__time { color: var(--os-ink-2); }
+:root.dark .workwrk-os .wb-card__placeholder { color: var(--os-ink-4); }
+:root.dark .workwrk-os .wb-card__slug { background: var(--os-line-strong); color: var(--os-ink-strong); }
+:root.dark .workwrk-os .wbc__bar { background: var(--os-surface) !important; border-color: var(--os-line) !important; }
+:root.dark .workwrk-os .wbc__title { color: var(--os-ink); }
+:root.dark .workwrk-os .wb__new { background: var(--os-inverse-bg) !important; color: var(--os-inverse-fg) !important; }
+:root.dark .workwrk-os .wb__new:hover:not(:disabled) { background: var(--os-inverse-bg) !important; }
 
-/* Accent=black is a near-black brand — indistinguishable from dark
- * surfaces. In dark mode flip it to light (the way ClickUp's black
- * accent behaves), covering every brand-token consumer at once. */
-:root.dark[data-accent="black"],
-:root.dark[data-accent="black"] .workwrk-os {
-  --os-brand: #E5E7EB;
-  --os-brand-hover: #F4F4F5;
-  --os-brand-deep: #C7CCD4;
-  --os-brand-soft: #2A2F38;
-}
-
-/* Accent-as-text flips light in dark for every accent (rail tones are
- * all near-black desaturated values — unreadable on dark surfaces). */
-:root.dark,
-:root.dark .workwrk-os { --os-brand-ink: #DDE2E8; }
+/* The black-accent dark flip and the dark --os-brand-ink override lived
+ * here; both went with the accent system. --os-brand-ink now follows
+ * --os-brand-deep, which tokens.css lifts to blue-400 in dark. */
 
 /* Customize panel dialog uses Tailwind defaults; key surfaces only */
 :root.dark .workwrk-os [role="dialog"] {
-  background: #14171D !important;
-  color: #E5E7EB;
+  background: var(--os-surface) !important;
+  color: var(--os-ink);
 }
 
 /* Secondary sidebar footer "Customize Sidebar" — bump contrast in dark
  * so it's not a faint gray-on-gray. Same idea for the small icons on
  * footer rows (Slider, etc.). */
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: #DDE2E8 !important; }
-:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: #B0B6C0 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-700 { color: var(--os-ink) !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .text-zinc-500 { color: var(--os-ink-strong) !important; }
 :root.dark .workwrk-os aside[data-branded="0"] .border-t.border-zinc-100,
-:root.dark .workwrk-os aside[data-branded="0"] .border-t.border-zinc-200 { border-color: #2A2F38 !important; }
+:root.dark .workwrk-os aside[data-branded="0"] .border-t.border-zinc-200 { border-color: var(--os-line-strong) !important; }
 
 /* Notification banner stays branded but the X / Remind button hover needs
  * a touch more contrast in dark surroundings. */
@@ -31837,7 +31696,7 @@ table.os-tbl {
  * a subtle tint over the dark surface; keep the brand-rail accent
  * underneath for the Enable button. */
 :root.dark .workwrk-os [role="region"][aria-label="System notification"] {
-  background: color-mix(in srgb, var(--os-brand-rail) 65%, #14171D) !important;
+  background: color-mix(in srgb, var(--os-chrome-bg) 65%, var(--os-surface)) !important;
   color: rgba(255,255,255,0.92) !important;
   border-bottom-color: rgba(255,255,255,0.08) !important;
 }
@@ -31857,46 +31716,46 @@ table.os-tbl {
  * ═══════════════════════════════════════════════════════════════════ */
 
 :root.dark [role="dialog"] {
-  background: #14171D !important;
-  color: #E5E7EB !important;
-  border-color: #2A2F38 !important;
+  background: var(--os-surface) !important;
+  color: var(--os-ink) !important;
+  border-color: var(--os-line-strong) !important;
 }
 
 /* Headings + descriptions */
 :root.dark [role="dialog"] h1,
 :root.dark [role="dialog"] h2,
 :root.dark [role="dialog"] h3,
-:root.dark [role="dialog"] [data-slot="dialog-title"] { color: #E5E7EB !important; }
-:root.dark [role="dialog"] [data-slot="dialog-description"] { color: #9BA1AC !important; }
+:root.dark [role="dialog"] [data-slot="dialog-title"] { color: var(--os-ink) !important; }
+:root.dark [role="dialog"] [data-slot="dialog-description"] { color: var(--os-ink-2) !important; }
 
 /* Text + icon hierarchy inside dialog */
-:root.dark [role="dialog"] .text-zinc-900 { color: #E5E7EB !important; }
-:root.dark [role="dialog"] .text-zinc-800 { color: #DDE2E8 !important; }
-:root.dark [role="dialog"] .text-zinc-700 { color: #C7CCD4 !important; }
-:root.dark [role="dialog"] .text-zinc-600 { color: #B0B6C0 !important; }
-:root.dark [role="dialog"] .text-zinc-500 { color: #9BA1AC !important; }
-:root.dark [role="dialog"] .text-zinc-400 { color: #71757D !important; }
+:root.dark [role="dialog"] .text-zinc-900 { color: var(--os-ink) !important; }
+:root.dark [role="dialog"] .text-zinc-800 { color: var(--os-ink) !important; }
+:root.dark [role="dialog"] .text-zinc-700 { color: var(--os-ink-strong) !important; }
+:root.dark [role="dialog"] .text-zinc-600 { color: var(--os-ink-strong) !important; }
+:root.dark [role="dialog"] .text-zinc-500 { color: var(--os-ink-2) !important; }
+:root.dark [role="dialog"] .text-zinc-400 { color: var(--os-ink-3) !important; }
 
 /* Surfaces */
-:root.dark [role="dialog"] .bg-white { background: #14171D !important; }
-:root.dark [role="dialog"] .bg-zinc-50 { background: #1B1F26 !important; }
-:root.dark [role="dialog"] .bg-zinc-100 { background: #1F2329 !important; }
-:root.dark [role="dialog"] .hover\:bg-zinc-50:hover { background: #1B1F26 !important; }
-:root.dark [role="dialog"] .hover\:bg-zinc-100:hover { background: #232831 !important; }
-:root.dark [role="dialog"] .hover\:bg-zinc-200:hover { background: #2A2F38 !important; }
+:root.dark [role="dialog"] .bg-white { background: var(--os-surface) !important; }
+:root.dark [role="dialog"] .bg-zinc-50 { background: var(--os-surface-hov) !important; }
+:root.dark [role="dialog"] .bg-zinc-100 { background: var(--os-surface-2) !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-50:hover { background: var(--os-surface-hov) !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-100:hover { background: var(--os-surface-2) !important; }
+:root.dark [role="dialog"] .hover\:bg-zinc-200:hover { background: var(--os-line-strong) !important; }
 
 /* Borders */
-:root.dark [role="dialog"] .border-zinc-100 { border-color: #232831 !important; }
-:root.dark [role="dialog"] .border-zinc-200 { border-color: #2A2F38 !important; }
-:root.dark [role="dialog"] .border-zinc-300 { border-color: #3A3F48 !important; }
+:root.dark [role="dialog"] .border-zinc-100 { border-color: var(--os-line) !important; }
+:root.dark [role="dialog"] .border-zinc-200 { border-color: var(--os-line-strong) !important; }
+:root.dark [role="dialog"] .border-zinc-300 { border-color: var(--os-line-strong) !important; }
 
 /* Tabs list — Radix data-state="active" already swaps to white; just
  * make the inactive tab text readable on the dark tabs-list bg. */
-:root.dark [role="dialog"] [data-state="inactive"] { color: #B0B6C0 !important; }
+:root.dark [role="dialog"] [data-state="inactive"] { color: var(--os-ink-strong) !important; }
 
 /* Checkbox squares default to white border-zinc-300; need a visible
  * empty state on dark. */
-:root.dark [role="dialog"] .border-zinc-300 { border-color: #4A4F58 !important; }
+:root.dark [role="dialog"] .border-zinc-300 { border-color: var(--os-line-strong) !important; }
 
 /* ─────────────────────────────────────────────────────────────────
  * Notes — Notion-killer block editor enhancements
@@ -34023,14 +33882,14 @@ table.os-tbl {
  * flips to the card surface so slice gaps blend instead of glowing.
  * ════════════════════════════════════════════════════════════════ */
 :root.dark .workwrk-os .recharts-default-tooltip {
-  background: #1B1F26 !important;
-  border-color: #2A2F38 !important;
+  background: var(--os-surface-hov) !important;
+  border-color: var(--os-line-strong) !important;
 }
 :root.dark .workwrk-os .recharts-default-tooltip .recharts-tooltip-label {
-  color: #E5E7EB !important;
+  color: var(--os-ink) !important;
 }
 :root.dark .workwrk-os .recharts-pie .recharts-sector {
-  stroke: #14171D;
+  stroke: var(--os-surface);
 }
 
 /* ════════════════════════════════════════════════════════════════

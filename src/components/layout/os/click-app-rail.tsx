@@ -26,6 +26,7 @@ import { useEffect, useRef, useState } from "react";
 import { UserPlus, ArrowUpCircle, LayoutGrid } from "lucide-react";
 import { type AppEntry } from "./apps-catalog";
 import { resolveHub } from "@/lib/nav/route-hub";
+import { hubShortcutHint } from "@/lib/shortcuts";
 import { InviteModal } from "./invite-modal";
 import { useOsShell } from "./shell-context";
 
@@ -133,7 +134,9 @@ export function ClickAppRail() {
           // you are.
           const active = highlightedKey === app.key;
           const isHovered = hoverKey === app.key;
-          const shortcut = idx < 9 ? `⌘${idx + 1}` : undefined;
+          // From the registry (src/lib/shortcuts.ts): "G 1".."G 8". ⌘1..9 is
+          // browser-reserved and was never delivered to the page.
+          const shortcut = hubShortcutHint(idx);
           return (
             <div
               key={app.key}

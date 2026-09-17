@@ -1,0 +1,238 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import {
+  deepMergePatch,
+  describeIssues,
+  preferencesPatchSchema,
+  stripOrgOnlyKeys,
+} from "./preferences-schema";
+
+// The schema exactly as src/app/api/preferences/route.ts had it before this
+// change (strip mode). Kept verbatim here as the widening oracle: every body
+// it accepted must be accepted by the strict schema with the same result.
+const legacyPatchSchema = z.object({
+  sidebar: z.object({
+    pinned: z.array(z.string()).optional(),
+    hidden: z.array(z.string()).optional(),
+    order: z.array(z.string()).optional(),
+    iconsOnly: z.boolean().optional(),
+    sectionsOrder: z.array(z.string()).optional(),
+  }).optional(),
+  home: z.object({
+    cards: z.array(z.string()).optional(),
+    order: z.array(z.string()).optional(),
+    favoriteBoardIds: z.array(z.string()).optional(),
+    favoriteSpaceIds: z.array(z.string()).optional(),
+    favoriteDocIds: z.array(z.string()).optional(),
+    favoriteFolderIds: z.array(z.string()).optional(),
+    favoriteTableIds: z.array(z.string()).optional(),
+    favoriteWhiteboardIds: z.array(z.string()).optional(),
+    favoriteFileIds: z.array(z.string()).optional(),
+    taskCardLayout: z.record(z.string(), z.array(z.object({
+      i: z.string(), x: z.number(), y: z.number(), w: z.number(), h: z.number(),
+    }))).optional(),
+    taskCardsHidden: z.array(z.string()).optional(),
+    overviewCardLayout: z.record(z.string(), z.array(z.object({
+      i: z.string(), x: z.number(), y: z.number(), w: z.number(), h: z.number(),
+    }))).optional(),
+    overviewCardsHidden: z.array(z.string()).optional(),
+    notifications: z.object({
+      inbox: z.record(z.string(), z.boolean()).optional(),
+      email: z.record(z.string(), z.boolean()).optional(),
+    }).optional(),
+  }).optional(),
+  theme: z.object({
+    appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),
+    accent: z.string().max(40).optional(),
+  }).optional(),
+  density: z.enum(["compact", "cozy"]).optional(),
+});
+
+const layout = { lg: [{ i: "recent", x: 0, y: 0, w: 6, h: 4 }], md: [{ i: "recent", x: 0, y: 0, w: 4, h: 4 }] };
+
+/** Every body a live client sends today (the 9 writers from the recon) plus
+ *  synthetic bodies covering every legacy key. */
+const LEGACY_VALID_BODIES: Record<string, unknown> = {
+  "account/appearance": { theme: { appearance: "DARK", accent: "workwrk" }, density: "compact" },
+  "settings/notifications": { home: { notifications: { inbox: { mention: false, assigned: true }, email: { master: true, mention: false } } } },
+  "tasks hidden": { home: { taskCardsHidden: ["okrs", "kras"] } },
+  "onboard pinned": { sidebar: { pinned: ["home", "planner"] } },
+  "customize sidebar": { sidebar: { iconsOnly: true, sectionsOrder: ["spaces", "favorites"], order: ["home"], hidden: ["clips"] } },
+  "customize home": { home: { cards: ["recent", "docs"], order: ["docs", "recent"] } },
+  "customize theme": { theme: { accent: "mint" } },
+  "customize density": { density: "cozy" },
+  "space overview layout": { home: { overviewCardLayout: layout } },
+  "space overview hidden": { home: { overviewCardsHidden: ["members"] } },
+  "favorites": {
+    home: {
+      favoriteBoardIds: ["b1"], favoriteSpaceIds: ["s1"], favoriteDocIds: ["d1"], favoriteFolderIds: ["f1"],
+      favoriteTableIds: ["t1"], favoriteWhiteboardIds: ["w1"], favoriteFileIds: ["file1"],
+    },
+  },
+  "task card layout (legacy key)": { home: { taskCardLayout: layout } },
+  "empty patch": {},
+  "everything at once": {
+    sidebar: { pinned: [], hidden: [], order: [], iconsOnly: false, sectionsOrder: [] },
+    home: { cards: [], order: [], taskCardLayout: {}, taskCardsHidden: [], overviewCardLayout: {}, overviewCardsHidden: [], notifications: { inbox: {}, email: {} } },
+    theme: { appearance: "AUTO", accent: "" },
+    density: "compact",
+  },
+};
+
+describe("preferencesPatchSchema is strictly widening", () => {
+  for (const [name, body] of Object.entries(LEGACY_VALID_BODIES)) {
+    it(`accepts and round-trips: ${name}`, () => {
+      const legacy = legacyPatchSchema.safeParse(body);
+      expect(legacy.success).toBe(true);
+      const next = preferencesPatchSchema.safeParse(body);
+      expect(next.success).toBe(true);
+      if (legacy.success && next.success) {
+        expect(next.data).toEqual(legacy.data);
+        // and the parsed value is the body itself: nothing added, nothing dropped
+        expect(next.data).toEqual(body);
+      }
+    });
+  }
+
+  // The legacy item schema was strip-mode: any extra key on a react-grid-layout
+  // item was accepted and dropped. Those bodies must still be accepted, and
+  // now survive whole (the item is a library object, not our namespace).
+  const LEGACY_ACCEPTED_ITEM_EXTRAS: Record<string, unknown> = {
+    "RGL resizeHandles on an item": { home: { taskCardLayout: { lg: [{ i: "a", x: 0, y: 0, w: 1, h: 1, resizeHandles: ["se"] }] } } },
+    "RGL isBounded on an item": { home: { overviewCardLayout: { lg: [{ i: "a", x: 0, y: 0, w: 1, h: 1, isBounded: false }] } } },
+    "every documented RGL item key": {
+      home: { taskCardLayoutV3: { lg: [{ i: "a", x: 0, y: 0, w: 2, h: 2, minW: 1, maxW: 4, minH: 1, maxH: 4, static: false, isDraggable: true, isResizable: true, isBounded: true, resizeHandles: ["se", "sw"], moved: false }] } },
+    },
+    "an item key this schema does not name": { home: { taskCardLayout: { lg: [{ i: "a", x: 0, y: 0, w: 1, h: 1, futureRglKey: 1 }] } } },
+  };
+  for (const [name, body] of Object.entries(LEGACY_ACCEPTED_ITEM_EXTRAS)) {
+    it(`still accepts, and now keeps whole: ${name}`, () => {
+      expect(legacyPatchSchema.safeParse(body).success).toBe(true);
+      const next = preferencesPatchSchema.safeParse(body);
+      expect(next.success).toBe(true);
+      if (next.success) expect(next.data).toEqual(body);
+    });
+  }
+
+  it("names the ONE intended narrowing: a stray key in a namespace this schema owns (spec 9.3), at every level", () => {
+    // The legacy schema accepted these and silently dropped the key; the
+    // strict schema rejects them so a client learns its key never persisted.
+    for (const [body, path] of [
+      [{ inbox: { showAll: true } }, "inbox"],
+      [{ sidebar: { pinnedApps: [] } }, "sidebar.pinnedApps"],
+      [{ home: { taskCardLayoutV4: {} } }, "home.taskCardLayoutV4"],
+      [{ home: { notifications: { pigeon: true } } }, "home.notifications.pigeon"],
+      [{ home: { notifications: { inboxView: { colour: "red" } } } }, "home.notifications.inboxView.colour"],
+      [{ theme: { font: "serif" } }, "theme.font"],
+    ] as [Record<string, unknown>, string][]) {
+      const legacy = legacyPatchSchema.safeParse(body);
+      expect(legacy.success).toBe(true);
+      const next = preferencesPatchSchema.safeParse(body);
+      expect(next.success).toBe(false);
+      if (!next.success) expect(describeIssues(next.error.issues).map((i) => i.path)).toContain(path);
+    }
+  });
+
+  it("still rejects what the legacy schema rejected", () => {
+    for (const bad of [
+      { density: "roomy" },
+      { theme: { appearance: "SEPIA" } },
+      { theme: { accent: "x".repeat(41) } },
+      { home: { cards: "recent" } },
+      { sidebar: { iconsOnly: "yes" } },
+      { home: { taskCardLayout: { lg: [{ i: "a", x: "0", y: 0, w: 1, h: 1 }] } } },
+      { home: { taskCardLayout: { lg: [{ i: "a", x: 0, y: 0, w: 1 }] } } },
+    ]) {
+      expect(legacyPatchSchema.safeParse(bad).success).toBe(false);
+      expect(preferencesPatchSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("never made an optional key required", () => {
+    // A body with only one key per column parses; so does a bare column.
+    expect(preferencesPatchSchema.safeParse({ sidebar: {} }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: {} }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ theme: {} }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { notifications: {} } }).success).toBe(true);
+  });
+});
+
+describe("the previously stripped keys now survive (critic S7)", () => {
+  it("home.notifications.inboxView (the Inbox display prefs)", () => {
+    const body = { home: { notifications: { inboxView: { showAll: true, groupByDate: false, sortNewest: true, mode: "inline" } } } };
+    // The legacy schema silently dropped inboxView:
+    const legacy = legacyPatchSchema.safeParse(body);
+    expect(legacy.success && legacy.data).toEqual({ home: { notifications: {} } });
+    // The strict schema keeps it whole:
+    const next = preferencesPatchSchema.safeParse(body);
+    expect(next.success && next.data).toEqual(body);
+  });
+
+  it("home.taskCardLayoutV3 (the My Tasks card layout)", () => {
+    const body = { home: { taskCardLayoutV3: layout } };
+    const legacy = legacyPatchSchema.safeParse(body);
+    expect(legacy.success && legacy.data).toEqual({ home: {} });
+    const next = preferencesPatchSchema.safeParse(body);
+    expect(next.success && next.data).toEqual(body);
+  });
+
+  it("the new 9.2 namespaces parse", () => {
+    const body = {
+      sidebar: { width: 280, collapsed: true, quickTools: ["create-task"] },
+      home: {
+        notifications: { mutedUntil: null, quietHours: { start: "18:00", end: "09:00", days: [0, 6] }, muted: ["space:a"], desktop: true },
+        locale: { language: "en", timezone: "Asia/Kolkata", weekStart: 1, dateFormat: "DD/MM/YYYY", timeFormat: "24h" },
+        ui: { reducedMotion: true, showUpcoming: false, dismissed: ["welcome"] },
+        work: { savedFilters: [{ name: "Mine" }], pinnedViews: ["v1"] },
+      },
+      theme: { chrome: "light" },
+    };
+    const next = preferencesPatchSchema.safeParse(body);
+    expect(next.success && next.data).toEqual(body);
+  });
+
+  it("a stray key is a 400 that names it, never a silent strip", () => {
+    const r = preferencesPatchSchema.safeParse({ inbox: { showAll: true } });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const paths = describeIssues(r.error.issues).map((i) => i.path);
+      expect(paths).toContain("inbox");
+    }
+    const nested = preferencesPatchSchema.safeParse({ home: { notifications: { pigeon: true } } });
+    expect(nested.success).toBe(false);
+    if (!nested.success) {
+      expect(describeIssues(nested.error.issues).map((i) => i.path)).toContain("home.notifications.pigeon");
+    }
+  });
+
+  it("sidebar.apps stays accepted on the personal route and is dropped before the write, as before", () => {
+    const r = preferencesPatchSchema.safeParse({ sidebar: { apps: { hidden: ["chat"] }, iconsOnly: true } });
+    expect(r.success).toBe(true);
+    if (r.success) expect(stripOrgOnlyKeys(r.data)).toEqual({ sidebar: { iconsOnly: true } });
+  });
+});
+
+describe("deepMergePatch", () => {
+  it("keeps sibling namespaces when a nested object is patched", () => {
+    const existing = { notifications: { inbox: { mention: false }, email: { master: true } }, cards: ["a"] };
+    const merged = deepMergePatch(existing, { notifications: { inboxView: { showAll: true } } });
+    expect(merged).toEqual({
+      notifications: { inbox: { mention: false }, email: { master: true }, inboxView: { showAll: true } },
+      cards: ["a"],
+    });
+    // inputs untouched
+    expect(existing.notifications).toEqual({ inbox: { mention: false }, email: { master: true } });
+  });
+  it("replaces arrays and scalars, stores null, skips undefined", () => {
+    const merged = deepMergePatch(
+      { cards: ["a", "b"], density: "cozy", notifications: { mutedUntil: "2026-01-01T00:00:00Z" } },
+      { cards: ["c"], density: undefined, notifications: { mutedUntil: null } },
+    );
+    expect(merged).toEqual({ cards: ["c"], density: "cozy", notifications: { mutedUntil: null } });
+  });
+  it("behaves like the old shallow spread for flat patches", () => {
+    const existing = { cards: ["a"], order: ["a"] };
+    const patch = { order: ["b"] };
+    expect(deepMergePatch(existing, patch)).toEqual({ ...existing, ...patch });
+  });
+});

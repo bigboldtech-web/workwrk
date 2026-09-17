@@ -8,12 +8,27 @@
 //
 // Back/Close are <Link>s (not <button>s) on purpose — the global
 // `.workwrk-os button { padding:0; border:none; background:none }` reset
-// would otherwise strip their chrome. Esc also closes (→ /today).
+// would otherwise strip their chrome.
+//
+// Exits follow the origin rule (settings-architecture.md section 8.3):
+// Back, Close and Esc all call closeSettings(), which returns to where the
+// person came from (`workwrk:settings:return`), else the last app path, else
+// the app fallback. Nothing here names a destination. Esc goes through the
+// shortcut registry (scope "page"), so a dialog open inside settings takes
+// the Esc first and the takeover stays put. The page label in the breadcrumb
+// is the active sidebar row's label, with the settings registry
+// (src/lib/settings-registry.ts) as the fallback for routes no row lists.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { useShortcut } from "@/lib/shortcuts";
+import { SETTINGS_FALLBACK_HREF, clearSettingsReturn, closeSettingsTarget } from "@/lib/settings-nav";
+import { resolveSettingsPage } from "@/lib/settings-registry";
+import { hasDirty, setLeaveConfirmer } from "@/lib/dirty-guard";
+import { useConfirm } from "@/components/ui/dialog-provider";
 import {
   ArrowLeft, X, ChevronRight, LayoutGrid, Building2, Tag, Shapes, Users,
   Globe, CreditCard, Boxes, Key, Calendar, FileCheck, Plug, Download,
@@ -124,22 +139,90 @@ const DOORS: NavDoor[] = [
   },
 ];
 
+/** The label of the sidebar row that is highlighted for `pathname` (the same
+ *  exact-or-prefix match the rows use; the longest href wins). */
+function activeDoorLabel(pathname: string): string | null {
+  let best: { label: string; len: number } | null = null;
+  for (const door of DOORS) {
+    for (const group of door.groups) {
+      for (const item of group.items) {
+        if (!item.href) continue;
+        const active = item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
+        if (active && (!best || item.href.length > best.len)) best = { label: item.label, len: item.href.length };
+      }
+    }
+  }
+  return best?.label ?? null;
+}
+
 export function SettingsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || "";
-  const router = useRouter();
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const isOrgAdmin = !!accessLevel && ORG_ADMIN_LEVELS.has(accessLevel);
   const [org, setOrg] = useState<string | null>(null);
+  const { closeSettings } = useSettingsNav();
+  const confirm = useConfirm();
 
-  // Esc closes settings.
+  // Where Back / Close go right now (read from sessionStorage, so computed
+  // after mount to keep server and client markup identical). The seed is the
+  // rule's own last resort, never a destination named here.
+  const [closeHref, setCloseHref] = useState<string>(SETTINGS_FALLBACK_HREF);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") router.push("/today");
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [router]);
+    setCloseHref(closeSettingsTarget());
+  }, [pathname]);
+
+  // The dirty guard's confirm, on the app's own dialog. useConfirm offers
+  // confirm / cancel, so the choice is Discard / Keep editing; "Save" from
+  // the confirm arrives with the Save-bar pages (settings spec 8.5).
+  useEffect(() => {
+    setLeaveConfirmer(async () => {
+      const discard = await confirm({
+        title: "Discard unsaved changes?",
+        description: "You have changes that have not been saved.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        destructive: true,
+      });
+      return discard ? "discard" : "stay";
+    });
+    return () => setLeaveConfirmer(null);
+  }, [confirm]);
+
+  // Back / Close: a real link for the common case, intercepted only while a
+  // form is dirty so the confirm can run first.
+  const onExitClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+      if (!hasDirty()) {
+        // The link navigates to the resolved target; the origin entry is
+        // consumed so a later visit cannot return to a stale one.
+        clearSettingsReturn();
+        return;
+      }
+      e.preventDefault();
+      void closeSettings();
+    },
+    [closeSettings],
+  );
+
+  // Esc leaves settings (after any open layer, through the registry).
+  useShortcut({
+    id: "settings.close",
+    keys: "escape",
+    label: "Back to app",
+    scope: "page",
+    run: () => {
+      void closeSettings();
+    },
+  });
+
+  // The breadcrumb names the page the way the active sidebar row does, so one
+  // screen never shows two names for one page. Until the sidebar itself is
+  // re-parented onto the registry (settings spec 8.2, a later step), the row
+  // table below is that name's source and the registry is the fallback for a
+  // route no row lists.
+  const pageLabel = activeDoorLabel(pathname) ?? resolveSettingsPage(pathname)?.label ?? null;
 
   // Workspace name for the breadcrumb.
   useEffect(() => {
@@ -155,7 +238,8 @@ export function SettingsShell({ children }: { children: ReactNode }) {
     <div className="flex h-full flex-col bg-white text-zinc-900">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-zinc-200 px-3">
         <Link
-          href="/today"
+          href={closeHref}
+          onClick={onExitClick}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
           title="Back to workspace (Esc)"
         >
@@ -167,10 +251,17 @@ export function SettingsShell({ children }: { children: ReactNode }) {
           <span className="truncate font-medium text-zinc-900">{org ?? "Workspace"}</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           <span className="text-zinc-500">Settings</span>
+          {pageLabel ? (
+            <>
+              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+              <span className="truncate text-zinc-500">{pageLabel}</span>
+            </>
+          ) : null}
         </div>
         <div className="flex-1" />
         <Link
-          href="/today"
+          href={closeHref}
+          onClick={onExitClick}
           aria-label="Close settings"
           title="Close (Esc)"
           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900"

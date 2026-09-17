@@ -19,6 +19,11 @@
 // be calling can() / accessibleIds() / requireCan() instead.
 
 export const ACCESS_LEGACY_ALLOWLIST = [
+  // Phase 0 step 2b: GET /api/boot folds the shell's four boot calls into one
+  // and has to run the SAME legacy rail resolver the client runs today
+  // (visibleRailApps over accessLevel tiers). It leaves this list with the
+  // rail switch-over to can() at step 6, together with the client rail.
+  "src/app/api/boot/route.ts",
   "src/app/(admin)/layout.tsx",
   "src/app/(auth)/register/page.tsx",
   "src/app/(dashboard)/account/profile/page.tsx",

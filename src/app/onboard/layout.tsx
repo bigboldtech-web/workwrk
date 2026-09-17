@@ -30,7 +30,7 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
       style={{
         colorScheme: "light",
         background: "#FBFBFC",
-        fontFamily: "Figtree, ui-sans-serif, system-ui, -apple-system, sans-serif",
+        fontFamily: "var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system, sans-serif",
       }}
     >
       <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">

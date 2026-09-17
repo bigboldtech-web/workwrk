@@ -34,11 +34,36 @@ import {
 // Relative on purpose (see header) — the premium-module registry, so the rail
 // can hide a module the org hasn't turned on.
 import { MODULE_APP_KEYS } from "./modules";
+// The tier ladder itself, from the engine's one pure copy. The resolver calls
+// this rather than the catalog's re-export so it also runs on the SERVER
+// (/api/boot): apps-catalog.tsx is a "use client" module, and its function
+// exports are client references, not callables, inside a route handler.
+import { legacyTierAllows, type LegacyTier } from "./access/legacy-levels";
 
 // Re-export so the rail and the admin page have ONE import for the whole
 // access story instead of splitting it across this module and the catalog.
 export { APPS, canAccessApp, canAccessTier, isAlwaysPinned };
 export type { AccessTier, AppEntry };
+
+/**
+ * The fields the resolver reads. `AppEntry` satisfies it; so does the pure
+ * server mirror in ./app-access.ts, which is how /api/boot resolves the same
+ * rail without loading the client catalog.
+ */
+export type AppLike = {
+  key: string;
+  label: string;
+  defaultHref: string;
+  requiredAccess?: AccessTier;
+  alwaysPinned?: boolean;
+  hideFromCatalog?: boolean;
+  hubKey?: string;
+};
+
+function tierAllows(tier: AccessTier | undefined, accessLevel: string | null | undefined): boolean {
+  if (!tier) return true;
+  return legacyTierAllows(tier as LegacyTier, accessLevel);
+}
 
 /**
  * The org rail config as stored in OrgPreference.sidebarDefault.apps.
@@ -101,10 +126,10 @@ export function parseOrgAppsConfig(raw: unknown): OrgAppsConfig {
 
 /** config.order first (unknown keys silently skipped — an app may have been
  *  removed from the catalog), then everything else in catalog order. */
-function orderApps(apps: AppEntry[], order: string[] | undefined): AppEntry[] {
+function orderApps<T extends AppLike>(apps: T[], order: string[] | undefined): T[] {
   if (!order || order.length === 0) return apps;
   const byKey = new Map(apps.map((a) => [a.key, a]));
-  const out: AppEntry[] = [];
+  const out: T[] = [];
   const seen = new Set<string>();
   for (const key of order) {
     const app = byKey.get(key);
@@ -131,7 +156,7 @@ const MODULE_HUB_SURVIVES_ON: Readonly<Record<string, string>> = {
 };
 
 /** The org floor for one app, or undefined when unset/invalid/alwaysPinned. */
-function orgFloor(config: OrgAppsConfig, app: AppEntry): AccessTier | undefined {
+function orgFloor(config: OrgAppsConfig, app: AppLike): AccessTier | undefined {
   if (app.alwaysPinned) return undefined; // escape hatch — never floored
   const tier = config.minAccess?.[app.key];
   return typeof tier === "string" && VALID_TIERS.has(tier) ? (tier as AccessTier) : undefined;
@@ -142,12 +167,12 @@ function orgFloor(config: OrgAppsConfig, app: AppEntry): AccessTier | undefined 
  * access level. This is the whole visibility story — there is no personal
  * pin state anymore.
  */
-export function visibleRailApps(opts: {
+export function visibleRailApps<T extends AppLike = AppEntry>(opts: {
   // undefined tolerated (= {}) so callers can pass a not-yet-hydrated
   // config without a guard — the rail must render something immediately.
   config: OrgAppsConfig | undefined;
   accessLevel: string | undefined;
-  apps?: typeof APPS;
+  apps?: readonly T[];
   // The rail app keys of the premium modules the org has ACTIVE. undefined
   // until /api/preferences answers; a module app is hidden while unknown so an
   // org that never enabled it never flashes it. Core apps ignore this.
@@ -158,20 +183,20 @@ export function visibleRailApps(opts: {
   // unreachable from the "More" grid. Every other filter still applies, so an
   // app the org hid or the viewer cannot access never resurfaces this way.
   includeFolded?: boolean;
-}): AppEntry[] {
+}): T[] {
   const { accessLevel, activeModules, includeFolded } = opts;
   const config = opts.config ?? {};
-  const catalog = opts.apps ?? APPS;
+  const catalog = (opts.apps ?? (APPS as unknown as readonly T[])) as readonly T[];
   const hidden = new Set(config.hidden ?? []);
 
   // Is this app allowed for this viewer once the org config and the catalog
   // baseline are both applied? Used for the app itself and for the folded app
   // that keeps a module hub alive.
-  const allowed = (cfg: OrgAppsConfig, hiddenSet: Set<string>, app: AppEntry): boolean => {
+  const allowed = (cfg: OrgAppsConfig, hiddenSet: Set<string>, app: AppLike): boolean => {
     if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
-    if (!canAccessApp(app, accessLevel)) return false;
+    if (!tierAllows(app.requiredAccess, accessLevel)) return false;
     const floor = orgFloor(cfg, app);
-    return !(floor && !canAccessTier(floor, accessLevel));
+    return !(floor && !tierAllows(floor, accessLevel));
   };
 
   const resolve = (cfg: OrgAppsConfig, hiddenSet: Set<string>) =>

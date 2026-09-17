@@ -1,11 +1,15 @@
 // GET   /api/preferences — effective preferences (org defaults + user override - locked)
 // PATCH /api/preferences — patch the user's UserPreference row
+//
+// The PATCH schema lives in src/lib/preferences-schema.ts (strict at every
+// level, widening only; settings-architecture.md section 9.3). A stray key is
+// a 400 naming it, never a silent strip.
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { z } from "zod";
 import { getEffectivePreferences, setUserPreference, getUserPreferenceRow } from "@/lib/preferences";
+import { describeIssues, preferencesPatchSchema, stripOrgOnlyKeys } from "@/lib/preferences-schema";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -32,72 +36,19 @@ export async function GET(req: Request) {
   return NextResponse.json({ effective });
 }
 
-const patchSchema = z.object({
-  sidebar: z.object({
-    pinned: z.array(z.string()).optional(),
-    hidden: z.array(z.string()).optional(),
-    order: z.array(z.string()).optional(),
-    iconsOnly: z.boolean().optional(),
-    sectionsOrder: z.array(z.string()).optional(),
-  }).optional(),
-  home: z.object({
-    cards: z.array(z.string()).optional(),
-    order: z.array(z.string()).optional(),
-    // Phase 78 — favorite (starred) board IDs. Surfaced in the
-    // board page header as a filled-star toggle.
-    favoriteBoardIds: z.array(z.string()).optional(),
-    // Phase 80 — favorite (starred) Space IDs.
-    favoriteSpaceIds: z.array(z.string()).optional(),
-    // Phase 15+ — favorite (starred) Doc/note IDs.
-    favoriteDocIds: z.array(z.string()).optional(),
-    // Phase 83 — favorite (starred) Folder IDs.
-    favoriteFolderIds: z.array(z.string()).optional(),
-    // Phase 84 — favorite (starred) Table IDs.
-    favoriteTableIds: z.array(z.string()).optional(),
-    // Phase 89 — favorite (starred) Whiteboard + File IDs.
-    favoriteWhiteboardIds: z.array(z.string()).optional(),
-    favoriteFileIds: z.array(z.string()).optional(),
-    // My Tasks card layout — react-grid-layout per-breakpoint shape.
-    taskCardLayout: z.record(z.string(), z.array(z.object({
-      i: z.string(),
-      x: z.number(),
-      y: z.number(),
-      w: z.number(),
-      h: z.number(),
-    }))).optional(),
-    taskCardsHidden: z.array(z.string()).optional(),
-    // Space Overview card layout — same shape, separate key.
-    overviewCardLayout: z.record(z.string(), z.array(z.object({
-      i: z.string(),
-      x: z.number(),
-      y: z.number(),
-      w: z.number(),
-      h: z.number(),
-    }))).optional(),
-    overviewCardsHidden: z.array(z.string()).optional(),
-    // Notification settings (/settings/notifications) — stored inside the
-    // home JSON column (no schema migration). "email" includes the "master" key.
-    notifications: z.object({
-      inbox: z.record(z.string(), z.boolean()).optional(),
-      email: z.record(z.string(), z.boolean()).optional(),
-    }).optional(),
-  }).optional(),
-  theme: z.object({
-    appearance: z.enum(["LIGHT", "DARK", "AUTO"]).optional(),
-    accent: z.string().max(40).optional(),
-  }).optional(),
-  density: z.enum(["compact", "cozy"]).optional(),
-});
-
 export async function PATCH(req: Request) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const body = await req.json().catch(() => null);
-  const parsed = patchSchema.safeParse(body);
+  const parsed = preferencesPatchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+    const issues = describeIssues(parsed.error.issues);
+    return NextResponse.json(
+      { error: `Invalid body: ${issues.map((i) => i.path).join(", ")}`, issues },
+      { status: 400 },
+    );
   }
-  await setUserPreference(c.userId, parsed.data);
+  await setUserPreference(c.userId, stripOrgOnlyKeys(parsed.data));
   const effective = await getEffectivePreferences(c.userId, c.organizationId);
   return NextResponse.json({ effective });
 }

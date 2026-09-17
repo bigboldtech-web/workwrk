@@ -1,31 +1,38 @@
 "use client";
 
-// ThemeApplier — mounts once at the OsShell level and applies the user's
-// effective preferences to the document. Sets:
-//   - data-theme on <html> ("light" | "dark" — AUTO resolves to system)
-//   - data-accent on <html> (the brand accent key — "mint", "purple", ...)
-//   - data-density on <html> ("compact" | "cozy")
+// ThemeApplier: mounts once at the OsShell level and applies the user's
+// effective preferences to the document. Sets, on <html>:
+//   - `.dark` + data-theme "light" | "dark": handed to next-themes via
+//                 setTheme ("light" / "dark" / "system" for AUTO). next-themes
+//                 writes both pre-hydration from its localStorage key, so a
+//                 returning browser paints the right palette before this
+//                 component has fetched anything (no light/dark flash), and
+//                 it owns the matchMedia listener for AUTO. The token layer
+//                 keys on the class and on data-theme (its
+//                 prefers-color-scheme guard is `:root:not([data-theme="light"])`).
+//   - data-chrome "navy": the frame variant (design-system 1.2.1). Always
+//                 navy for now: the tokens for the light flip exist, but the
+//                 rail and top bar still paint white foregrounds on
+//                 --os-brand-rail, so honouring a stored "light" would blank
+//                 them. Step 3 rewires the shell on --os-chrome-fg; step 8
+//                 exposes the control and reads theme.chrome here.
+//   - data-density "comfortable" | "cozy" | "compact": data-row height
+//                 (tokens.css keys --os-row-h on it; comfortable is the default)
 //
-// CSS then keys off these attributes via variables (e.g. --os-brand maps
-// per data-accent). This component renders nothing — it's pure side
-// effects on the document root.
+// The old data-accent attribute is gone: there is one brand blue and the
+// per-accent CSS blocks were deleted with it. This component renders
+// nothing; it is pure side effects on the document root.
 
 import { useEffect, useState } from "react";
+import { useTheme } from "next-themes";
 import type { EffectivePreferences } from "@/lib/preferences";
-
-function applySystemThemeListener(onChange: (dark: boolean) => void) {
-  if (typeof window === "undefined" || !window.matchMedia) return () => {};
-  const mq = window.matchMedia("(prefers-color-scheme: dark)");
-  const handler = (e: MediaQueryListEvent) => onChange(e.matches);
-  mq.addEventListener("change", handler);
-  return () => mq.removeEventListener("change", handler);
-}
 
 export function ThemeApplier() {
   const [prefs, setPrefs] = useState<EffectivePreferences | null>(null);
+  const { setTheme } = useTheme();
 
   // Fetch once on mount; the CustomizePanel does its own optimistic
-  // updates so we don't need to subscribe to its changes here — instead
+  // updates so we don't need to subscribe to its changes here; instead
   // we listen for a window event "workwrk:prefs-changed" to re-fetch
   // when the user saves.
   useEffect(() => {
@@ -49,36 +56,21 @@ export function ThemeApplier() {
     };
   }, []);
 
-  // Resolve appearance: LIGHT / DARK explicit; AUTO follows system.
+  // Resolve appearance: LIGHT / DARK explicit; AUTO follows the system
+  // through next-themes' own "system" theme.
+  useEffect(() => {
+    if (!prefs) return;
+    const appearance = prefs.theme.appearance;
+    setTheme(appearance === "AUTO" ? "system" : appearance === "DARK" ? "dark" : "light");
+  }, [prefs, setTheme]);
+
+  // Chrome + density are simple attribute writes.
   useEffect(() => {
     if (!prefs) return;
     const root = document.documentElement;
-
-    const apply = (isDark: boolean) => {
-      root.setAttribute("data-theme", isDark ? "dark" : "light");
-      root.classList.toggle("dark", isDark);
-    };
-
-    if (prefs.theme.appearance === "AUTO") {
-      const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-      apply(!!mq?.matches);
-      return applySystemThemeListener(apply);
-    } else {
-      apply(prefs.theme.appearance === "DARK");
-    }
-  }, [prefs]);
-
-  // Accent + density are simple attribute writes.
-  useEffect(() => {
-    if (!prefs) return;
-    const root = document.documentElement;
-    // "purple" was the accidental DEFAULT accent for months, so a stored
-    // "purple" is almost always the leaked default, not a choice — normalize
-    // it to the brand. A deliberate purple pick now stores "grape" (same
-    // swatch, new key), which passes through untouched.
-    const accent = prefs.theme.accent === "purple" ? "workwrk" : (prefs.theme.accent || "workwrk");
-    root.setAttribute("data-accent", accent);
-    root.setAttribute("data-density", prefs.density || "cozy");
+    root.setAttribute("data-chrome", "navy");
+    root.removeAttribute("data-accent");
+    root.setAttribute("data-density", prefs.density || "comfortable");
   }, [prefs]);
 
   return null;

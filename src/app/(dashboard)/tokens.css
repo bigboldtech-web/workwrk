@@ -1,0 +1,530 @@
+/* ═════════════════════════════════════════════════════════════════
+ * WorkwrK token layer (design-system.md sections 1, 2, 3, 6, 8.1)
+ *
+ * The one token file. os.css imports it as its first statement; every
+ * component and every os.css rule reads these names and nothing else.
+ *
+ * Three layers, in order:
+ *   1. primitives      the cool slate ramp, navy, blue, the four brand
+ *                      dots. Components never reference these directly.
+ *   2. semantic        every existing --os-* name kept and re-pointed,
+ *                      plus the new concepts (selected, focus, the
+ *                      success / warning / danger trio, chrome).
+ *   3. component       sparse: chip height, table head, widget strip,
+ *                      user status hues, kbd, skeleton.
+ *
+ * Attributes on <html> that this file keys on:
+ *   .dark                         written by ThemeApplier (and next-themes)
+ *   data-chrome="navy" | "light"  written by ThemeApplier, default navy
+ *   data-theme="light" | "dark"   the resolved appearance, written by
+ *                                 next-themes (pre-hydration, from its
+ *                                 localStorage key) and by ThemeApplier
+ *                                 once the stored preference is fetched
+ *   data-density="comfortable|cozy|compact"
+ *                                 written by ThemeApplier and lib/density
+ *   data-contrast="high"          reserved (nothing writes it yet)
+ *
+ * Tokens are declared on :root AND .workwrk-os so UI portaled to <body>
+ * (menus, dialogs, toasts) resolves var(--os-*) instead of computing to
+ * transparent. Every override below therefore targets both selectors.
+ *
+ * Dark is a rebinding of layer 2 in two places that carry IDENTICAL
+ * declarations (scripts/check-token-contrast.mjs fails if they drift):
+ *   1. `:root.dark`, the class ThemeApplier and next-themes toggle;
+ *   2. `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }`
+ *      (design-system 1.5), so a system-dark browser paints the dark
+ *      palette before hydration and until the stored preference lands.
+ *      The guard is the data-theme attribute, not a `.light` class,
+ *      because `data-theme="light"` is what actually gets written.
+ * ═════════════════════════════════════════════════════════════════ */
+
+:root,
+.workwrk-os {
+  /* ── Layer 1: primitives (do not reference from components) ─────── */
+  --os-n0:    #FFFFFF;
+  --os-n50:   #F6F7F9;
+  --os-n100:  #EEF0F3;
+  --os-n200:  #E4E7EC;
+  --os-n300:  #D0D5DD;
+  --os-n400:  #98A2B3;
+  /* N500 is one step darker than the spec table's #667085: that value is
+     4.36:1 on N100, and 8.4 rule 5 requires ink-2 (which IS N500) to pass
+     4.5:1 on --os-surface-hov (which IS N100). #5C6779 clears every
+     surface ink-2 is allowed on (white 5.72, N50 5.34, N100 5.01,
+     selected 5.11) without touching the rest of the ramp. */
+  --os-n500:  #5C6779;
+  --os-n600:  #475467;
+  --os-n700:  #344054;
+  --os-n800:  #1F2430;
+  --os-n900:  #101215;
+
+  --os-nv900: #1B2537;
+  --os-nv800: #242F44;
+  --os-nv950: #0C0F14;
+
+  --os-blue-50:  #EAF3FE;
+  --os-blue-100: #D4E7FD;
+  --os-blue-200: #A9CFFB;
+  --os-blue-400: #4D9CFF;
+  --os-blue-600: #0073EA;
+  --os-blue-650: #0062CC;
+  --os-blue-700: #0B5FC2;
+  --os-blue-800: #0A4C9B;
+
+  /* Brand dots (the logo, the loader). Fixed, never rebound, quarantined
+     to src/components/brand and src/app/(marketing) by lint (1.6). */
+  --os-dot-y: #FFCB00;
+  --os-dot-b: #0073EA;
+  --os-dot-r: #FF3D57;
+  --os-dot-g: #00C875;
+
+  /* ── Layer 2: semantic aliases (what components use) ───────────── */
+
+  /* Accent: the one blue */
+  --os-brand:         #0073EA;
+  --os-brand-hover:   #0062CC;
+  --os-brand-pressed: #0A4C9B;
+  --os-brand-soft:    #EAF3FE;
+  --os-brand-deep:    #0B5FC2;
+  /* Accent-as-text alias. Historically pointed at the rail navy; now the
+     link / accent-text colour, which lifts to blue-400 in dark. */
+  --os-brand-ink:     var(--os-brand-deep);
+  /* Retired chrome aliases, kept one release: both used to paint the rail
+     and the splash. They now follow the chrome token. */
+  --os-brand-dark:    var(--os-chrome-bg);
+  --os-brand-rail:    var(--os-chrome-bg);
+
+  /* Surfaces */
+  --os-canvas:        #FFFFFF;
+  --os-surface:       #FFFFFF;
+  --os-surface-1:     #F6F7F9;
+  --os-surface-hov:   #EEF0F3;
+  --os-surface-2:     #E4E7EC;
+  --os-surface-3:     var(--os-surface-2);   /* retired alias */
+  --os-row-hov:       var(--os-surface-hov); /* retired alias: one hover, not two */
+  --os-selected:      #EAF3FE;
+  --os-selected-hov:  #D4E7FD;
+  --os-scrim:         rgba(16, 18, 21, 0.40);
+  --os-inverse-bg:    #1F2430;
+  --os-inverse-fg:    #FFFFFF;
+
+  /* Borders */
+  --os-line-soft:     #EEF0F3;
+  --os-line:          #E4E7EC;
+  --os-line-strong:   #D0D5DD;
+
+  /* Ink */
+  --os-ink:           #1F2430;
+  --os-ink-2:         #5C6779;   /* N500, see the note on the primitive */
+  --os-ink-strong:    #475467;
+  --os-ink-3:         #98A2B3;
+  --os-ink-4:         #D0D5DD;
+  --os-ink-inv:       #FFFFFF;
+
+  /* Focus */
+  --os-focus:         #0073EA;
+  --os-focus-halo:    #A9CFFB;
+
+  /* The semantic trio: the only yellow, red and green that reach components */
+  --os-success-bg:    #ECFDF3;
+  --os-success-text:  #15803D;
+  --os-success-solid: #15803D;
+  --os-warning-bg:    #FFFAEB;
+  --os-warning-text:  #854D0E;
+  --os-warning-solid: #FACC15;
+  --os-danger-bg:     #FEF3F2;
+  --os-danger-text:   #B42318;
+  --os-danger-solid:  #D92D20;
+  --os-presence:      #15803D;
+  --os-attention:     #D92D20;
+
+  /* Legacy monday status palette: interim aliases until the Phase 5 colour
+     sweep replaces every consumer, then the whole --os-c-* family goes
+     (8.1 says delete purple / pink / indigo / lime outright; they stay as
+     aliases only because settings/tags, announcements, activity-feed and
+     analytics still read them and step 1 makes no component changes).
+     Orange and yellow both resolve to the warning solid, which carries
+     N800 text: os.css gives .os-c-orange, .s-working and the orange text
+     sites ink / warning-text so no white-on-yellow pill ships. No
+     generic yellow variable exists (1.4 rule 3) and the dot-Y hex never
+     leaves the brand tokens (1.6). */
+  --os-c-green:       var(--os-success-solid);
+  --os-c-orange:      var(--os-warning-solid);
+  --os-c-red:         var(--os-danger-solid);
+  --os-c-yellow:      var(--os-warning-solid);
+  --os-c-blue:        var(--os-brand);
+  --os-c-purple:      var(--os-brand);          /* legacy alias, sweep deletes */
+  --os-c-pink:        var(--os-danger-solid);   /* legacy alias, sweep deletes */
+  --os-c-indigo:      var(--os-brand-deep);     /* legacy alias, sweep deletes */
+  --os-c-teal:        var(--os-ink-2);
+  --os-c-lime:        var(--os-success-solid);  /* legacy alias, sweep deletes */
+  --os-c-brown:       var(--os-ink-2);
+  --os-c-sage:        var(--os-ink-2);
+  --os-c-gray:        var(--os-ink-2);
+  --os-c-darkgray:    var(--os-ink-2);
+
+  /* ── Chrome (rail + top bar only). Navy is the default; the
+     html[data-chrome] blocks below re-point these. ───────────────── */
+  --os-chrome-bg:         #1B2537;
+  --os-chrome-hov:        #242F44;
+  --os-chrome-fg:         #FFFFFF;
+  --os-chrome-fg-2:       #A3AEC2;
+  --os-chrome-line:       rgba(255, 255, 255, 0.12);
+  --os-chrome-pill:       #FFFFFF;
+  --os-chrome-pill-fg:    #1B2537;
+  --os-chrome-field:      rgba(255, 255, 255, 0.10);
+  --os-chrome-field-fg:   #FFFFFF;
+  --os-chrome-field-ph:   rgba(255, 255, 255, 0.64);
+  --os-chrome-presence:   #4ADE80;
+  --os-chrome-attention:  #F87171;
+  /* The secondary sidebar is grey in both chrome variants */
+  --os-side-bg:           #F6F7F9;
+  --os-side-pill:         #E4E7EC;
+
+  /* ── Layer 3: component tokens ─────────────────────────────────── */
+  --os-chip-h:            24px;
+  --os-table-head-bg:     var(--os-surface-1);
+  --os-table-row-line:    var(--os-line-soft);
+  --os-widget-head-bg:    #EEF3FB;
+  --os-rail-pill-size:    40px;
+  --os-danger-border:     #F3B6B0;
+  --os-kbd-bg:            #EEF0F3;
+  --os-skeleton:          #EEF0F3;
+
+  /* User-defined status and icon hues (data, not chrome). Eight muted
+     hues, none semantic, none purple-adjacent. Pale = hue at 12 percent
+     over white. The picker stores the index, never the hex. */
+  --os-status-user-1: #0B5FC2; --os-status-user-1-bg: #E2ECF8;
+  --os-status-user-2: #0F766E; --os-status-user-2-bg: #E2EFEE;
+  --os-status-user-3: #3F6212; --os-status-user-3-bg: #E8ECE3;
+  --os-status-user-4: #854D0E; --os-status-user-4-bg: #F0EAE2;
+  --os-status-user-5: #9A3412; --os-status-user-5-bg: #F3E7E3;
+  --os-status-user-6: #9F1239; --os-status-user-6-bg: #F3E3E7;
+  --os-status-user-7: #475569; --os-status-user-7-bg: #E9EBED;
+  --os-status-user-8: #57534E; --os-status-user-8-bg: #EBEAEA;
+  --os-status-user-1-dark: #4D9CFF; --os-status-user-1-dark-bg: #223248;
+  --os-status-user-2-dark: #5EEAD4; --os-status-user-2-dark-bg: #254040;
+  --os-status-user-3-dark: #A6C97A; --os-status-user-3-dark-bg: #323A30;
+  --os-status-user-4-dark: #D9A85A; --os-status-user-4-dark-bg: #3B342A;
+  --os-status-user-5-dark: #E8916A; --os-status-user-5-dark-bg: #3D302D;
+  --os-status-user-6-dark: #F07A9A; --os-status-user-6-dark-bg: #3F2C36;
+  --os-status-user-7-dark: #A3ADBF; --os-status-user-7-dark-bg: #31353D;
+  --os-status-user-8-dark: #B5B0AA; --os-status-user-8-dark-bg: #343639;
+
+  /* ── Type (section 2). Nine sizes; 14 base, floor 10, no half pixels. */
+  --os-font:   var(--font-inter), Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --os-f-mono: var(--font-mono), "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --os-t-rail:       10px; --os-t-rail-lh:       12px;
+  --os-t-micro:      11px; --os-t-micro-lh:      14px;
+  --os-t-meta:       12px; --os-t-meta-lh:       16px;
+  --os-t-helper:     13px; --os-t-helper-lh:     18px;
+  --os-t-body:       14px; --os-t-body-lh:       20px;
+  --os-t-row:        15px; --os-t-row-lh:        22px;
+  --os-t-row-strong: 15px; --os-t-row-strong-lh: 22px;
+  --os-t-title:      16px; --os-t-title-lh:      22px;
+  --os-t-page:       22px; --os-t-page-lh:       28px;
+  --os-t-prose:      15px; --os-t-prose-lh:      24px;
+
+  /* ── Rhythm (section 3) ────────────────────────────────────────── */
+  --os-s-1: 4px;
+  --os-s-2: 8px;
+  --os-s-3: 12px;
+  --os-s-4: 16px;
+  --os-s-5: 24px;
+  --os-s-6: 32px;
+  --os-s-7: 48px;
+  --os-s-8: 64px;
+
+  /* Radii. xl is retired (aliased to lg for one release). */
+  --os-r-xs:   4px;
+  --os-r-sm:   6px;
+  --os-r-md:   8px;
+  --os-r-lg:   12px;
+  --os-r-xl:   var(--os-r-lg);
+  --os-r-pill: 999px;
+
+  /* Elevation: borders over shadows. Cards are bordered, so the card and
+     rest shadows are retired (none, deleted after one release). */
+  --os-shadow-card:  none;
+  --os-shadow-rest:  none;
+  --os-shadow-pop:   0 8px 24px rgba(16, 18, 21, 0.12);
+  --os-shadow-modal: 0 8px 32px rgba(16, 18, 21, 0.16);
+
+  /* Layout. The rail and top bar are Tailwind-sized today; these become
+     load-bearing when Phase 1 rebuilds the shell on them. */
+  --os-rail-w:    64px;
+  --os-side-w:    264px;
+  --os-drawer-w:  520px;
+  /* New header-stack names (title 48 / views 36 / toolbar 44). */
+  --os-head-h:    48px;
+  --os-views-h:   36px;
+  --os-toolbar-h: 44px;
+  /* The old header names are still read by the live .os-title-bar,
+     .os-tabs, .os-filter, .os-chat and .os-notif rules. They keep today's
+     values until Phase 1 replaces OsTitleBar with the three-row header;
+     re-pointing them here would change the live header heights. Phase 1:
+     --os-top-h 48, then alias the three to head / views / toolbar. */
+  --os-top-h:    32px;
+  --os-title-h:  40px;
+  --os-tabs-h:   34px;
+  --os-filter-h: 34px;
+
+  /* Density (3.2, 3.3). Data rows follow html[data-density]; nav rows are
+     fixed at 36. Control heights: 36 default, 32 small. */
+  --os-page-pad:     24px;
+  --os-card-pad:     16px;
+  --os-row-h:        44px;
+  --os-nav-row-h:    36px;
+  --os-row-h-lg:     var(--os-nav-row-h); /* retired alias */
+  --os-control-h:    36px;
+  --os-control-h-sm: 32px;
+  --os-popover-w:    280px;
+
+  /* Motion (section 6). Nothing above 250ms. */
+  --os-dur-fast:   120ms;
+  --os-dur-base:   160ms;
+  --os-dur-slow:   220ms;
+  --os-dur-expand: 240ms;
+  --os-ease-out:   cubic-bezier(0.2, 0, 0, 1);
+  --os-ease-in:    cubic-bezier(0.4, 0, 1, 1);
+
+  font-family: var(--os-font);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--os-ink);
+  background: var(--os-canvas);
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Density preference (3.2) ───────────────────────────────────────
+   Comfortable 44 is the shipped default (DEFAULT_DENSITY in
+   lib/preferences.ts) and also what the absent attribute resolves to;
+   stored "cozy" is 36 and stored "compact" is 32. Nothing reads
+   --os-row-h yet; TableCard and the list renderers pick it up later. */
+html[data-density="comfortable"],
+html[data-density="comfortable"] .workwrk-os { --os-row-h: 44px; }
+html[data-density="cozy"],
+html[data-density="cozy"] .workwrk-os { --os-row-h: 36px; }
+html[data-density="compact"],
+html[data-density="compact"] .workwrk-os { --os-row-h: 32px; }
+
+/* ── Chrome variants, light theme ─────────────────────────────────── */
+html[data-chrome="navy"],
+html[data-chrome="navy"] .workwrk-os {
+  --os-chrome-bg:         #1B2537;
+  --os-chrome-hov:        #242F44;
+  --os-chrome-fg:         #FFFFFF;
+  --os-chrome-fg-2:       #A3AEC2;
+  --os-chrome-line:       rgba(255, 255, 255, 0.12);
+  --os-chrome-pill:       #FFFFFF;
+  --os-chrome-pill-fg:    #1B2537;
+  --os-chrome-field:      rgba(255, 255, 255, 0.10);
+  --os-chrome-field-fg:   #FFFFFF;
+  --os-chrome-field-ph:   rgba(255, 255, 255, 0.64);
+  --os-chrome-presence:   #4ADE80;
+  --os-chrome-attention:  #F87171;
+}
+html[data-chrome="light"],
+html[data-chrome="light"] .workwrk-os {
+  --os-chrome-bg:         #FFFFFF;
+  --os-chrome-hov:        #EEF0F3;
+  --os-chrome-fg:         #1F2430;
+  --os-chrome-fg-2:       #475467;
+  --os-chrome-line:       #E4E7EC;
+  --os-chrome-pill:       #E4E7EC;
+  --os-chrome-pill-fg:    #1F2430;
+  --os-chrome-field:      #F6F7F9;
+  --os-chrome-field-fg:   #1F2430;
+  /* Spec table says N400 (#98A2B3), which is 2.40:1 on the N50 field; a
+     placeholder is visible text, so it takes the ink-2 value (5.34:1),
+     matching the navy placeholder's 7.14:1. */
+  --os-chrome-field-ph:   #5C6779;
+  --os-chrome-presence:   #15803D;
+  --os-chrome-attention:  #D92D20;
+}
+
+/* ── Dark: a rebinding of layer 2, the component tokens and the navy
+   chrome. Brand dots and the semantic solids do not rebind. ───────── */
+:root.dark,
+:root.dark .workwrk-os {
+  --os-brand-soft:    rgba(0, 115, 234, 0.14);
+  --os-brand-deep:    #4D9CFF;
+
+  --os-canvas:        #101215;
+  --os-surface:       #181B20;
+  --os-surface-1:     #15181D;
+  --os-surface-hov:   #1F232A;
+  --os-surface-2:     #262A31;
+  --os-selected:      rgba(0, 115, 234, 0.14);
+  --os-selected-hov:  rgba(0, 115, 234, 0.22);
+  --os-scrim:         rgba(0, 0, 0, 0.60);
+  --os-inverse-bg:    #E6E8EC;
+  --os-inverse-fg:    #101215;
+
+  --os-line-soft:     #1F232A;
+  --os-line:          #262A31;
+  --os-line-strong:   #30353D;
+
+  --os-ink:           #E6E8EC;
+  --os-ink-2:         #9AA3B2;
+  --os-ink-strong:    #B4BBC7;
+  --os-ink-3:         #6B7280;
+  --os-ink-4:         #3A3F47;
+
+  --os-focus:         #4D9CFF;
+  --os-focus-halo:    rgba(77, 156, 255, 0.35);
+
+  --os-success-bg:    #0F2A1A;
+  --os-success-text:  #4ADE80;
+  --os-warning-bg:    #2A2208;
+  --os-warning-text:  #FCD34D;
+  --os-danger-bg:     #2C1212;
+  --os-danger-text:   #F87171;
+  --os-presence:      #4ADE80;
+  --os-attention:     #F87171;
+
+  --os-chrome-bg:         #0C0F14;
+  --os-chrome-hov:        #161A21;
+  --os-chrome-fg:         #E6E8EC;
+  --os-chrome-fg-2:       #8E9BB3;
+  --os-chrome-line:       rgba(255, 255, 255, 0.08);
+  --os-chrome-pill:       #262A31;
+  --os-chrome-pill-fg:    #FFFFFF;
+  --os-chrome-field:      rgba(255, 255, 255, 0.06);
+  --os-chrome-field-fg:   #E6E8EC;
+  --os-chrome-field-ph:   rgba(255, 255, 255, 0.50);
+  --os-chrome-presence:   #4ADE80;
+  --os-chrome-attention:  #F87171;
+  --os-side-bg:           #15181D;
+  --os-side-pill:         #262A31;
+
+  --os-widget-head-bg:    #171C26;
+  --os-danger-border:     #5A2424;
+  --os-kbd-bg:            #262A31;
+  --os-skeleton:          #1F232A;
+
+  /* Elevation in dark is the lighter surface plus a 1px outline */
+  --os-shadow-pop:   0 0 0 1px var(--os-line), 0 8px 24px rgba(0, 0, 0, 0.45);
+  --os-shadow-modal: 0 0 0 1px var(--os-line), 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+:root.dark[data-chrome="light"],
+:root.dark[data-chrome="light"] .workwrk-os {
+  --os-chrome-bg:         #181B20;
+  --os-chrome-hov:        #1F232A;
+  --os-chrome-fg:         #E6E8EC;
+  --os-chrome-fg-2:       #9AA3B2;
+  --os-chrome-line:       #262A31;
+  --os-chrome-pill:       #262A31;
+  --os-chrome-pill-fg:    #FFFFFF;
+  --os-chrome-field:      #15181D;
+  --os-chrome-field-fg:   #E6E8EC;
+  --os-chrome-field-ph:   #9AA3B2;   /* dark ink-2; spec's #6B7280 is 3.68:1 */
+  --os-chrome-presence:   #4ADE80;
+  --os-chrome-attention:  #F87171;
+}
+
+/* ── High contrast: a variable block, not a third theme (1.5) ─────── */
+html[data-contrast="high"],
+html[data-contrast="high"] .workwrk-os {
+  --os-ink-2: #475467;
+  --os-line:  #D0D5DD;
+}
+:root.dark[data-contrast="high"],
+:root.dark[data-contrast="high"] .workwrk-os {
+  --os-ink-2:     #B8C0CC;
+  --os-line:      #3A3F47;
+  --os-brand-deep: #7AB8FF;
+}
+
+/* ── System dark (1.5): the SAME three dark blocks, keyed on the OS
+   preference for the window between first paint and the moment the
+   resolved appearance is written as data-theme. Declarations here must
+   stay byte-identical to the `:root.dark` blocks above; the contrast
+   script diffs the two and fails on drift. ─────────────────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]),
+  :root:not([data-theme="light"]) .workwrk-os {
+    --os-brand-soft:    rgba(0, 115, 234, 0.14);
+    --os-brand-deep:    #4D9CFF;
+
+    --os-canvas:        #101215;
+    --os-surface:       #181B20;
+    --os-surface-1:     #15181D;
+    --os-surface-hov:   #1F232A;
+    --os-surface-2:     #262A31;
+    --os-selected:      rgba(0, 115, 234, 0.14);
+    --os-selected-hov:  rgba(0, 115, 234, 0.22);
+    --os-scrim:         rgba(0, 0, 0, 0.60);
+    --os-inverse-bg:    #E6E8EC;
+    --os-inverse-fg:    #101215;
+
+    --os-line-soft:     #1F232A;
+    --os-line:          #262A31;
+    --os-line-strong:   #30353D;
+
+    --os-ink:           #E6E8EC;
+    --os-ink-2:         #9AA3B2;
+    --os-ink-strong:    #B4BBC7;
+    --os-ink-3:         #6B7280;
+    --os-ink-4:         #3A3F47;
+
+    --os-focus:         #4D9CFF;
+    --os-focus-halo:    rgba(77, 156, 255, 0.35);
+
+    --os-success-bg:    #0F2A1A;
+    --os-success-text:  #4ADE80;
+    --os-warning-bg:    #2A2208;
+    --os-warning-text:  #FCD34D;
+    --os-danger-bg:     #2C1212;
+    --os-danger-text:   #F87171;
+    --os-presence:      #4ADE80;
+    --os-attention:     #F87171;
+
+    --os-chrome-bg:         #0C0F14;
+    --os-chrome-hov:        #161A21;
+    --os-chrome-fg:         #E6E8EC;
+    --os-chrome-fg-2:       #8E9BB3;
+    --os-chrome-line:       rgba(255, 255, 255, 0.08);
+    --os-chrome-pill:       #262A31;
+    --os-chrome-pill-fg:    #FFFFFF;
+    --os-chrome-field:      rgba(255, 255, 255, 0.06);
+    --os-chrome-field-fg:   #E6E8EC;
+    --os-chrome-field-ph:   rgba(255, 255, 255, 0.50);
+    --os-chrome-presence:   #4ADE80;
+    --os-chrome-attention:  #F87171;
+    --os-side-bg:           #15181D;
+    --os-side-pill:         #262A31;
+
+    --os-widget-head-bg:    #171C26;
+    --os-danger-border:     #5A2424;
+    --os-kbd-bg:            #262A31;
+    --os-skeleton:          #1F232A;
+
+    --os-shadow-pop:   0 0 0 1px var(--os-line), 0 8px 24px rgba(0, 0, 0, 0.45);
+    --os-shadow-modal: 0 0 0 1px var(--os-line), 0 8px 32px rgba(0, 0, 0, 0.55);
+  }
+  :root:not([data-theme="light"])[data-chrome="light"],
+  :root:not([data-theme="light"])[data-chrome="light"] .workwrk-os {
+    --os-chrome-bg:         #181B20;
+    --os-chrome-hov:        #1F232A;
+    --os-chrome-fg:         #E6E8EC;
+    --os-chrome-fg-2:       #9AA3B2;
+    --os-chrome-line:       #262A31;
+    --os-chrome-pill:       #262A31;
+    --os-chrome-pill-fg:    #FFFFFF;
+    --os-chrome-field:      #15181D;
+    --os-chrome-field-fg:   #E6E8EC;
+    --os-chrome-field-ph:   #9AA3B2;
+    --os-chrome-presence:   #4ADE80;
+    --os-chrome-attention:  #F87171;
+  }
+  :root:not([data-theme="light"])[data-contrast="high"],
+  :root:not([data-theme="light"])[data-contrast="high"] .workwrk-os {
+    --os-ink-2:     #B8C0CC;
+    --os-line:      #3A3F47;
+    --os-brand-deep: #7AB8FF;
+  }
+}

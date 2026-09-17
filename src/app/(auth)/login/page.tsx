@@ -8,6 +8,7 @@ import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowRight, ShieldCheck } from "lucide-react";
+import { resetSessionExpired } from "@/lib/session-expiry";
 
 // Map an authorize() error to what the person should read. Our authorize
 // throws curated, safe messages (lockout countdown, account/workspace status),
@@ -66,6 +67,12 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
+    // A fresh session. The expiry latch (spec-shell 1.10) is module state
+    // that survives the client-side hop dashboard -> /login -> callbackUrl,
+    // so it is cleared here, at the one place a new session is minted, or
+    // every apiFetch after sign-in would short-circuit to a fake 401 and the
+    // "signed out" dialog would greet the person who just signed in.
+    resetSessionExpired();
     router.push(callbackUrl);
   }
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Outfit, JetBrains_Mono, Syne, Geist, Geist_Mono, Instrument_Serif, Figtree } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { Providers } from "@/components/layout/providers";
@@ -7,47 +7,23 @@ import { rtlLocales, type Locale } from "@/i18n/config";
 import { resolveCurrency } from "@/lib/currency-server";
 import "./globals.css";
 
-const outfit = Outfit({
-  variable: "--font-outfit",
+// Two families only (design-system 2.1): Inter for everything, JetBrains
+// Mono for code, formulas and IDs. Both self-hosted and subset by next/font;
+// never a Google Fonts <link>. Outfit, Syne, Geist, Geist Mono, Instrument
+// Serif and Figtree were dropped; globals.css aliases their old variables to
+// these two for one release so no surface loses its font.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600"],
+  display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
-});
-
-const syne = Syne({
-  variable: "--font-syne",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
-
-const geist = Geist({
-  variable: "--font-geist",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-});
-
-const instrumentSerif = Instrument_Serif({
-  variable: "--font-instrument-serif",
-  subsets: ["latin"],
-  weight: ["400"],
-  style: ["normal", "italic"],
-});
-
-const figtree = Figtree({
-  variable: "--font-figtree",
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -122,7 +98,7 @@ export default async function RootLayout({
     <html
       lang={locale}
       dir={dir}
-      className={`${outfit.variable} ${jetbrainsMono.variable} ${syne.variable} ${geist.variable} ${geistMono.variable} ${instrumentSerif.variable} ${figtree.variable}`}
+      className={`${inter.variable} ${jetbrainsMono.variable}`}
       suppressHydrationWarning
     >
       <body className="min-h-screen bg-background font-sans text-foreground antialiased">

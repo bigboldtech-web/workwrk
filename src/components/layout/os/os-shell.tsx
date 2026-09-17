@@ -44,6 +44,8 @@ import { TemplateCenter } from "@/components/templates/template-center";
 import { CallDock } from "@/components/calls/call-dock";
 import { IncomingCallWatcher } from "@/components/calls/incoming-call-watcher";
 import { RealtimeClient } from "./realtime-client";
+import { ShellShortcuts } from "./shell-shortcuts";
+import { ShortcutsOverlay } from "./shortcuts-overlay";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -94,6 +96,11 @@ export function OsShell({ children }: { children: React.ReactNode }) {
         <IncomingCallWatcher />
         {/* One SSE connection per tab → instant chat / notifications / calls. */}
         <RealtimeClient />
+        {/* The shell's ONE keyboard listener (src/lib/shortcuts.ts) and the
+            "?" overlay, above the fork so Esc and the map work inside the
+            Settings takeover too. */}
+        <ShellShortcuts />
+        <ShortcutsOverlay />
         {settingsMode ? (
           <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
             {children}
