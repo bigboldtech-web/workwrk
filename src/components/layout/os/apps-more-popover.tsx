@@ -33,8 +33,8 @@ export function AppsMorePopover() {
   const router = useRouter();
   const {
     appsGridOpen, closeAppsGrid,
-    railApps,
-    setActiveApp, openCustomize, pushRecentApp,
+    launcherApps,
+    openCustomize, pushRecentApp, hubHref,
     recentAppKeys,
   } = useOsShell();
   const [query, setQuery] = useState("");
@@ -58,10 +58,14 @@ export function AppsMorePopover() {
 
   const grouped = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // railApps is the org-governed set: access-filtered, org-hidden removed,
-    // admin-ordered. The launcher must agree with the rail — an app the
-    // admin switched off should not resurface here.
-    const accessible = railApps;
+    // launcherApps is the org-governed set WITH the folded apps kept in:
+    // access-filtered, org-hidden removed, module-gated, admin-ordered. The
+    // launcher used to read railApps, which drops every folded app, so the
+    // grid could only ever show the eight hubs and Library, SOPs, Kudos and
+    // the other 16 were reachable by URL alone. An app the admin switched off
+    // still never resurfaces here — only the "not a rail icon" filter is
+    // lifted.
+    const accessible = launcherApps;
     const filtered = q
       ? accessible.filter((a) => a.label.toLowerCase().includes(q) || a.key.includes(q))
       : accessible;
@@ -79,7 +83,7 @@ export function AppsMorePopover() {
           .filter((c) => !CATEGORY_ORDER.includes(c))
           .map((c) => ({ category: c, apps: byCat.get(c)! })),
       );
-  }, [query, railApps]);
+  }, [query, launcherApps]);
 
   const recentApps = useMemo<AppEntry[]>(() => {
     const byKey = new Map(APPS.map((a) => [a.key, a] as const));
@@ -92,10 +96,11 @@ export function AppsMorePopover() {
   if (!appsGridOpen) return null;
 
   const launch = (app: AppEntry) => {
-    setActiveApp(app.key);
+    // Navigate only — the URL is what sets the rail highlight and the sidebar
+    // now, so there is no key to write first.
     pushRecentApp(app.key);
     closeAppsGrid();
-    if (app.defaultHref) router.push(app.defaultHref);
+    router.push(hubHref(app.key));
   };
 
   // Hide Recents when the user is searching — the filter is what matters then.

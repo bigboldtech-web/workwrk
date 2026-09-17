@@ -12,15 +12,20 @@
 //     highlights nothing — the icon isn't ghosted back in
 //   - the <nav> scrolls (overflow-y-auto): with access-wide visibility
 //     the rail can carry 15-20+ icons on short viewports
-// Unchanged: Cmd+1..9 jumps to the Nth rail app (shell-context), hover
-// previews the app's sidebar, active app shows the white pill, and the
-// "More" tile opens AppsMorePopover as a launcher over the same set.
+//
+// The highlight is URL-derived (spec-shell.md §1.1): the white pill and
+// aria-current sit on resolveHub(pathname), never on a stored key, so a
+// pasted link shows the same chrome the sender saw. The hover-preview of
+// another hub's sidebar is gone with it — hovering a rail icon changes
+// nothing but the icon's own background. Cmd+1..9 (shell-context) now
+// navigates to the hub instead of writing a key.
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { UserPlus, ArrowUpCircle, LayoutGrid } from "lucide-react";
 import { type AppEntry } from "./apps-catalog";
+import { resolveHub } from "@/lib/nav/route-hub";
 import { InviteModal } from "./invite-modal";
 import { useOsShell } from "./shell-context";
 
@@ -42,45 +47,55 @@ function RailLabel({ children }: { children: React.ReactNode }) {
 
 export function ClickAppRail() {
   const router = useRouter();
+  const pathname = usePathname() || "";
   const {
-    activeAppKey, setActiveApp, sidebarCollapsed,
+    sidebarCollapsed, setSidebarCollapsed,
     railApps, openAppsGrid, appsGridOpen,
-    pushRecentApp, iconsOnly,
-    setPreviewApp, keepPreview, clearPreviewSoon,
+    pushRecentApp, iconsOnly, hubHref,
   } = useOsShell();
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // activeAppKey can lag reality (localStorage carries it across sessions,
-  // and an admin may hide the app mid-session). When it names an app that
-  // isn't in railApps, no icon matches and nothing highlights — which is
-  // exactly the wanted behavior for hidden apps' routes.
-  const highlightedKey = activeAppKey || "home";
+  // The one source of the highlight. When the resolved hub is not in railApps
+  // (the org hid it, or the viewer cannot access it) no icon matches and
+  // nothing highlights, which is the wanted behaviour for those routes.
+  const highlightedKey: string = resolveHub(pathname);
 
   useEffect(() => () => {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     if (closeTimer.current) clearTimeout(closeTimer.current);
   }, []);
 
+  // Hover state is local and cosmetic now: it tints the icon chip and nothing
+  // else. It no longer swaps the sidebar out from under the URL.
   const scheduleOpen = (key: string) => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    keepPreview(); // cancel any pending close so sweeping between icons doesn't flicker
-    hoverTimer.current = setTimeout(() => { setHoverKey(key); setPreviewApp(key); }, HOVER_OPEN_MS);
+    hoverTimer.current = setTimeout(() => setHoverKey(key), HOVER_OPEN_MS);
   };
   const scheduleClose = () => {
     if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; }
     if (closeTimer.current) clearTimeout(closeTimer.current);
     closeTimer.current = setTimeout(() => setHoverKey(null), HOVER_CLOSE_MS);
-    clearPreviewSoon(); // the sidebar cancels this if the pointer lands on it
   };
 
   const handleClick = (app: AppEntry) => {
-    setActiveApp(app.key);
+    // Reopening a collapsed sidebar is the side effect setActiveApp used to
+    // carry; it has to live here now, or a collapsed sidebar could only be
+    // reopened by the chord.
+    setSidebarCollapsed(false);
+    // "Clicking the already-active hub reopens a collapsed sidebar and
+    // otherwise does nothing" (spec-shell §1.1). Inside a hub the sidebar is
+    // how you move, so re-navigating would only throw away where you are: the
+    // Work landing, for one, re-runs its first-Space redirect and drops you in
+    // a Space you were not in. No landing is stranded: the click still
+    // navigates from every other hub, and inside the hub the sidebar carries
+    // the rows.
+    if (highlightedKey === app.key) return;
     pushRecentApp(app.key);
-    if (app.defaultHref) router.push(app.defaultHref);
+    router.push(hubHref(app.key));
   };
 
   // ClickUp-style theming: the rail uses a *dark, muted* version of the
@@ -113,7 +128,10 @@ export function ClickAppRail() {
           scroll on short viewports instead of clipping the tail. */}
       <nav className="flex-1 pt-3 pb-2 overflow-y-auto overflow-x-visible os-no-scrollbar">
         {railApps.map((app, idx) => {
-          const active = highlightedKey === app.key && !sidebarCollapsed;
+          // No `&& !sidebarCollapsed`: the pill follows the URL whether or not
+          // the sidebar is open, so working collapsed no longer hides where
+          // you are.
+          const active = highlightedKey === app.key;
           const isHovered = hoverKey === app.key;
           const shortcut = idx < 9 ? `⌘${idx + 1}` : undefined;
           return (

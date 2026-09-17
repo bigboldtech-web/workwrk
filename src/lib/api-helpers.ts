@@ -5,6 +5,7 @@ import { AccessLevel } from "@/generated/prisma";
 import { prisma } from "./prisma";
 import { checkPermission, type PermissionModule, type PermissionMatrix, type AccessLevel as PermAccessLevel } from "./permissions";
 import { isModuleActive } from "./entitlements";
+import { legacyIsAdminLevel, legacyIsManagerLevel } from "./access/legacy-levels";
 
 export async function getSessionOrFail() {
   const session = await getServerSession(authOptions);
@@ -53,27 +54,18 @@ export function hasRole(session: any, roles: AccessLevel[]): boolean {
   return roles.includes(session.user.accessLevel);
 }
 
+/** Delegate (migration step 1): the eight-level list lives once, in
+ *  src/lib/access/legacy-levels.ts. A session with no accessLevel is not a
+ *  manager, exactly as `roles.includes(undefined)` answered before. */
 export function isManager(session: any): boolean {
-  return hasRole(session, [
-    "SUPER_ADMIN" as AccessLevel,
-    "COMPANY_ADMIN" as AccessLevel,
-    "C_LEVEL" as AccessLevel,
-    "VP" as AccessLevel,
-    "DIRECTOR" as AccessLevel,
-    "MANAGER" as AccessLevel,
-    "TEAM_LEAD" as AccessLevel,
-    "HR" as AccessLevel,
-  ]);
+  return legacyIsManagerLevel(session.user.accessLevel);
 }
 
 /** Organization-level admin. Gates org-structure changes like creating
  *  SOP folders and assigning access to them — the SOP folder system
  *  uses this to keep "who can see what" under a small trusted group. */
 export function isOrgAdmin(session: any): boolean {
-  return hasRole(session, [
-    "SUPER_ADMIN" as AccessLevel,
-    "COMPANY_ADMIN" as AccessLevel,
-  ]);
+  return legacyIsAdminLevel(session.user.accessLevel);
 }
 
 export function jsonError(message: string, status: number = 400) {

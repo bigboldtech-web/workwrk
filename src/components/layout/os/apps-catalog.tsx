@@ -1,10 +1,14 @@
 "use client";
 
 // Central registry for the ClickUp-style app switcher. Each entry is
-// one icon in the left rail; clicking it makes its `Sidebar` the
-// secondary column, hovering it shows the same `Sidebar` inside a
-// floating preview popover. Keep this file lean — sidebars that grow
-// past ~30 lines of UI should move to apps/<key>-sidebar.tsx.
+// one icon in the left rail; clicking it navigates to the hub's landing
+// URL and the URL is what decides which `Sidebar` renders. Keep this
+// file lean — sidebars that grow past ~30 lines of UI should move to
+// apps/<key>-sidebar.tsx.
+//
+// The URL -> hub mapping is NOT here: it lives in src/lib/nav/route-hub.ts
+// (spec-shell.md §1.1). Entries used to carry `matchPaths`, which nothing
+// read for highlighting; `ROUTE_HUB` replaced it.
 
 import Link from "next/link";
 import { ChatSidebar } from "./chat-sidebar";
@@ -33,7 +37,7 @@ import {
   MessageCircle, Hash, Table2 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
 import { TeamsCreateMenu } from "./teams-create-menu";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
 import { NewBoardDialog } from "./new-board-dialog";
@@ -46,6 +50,8 @@ import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { useOsShell } from "./shell-context";
 import { MorePortal } from "./more-portal";
+import { FOLDED_APP_HUB, type HubKey } from "@/lib/nav/route-hub";
+import { useActiveRowHref } from "./use-active-row";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 
@@ -87,10 +93,13 @@ export interface AppEntry {
   label: string;
   /** Allow non-Lucide icons (e.g. BloomMark) for AI-branded entries. */
   Icon: LucideIcon | React.ComponentType<{ className?: string }>;
-  /** Where to navigate when the user clicks this rail icon. */
+  /**
+   * Where to navigate when the user clicks this rail icon. For the eight hubs
+   * `hubDefaultHref` (src/lib/nav/route-hub.ts) is the authority — it carries
+   * the two conditional landings (Talk on module state, Settings on role) — and
+   * this value is the static fallback used for folded apps and the palette.
+   */
   defaultHref: string;
-  /** Path prefixes that auto-select this app when the URL matches. */
-  matchPaths: string[];
   /** Renders the secondary sidebar body for this app. */
   Sidebar: React.ComponentType;
   /** Grouping label inside the More popover ("Work", "Sales", …). */
@@ -103,11 +112,13 @@ export interface AppEntry {
   hideFromCatalog?: boolean;
   /**
    * Folded into a hub — kept in the catalog (still reachable by route, the
-   * More launcher, and search) but NOT shown as its own rail icon. Its links
-   * live inside the hub's secondary sidebar instead. This is how the rail is
-   * trimmed to a handful of hubs without losing any feature.
+   * More launcher, and search) but NOT shown as its own rail icon. The value
+   * names the hub whose secondary sidebar carries this app's rows, so the
+   * catalog says where each folded app lives instead of only that it is off
+   * the rail. Absent = this app IS a hub. Stamped from `FOLDED_APP_HUB`
+   * (src/lib/nav/route-hub.ts), which is the one list of the 19.
    */
-  offRail?: boolean;
+  hubKey?: HubKey;
   /**
    * Feeds the global CreateMenu's "Space" row (Home only, today).
    * Either a route (href) or a custom-event name the app's Sidebar
@@ -217,13 +228,20 @@ async function startTimesheetWeek(ctx: CreateActionContext) {
 
 /** Helper: build a sidebar component from a static link list. */
 function linksSidebar(
-  links: Array<{ href: string; label: string; Icon: LucideIcon }>,
+  links: Array<{ href: string; label: string; Icon: LucideIcon; match?: "exact" | "prefix" }>,
 ): React.ComponentType {
   function Sidebar() {
+    const activeHref = useActiveRowHref(links);
     return (
       <ul>
         {links.map((l) => (
-          <NavItem key={l.href} href={l.href} label={l.label} Icon={l.Icon} />
+          <NavItem
+            key={l.href}
+            href={l.href}
+            label={l.label}
+            Icon={l.Icon}
+            active={l.href === activeHref}
+          />
         ))}
       </ul>
     );
@@ -305,18 +323,16 @@ function MoreNavItem() {
 // nothing the old Goals sidebar offered is lost — My / Team (managers) /
 // Company Goals + My KRAs & KPIs. Views are ?mine / ?team / ?level=company on
 // /okrs, so the active row is read from the query string.
-function GoalsGroup({ pathname }: { pathname: string }) {
-  const sp = useSearchParams();
+function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const isManager = canAccessTier("manager", accessLevel);
-  const onGoals = pathname.startsWith("/okrs") || pathname.startsWith("/goals");
-  const view = !onGoals ? null
-    : sp.get("mine") === "1" ? "mine"
-    : sp.get("team") === "1" ? "team"
-    : (sp.get("level") || "").toLowerCase() === "company" ? "company"
-    : "all";
-  const [expanded, setExpanded] = useState(onGoals || pathname === "/people/me");
+  // The active row comes from the one resolver over the whole sidebar, so the
+  // ?mine / ?team / ?level=company views are read the same way every other row
+  // is read, and two rows can never light at once.
+  const [expanded, setExpanded] = useState(
+    Boolean(activeHref && (activeHref.startsWith("/okrs") || activeHref === "/people/me")),
+  );
 
   return (
     <>
@@ -324,7 +340,7 @@ function GoalsGroup({ pathname }: { pathname: string }) {
         <Link
           href="/okrs"
           className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
-            view === "all"
+            activeHref === "/okrs"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
           }`}
@@ -354,12 +370,14 @@ function GoalsGroup({ pathname }: { pathname: string }) {
       {expanded ? (
         <li>
           <ul className="ml-[18px] border-l border-zinc-200/70 pl-2">
-            <SubNavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" active={view === "mine"} iconTint="#0073EA" />
+            <SubNavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" active={activeHref === "/okrs?mine=1"} iconTint="#0073EA" />
             {isManager ? (
-              <SubNavItem href="/okrs?team=1" Icon={Users} label="Team Goals" active={view === "team"} iconTint="#16a34a" />
+              <SubNavItem href="/okrs?team=1" Icon={Users} label="Team Goals" active={activeHref === "/okrs?team=1"} iconTint="#16a34a" />
             ) : null}
-            <SubNavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" active={view === "company"} iconTint="#f59e0b" />
-            <SubNavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" active={pathname === "/people/me"} iconTint="#e2445c" />
+            <SubNavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" active={activeHref === "/okrs?level=company"} iconTint="#f59e0b" />
+            {/* Same href as the personal "My profile" row above, so the
+                resolver's tie rule lights that one; this row stays a door. */}
+            <SubNavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" iconTint="#e2445c" />
           </ul>
         </li>
       ) : null}
@@ -367,13 +385,8 @@ function GoalsGroup({ pathname }: { pathname: string }) {
   );
 }
 
-function MyTasksGroup({ pathname }: { pathname: string }) {
-  const isActiveTree =
-    pathname === "/tasks" ||
-    pathname.startsWith("/tasks/assigned-to-me") ||
-    pathname.startsWith("/tasks/today-overdue") ||
-    pathname.startsWith("/tasks/personal-list");
-  const [expanded, setExpanded] = useState(isActiveTree);
+function MyTasksGroup({ activeHref }: { activeHref: string | undefined }) {
+  const [expanded, setExpanded] = useState(Boolean(activeHref?.startsWith("/tasks")));
 
   return (
     <>
@@ -381,7 +394,7 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
         <Link
           href="/tasks"
           className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
-            pathname === "/tasks"
+            activeHref === "/tasks"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
           }`}
@@ -415,21 +428,21 @@ function MyTasksGroup({ pathname }: { pathname: string }) {
               href="/tasks/assigned-to-me"
               Icon={UserCheck}
               label="Assigned to me"
-              active={pathname.startsWith("/tasks/assigned-to-me")}
+              active={activeHref === "/tasks/assigned-to-me"}
               iconTint="#f97316"
             />
             <SubNavItem
               href="/tasks/today-overdue"
               Icon={Calendar}
               label="Today & Overdue"
-              active={pathname.startsWith("/tasks/today-overdue")}
+              active={activeHref === "/tasks/today-overdue"}
               iconTint="#3b82f6"
             />
             <SubNavItem
               href="/tasks/personal-list"
               Icon={ClipboardCheck}
               label="Personal List"
-              active={pathname.startsWith("/tasks/personal-list")}
+              active={activeHref === "/tasks/personal-list"}
             />
           </ul>
         </li>
@@ -552,15 +565,36 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
   );
 }
 
+// Every static row of the Work sidebar in one list, in declaration order, so
+// resolveActiveRow can light exactly one of them (spec-shell §1.1). The Spaces
+// and Favorites trees are dynamic rows and carry their own active state.
+const WORK_ROWS = [
+  { href: "/people/me", match: "exact" as const },
+  { href: "/inbox" },
+  { href: "/assigned-comments" },
+  { href: "/tasks", match: "exact" as const },
+  { href: "/tasks/assigned-to-me" },
+  { href: "/tasks/today-overdue" },
+  { href: "/tasks/personal-list" },
+  { href: "/everything" },
+  { href: "/okrs" },
+  { href: "/okrs?mine=1" },
+  { href: "/okrs?team=1" },
+  { href: "/okrs?level=company" },
+  { href: "/trash" },
+];
+
 function HomeSidebar() {
-  const pathname = usePathname() || "";
   const router = useRouter();
   const { data: session } = useSession();
-  // /people/me redirects to /people/<myId>, so the active check must match
-  // the resolved id, not the literal "me" alias (which never survives nav).
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
+  const activeHref = useActiveRowHref(WORK_ROWS);
+  // /people/me redirects to /people/<myId>, so the profile row also answers to
+  // the resolved id, which no declared href can match.
+  const pathname = usePathname() || "";
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const profileActive =
-    pathname === "/people/me" || (meId !== null && pathname === `/people/${meId}`);
+    activeHref === "/people/me" || (meId !== null && pathname === `/people/${meId}`);
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
@@ -948,11 +982,18 @@ function HomeSidebar() {
     <>
       <ul>
         <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={profileActive} />
-        <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={pathname.startsWith("/inbox")} />
-        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={pathname.startsWith("/assigned-comments")} />
-        <MyTasksGroup pathname={pathname} />
-        <NavItem href="/everything" Icon={Layers} label="Everything" active={pathname.startsWith("/everything")} />
-        <GoalsGroup pathname={pathname} />
+        <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={activeHref === "/inbox"} />
+        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={activeHref === "/assigned-comments"} />
+        <MyTasksGroup activeHref={activeHref} />
+        <NavItem href="/everything" Icon={Layers} label="Everything" active={activeHref === "/everything"} />
+        <GoalsGroup activeHref={activeHref} />
+        {/* Trash re-parented here from the Settings sidebar: /trash is a Work
+            route by ROUTE_HUB, and Settings is a takeover with no sidebar of
+            its own (spec-shell §1.2 rule 3). Same hr-admin gate it carried
+            there, so nobody gains a door they did not have. */}
+        {canAccessTier("hr-admin", accessLevel) ? (
+          <NavItem href="/trash" Icon={Trash2} label="Trash" active={activeHref === "/trash"} />
+        ) : null}
         <MoreNavItem />
       </ul>
 
@@ -1005,12 +1046,19 @@ function HomeSidebar() {
 
 /* ───────────────────────── Calendar sidebar ───────────────────────── */
 
+const PLANNER_ROWS = [
+  { href: "/planner", label: "Planner", Icon: Calendar },
+  { href: "/timesheets", label: "Timesheets", Icon: Calendar },
+];
+
 function CalendarSidebar() {
+  const activeHref = useActiveRowHref(PLANNER_ROWS);
   return (
     <>
       <ul>
-        <NavItem href="/planner" Icon={Calendar} label="Planner" />
-        <NavItem href="/timesheets" Icon={Calendar} label="Timesheets" />
+        {PLANNER_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
     </>
   );
@@ -1018,32 +1066,59 @@ function CalendarSidebar() {
 
 /* ───────────────────────── AI sidebar ───────────────────────── */
 
+const AI_ROWS = [
+  { href: "/sidekick", label: "Ask Sidekick", Icon: Sparkles },
+  { href: "/sidekick/history", label: "History", Icon: MessageSquare },
+  { href: "/sidekick/prompts", label: "Prompts", Icon: FileText },
+  { href: "/agents", label: "Agents", Icon: Sparkles },
+];
+const AI_AUTOMATION_ROWS = [
+  { href: "/automation/workflows", label: "Workflows", Icon: Workflow },
+  { href: "/automation/templates", label: "Templates", Icon: LayoutTemplate },
+  { href: "/automation/health", label: "Health", Icon: Activity },
+  { href: "/automation/usage", label: "Usage", Icon: GaugeCircle },
+  { href: "/automation/logs", label: "Logs", Icon: ScrollText },
+  { href: "/automation/connections", label: "Connections", Icon: Plug },
+];
+// Re-parented from the Settings sidebar: ROUTE_HUB puts /build and /store in
+// this hub, and Settings is a takeover with no sidebar of its own (spec-shell
+// §1.2 rule 3). Open to everyone, exactly as they were there.
+const AI_BUILD_ROWS = [
+  { href: "/build", label: "Build apps", Icon: Wrench },
+  { href: "/store", label: "Marketplace", Icon: ShoppingBag },
+];
+// One list across every section: the active row is resolved over every
+// candidate at once, so two sections can never both light up.
+const AI_ALL_ROWS = [...AI_ROWS, ...AI_AUTOMATION_ROWS, ...AI_BUILD_ROWS];
+
 function AiSidebar() {
-  const pathname = usePathname() || "";
+  const activeHref = useActiveRowHref(AI_ALL_ROWS);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const isManager = canAccessTier("manager", accessLevel);
   return (
     <>
       <ul>
-        <NavItem href="/sidekick" Icon={Sparkles} label="Ask Sidekick" />
-        <NavItem href="/sidekick/history" Icon={MessageSquare} label="History" />
-        <NavItem href="/sidekick/prompts" Icon={FileText} label="Prompts" />
-        <NavItem href="/agents" Icon={Sparkles} label="Agents" />
+        {AI_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
       {isManager ? (
         <>
           <SectionLabel>Automation</SectionLabel>
           <ul>
-            <NavItem href="/automation/workflows" Icon={Workflow} label="Workflows" active={pathname.startsWith("/automation/workflows")} />
-            <NavItem href="/automation/templates" Icon={LayoutTemplate} label="Templates" active={pathname.startsWith("/automation/templates")} />
-            <NavItem href="/automation/health" Icon={Activity} label="Health" active={pathname.startsWith("/automation/health")} />
-            <NavItem href="/automation/usage" Icon={GaugeCircle} label="Usage" active={pathname.startsWith("/automation/usage")} />
-            <NavItem href="/automation/logs" Icon={ScrollText} label="Logs" active={pathname.startsWith("/automation/logs")} />
-            <NavItem href="/automation/connections" Icon={Plug} label="Connections" active={pathname.startsWith("/automation/connections")} />
+            {AI_AUTOMATION_ROWS.map((r) => (
+              <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+            ))}
           </ul>
         </>
       ) : null}
+      <SectionLabel>Build</SectionLabel>
+      <ul>
+        {AI_BUILD_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
+      </ul>
     </>
   );
 }
@@ -1060,16 +1135,42 @@ function AiSidebar() {
 // director-gated Rollup row is hidden below director (no dead controls).
 const DIRECTOR_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR"]);
 
+// Every static row of the Teams sidebar in one list, so the resolver lights
+// exactly one (spec-shell §1.1). Tools and Assets are re-parented here from the
+// Settings sidebar: ROUTE_HUB puts both routes in this hub, and Settings is a
+// takeover with no sidebar of its own.
+const TEAMS_ROWS = [
+  { href: "/team", match: "exact" as const },
+  { href: "/people/me", match: "exact" as const },
+  { href: "/people", match: "exact" as const },
+  { href: "/organization" },
+  { href: "/people/roles" },
+  { href: "/kra-kpi" },
+  { href: "/team/alignment", match: "exact" as const },
+  { href: "/team/reviews", match: "exact" as const },
+  { href: "/team/kpi-reviews", match: "exact" as const },
+  { href: "/team/rollup", match: "exact" as const },
+  { href: "/team/workload", match: "exact" as const },
+  { href: "/reviews" },
+  { href: "/talent" },
+  { href: "/candor" },
+  { href: "/kudos" },
+  { href: "/surveys" },
+  { href: "/tools" },
+  { href: "/assets" },
+];
+
 function TeamsSidebar() {
-  const pathname = usePathname() || "";
+  const activeHref = useActiveRowHref(TEAMS_ROWS);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const isManagerTier = MANAGER_LEVELS.has(accessLevel);
+  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
 
   if (!isManagerTier) {
     return (
       <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname.startsWith("/people")} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={activeHref === "/people/me"} />
       </ul>
     );
   }
@@ -1077,42 +1178,53 @@ function TeamsSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/team" Icon={LayoutDashboard} label="Overview" active={pathname === "/team"} />
-        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={pathname === "/people/me"} />
+        <NavItem href="/team" Icon={LayoutDashboard} label="Overview" active={activeHref === "/team"} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={activeHref === "/people/me"} />
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
-        <NavItem href="/people" Icon={Users} label="Directory" active={pathname === "/people"} />
-        <NavItem href="/organization" Icon={Building2} label="Org chart" active={pathname.startsWith("/organization")} />
-        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={pathname.startsWith("/people/roles")} />
+        <NavItem href="/people" Icon={Users} label="Directory" active={activeHref === "/people"} />
+        <NavItem href="/organization" Icon={Building2} label="Org chart" active={activeHref === "/organization"} />
+        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={activeHref === "/people/roles"} />
       </ul>
       <SectionLabel>Alignment</SectionLabel>
       <ul>
-        <NavItem href="/kra-kpi" Icon={Star} label="KRAs & KPIs" active={pathname.startsWith("/kra-kpi")} />
-        <NavItem href="/team/alignment" Icon={Target} label="Alignment board" active={pathname === "/team/alignment"} />
+        <NavItem href="/kra-kpi" Icon={Star} label="KRAs & KPIs" active={activeHref === "/kra-kpi"} />
+        <NavItem href="/team/alignment" Icon={Target} label="Alignment board" active={activeHref === "/team/alignment"} />
       </ul>
       <SectionLabel>Performance</SectionLabel>
       <ul>
-        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={pathname === "/team/reviews"} />
-        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={pathname === "/team/kpi-reviews"} />
+        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={activeHref === "/team/reviews"} />
+        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={activeHref === "/team/kpi-reviews"} />
         {DIRECTOR_LEVELS.has(accessLevel) ? (
-          <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={pathname === "/team/rollup"} />
+          <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={activeHref === "/team/rollup"} />
         ) : null}
-        <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={pathname === "/team/workload"} />
-        {canAccessTier("hr-admin", accessLevel) ? (
+        <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={activeHref === "/team/workload"} />
+        {isHrAdmin ? (
           <>
-            <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={pathname.startsWith("/reviews")} />
-            <NavItem href="/talent" Icon={Award} label="Talent (9-box)" active={pathname.startsWith("/talent")} />
+            <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={activeHref === "/reviews"} />
+            <NavItem href="/talent" Icon={Award} label="Talent (9-box)" active={activeHref === "/talent"} />
           </>
         ) : null}
       </ul>
-      {canAccessTier("hr-admin", accessLevel) ? (
+      {isHrAdmin ? (
         <>
           <SectionLabel>Culture</SectionLabel>
           <ul>
-            <NavItem href="/candor" Icon={MessageSquare} label="Candor" active={pathname.startsWith("/candor")} />
-            <NavItem href="/kudos" Icon={ThumbsUp} label="Kudos" active={pathname.startsWith("/kudos")} />
-            <NavItem href="/surveys" Icon={FileSpreadsheet} label="Surveys" active={pathname.startsWith("/surveys")} />
+            <NavItem href="/candor" Icon={MessageSquare} label="Candor" active={activeHref === "/candor"} />
+            <NavItem href="/kudos" Icon={ThumbsUp} label="Kudos" active={activeHref === "/kudos"} />
+            <NavItem href="/surveys" Icon={FileSpreadsheet} label="Surveys" active={activeHref === "/surveys"} />
+          </ul>
+        </>
+      ) : null}
+      {isHrAdmin ? (
+        <>
+          {/* Re-parented from the Settings sidebar. Same hr-admin gate they
+              carried there. */}
+          <SectionLabel>Resourcing</SectionLabel>
+          <ul>
+            <NavItem href="/tools" Icon={HardDrive} label="Tools & SaaS" active={activeHref === "/tools"} />
+            <NavItem href="/assets" Icon={Boxes} label="Assets" active={activeHref === "/assets"} />
           </ul>
         </>
       ) : null}
@@ -1123,14 +1235,21 @@ function TeamsSidebar() {
 
 /* ───────────────────────── Library sidebar (Notes + Whiteboards + Files) ───────────────────────── */
 
+const LIBRARY_ROWS = [
+  { href: "/library", label: "All", Icon: LibraryIcon },
+  { href: "/library?tab=notes", label: "Notes", Icon: FileText },
+  { href: "/library?tab=whiteboards", label: "Canvases", Icon: Brush },
+  { href: "/library?tab=files", label: "Files", Icon: Folder },
+];
+
 function LibrarySidebar() {
+  const activeHref = useActiveRowHref(LIBRARY_ROWS);
   return (
     <>
       <ul>
-        <NavItem href="/library" Icon={LibraryIcon} label="All" />
-        <NavItem href="/library?tab=notes" Icon={FileText} label="Notes" />
-        <NavItem href="/library?tab=whiteboards" Icon={Brush} label="Canvases" />
-        <NavItem href="/library?tab=files" Icon={Folder} label="Files" />
+        {LIBRARY_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
       <SectionLabel>Favorites</SectionLabel>
       <EmptyState title="Star an item to see it here" />
@@ -1140,12 +1259,19 @@ function LibrarySidebar() {
 
 /* ───────────────────────── Forms sidebar ───────────────────────── */
 
+const FORMS_ROWS = [
+  { href: "/forms", label: "All Forms", Icon: ClipboardCheck },
+  { href: "/forms?mine=1", label: "My Forms", Icon: ClipboardCheck },
+];
+
 function FormsSidebar() {
+  const activeHref = useActiveRowHref(FORMS_ROWS);
   return (
     <>
       <ul>
-        <NavItem href="/forms" Icon={ClipboardCheck} label="All Forms" />
-        <NavItem href="/forms?mine=1" Icon={ClipboardCheck} label="My Forms" />
+        {FORMS_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
       <SectionLabel>Favorites</SectionLabel>
       <EmptyState title="Star a Form to see it here" />
@@ -1155,12 +1281,19 @@ function FormsSidebar() {
 
 /* ───────────────────────── Clips sidebar ───────────────────────── */
 
+const CLIPS_ROWS = [
+  { href: "/notetaker", label: "All Clips", Icon: Video },
+  { href: "/notetaker?mine=1", label: "My Clips", Icon: Video },
+];
+
 function ClipsSidebar() {
+  const activeHref = useActiveRowHref(CLIPS_ROWS);
   return (
     <>
       <ul>
-        <NavItem href="/notetaker" Icon={Video} label="All Clips" />
-        <NavItem href="/notetaker?mine=1" Icon={Video} label="My Clips" />
+        {CLIPS_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
       <SectionLabel>Favorites</SectionLabel>
       <EmptyState title="Star a Clip to see it here" />
@@ -1170,7 +1303,15 @@ function ClipsSidebar() {
 
 /* ───────────────────────── Goals sidebar ───────────────────────── */
 
+const GOALS_ROWS = [
+  { href: "/okrs?mine=1", label: "My Goals", Icon: Trophy },
+  { href: "/okrs?team=1", label: "Team Goals", Icon: Users },
+  { href: "/okrs?level=company", label: "Company Goals", Icon: Building2 },
+  { href: "/people/me", label: "My KRAs & KPIs", Icon: Target },
+];
+
 function GoalsSidebar() {
+  const activeHref = useActiveRowHref(GOALS_ROWS);
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const isManager = canAccessTier("manager", accessLevel);
@@ -1180,10 +1321,9 @@ function GoalsSidebar() {
         {/* My Goals is primary: what I own or am assigned. Team Goals (my
             report tree) is manager-only. Company objectives show as context
             inside each view — no "All Goals" firehose. */}
-        <NavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" />
-        {isManager ? <NavItem href="/okrs?team=1" Icon={Users} label="Team Goals" /> : null}
-        <NavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" />
-        <NavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" />
+        {GOALS_ROWS.filter((r) => isManager || r.href !== "/okrs?team=1").map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
     </>
   );
@@ -1191,11 +1331,16 @@ function GoalsSidebar() {
 
 /* ───────────────────────── Timesheets sidebar ───────────────────────── */
 
+const TIMESHEETS_ROWS = [{ href: "/timesheets", label: "My Timesheets", Icon: Clock }];
+
 function TimesheetsSidebar() {
+  const activeHref = useActiveRowHref(TIMESHEETS_ROWS);
   return (
     <>
       <ul>
-        <NavItem href="/timesheets" Icon={Clock} label="My Timesheets" />
+        {TIMESHEETS_ROWS.map((r) => (
+          <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+        ))}
       </ul>
       <SectionLabel>Approvals</SectionLabel>
       <EmptyState title="No pending approvals" />
@@ -1205,26 +1350,27 @@ function TimesheetsSidebar() {
 
 /* ───────────────────────── Settings sidebar (workspace + folded ops) ───────────────────────── */
 
+// Settings is a takeover: os-shell.tsx renders /settings/* and /account/* with
+// no rail and no sidebar, so this component only ever paints on /imports, the
+// one Settings-hub route outside the takeover. Its old Operations block (Build
+// apps, Marketplace, Tools & SaaS, Assets, Trash) is re-parented to the hubs
+// ROUTE_HUB gives those routes: Build and Marketplace to AI, Tools and Assets
+// to Teams, Trash to Work (spec-shell §1.2 rule 3, settings spec §7.1a). Every
+// one of the five kept its gate in the move, and the More launcher still lists
+// all five apps.
+const SETTINGS_DOOR_ROWS = [
+  { href: "/settings", label: "Workspace settings", Icon: SettingsIcon, match: "exact" as const },
+  { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },
+];
+
 function SettingsSidebar() {
-  const pathname = usePathname() || "";
-  const { data: session } = useSession();
-  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
-  const isHrAdmin = canAccessTier("hr-admin", accessLevel);
+  const activeHref = useActiveRowHref(SETTINGS_DOOR_ROWS);
   return (
-    <>
-      <ul>
-        <NavItem href="/settings" Icon={SettingsIcon} label="Workspace settings" active={pathname === "/settings"} />
-        <NavItem href="/account/security" Icon={ShieldCheck} label="Account · Security" active={pathname.startsWith("/account")} />
-      </ul>
-      <SectionLabel>Operations</SectionLabel>
-      <ul>
-        <NavItem href="/build" Icon={Wrench} label="Build apps" active={pathname.startsWith("/build")} />
-        <NavItem href="/store" Icon={ShoppingBag} label="Marketplace" active={pathname.startsWith("/store")} />
-        {isHrAdmin ? <NavItem href="/tools" Icon={HardDrive} label="Tools & SaaS" active={pathname.startsWith("/tools")} /> : null}
-        {isHrAdmin ? <NavItem href="/assets" Icon={Boxes} label="Assets" active={pathname.startsWith("/assets")} /> : null}
-        {isHrAdmin ? <NavItem href="/trash" Icon={Trash2} label="Trash" active={pathname.startsWith("/trash")} /> : null}
-      </ul>
-    </>
+    <ul>
+      {SETTINGS_DOOR_ROWS.map((r) => (
+        <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
+      ))}
+    </ul>
   );
 }
 
@@ -1236,71 +1382,64 @@ function SettingsSidebar() {
  * Adding a new app:
  *   1. add an entry below — set category + defaultPinned
  *   2. its Sidebar is the linksSidebar helper for simple link lists
- *   3. matchPaths is what makes route-based auto-select work
+ *   3. give its routes a ROUTE_HUB row in src/lib/nav/route-hub.ts, and a
+ *      FOLDED_APP_HUB entry when it folds into a hub rather than taking a
+ *      rail icon of its own. A route with no row fails the nav CI test.
  */
 
 export const APPS: AppEntry[] = [
   // ── Core (always pinned by default) ──────────────────────────
   { key: "home", label: "Work", Icon: Home, defaultHref: "/today",
-    matchPaths: ["/today", "/inbox", "/tasks", "/spaces", "/activity", "/favorites", "/files", "/okrs", "/goals"],
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" },
     // Home is the OS-wide catch-all — it keeps the global create menu.
     createActions: "global" },
-  { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner",
-    matchPaths: ["/calendar", "/planner", "/timesheets"], Sidebar: CalendarSidebar,
+  { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner", Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New task", icon: CheckSquare, onSelect: (ctx) => ctx.openCreateTask() }] },
-  { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick",
-    matchPaths: ["/sidekick", "/agents", "/automation"], Sidebar: AiSidebar,
+  { key: "ai", label: "AI", Icon: Sparkles, defaultHref: "/sidekick", Sidebar: AiSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New chat", icon: Sparkles, href: "/sidekick?new=1" }] },
-  { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk",
-    matchPaths: ["/tlk", "/announcements"], Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
+  { key: "chat", label: "Talk", Icon: MessageCircle, defaultHref: "/tlk", Sidebar: ChatSidebar, category: "Core", defaultPinned: true,
     createActions: [
       { label: "New message", icon: MessageCircle, event: "chat-new" },
       { label: "New channel", icon: Hash, event: "chat-new-channel" },
     ] },
-  { key: "teams", label: "Teams", Icon: Users, defaultHref: "/team",
-    matchPaths: ["/team", "/people", "/organization", "/kra-kpi", "/reviews", "/talent", "/candor", "/kudos", "/surveys"],
+  // /people (the Directory), not /team: /team is gated on having reports, so a
+  // rail pill pointed at it would land a plain Member on a denial. My team is
+  // the second row of the hub sidebar (spec-shell §1.1).
+  { key: "teams", label: "Teams", Icon: Users, defaultHref: "/people",
     Sidebar: TeamsSidebar, category: "Core", defaultPinned: true,
     requiredAccess: "manager",
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
-    matchPaths: ["/docs", "/library", "/canvas", "/notetaker", "/clips", "/sops", "/process-runs", "/policies", "/agreements"],
     Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
     // DocsSidebar listens for this event and runs its "New page" flow.
     createActions: [{ label: "New doc", icon: FileText, event: "docs-new-page" }] },
-  { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables",
-    matchPaths: ["/tables", "/forms"], category: "Core", defaultPinned: true,
+  { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables", category: "Core", defaultPinned: true,
     // TablesSidebar lists every worksheet (like Docs lists docs); the old
     // single "All tables" link survives as a secondary row inside it.
     Sidebar: TablesSidebar,
     // ?new=1 is an armed latch on the list page: it opens the name prompt
     // once on arrival, so the rail "+" goes straight into creation.
     createActions: [{ label: "New sheet", icon: Table2, href: "/tables?new=1" }] },
-  { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library",
-    matchPaths: ["/library", "/canvas", "/docs"], Sidebar: LibrarySidebar,
+  { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library", Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,
     createActions: [
       { label: "New note", icon: FileText, description: "A standalone note in the Library", onSelect: createLibraryNote },
       { label: "New canvas", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
       { label: "Upload file", icon: Upload, description: "Drop a file into the Library", href: "/library?tab=files" },
     ] },
-  { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms",
-    matchPaths: ["/forms"], Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
+  { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms", Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
   // Clips has no separate creatable object — /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
-  { key: "clips", label: "Clips", Icon: Video, defaultHref: "/notetaker",
-    matchPaths: ["/notetaker", "/clips"], Sidebar: ClipsSidebar,
+  { key: "clips", label: "Clips", Icon: Video, defaultHref: "/notetaker", Sidebar: ClipsSidebar,
     category: "Core", defaultPinned: true },
-  { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs",
-    matchPaths: ["/okrs", "/goals"], Sidebar: GoalsSidebar,
+  { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs", Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "New Goal", icon: Trophy, href: "/okrs?new=1" }] },
-  { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets",
-    matchPaths: ["/timesheets"], Sidebar: TimesheetsSidebar,
+  { key: "timesheets", label: "Timesheets", Icon: Clock, defaultHref: "/timesheets", Sidebar: TimesheetsSidebar,
     category: "Core", defaultPinned: true,
     createActions: [{ label: "Start this week", icon: Clock, onSelect: startTimesheetWeek }] },
 
@@ -1314,8 +1453,7 @@ export const APPS: AppEntry[] = [
   // ── People ──────────────────────────────────────────────────
   // "Review cycles", not "Reviews" — the Teams sidebar's weekly "Reviews"
   // queue keeps that name, and the two colliding was the confusion.
-  { key: "reviews", label: "Review cycles", Icon: ClipboardCheck, defaultHref: "/reviews",
-    matchPaths: ["/reviews"], category: "People", requiredAccess: "hr-admin",
+  { key: "reviews", label: "Review cycles", Icon: ClipboardCheck, defaultHref: "/reviews", category: "People", requiredAccess: "hr-admin",
     // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
     // reviews-client.tsx, so repeat "+" clicks re-open it).
     createActions: [{ label: "Start review cycle", icon: ClipboardCheck, href: "/reviews?new=1", requiredAccess: "manager" }],
@@ -1323,17 +1461,13 @@ export const APPS: AppEntry[] = [
       { href: "/reviews", label: "Review cycles", Icon: ClipboardCheck },
       { href: "/talent",  label: "Talent (9-box)", Icon: Award },
     ]) },
-  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor",
-    matchPaths: ["/candor"], category: "People", requiredAccess: "hr-admin",
+  { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
-  { key: "announcements", label: "Announce", Icon: Megaphone, defaultHref: "/announcements",
-    matchPaths: ["/announcements"], category: "People", requiredAccess: "hr-admin",
+  { key: "announcements", label: "Announce", Icon: Megaphone, defaultHref: "/announcements", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/announcements", label: "Announcements", Icon: Megaphone }]) },
-  { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos",
-    matchPaths: ["/kudos"], category: "People", requiredAccess: "hr-admin",
+  { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: ThumbsUp }]) },
-  { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys",
-    matchPaths: ["/surveys"], category: "People", requiredAccess: "hr-admin",
+  { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
   // ── People resourcing — provisioning what employees need to do work.
@@ -1341,16 +1475,13 @@ export const APPS: AppEntry[] = [
   // Assets = physical equipment (laptops, monitors, keys, badges).
   // Both are per-employee provisioning surfaces — natural fit under
   // People. Tied to joiner (grant) and offboarding (revoke) flows.
-  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools",
-    matchPaths: ["/tools"], category: "People", requiredAccess: "hr-admin",
+  { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
-  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets",
-    matchPaths: ["/assets"], category: "People", requiredAccess: "hr-admin",
+  { key: "assets", label: "Assets", Icon: Boxes, defaultHref: "/assets", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/assets", label: "Assets & equipment", Icon: Boxes }]) },
 
   // ── Knowledge ───────────────────────────────────────────────
-  { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops",
-    matchPaths: ["/sops"], category: "Knowledge", defaultPinned: true,
+  { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops", category: "Knowledge", defaultPinned: true,
     // One action per SOP kind — /sops/new?type=STEPS pre-creates a
     // step-list SOP and drops straight into inline editing.
     createActions: [
@@ -1365,14 +1496,12 @@ export const APPS: AppEntry[] = [
       { href: "/process-runs",       label: "Run history",          Icon: Workflow },
       { href: "/sops/compliance",    label: "Compliance",           Icon: ShieldCheck },
     ]) },
-  { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies",
-    matchPaths: ["/policies"], category: "Knowledge", requiredAccess: "hr-admin",
+  { key: "policies", label: "Policies", Icon: ShieldCheck, defaultHref: "/policies", category: "Knowledge", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([
       { href: "/policies",            label: "All policies", Icon: ShieldCheck },
       { href: "/policies/compliance", label: "Compliance",   Icon: BarChart3 },
     ]) },
-  { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements",
-    matchPaths: ["/agreements"], category: "Knowledge", requiredAccess: "hr-admin",
+  { key: "agreements", label: "Contracts", Icon: FileSignature, defaultHref: "/agreements", category: "Knowledge", requiredAccess: "hr-admin",
     createActions: [{ label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" }],
     Sidebar: linksSidebar([
       { href: "/agreements", label: "All contracts", Icon: FileSignature },
@@ -1380,14 +1509,11 @@ export const APPS: AppEntry[] = [
       { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
     ]) },
   // ── Build & Extend ──────────────────────────────────────────
-  { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build",
-    matchPaths: ["/build"], category: "Build & Extend",
+  { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build", category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },
-  { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store",
-    matchPaths: ["/store"], category: "Build & Extend",
+  { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store", category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },
-  { key: "automation", label: "Automation", Icon: Workflow, defaultHref: "/automation/workflows",
-    matchPaths: ["/automation"], category: "Build & Extend", requiredAccess: "manager",
+  { key: "automation", label: "Automation", Icon: Workflow, defaultHref: "/automation/workflows", category: "Build & Extend", requiredAccess: "manager",
     Sidebar: linksSidebar([
       { href: "/automation/workflows",   label: "Workflows",   Icon: Workflow },
       { href: "/automation/templates",   label: "Templates",   Icon: LayoutTemplate },
@@ -1402,12 +1528,10 @@ export const APPS: AppEntry[] = [
   // Settings, a bad config could lock the org out of the page that fixes
   // configs. Everyone gets the door; the Admin sections gate inside it.
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
-    matchPaths: ["/settings", "/account", "/tools", "/assets", "/build", "/store", "/trash"],
     category: "Workspace", alwaysPinned: true,
     Sidebar: SettingsSidebar },
   // Org-wide recycle bin — one place to recover anything deleted (60-day window).
-  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash",
-    matchPaths: ["/trash"], category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
+  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash", category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
     Sidebar: linksSidebar([
       { href: "/trash", label: "All deleted items", Icon: Trash2 },
     ]) },
@@ -1415,20 +1539,16 @@ export const APPS: AppEntry[] = [
 
 // Rail consolidation: these apps are FOLDED into a hub — still in the catalog,
 // still reachable by route / the More launcher / search, but not their own rail
-// icon. Their links live inside the hub's secondary sidebar (see each hub's
-// matchPaths above + Sidebar component). Marked in one place so the entries stay
-// readable. The 8 rail hubs = home, planner, ai, chat, teams, docs, tables,
-// settings (everything below folds into one of them).
-const FOLDED_INTO_HUB: ReadonlySet<string> = new Set([
-  "goals", "timesheets",                    // → Work / Planner
-  "library", "clips", "sops", "policies", "agreements", // → Docs
-  "reviews", "candor", "kudos", "surveys",  // → Teams
-  "announcements",                          // → Talk
-  "forms",                                  // → Tables
-  "automation",                             // → AI
-  "tools", "assets", "build", "store", "trash", // → Settings
-]);
-for (const a of APPS) if (FOLDED_INTO_HUB.has(a.key)) a.offRail = true;
+// icon. Their rows live inside the hub's secondary sidebar. The list of 19 and
+// the hub each one folds into is FOLDED_APP_HUB in src/lib/nav/route-hub.ts, so
+// one alias-free module carries it and a CI test can assert it; stamping it
+// here keeps the entry literals readable. The 8 rail hubs are everything this
+// leaves without a hubKey: home, planner, ai, chat, teams, docs, tables,
+// settings.
+for (const a of APPS) {
+  const hub = FOLDED_APP_HUB[a.key];
+  if (hub) a.hubKey = hub;
+}
 
 /** Apps to render in the rail when the user hasn't customised yet. */
 export const DEFAULT_PINNED_KEYS: string[] = APPS.filter((a) => a.defaultPinned).map((a) => a.key);
@@ -1449,15 +1569,10 @@ export const CATEGORY_ORDER: string[] = [
   "Finance", "Dev", "Knowledge", "Build & Extend", "Workspace",
 ];
 
-export function findAppForPath(pathname: string): AppEntry | undefined {
-  // Skip folded (offRail) apps: their routes belong to the HUB they fold into,
-  // so the hub's matchPaths (which include those routes) win and the hub stays
-  // highlighted while you're on a folded page.
-  return APPS.find((a) =>
-    !a.offRail &&
-    a.matchPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`)),
-  );
-}
+// findAppForPath is gone: resolveHub(pathname) in src/lib/nav/route-hub.ts is
+// the one URL -> hub answer, and it is longest-prefix rather than
+// first-match-in-catalog-order, so overlapping prefixes resolve the same way
+// every time.
 
 export function getApp(key: string): AppEntry | undefined {
   return APPS.find((a) => a.key === key);

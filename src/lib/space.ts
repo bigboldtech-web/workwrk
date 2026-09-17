@@ -10,11 +10,9 @@
 import { prisma } from "@/lib/prisma";
 import type { SpaceRole, Visibility } from "@/generated/prisma";
 import { createEntityLink } from "@/lib/entity-link";
-
-const ADMIN_ACCESS_LEVELS = new Set([
-  "SUPER_ADMIN",
-  "COMPANY_ADMIN",
-]);
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { legacyAllows } from "@/lib/access/parity";
+import { emptyLegacyInputs, loadSpaceInputs } from "@/lib/access/legacy-facts";
 
 export interface SpaceSummary {
   id: string;
@@ -55,9 +53,11 @@ async function uniqueSlug(organizationId: string, desired: string): Promise<stri
   return `${desired}-${Date.now()}`;
 }
 
-/** Is the user an org-level admin (implicit access to every Space)? */
+/** Is the user an org-level admin (implicit access to every Space)?
+ *  Delegate: the ladder lives in src/lib/access/legacy-levels.ts, which is the
+ *  one copy the engine, the rail tiers and the page gates all read. */
 export function isOrgAdminAccessLevel(accessLevel: string | null | undefined): boolean {
-  return !!accessLevel && ADMIN_ACCESS_LEVELS.has(accessLevel);
+  return legacyIsAdminLevel(accessLevel);
 }
 
 /**
@@ -192,15 +192,15 @@ export async function visibleSpaceIds(
  * Returns the Space row if readable; null otherwise.
  */
 export async function getSpaceForReader(spaceId: string, userId: string, accessLevel?: string) {
-  const space = await prisma.space.findUnique({
-    where: { id: spaceId },
-    include: { members: { where: { userId }, select: { role: true } } },
-  });
-  if (!space) return null;
-  if (isOrgAdminAccessLevel(accessLevel)) return space;
-  if (space.visibility === "ORG") return space;
-  if (space.members.length > 0) return space;
-  return null;
+  // Delegate (migration step 1). The row is loaded by the engine's legacy
+  // facts loader with the same include this function used, and the decision is
+  // parity.ts's transcription of space.ts:199-203. No org filter is applied
+  // here today and none is added: the loader fills organizationId from the row
+  // so the comparison can never narrow. The row itself is still the return
+  // value, so every caller that reads space.settings or space.organizationId
+  // is untouched.
+  const { inputs, space } = await loadSpaceInputs(spaceId, { userId, accessLevel });
+  return legacyAllows(inputs, "getSpaceForReader") ? space : null;
 }
 
 /**
@@ -208,12 +208,14 @@ export async function getSpaceForReader(spaceId: string, userId: string, accessL
  * row with role OWNER or ADMIN is required.
  */
 export async function canEditSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  if (isOrgAdminAccessLevel(accessLevel)) return true;
-  const member = await prisma.spaceMember.findUnique({
-    where: { spaceId_userId: { spaceId, userId } },
-    select: { role: true },
-  });
-  return member?.role === "OWNER" || member?.role === "ADMIN";
+  // Delegate (migration step 1) to parity.ts's transcription of space.ts:211-216.
+  // The admin branch is first there as it was here, so an org admin still
+  // issues no query at all.
+  const viewer = { userId, accessLevel };
+  const inputs = isOrgAdminAccessLevel(accessLevel)
+    ? emptyLegacyInputs(viewer)
+    : (await loadSpaceInputs(spaceId, viewer)).inputs;
+  return legacyAllows(inputs, "canEditSpace");
 }
 
 /**
@@ -223,12 +225,12 @@ export async function canEditSpace(spaceId: string, userId: string, accessLevel?
  * read-only. This is what lets a Space "member" actually make changes.
  */
 export async function canContributeSpace(spaceId: string, userId: string, accessLevel?: string): Promise<boolean> {
-  if (isOrgAdminAccessLevel(accessLevel)) return true;
-  const member = await prisma.spaceMember.findUnique({
-    where: { spaceId_userId: { spaceId, userId } },
-    select: { role: true },
-  });
-  return !!member && member.role !== "GUEST";
+  // Delegate (migration step 1) to parity.ts's transcription of space.ts:226-231.
+  const viewer = { userId, accessLevel };
+  const inputs = isOrgAdminAccessLevel(accessLevel)
+    ? emptyLegacyInputs(viewer)
+    : (await loadSpaceInputs(spaceId, viewer)).inputs;
+  return legacyAllows(inputs, "canContributeSpace");
 }
 
 export interface CreateSpaceInput {

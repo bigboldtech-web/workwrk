@@ -1,7 +1,19 @@
 name: CI
 
-# Quality gate: validates the Prisma schema on every PR and on pushes to main.
-# Deploy (.github/workflows/deploy.yml) waits for this to pass before shipping.
+# Quality gate: validates the Prisma schema and runs the unit suite on every PR
+# and on pushes to main. Deploy (.github/workflows/deploy.yml) waits for this to
+# pass before shipping.
+#
+# The unit suite is what makes the nav completeness test a real gate: adding a
+# route under src/app/(dashboard) without a ROUTE_HUB row fails
+# src/lib/nav/route-hub.test.ts, and therefore fails here.
+#
+# Blast radius, stated so nobody inherits it by surprise: deploy.yml keys off
+# this WORKFLOW's conclusion, not off one job, so from now on any failing unit
+# test anywhere blocks a production deploy, not only a missing ROUTE_HUB row.
+# That is the intended trade (a red suite should not ship), and splitting the
+# tests into a second job would not change it. To narrow it, run the nav tests
+# alone here and move the rest to a workflow deploy does not watch.
 
 on:
   pull_request:
@@ -14,7 +26,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Prisma validate
+    name: Prisma validate + unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,3 +44,6 @@ jobs:
 
       - name: Validate Prisma schema
         run: npx prisma validate
+
+      - name: Unit tests
+        run: npx vitest run

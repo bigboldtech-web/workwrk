@@ -17,6 +17,7 @@ import {
   ShieldCheck, FileSignature, Workflow, BarChart3, Trash2, type LucideIcon,
 } from "lucide-react";
 import { canAccessTier } from "./access-tiers";
+import { useActiveRowHref } from "./use-active-row";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { onSidebarRefresh } from "./sidebar-refresh";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
@@ -35,6 +36,36 @@ type DocRow = {
 
 type ViewKey = "all" | "my" | "shared" | "private" | "meeting" | "archived";
 
+// The folded apps' rows, in one list per section but resolved as one set, so
+// exactly one lights (spec-shell §1.1). The query rows (?tab=, ?view=) used to
+// pass no active prop at all, which is why /library stayed lit under all four
+// Library tabs. `/clips` is gone from the Clips row: there is no such route.
+const CONTENT_ROWS = [
+  { href: "/library", label: "Library — all", Icon: BookOpen, match: "exact" as const },
+  { href: "/library?tab=notes", label: "Notes", Icon: FileText },
+  { href: "/library?tab=whiteboards", label: "Canvases", Icon: Brush },
+  { href: "/library?tab=files", label: "Files", Icon: Folder },
+  { href: "/notetaker", label: "All Clips", Icon: Video },
+  { href: "/notetaker?mine=1", label: "My Clips", Icon: Video },
+];
+
+const PROCESS_ROWS: Array<{
+  href: string; label: string; Icon: LucideIcon;
+  match?: "exact" | "prefix"; hrAdminOnly?: boolean;
+}> = [
+  { href: "/sops", label: "All SOPs", Icon: ScrollText, match: "exact" },
+  { href: "/sops/my-sops", label: "My SOPs", Icon: ScrollText },
+  { href: "/process-runs", label: "Run history", Icon: Workflow },
+  { href: "/sops/compliance", label: "SOP compliance", Icon: ShieldCheck },
+  { href: "/policies", label: "All policies", Icon: ShieldCheck, match: "exact", hrAdminOnly: true },
+  { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, hrAdminOnly: true },
+  { href: "/agreements", label: "All contracts", Icon: FileSignature, match: "exact", hrAdminOnly: true },
+  { href: "/agreements?view=templates", label: "Contract templates", Icon: Folder, hrAdminOnly: true },
+  { href: "/agreements?view=trash", label: "Contract trash", Icon: Trash2, hrAdminOnly: true },
+];
+
+const DOCS_HUB_ROWS = [...CONTENT_ROWS, ...PROCESS_ROWS];
+
 export function DocsSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
@@ -44,6 +75,7 @@ export function DocsSidebar() {
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const isHrAdmin = canAccessTier("hr-admin", accessLevel);
+  const activeHubHref = useActiveRowHref(DOCS_HUB_ROWS);
   const noteMenu = useNoteMenu();
 
   const [docs, setDocs] = useState<DocRow[] | null>(null);
@@ -154,30 +186,17 @@ export function DocsSidebar() {
           Every link the Library and Clips sidebars had is kept. */}
       <SectionLabel>Content</SectionLabel>
       <ul className="flex flex-col gap-0.5">
-        <HubLink href="/library" Icon={BookOpen} label="Library — all" active={pathname === "/library"} />
-        <HubLink href="/library?tab=notes" Icon={FileText} label="Notes" />
-        <HubLink href="/library?tab=whiteboards" Icon={Brush} label="Canvases" />
-        <HubLink href="/library?tab=files" Icon={Folder} label="Files" />
-        <HubLink href="/notetaker" Icon={Video} label="All Clips" active={pathname.startsWith("/notetaker") || pathname.startsWith("/clips")} />
-        <HubLink href="/notetaker?mine=1" Icon={Video} label="My Clips" />
+        {CONTENT_ROWS.map((r) => (
+          <HubLink key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHubHref} />
+        ))}
       </ul>
 
       {/* Process — SOPs / Policies / Contracts. Every link their sidebars had is kept. */}
       <SectionLabel>Process</SectionLabel>
       <ul className="flex flex-col gap-0.5">
-        <HubLink href="/sops" Icon={ScrollText} label="All SOPs" active={pathname === "/sops"} />
-        <HubLink href="/sops/my-sops" Icon={ScrollText} label="My SOPs" active={pathname.startsWith("/sops/my-sops")} />
-        <HubLink href="/process-runs" Icon={Workflow} label="Run history" active={pathname.startsWith("/process-runs")} />
-        <HubLink href="/sops/compliance" Icon={ShieldCheck} label="SOP compliance" active={pathname.startsWith("/sops/compliance")} />
-        {isHrAdmin ? (
-          <>
-            <HubLink href="/policies" Icon={ShieldCheck} label="All policies" active={pathname === "/policies"} />
-            <HubLink href="/policies/compliance" Icon={BarChart3} label="Policy compliance" active={pathname.startsWith("/policies/compliance")} />
-            <HubLink href="/agreements" Icon={FileSignature} label="All contracts" active={pathname === "/agreements"} />
-            <HubLink href="/agreements?view=templates" Icon={Folder} label="Contract templates" />
-            <HubLink href="/agreements?view=trash" Icon={Trash2} label="Contract trash" />
-          </>
-        ) : null}
+        {PROCESS_ROWS.filter((r) => isHrAdmin || !r.hrAdminOnly).map((r) => (
+          <HubLink key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHubHref} />
+        ))}
       </ul>
 
       {/* Favorites */}

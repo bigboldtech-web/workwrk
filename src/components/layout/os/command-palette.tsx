@@ -239,7 +239,7 @@ type ServerHit = { type: string; id: string; title: string; subtitle?: string; h
 /* ─── Component ─── */
 
 export function OsCommandPalette() {
-  const { paletteOpen, closePalette, openSidekick, openCreateTask, recentAppKeys } = useOsShell();
+  const { paletteOpen, closePalette, openSidekick, openCreateTask, recentAppKeys, hubHref } = useOsShell();
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -289,11 +289,14 @@ export function OsCommandPalette() {
         kind: "navigate" as const,
         id: `recent-${a.key}`,
         label: a.label,
-        href: a.defaultHref,
+        // hubHref, not the static defaultHref: the rail and the launcher both
+        // route through it, and a hub has one landing however you reach it
+        // (Talk and Settings are the two that branch).
+        href: hubHref(a.key),
         Icon: a.Icon as LucideIcon,
         color: "var(--os-ink-2)",
       }));
-  }, [recentAppKeys]);
+  }, [recentAppKeys, hubHref]);
 
   const emptyBase = useMemo<Item[]>(
     () => [...recents, ...quickActions, ...NAVIGATE, ...COMMANDS],

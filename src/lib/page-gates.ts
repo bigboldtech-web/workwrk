@@ -15,11 +15,11 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canSeeGoal } from "@/lib/goal-audience";
 
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
-  "MANAGER", "TEAM_LEAD", "HR",
-]);
-const HR_ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "HR"]);
+// Delegate (migration step 1): both ladders now come from the engine's one
+// copy, src/lib/access/legacy-levels.ts. The redirect targets are untouched —
+// the spec deletes /people/me and /team/reviews as denial destinations later,
+// with LockedPage, not here.
+import { legacyIsHrAdminLevel, legacyIsManagerLevel } from "@/lib/access/legacy-levels";
 
 export interface PageSessionUser {
   id: string;
@@ -44,21 +44,21 @@ export async function requireSessionUser(): Promise<PageSessionUser> {
  */
 export async function requireManagerPage(): Promise<PageSessionUser> {
   const user = await requireSessionUser();
-  if (!MANAGER_LEVELS.has(user.accessLevel)) redirect("/people/me");
+  if (!legacyIsManagerLevel(user.accessLevel)) redirect("/people/me");
   return user;
 }
 
 /** HR-admin gate (review-cycle administration). Managers keep /team/reviews. */
 export async function requireHrAdminPage(): Promise<PageSessionUser> {
   const user = await requireSessionUser();
-  if (!HR_ADMIN_LEVELS.has(user.accessLevel)) {
-    redirect(MANAGER_LEVELS.has(user.accessLevel) ? "/team/reviews" : "/people/me");
+  if (!legacyIsHrAdminLevel(user.accessLevel)) {
+    redirect(legacyIsManagerLevel(user.accessLevel) ? "/team/reviews" : "/people/me");
   }
   return user;
 }
 
 export function isManagerLevel(accessLevel: string): boolean {
-  return MANAGER_LEVELS.has(accessLevel);
+  return legacyIsManagerLevel(accessLevel);
 }
 
 /**

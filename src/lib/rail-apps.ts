@@ -119,6 +119,17 @@ function orderApps(apps: AppEntry[], order: string[] | undefined): AppEntry[] {
   return out;
 }
 
+/**
+ * The one hub that is not its own module (spec-shell §1.4). Announcements is
+ * not module-gated and lives in the Talk hub, so the hub stays visible with the
+ * Talk module off whenever the viewer may see the folded app named here. The
+ * key is the module app key; the value is the folded app that keeps the hub
+ * alive. Every other module app disappears with its module.
+ */
+const MODULE_HUB_SURVIVES_ON: Readonly<Record<string, string>> = {
+  chat: "announcements",
+};
+
 /** The org floor for one app, or undefined when unset/invalid/alwaysPinned. */
 function orgFloor(config: OrgAppsConfig, app: AppEntry): AccessTier | undefined {
   if (app.alwaysPinned) return undefined; // escape hatch — never floored
@@ -141,29 +152,52 @@ export function visibleRailApps(opts: {
   // until /api/preferences answers; a module app is hidden while unknown so an
   // org that never enabled it never flashes it. Core apps ignore this.
   activeModules?: ReadonlySet<string>;
+  // Keep the folded apps (the ones carrying a hubKey) in the result. The rail
+  // never wants them — they have no icon of their own — but a launcher or a
+  // search palette does, and leaving them out is what made the 19 folded apps
+  // unreachable from the "More" grid. Every other filter still applies, so an
+  // app the org hid or the viewer cannot access never resurfaces this way.
+  includeFolded?: boolean;
 }): AppEntry[] {
-  const { accessLevel, activeModules } = opts;
+  const { accessLevel, activeModules, includeFolded } = opts;
   const config = opts.config ?? {};
   const catalog = opts.apps ?? APPS;
   const hidden = new Set(config.hidden ?? []);
 
+  // Is this app allowed for this viewer once the org config and the catalog
+  // baseline are both applied? Used for the app itself and for the folded app
+  // that keeps a module hub alive.
+  const allowed = (cfg: OrgAppsConfig, hiddenSet: Set<string>, app: AppEntry): boolean => {
+    if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
+    if (!canAccessApp(app, accessLevel)) return false;
+    const floor = orgFloor(cfg, app);
+    return !(floor && !canAccessTier(floor, accessLevel));
+  };
+
   const resolve = (cfg: OrgAppsConfig, hiddenSet: Set<string>) =>
     orderApps(
       catalog.filter((app) => {
-        if (hiddenSet.has(app.key) && !app.alwaysPinned) return false;
         // Folded into a hub — kept in the catalog + reachable by route/search/
-        // launcher, but not its own rail icon.
-        if (app.offRail && !app.alwaysPinned) return false;
+        // launcher, but not its own rail icon. `hubKey` names the hub whose
+        // sidebar carries its rows (src/lib/nav/route-hub.ts FOLDED_APP_HUB);
+        // an app WITHOUT one is a hub itself.
+        if (app.hubKey && !app.alwaysPinned && !includeFolded) return false;
         // Premium module: hidden unless the org has it ACTIVE. Applied in both
         // the primary and the last-ditch fallback resolve, so a pathological
         // all-hidden config can't resurface a disabled module.
-        if (MODULE_APP_KEYS.has(app.key) && !activeModules?.has(app.key)) return false;
+        if (MODULE_APP_KEYS.has(app.key) && !activeModules?.has(app.key)) {
+          // ...unless a NON-module app folded into this hub keeps it alive.
+          // Talk is the only one: with the module off the hub still holds
+          // Announcements, so dropping it would leave that app with no hub at
+          // all (spec-shell §1.4). The keeper runs the same org/access gate,
+          // so this never widens what the viewer may see.
+          const keeperKey = MODULE_HUB_SURVIVES_ON[app.key];
+          const keeper = keeperKey ? catalog.find((a) => a.key === keeperKey) : undefined;
+          if (!keeper || !allowed(cfg, hiddenSet, keeper)) return false;
+        }
         // Catalog baseline first — the org can only TIGHTEN access, never
         // widen it (applies to alwaysPinned apps too).
-        if (!canAccessApp(app, accessLevel)) return false;
-        const floor = orgFloor(cfg, app);
-        if (floor && !canAccessTier(floor, accessLevel)) return false;
-        return true;
+        return allowed(cfg, hiddenSet, app);
       }),
       cfg.order,
     );

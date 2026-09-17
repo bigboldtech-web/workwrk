@@ -1,11 +1,13 @@
 "use client";
 
-// ClickSidebar — the second column. Renders whichever app is active
-// from apps-catalog.tsx. Header has the app's name + an action button
-// row + a [«] close button that collapses the entire column.
+// ClickSidebar — the second column. Renders the sidebar of whichever hub
+// the URL resolves to (resolveHub, src/lib/nav/route-hub.ts, spec-shell
+// §1.1), never a stored key: paste a link and you get the chrome the
+// sender had. Header has the hub's name + an action button row + a [«]
+// close button that collapses the entire column.
 //
-// When collapsed, returns null. To reopen, the user clicks any rail
-// icon — `setActiveApp` flips `sidebarCollapsed` back to false.
+// When collapsed, returns null. To reopen, the user clicks any rail icon
+// (or ⌘B / the chord), which sets sidebarCollapsed back to false.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -19,7 +21,8 @@ import {
 } from "lucide-react";
 import { useSession } from "next-auth/react";
 import { useOsShell } from "./shell-context";
-import { APPS, canAccessTier, findAppForPath, getApp, NEW_EVENT_PREFIX, type CreateAction } from "./apps-catalog";
+import { canAccessTier, NEW_EVENT_PREFIX, type CreateAction } from "./apps-catalog";
+import { resolveHub } from "@/lib/nav/route-hub";
 import { usePathname } from "next/navigation";
 import { SidebarSearchProvider, useSidebarSearch } from "./sidebar-search-context";
 import { CreateMenu } from "./create-menu";
@@ -46,7 +49,7 @@ export function ClickSidebar() {
 }
 
 function ClickSidebarBody() {
-  const { activeAppKey, previewAppKey, setActiveApp, keepPreview, clearPreviewSoon, toggleSidebar, openCustomize } = useOsShell();
+  const { toggleSidebar, openCustomize, hubSidebarApp } = useOsShell();
   const pathname = usePathname() || "";
   const router = useRouter();
   const { query, setQuery } = useSidebarSearch();
@@ -77,17 +80,13 @@ function ClickSidebarBody() {
     sidebarWidthRef.current = sidebarWidth;
   }, [sidebarWidth]);
 
-  // While a rail icon is hovered, preview THAT app's options here; otherwise
-  // render the committed active app. Clicking a rail icon (or any option in the
-  // previewed list) commits it via setActiveApp. The swap itself is the cue —
-  // no border/ring (that read as noise).
-  const app = useMemo(() => {
-    if (previewAppKey) {
-      const p = getApp(previewAppKey);
-      if (p) return p;
-    }
-    return getApp(activeAppKey) ?? findAppForPath(pathname) ?? APPS[0];
-  }, [previewAppKey, activeAppKey, pathname]);
+  // The URL decides which hub, and nothing else does. What the hub's column
+  // then renders runs through hubSidebarApp, which applies the two rules the
+  // URL cannot know about: a hub the org hid or the viewer's tier does not
+  // reach falls back to Work instead of exposing chrome that is supposed to be
+  // absent (spec-shell §1.4), and Talk with its module off renders the
+  // Announcements row alone (§1.1).
+  const app = useMemo(() => hubSidebarApp(resolveHub(pathname)), [pathname, hubSidebarApp]);
 
   const title = app.label.replace(/\.\.$/, "");
 
@@ -188,8 +187,6 @@ function ClickSidebarBody() {
   return (
     <aside
       data-branded="0"
-      onMouseEnter={keepPreview}
-      onMouseLeave={clearPreviewSoon}
       className={`group/sidebar relative flex-shrink-0 h-full bg-zinc-50 border border-zinc-200 rounded-[14px] ${
         resizing
           ? "select-none transition-[background-color,border-color] shadow-[0_0_0_1px_rgba(161,161,170,0.35)]"
@@ -285,12 +282,7 @@ function ClickSidebarBody() {
           )}
         </div>
 
-        <nav
-          className="flex-1 overflow-y-auto px-3 pb-2"
-          // Clicking anything in a previewed list commits that app (so the rail
-          // + work area follow), then lets the click's own navigation proceed.
-          onClickCapture={() => { if (previewAppKey) setActiveApp(previewAppKey); }}
-        >
+        <nav className="flex-1 overflow-y-auto px-3 pb-2">
           <app.Sidebar />
         </nav>
 

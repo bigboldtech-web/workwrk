@@ -5,12 +5,15 @@
 // Phase 6 resolver may add per-Folder ACLs later.
 
 import { prisma } from "@/lib/prisma";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import { legacyAllows, type LegacyInputs, type VisibilityValue } from "@/lib/access/parity";
+import { loadFolderInputs } from "@/lib/access/legacy-facts";
 
 const MAX_FOLDER_DEPTH = 6;
 
 export type FolderVisibility = "PRIVATE" | "WORKSPACE" | "ORG";
 
-const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// The org-admin ladder now has one copy, in src/lib/access/legacy-levels.ts.
 
 /** Can this viewer see a folder? A PRIVATE folder is visible only to its owner
  *  and org admins; WORKSPACE/ORG folders are gated by the Space, not here.
@@ -23,9 +26,29 @@ export function folderVisibleTo(
   userId: string | null | undefined,
   accessLevel: string | null | undefined,
 ): boolean {
-  if (folder.visibility !== "PRIVATE") return true;
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
-  return !!userId && folder.ownerId === userId;
+  // Delegate (migration step 1), and the one delegate that stays SYNCHRONOUS.
+  // parity.ts's transcription is a pure function over a struct, so this helper
+  // keeps its exact signature (a row, not an id) and its three call sites
+  // (api/spaces/[id]/children:172, spaces/[slug]/page.tsx:230,
+  // folders/[id]/page.tsx:105) need no await and no change.
+  //
+  // A null userId cannot match a row's ownerId, so the empty-string stand-in
+  // below reproduces folder.ts:28's `!!userId &&` guard exactly: Folder.ownerId
+  // is either null (no match, since the struct's userId is "") or a real id.
+  const inputs: LegacyInputs = {
+    userId: userId ?? "",
+    organizationId: "",
+    accessLevel: accessLevel ?? null,
+    folder: {
+      id: "",
+      organizationId: "",
+      spaceId: "",
+      visibility: (folder.visibility ?? "WORKSPACE") as VisibilityValue,
+      ownerId: folder.ownerId,
+      memberRole: null,
+    },
+  };
+  return legacyAllows(inputs, "folderVisibleTo");
 }
 
 // ── Granular folder access ─────────────────────────────────────────
@@ -50,7 +73,9 @@ export async function folderAccessForSpace(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<FolderAccessMode> {
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return { mode: "full" };
+  // Not a delegate: this returns a three-mode set, not a decision. Only its
+  // ladder is shared (see notDelegated in the step-1 report).
+  if (legacyIsAdminLevel(accessLevel)) return { mode: "full" };
   const [space, spaceMember, folderGrants] = await Promise.all([
     prisma.space.findUnique({ where: { id: spaceId }, select: { visibility: true } }),
     prisma.spaceMember.findUnique({
@@ -173,37 +198,12 @@ export async function folderReadable(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
-  const folder = await prisma.folder.findUnique({
-    where: { id: folderId },
-    select: {
-      spaceId: true, ownerId: true, visibility: true, parentFolderId: true,
-      members: { where: { userId }, select: { id: true } },
-    },
-  });
-  if (!folder) return false;
-  if (folder.members.length > 0 || folder.ownerId === userId) return true;
-
-  // A grant on any ancestor folder covers this one.
-  let cursor = folder.parentFolderId;
-  for (let hops = 0; cursor && hops < 8; hops++) {
-    const parent = await prisma.folder.findUnique({
-      where: { id: cursor },
-      select: { parentFolderId: true, members: { where: { userId }, select: { id: true } } },
-    });
-    if (!parent) break;
-    if (parent.members.length > 0) return true;
-    cursor = parent.parentFolderId;
-  }
-
-  // A PRIVATE folder is never covered by mere space read.
-  if (folder.visibility === "PRIVATE") return false;
-  const space = await prisma.space.findUnique({
-    where: { id: folder.spaceId },
-    select: { visibility: true, members: { where: { userId }, select: { id: true } } },
-  });
-  if (!space) return false;
-  return space.visibility === "ORG" || space.members.length > 0;
+  // Delegate (migration step 1) to parity.ts's transcription of folder.ts:176-206.
+  // The loader runs the same eight-hop ancestor walk, and skips it (plus the
+  // parent Space read) only where this body returned before consulting either:
+  // an org admin, the viewer's own FolderMember row, or ownership.
+  const { inputs } = await loadFolderInputs(folderId, { userId, accessLevel });
+  return legacyAllows(inputs, "folderReadable");
 }
 
 export interface FolderSummary {

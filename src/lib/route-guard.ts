@@ -9,14 +9,17 @@ import { redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 
-const EMPLOYEE_LEVELS = new Set(["EMPLOYEE", "AGENT"]);
-const ORG_ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// Delegate (migration step 1): both lists come from the engine's one copy in
+// src/lib/access/legacy-levels.ts. EMPLOYEE_LEVELS stays a DENY list there,
+// because that is what it is here: a level in neither list behaves oppositely
+// in this file and in page-gates.ts, and the pivot does not reconcile them.
+import { LEGACY_EMPLOYEE_LEVELS, legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 
 export async function requireManagerOrRedirect(redirectTo: string = "/dashboard"): Promise<void> {
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
   const level = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-  if (EMPLOYEE_LEVELS.has(level)) redirect(redirectTo);
+  if (LEGACY_EMPLOYEE_LEVELS.has(level)) redirect(redirectTo);
 }
 
 // Stricter than manager — only the two protected admin tiers. Used
@@ -27,5 +30,5 @@ export async function requireOrgAdminOrRedirect(redirectTo: string = "/dashboard
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
   const level = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-  if (!ORG_ADMIN_LEVELS.has(level)) redirect(redirectTo);
+  if (!legacyIsAdminLevel(level)) redirect(redirectTo);
 }

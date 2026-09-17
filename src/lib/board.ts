@@ -16,7 +16,8 @@
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
-import { canEditSpace, getSpaceForReader } from "@/lib/space";
+import { legacyAllows } from "@/lib/access/parity";
+import { loadBoardInputs } from "@/lib/access/legacy-facts";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import {
   parseSprintMeta,
@@ -26,7 +27,8 @@ import {
   type SprintMeta,
 } from "@/lib/sprint";
 
-const ADMIN_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN"]);
+// The org-admin ladder moved to src/lib/access/legacy-levels.ts with the
+// step-1 pivot; the three gates below read it through parity.ts.
 
 export interface BoardSummary {
   id: string;
@@ -607,61 +609,23 @@ export async function getBoardForReader(
   userId: string,
   accessLevel: string | null | undefined,
 ) {
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
-  });
-  if (!board) return null;
-
-  // Org admins always read.
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return board;
-
-  // Explicit board grant (ANY role, incl. GUEST) → read. This is the
-  // list-level share: someone added straight to this board can see it even
-  // without Space membership, regardless of visibility. Additive, never
-  // subtractive.
-  const directGrant = await prisma.boardMember.findUnique({
-    where: { boardId_userId: { boardId, userId } },
-    select: { id: true },
-  });
-  if (directGrant) return board;
-
-  // Private-folder cascade: a board inside a PRIVATE folder is hidden from
-  // everyone but the folder owner (admins already returned above), regardless
-  // of the board's own visibility.
-  if (board.folderId) {
-    const folder = await prisma.folder.findUnique({
-      where: { id: board.folderId },
-      select: { visibility: true, ownerId: true },
-    });
-    if (folder && folder.visibility === "PRIVATE" && folder.ownerId !== userId) return null;
-  }
-
-  if (board.visibility === "ORG") return board;
-
-  if (board.visibility === "PRIVATE") {
-    // Board owner always passes.
-    if (board.ownerId === userId) return board;
-    // Space OWNERs see through PRIVATE board overrides (they manage the parent).
-    if (board.spaceId) {
-      const spaceMember = await prisma.spaceMember.findUnique({
-        where: { spaceId_userId: { spaceId: board.spaceId, userId } },
-        select: { role: true },
-      });
-      if (spaceMember?.role === "OWNER") return board;
-    }
-    // Otherwise: explicit BoardMember row required.
-    const boardMember = await prisma.boardMember.findUnique({
-      where: { boardId_userId: { boardId, userId } },
-      select: { id: true },
-    });
-    return boardMember ? board : null;
-  }
-
-  // visibility = WORKSPACE (default) → inherit Space rules.
-  if (!board.spaceId) return null;
-  const space = await getSpaceForReader(board.spaceId, userId, accessLevel ?? undefined);
-  return space ? board : null;
+  // Delegate (migration step 1) to parity.ts's transcription of board.ts's
+  // seven branches (:614 through :664), including the two this file is known
+  // for: the direct BoardMember grant of ANY role, and the private-folder
+  // cascade that checks folder.ownerId and never FolderMember. Both stay
+  // exactly as they are; the engine's own answers for them differ and are
+  // recorded in EXPECTED_MISMATCHES as audit-1.6 rows a and c.
+  //
+  // The loader issues at most three queries where this body issued four, and
+  // returns the identical row shape ({ id, spaceId, visibility, ownerId,
+  // organizationId, folderId }) so boards/[id]/items:62's cross-org check and
+  // every other field read still compile and behave.
+  const { inputs, board } = await loadBoardInputs(
+    boardId,
+    { userId, accessLevel },
+    { folderDepth: "shallow" },
+  );
+  return legacyAllows(inputs, "getBoardForReader") ? board : null;
 }
 
 /**
@@ -674,34 +638,16 @@ export async function canEditBoard(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { spaceId: true, visibility: true, ownerId: true },
-  });
-  if (!board) return false;
-  if (board.ownerId === userId) return true;
-
-  if (board.visibility === "PRIVATE") {
-    const boardMember = await prisma.boardMember.findUnique({
-      where: { boardId_userId: { boardId, userId } },
-      select: { role: true },
-    });
-    if (boardMember?.role === "OWNER" || boardMember?.role === "ADMIN") return true;
-    // Fall through to Space OWNER override (admins of the parent Space
-    // can manage even a PRIVATE board).
-    if (board.spaceId) {
-      const spaceMember = await prisma.spaceMember.findUnique({
-        where: { spaceId_userId: { spaceId: board.spaceId, userId } },
-        select: { role: true },
-      });
-      return spaceMember?.role === "OWNER";
-    }
-    return false;
-  }
-
-  if (!board.spaceId) return false;
-  return canEditSpace(board.spaceId, userId, accessLevel ?? undefined);
+  // Delegate (migration step 1) to parity.ts's transcription of board.ts:677-704.
+  // The asymmetry it preserves: a BoardMember ADMIN manages only a PRIVATE
+  // board, because on any other visibility this function falls through to
+  // canEditSpace and the board-level grant is never consulted.
+  const { inputs } = await loadBoardInputs(
+    boardId,
+    { userId, accessLevel },
+    { folderDepth: "none" },
+  );
+  return legacyAllows(inputs, "canEditBoard");
 }
 
 /**
@@ -718,32 +664,16 @@ export async function canContributeBoard(
   userId: string,
   accessLevel: string | null | undefined,
 ): Promise<boolean> {
-  if (accessLevel && ADMIN_LEVELS.has(accessLevel)) return true;
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { spaceId: true, visibility: true, ownerId: true },
-  });
-  if (!board) return false;
-  if (board.ownerId === userId) return true;
-
-  // A non-guest board grant contributes. (A GUEST board grant is read-only,
-  // but doesn't REMOVE any Space-derived write below — additive.)
-  const bm = await prisma.boardMember.findUnique({
-    where: { boardId_userId: { boardId, userId } },
-    select: { role: true },
-  });
-  if (bm && bm.role !== "GUEST") return true;
-
-  // PRIVATE = board-grant-only; Space membership does not pierce it.
-  if (board.visibility === "PRIVATE") return false;
-
-  // WORKSPACE / ORG board → a non-guest Space member contributes.
-  if (!board.spaceId) return false;
-  const sm = await prisma.spaceMember.findUnique({
-    where: { spaceId_userId: { spaceId: board.spaceId, userId } },
-    select: { role: true },
-  });
-  return !!sm && sm.role !== "GUEST";
+  // Delegate (migration step 1) to parity.ts's transcription of board.ts:721-746.
+  // A non-guest Space MEMBER still writes, which is the 2026-09-09 decision the
+  // schema comment at prisma/schema.prisma:4364-4365 still contradicts; that
+  // stale comment is a docs fix, not an access change, and is left alone here.
+  const { inputs } = await loadBoardInputs(
+    boardId,
+    { userId, accessLevel },
+    { folderDepth: "none" },
+  );
+  return legacyAllows(inputs, "canContributeBoard");
 }
 
 /**

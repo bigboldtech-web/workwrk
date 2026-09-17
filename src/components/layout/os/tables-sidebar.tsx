@@ -14,6 +14,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ClipboardCheck, LayoutGrid, Pencil, Plus, Table2, Trash2 } from "lucide-react";
 import { useSidebarSearch } from "./sidebar-search-context";
+import { useActiveRowHref } from "./use-active-row";
 import { onSidebarRefresh, notifyTablesChanged } from "./sidebar-refresh";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
@@ -28,9 +29,19 @@ type SheetRow = {
   rowCount?: number;
 };
 
+// The hub's static rows (the sheet list above them is dynamic and carries its
+// own active state). Resolved as one set so exactly one lights, which is what
+// the "My Forms" row never did: it declared a query string and no active prop.
+const TABLES_HUB_ROWS = [
+  { href: "/tables", label: "All tables", Icon: LayoutGrid, match: "exact" as const },
+  { href: "/forms", label: "All Forms", Icon: ClipboardCheck, match: "exact" as const },
+  { href: "/forms?mine=1", label: "My Forms", Icon: ClipboardCheck },
+];
+
 export function TablesSidebar() {
   const router = useRouter();
   const pathname = usePathname() || "";
+  const activeHubHref = useActiveRowHref(TABLES_HUB_ROWS);
   const { query } = useSidebarSearch();
   const { rowVersion, bumpRowVersion } = useOsShell();
   const { toast } = useOsToast();
@@ -215,31 +226,20 @@ export function TablesSidebar() {
 
       {/* Secondary escape hatch back to the card overview + folded Forms. */}
       <div className="mt-3 border-t border-zinc-100 pt-2">
-        <Link
-          href="/tables"
-          className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
-            pathname === "/tables" ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-          }`}
-        >
-          <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-          <span>All tables</span>
-        </Link>
-        <Link
-          href="/forms"
-          className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
-            pathname === "/forms" ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-          }`}
-        >
-          <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
-          <span>All Forms</span>
-        </Link>
-        <Link
-          href="/forms?mine=1"
-          className="flex items-center gap-2 h-7 px-2 rounded-md text-[13px] text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
-        >
-          <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
-          <span>My Forms</span>
-        </Link>
+        {TABLES_HUB_ROWS.map((r) => (
+          <Link
+            key={r.href}
+            href={r.href}
+            className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
+              r.href === activeHubHref
+                ? "bg-zinc-100 text-zinc-900 font-medium"
+                : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
+            }`}
+          >
+            <r.Icon className="w-3.5 h-3.5 shrink-0" />
+            <span>{r.label}</span>
+          </Link>
+        ))}
       </div>
     </div>
   );

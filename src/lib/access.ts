@@ -21,6 +21,20 @@ import { prisma } from "@/lib/prisma";
 import { getEffectiveReportTree, isInReportTree } from "@/lib/reporting-line";
 import { hrCanReadUser } from "@/lib/hr-segment";
 import type { AccessLevel } from "@/generated/prisma";
+import {
+  legacyIsAdminLevel,
+  legacyIsDirectorLevel,
+  legacyIsManagerLevel,
+} from "@/lib/access/legacy-levels";
+import { legacyResolveDetailed } from "@/lib/access/parity";
+import {
+  loadBoardInputs,
+  loadDocInputs,
+  loadFolderInputs,
+  loadItemInputs,
+  loadSpaceInputs,
+  type LegacyViewer,
+} from "@/lib/access/legacy-facts";
 
 // ── Types ─────────────────────────────────────────────────────────
 
@@ -65,31 +79,30 @@ export interface AccessDecision {
 
 // ── Role tiers ────────────────────────────────────────────────────
 
-const ORG_ADMIN_LEVELS = new Set<string>(["SUPER_ADMIN", "COMPANY_ADMIN"]);
-const DIRECTOR_LEVELS = new Set<string>(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR"]);
-const MANAGER_LEVELS  = new Set<string>(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR", "MANAGER", "TEAM_LEAD", "HR"]);
+// The three tier sets moved to src/lib/access/legacy-levels.ts (migration step
+// 1). String() is preserved around accessLevel so an enum value and a plain
+// string still compare the same way.
 
 export function isOrgAdmin(viewer: ViewerContext): boolean {
-  return ORG_ADMIN_LEVELS.has(String(viewer.accessLevel));
+  return legacyIsAdminLevel(String(viewer.accessLevel));
 }
 export function isDirectorOrAbove(viewer: ViewerContext): boolean {
-  return DIRECTOR_LEVELS.has(String(viewer.accessLevel));
+  return legacyIsDirectorLevel(String(viewer.accessLevel));
 }
 export function isManagerOrAbove(viewer: ViewerContext): boolean {
-  return MANAGER_LEVELS.has(String(viewer.accessLevel));
+  return legacyIsManagerLevel(String(viewer.accessLevel));
 }
 
-/** Map a Space/Folder/Board membership role to a decision: OWNER/ADMIN edit,
- *  MEMBER/GUEST read, anything else (no row) → null so the caller falls through
- *  to the next access source. */
-function roleToDecision(role: string | null | undefined, reason: string): AccessDecision | null {
-  if (role === "OWNER" || role === "ADMIN") {
-    return { permission: "edit", reason: `${reason} (${role.toLowerCase()})` };
-  }
-  if (role === "MEMBER" || role === "GUEST") {
-    return { permission: "read", reason: `${reason} (${role.toLowerCase()})` };
-  }
-  return null;
+/** The ViewerContext as the legacy facts loader wants it. Unlike the container
+ *  gates in space.ts / board.ts / folder.ts, this file's resolvers DO scope by
+ *  organization (access.ts:134, :167, :206, :239, :272), so the org id is
+ *  passed through and the comparison still happens. */
+function viewerToLegacy(viewer: ViewerContext): LegacyViewer {
+  return {
+    userId: viewer.userId,
+    organizationId: viewer.organizationId,
+    accessLevel: String(viewer.accessLevel),
+  };
 }
 
 // ── Module-level gate ─────────────────────────────────────────────
@@ -126,161 +139,54 @@ function resolveModule(viewer: ViewerContext, name: ModuleName): AccessDecision 
 
 // ── Resource resolvers ────────────────────────────────────────────
 
-async function resolveSpace(viewer: ViewerContext, spaceId: string): Promise<AccessDecision> {
-  const space = await prisma.space.findUnique({
-    where: { id: spaceId },
-    include: { members: { where: { userId: viewer.userId }, select: { role: true } } },
-  });
-  if (!space || space.organizationId !== viewer.organizationId) {
-    return { permission: "none", reason: "space not found in your org" };
-  }
-  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
+// The five object resolvers below are DELEGATES (migration step 1). Each one
+// loads the rows it always loaded, through src/lib/access/legacy-facts.ts, and
+// decides through src/lib/access/parity.ts, which holds this file's branches
+// transcribed line for line — reasons included, because GET /api/me/access
+// serves `reason` verbatim and the pivot may not change an API response.
+//
+// They still answer what they answer today, which for six of these rows is not
+// what the engine's decide() answers: a direct BoardMember grant is still
+// invisible here, a Space ADMIN still pierces a PRIVATE board, and an org
+// admin still reads a NOTEPAD doc. Those are the audit 1.6 disagreements and
+// they are listed in parity.ts EXPECTED_MISMATCHES, to be closed by the flip
+// after the parity job's week, never silently by this PR.
+//
+// resolveUser, resolveWeeklyReview, resolveKra and resolveModule are NOT
+// delegated: they resolve people data and nav tiers, which the transcription
+// does not cover.
 
-  const member = space.members[0];
-  if (member?.role === "OWNER" || member?.role === "ADMIN") {
-    return { permission: "edit", reason: `space ${member.role.toLowerCase()}` };
-  }
-  if (member?.role === "MEMBER" || member?.role === "GUEST") {
-    return { permission: "read", reason: `space ${member.role.toLowerCase()}` };
-  }
-  if (space.visibility === "ORG") {
-    return { permission: "read", reason: "space is org-visible" };
-  }
-  return { permission: "none", reason: "not a member of this space" };
+async function resolveSpace(viewer: ViewerContext, spaceId: string): Promise<AccessDecision> {
+  const { inputs } = await loadSpaceInputs(spaceId, viewerToLegacy(viewer));
+  return legacyResolveDetailed(inputs, "space");
 }
 
-// ── Folder ────────────────────────────────────────────────────────
-//
-// Access is additive + inherited DOWNWARD: a grant on a Folder (or any of its
-// ancestor folders, or the parent Space) grants the folder; a grant lower down
-// never leaks upward. A folder-only grantee reaches this folder without any
-// Space membership — this is what lets "share one folder" work.
 async function resolveFolder(viewer: ViewerContext, folderId: string): Promise<AccessDecision> {
-  const folder = await prisma.folder.findUnique({
-    where: { id: folderId },
-    select: {
-      organizationId: true, spaceId: true, ownerId: true,
-      visibility: true, parentFolderId: true,
-      members: { where: { userId: viewer.userId }, select: { role: true } },
-    },
-  });
-  if (!folder || folder.organizationId !== viewer.organizationId) {
-    return { permission: "none", reason: "folder not found in your org" };
-  }
-  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
-
-  const grant = roleToDecision(folder.members[0]?.role, "folder member");
-  if (grant) return grant;
-  if (folder.ownerId === viewer.userId) return { permission: "edit", reason: "folder owner" };
-
-  // A grant on any ANCESTOR folder covers this one (inheritance downward).
-  let cursor = folder.parentFolderId;
-  for (let hops = 0; cursor && hops < 8; hops++) {
-    const parent = await prisma.folder.findUnique({
-      where: { id: cursor },
-      select: { parentFolderId: true, members: { where: { userId: viewer.userId }, select: { role: true } } },
-    });
-    if (!parent) break;
-    const inherited = roleToDecision(parent.members[0]?.role, "inherited folder grant");
-    if (inherited) return inherited;
-    cursor = parent.parentFolderId;
-  }
-
-  // A PRIVATE folder is reachable ONLY by an explicit folder/owner grant or an
-  // org admin — all handled above. Mere space membership, even OWNER/ADMIN,
-  // does NOT pierce it, matching folderVisibleTo and the sidebar/space-page
-  // prune. (Whoever reaches this line is not org admin, owner, or a grant
-  // holder, so PRIVATE = deny outright.)
-  if (folder.visibility === "PRIVATE") {
-    return { permission: "none", reason: "folder is private" };
-  }
-  // Otherwise inherit from the Space.
-  return resolveSpace(viewer, folder.spaceId);
+  const { inputs } = await loadFolderInputs(folderId, viewerToLegacy(viewer));
+  return legacyResolveDetailed(inputs, "folder");
 }
 
 async function resolveBoard(viewer: ViewerContext, boardId: string): Promise<AccessDecision> {
-  const board = await prisma.board.findUnique({
-    where: { id: boardId },
-    select: { spaceId: true, folderId: true, organizationId: true, visibility: true },
+  const { inputs } = await loadBoardInputs(boardId, viewerToLegacy(viewer), {
+    folderDepth: "full",
   });
-  if (!board || board.organizationId !== viewer.organizationId) {
-    return { permission: "none", reason: "board not found in your org" };
-  }
-  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
-  if (!board.spaceId && !board.folderId) {
-    return { permission: "none", reason: "board not attached to a space" };
-  }
-  // A board in a Folder inherits the FOLDER's decision — which itself handles
-  // PRIVATE folders, folder grants (so a shared folder's boards open) and the
-  // space cascade. A board directly under a Space (no folder) inherits the
-  // Space. This is the single gate: routing folder boards through resolveSpace
-  // would wrongly reveal a board inside a PRIVATE folder to space members.
-  const decision = board.folderId
-    ? await resolveFolder(viewer, board.folderId)
-    : await resolveSpace(viewer, board.spaceId as string);
-  if (decision.permission === "none") return decision;
-  // Boards can be narrower than their container (PRIVATE overrides a WORKSPACE).
-  if (board.visibility === "PRIVATE" && decision.permission === "read") {
-    return { permission: "none", reason: "board is private to its owners" };
-  }
-  return decision;
+  return legacyResolveDetailed(inputs, "board");
 }
 
-// ── Doc / note ────────────────────────────────────────────────────
-//
-// A doc inherits its container: a FOLDER doc from its folder, a SPACE doc from
-// its space, a TASK doc from its item. A standalone note (no container) stays
-// org-visible, preserving the pre-ACL behaviour for personal notes.
 async function resolveDoc(viewer: ViewerContext, docId: string): Promise<AccessDecision> {
-  const doc = await prisma.doc.findUnique({
-    where: { id: docId },
-    select: { organizationId: true, entityType: true, entityId: true, createdById: true },
+  // `consumer: "resolveDoc"` opts into the anchor-chain skip, which is sound
+  // only because this file's branches at :242 and :253 return before reading
+  // the anchor for an org admin and for the doc's creator. docAccessible has
+  // neither branch, which is why the loader's default is the safe one.
+  const { inputs } = await loadDocInputs(docId, viewerToLegacy(viewer), {
+    consumer: "resolveDoc",
   });
-  if (!doc || doc.organizationId !== viewer.organizationId) {
-    return { permission: "none", reason: "doc not found in your org" };
-  }
-  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
-  if (doc.entityId) {
-    // A personal NOTEPAD note is owner-only — even org admins get no read-around
-    // (entityId is the owner's userId). Checked BEFORE createdById because a
-    // note captured on someone's behalf still belongs to entityId, not the
-    // creator. Mirrors docAccessible's NOTEPAD rule.
-    if (doc.entityType === "NOTEPAD") {
-      return doc.entityId === viewer.userId
-        ? { permission: "edit", reason: "your notepad" }
-        : { permission: "none", reason: "someone else's notepad" };
-    }
-    if (doc.createdById === viewer.userId) return { permission: "edit", reason: "you created this doc" };
-    if (doc.entityType === "FOLDER") return resolveFolder(viewer, doc.entityId);
-    if (doc.entityType === "SPACE") return resolveSpace(viewer, doc.entityId);
-    if (doc.entityType === "BOARD") return resolveBoard(viewer, doc.entityId);
-    // Item-anchored docs: the live shape is BOARD_ITEM; TASK/BOARD_ROW are
-    // tolerated as historical aliases. All defer to the parent item's board.
-    if (doc.entityType === "BOARD_ITEM" || doc.entityType === "TASK" || doc.entityType === "BOARD_ROW") {
-      return resolveItem(viewer, doc.entityId);
-    }
-  }
-  if (doc.createdById === viewer.userId) return { permission: "edit", reason: "you created this doc" };
-  return { permission: "read", reason: "standalone note, org-visible" };
+  return legacyResolveDetailed(inputs, "doc");
 }
 
 async function resolveItem(viewer: ViewerContext, itemId: string): Promise<AccessDecision> {
-  const item = await prisma.item.findUnique({
-    where: { id: itemId },
-    select: { boardId: true, ownerId: true, organizationId: true },
-  });
-  if (!item || item.organizationId !== viewer.organizationId) {
-    return { permission: "none", reason: "item not found in your org" };
-  }
-  if (isOrgAdmin(viewer)) return { permission: "admin", reason: "org admin override" };
-  // Inherit from parent board.
-  const boardDecision = await resolveBoard(viewer, item.boardId);
-  if (boardDecision.permission === "none") return boardDecision;
-  // Item owners always have at least edit on their own row.
-  if (item.ownerId === viewer.userId && boardDecision.permission === "read") {
-    return { permission: "edit", reason: "you own this item" };
-  }
-  return boardDecision;
+  const { inputs } = await loadItemInputs(itemId, viewerToLegacy(viewer));
+  return legacyResolveDetailed(inputs, "item");
 }
 
 async function resolveUser(viewer: ViewerContext, targetUserId: string): Promise<AccessDecision> {

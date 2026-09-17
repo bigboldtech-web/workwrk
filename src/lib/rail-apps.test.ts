@@ -31,7 +31,6 @@ vi.mock("../components/layout/os/apps-catalog", () => {
     label: key,
     Icon: () => null,
     defaultHref: `/${key}`,
-    matchPaths: [`/${key}`],
     Sidebar: () => null,
     ...extra,
   });
@@ -196,8 +195,7 @@ describe("visibleRailApps — premium module gating", () => {
       label: key,
       Icon: () => null,
       defaultHref: `/${key}`,
-      matchPaths: [`/${key}`],
-      Sidebar: () => null,
+        Sidebar: () => null,
       ...extra,
     }) as unknown as AppEntry;
   const withModule = [mk("home", { alwaysPinned: true }), mk("planner"), mk("tables")];
@@ -221,6 +219,44 @@ describe("visibleRailApps — premium module gating", () => {
     expect(out).toContain("tables");
   });
 
+  // Talk is the one hub that is not its own module: Announcements is folded
+  // into it and is not module-gated, so the hub survives the module switch for
+  // anyone who may open Announcements (spec-shell §1.4).
+  const withTalk = [
+    mk("home", { alwaysPinned: true }),
+    mk("chat"),
+    mk("announcements", { hubKey: "chat", requiredAccess: "hr-admin" }),
+  ];
+
+  it("keeps the Talk hub with the module off when the viewer may see Announcements", () => {
+    const out = keys(visibleRailApps({ config: {}, accessLevel: "HR", apps: withTalk }));
+    expect(out).toContain("chat");
+  });
+
+  it("drops the Talk hub with the module off when the viewer may not", () => {
+    const out = keys(visibleRailApps({ config: {}, accessLevel: "EMPLOYEE", apps: withTalk }));
+    expect(out).not.toContain("chat");
+  });
+
+  it("drops the Talk hub with the module off when the org hid Announcements", () => {
+    const out = keys(
+      visibleRailApps({ config: { hidden: ["announcements"] }, accessLevel: "HR", apps: withTalk }),
+    );
+    expect(out).not.toContain("chat");
+  });
+
+  it("keeps the Talk hub for everyone once the module is on", () => {
+    const out = keys(
+      visibleRailApps({
+        config: {},
+        accessLevel: "EMPLOYEE",
+        apps: withTalk,
+        activeModules: new Set(["chat"]),
+      }),
+    );
+    expect(out).toContain("chat");
+  });
+
   it("keeps the module hidden even through the empty-rail fallback", () => {
     // No alwaysPinned app + everything hidden forces the last-ditch resolve;
     // it must NOT resurface an inactive module.
@@ -234,5 +270,61 @@ describe("visibleRailApps — premium module gating", () => {
     );
     expect(out).toEqual(["planner"]);
     expect(out).not.toContain("tables");
+  });
+});
+
+describe("visibleRailApps — folded apps (hubKey)", () => {
+  const mk = (key: string, extra: Record<string, unknown> = {}) =>
+    ({
+      key,
+      label: key,
+      Icon: () => null,
+      defaultHref: `/${key}`,
+      Sidebar: () => null,
+      ...extra,
+    }) as unknown as AppEntry;
+  // One hub, one app folded into it, one folded app the viewer may not access.
+  const catalog = [
+    mk("home", { alwaysPinned: true }),
+    mk("docs"),
+    mk("library", { hubKey: "docs" }),
+    mk("policies", { hubKey: "docs", requiredAccess: "hr-admin" }),
+  ];
+
+  it("keeps a folded app off the rail", () => {
+    const out = keys(visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: catalog }));
+    expect(out).toEqual(["home", "docs"]);
+  });
+
+  it("treats an app with no hubKey as a hub", () => {
+    const out = keys(visibleRailApps({ config: {}, accessLevel: "MEMBER", apps: catalog }));
+    expect(out).toContain("docs");
+  });
+
+  it("returns folded apps for a launcher when asked", () => {
+    const out = keys(
+      visibleRailApps({ config: {}, accessLevel: "SUPER_ADMIN", apps: catalog, includeFolded: true }),
+    );
+    expect(out).toEqual(["home", "docs", "library", "policies"]);
+  });
+
+  it("still hides a folded app the viewer cannot access", () => {
+    const out = keys(
+      visibleRailApps({ config: {}, accessLevel: "MEMBER", apps: catalog, includeFolded: true }),
+    );
+    expect(out).toEqual(["home", "docs", "library"]);
+    expect(out).not.toContain("policies");
+  });
+
+  it("still hides a folded app the org switched off", () => {
+    const out = keys(
+      visibleRailApps({
+        config: { hidden: ["library"] },
+        accessLevel: "SUPER_ADMIN",
+        apps: catalog,
+        includeFolded: true,
+      }),
+    );
+    expect(out).not.toContain("library");
   });
 });
