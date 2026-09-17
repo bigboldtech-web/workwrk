@@ -240,7 +240,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   <ArrowLeft className="h-3.5 w-3.5" />
                 </button>
                 <step.Icon className={`h-4 w-4 ${step.iconClassName}`} />
-                <span className="text-[14px] font-semibold text-zinc-900">New {step.label}</span>
+                <span className="text-base font-semibold text-zinc-900">New {step.label}</span>
               </div>
               <input
                 ref={nameRef}
@@ -252,14 +252,14 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   if (e.key === "Escape") resetStep();
                 }}
                 placeholder={step.placeholder}
-                className="h-8 w-full rounded-lg border bg-white px-2.5 text-[14px] outline-none"
+                className="h-8 w-full rounded-lg border bg-white px-2.5 text-base outline-none"
                 style={{ borderColor: TAUPE.ring }}
               />
               {step.hasLocation ? (
                 <select
                   value={spaceId}
                   onChange={(e) => setSpaceId(e.target.value)}
-                  className="mt-2 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-[14px] text-zinc-700 outline-none focus:border-zinc-400"
+                  className="mt-2 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-base text-zinc-700 outline-none focus:border-zinc-400"
                 >
                   <option value="">No location · org-wide</option>
                   {(spaces ?? []).map((s) => (
@@ -271,7 +271,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 type="button"
                 onClick={() => void submit()}
                 disabled={!name.trim() || busy}
-                className={`mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg text-[14px] text-white ${taupeButton}`}
+                className={`mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg text-base text-white ${taupeButton}`}
               >
                 {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                 Create {step.label}
@@ -282,7 +282,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
               <div className="p-2">
                 <input
                   type="text"
-                  className="h-8 w-full rounded-lg border bg-white px-2.5 text-[14px] outline-none"
+                  className="h-8 w-full rounded-lg border bg-white px-2.5 text-base outline-none"
                   style={{ borderColor: TAUPE.ring }}
                   placeholder="Describe anything to create"
                   onKeyDown={(event) => {
@@ -340,7 +340,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                   icon={Bot}
                   label="Super Agent"
                   badge={
-                    <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-[12px] font-medium text-red-600">
+                    <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-600">
                       Hot
                     </span>
                   }
@@ -396,7 +396,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 <button
                   type="button"
                   onClick={() => run(() => router.push("/imports"))}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-[14px] font-medium text-zinc-700 hover:bg-zinc-50"
+                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-base font-medium text-zinc-700 hover:bg-zinc-50"
                 >
                   <Import className="h-4 w-4 text-zinc-500" />
                   Import
@@ -404,7 +404,7 @@ export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMe
                 <button
                   type="button"
                   onClick={() => run(() => openTemplateCenter())}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-[14px] font-medium text-zinc-700 hover:bg-zinc-50"
+                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-base font-medium text-zinc-700 hover:bg-zinc-50"
                 >
                   <Rocket className="h-4 w-4 text-zinc-500" />
                   Templates

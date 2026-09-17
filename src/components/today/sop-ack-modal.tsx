@@ -89,7 +89,7 @@ export function SopAckModal({
 
         <div className="px-5 py-3 space-y-3">
           <div>
-            <h3 className="text-sm font-medium">{sop.sop.title}</h3>
+            <h3 className="text-xs font-medium">{sop.sop.title}</h3>
             {sop.sop.description ? (
               <p className="text-xs text-zinc-500 mt-1 line-clamp-3">{sop.sop.description}</p>
             ) : null}
@@ -101,7 +101,7 @@ export function SopAckModal({
             </Link>
           </div>
 
-          <label className="flex items-start gap-2 cursor-pointer text-sm">
+          <label className="flex items-start gap-2 cursor-pointer text-xs">
             <input
               type="checkbox"
               checked={confirmed}
@@ -120,7 +120,7 @@ export function SopAckModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Anything you want to flag for the SOP owner…"
-              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
           </div>
 
@@ -131,7 +131,7 @@ export function SopAckModal({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2"
+            className="text-xs text-zinc-500 hover:text-zinc-900 px-3 py-2"
             disabled={submitting}
           >
             Cancel
@@ -140,7 +140,7 @@ export function SopAckModal({
             type="button"
             onClick={submit}
             disabled={submitting || !confirmed}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="px-4 py-2 rounded-md text-xs font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {submitting ? "Acknowledging…" : "Acknowledge"}
           </button>

@@ -75,10 +75,10 @@ export function PromptDialog({
           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 dark:bg-[#0073EA]/15">
             <Pencil size={14} className="text-[#0073EA]" />
           </span>
-          <DialogTitle className="text-[15px] leading-none">{title}</DialogTitle>
+          <DialogTitle className="text-base leading-none">{title}</DialogTitle>
         </div>
         {description && (
-          <p className="mt-2.5 text-[14px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+          <p className="mt-2.5 text-base leading-relaxed text-zinc-500 dark:text-zinc-400">
             {description}
           </p>
         )}

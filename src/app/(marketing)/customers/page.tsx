@@ -98,18 +98,18 @@ export default function CustomersPage() {
                 >
                   <div className={`absolute -top-12 -right-8 w-48 h-48 rounded-full bg-gradient-to-br ${t.gradVia} opacity-20 blur-2xl pointer-events-none`} aria-hidden />
                   <div className="relative">
-                    <span className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                    <span className={`inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                       {c.industry}
                     </span>
                     <p className={`mt-5 text-5xl font-extrabold bg-gradient-to-br ${t.gradVia} bg-clip-text text-transparent`}>
                       {c.metric}
                     </p>
-                    <p className="mt-2 text-sm font-medium text-slate-600">{c.metricLabel}</p>
+                    <p className="mt-2 text-base font-medium text-slate-600">{c.metricLabel}</p>
                     <blockquote className="mt-6 text-lg text-slate-800 leading-snug font-medium">
                       <QuoteIcon size={20} className={`${t.text} opacity-40 inline -mt-3 mr-1`} />
                       {c.quote}
                     </blockquote>
-                    <figcaption className="mt-6 pt-6 border-t border-slate-100 text-sm">
+                    <figcaption className="mt-6 pt-6 border-t border-slate-100 text-base">
                       <span className="font-bold text-slate-900">{c.author}</span>
                       <span className="text-slate-500"> · {c.role}, {c.company}</span>
                     </figcaption>

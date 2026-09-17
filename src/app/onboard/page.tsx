@@ -149,16 +149,16 @@ export default function OnboardPage() {
       {/* Step 0. Welcome */}
       {step === 0 && (
         <div className="flex flex-1 flex-col items-center justify-center text-center">
-          <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-[#E6F1FB] px-3 py-1 text-[13px] font-bold uppercase tracking-wide text-[#0073EA]">
+          <span className="mb-5 inline-flex items-center gap-1.5 rounded-full bg-[#E6F1FB] px-3 py-1 text-sm font-semibold uppercase tracking-wide text-[#0073EA]">
             <Sparkles className="h-3.5 w-3.5" /> Welcome to WorkwrK
           </span>
-          <h1 className="text-[40px] font-extrabold leading-[1.05] tracking-tight text-zinc-900 sm:text-[52px]">
+          <h1 className="text-[40px] font-semibold leading-[1.05] tracking-tight text-zinc-900 sm:text-[52px]">
             Your modular <span className="text-[#0073EA]">Work OS</span>.
           </h1>
-          <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-zinc-500">
+          <p className="mt-4 max-w-xl text-lg leading-relaxed text-zinc-500">
             Pick the apps that match how your team works. Every app comes with boards, AI agents, automations, and templates ready to go. Add or remove any time.
           </p>
-          <button type="button" onClick={() => setStep(1)} className="mt-9 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
+          <button type="button" onClick={() => setStep(1)} className="mt-9 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
             Get started <ArrowRight className="h-4 w-4" />
           </button>
         </div>
@@ -168,8 +168,8 @@ export default function OnboardPage() {
       {step === 1 && (
         <div className="flex flex-1 flex-col">
           <div className="mb-8 text-center">
-            <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">What brings you to WorkwrK?</h1>
-            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">Pick your primary use case. We&apos;ll pre-select the right apps. You can adjust on the next step.</p>
+            <h1 className="text-[32px] font-semibold tracking-tight text-zinc-900">What brings you to WorkwrK?</h1>
+            <p className="mx-auto mt-2 max-w-lg text-base text-zinc-500">Pick your primary use case. We&apos;ll pre-select the right apps. You can adjust on the next step.</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {DEPARTMENTS.map((d) => (
@@ -187,8 +187,8 @@ export default function OnboardPage() {
       {step === 2 && (
         <div className="flex flex-1 flex-col">
           <div className="mb-6 text-center">
-            <h1 className="text-[32px] font-extrabold tracking-tight text-zinc-900">Pick your apps</h1>
-            <p className="mx-auto mt-2 max-w-lg text-[15px] text-zinc-500">We pre-selected the essentials for your team. Add or remove freely. Change it any time from the rail.</p>
+            <h1 className="text-[32px] font-semibold tracking-tight text-zinc-900">Pick your apps</h1>
+            <p className="mx-auto mt-2 max-w-lg text-base text-zinc-500">We pre-selected the essentials for your team. Add or remove freely. Change it any time from the rail.</p>
           </div>
 
           {department ? (
@@ -196,8 +196,8 @@ export default function OnboardPage() {
               <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white" style={{ background: selectedDept?.gradient ?? CTA }}>
                 {selectedDept ? <selectedDept.Icon className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
               </span>
-              <p className="flex-1 text-[14px] text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong>. The core apps everyone gets, plus what your team typically needs day-one.</p>
-              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[13px] font-semibold text-[#0073EA] shadow-sm">{selected.size} selected</span>
+              <p className="flex-1 text-base text-zinc-600">Pre-selected for <strong className="font-semibold text-zinc-900">{deptLabel}</strong>. The core apps everyone gets, plus what your team typically needs day-one.</p>
+              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-sm font-semibold text-[#0073EA] shadow-sm">{selected.size} selected</span>
             </div>
           ) : null}
 
@@ -205,9 +205,9 @@ export default function OnboardPage() {
             {grouped.map((g) => (
               <section key={g.category}>
                 <div className="mb-2.5 flex items-center gap-2">
-                  <h2 className="text-[13px] font-bold uppercase tracking-wide text-zinc-500">{g.category === "Core" ? "Core · recommended for everyone" : g.category}</h2>
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">{g.category === "Core" ? "Core · recommended for everyone" : g.category}</h2>
                   <span className="h-px flex-1 bg-zinc-100" />
-                  <span className="text-[12px] tabular-nums text-zinc-400">{g.items.filter((a) => selected.has(a.key)).length}/{g.items.length}</span>
+                  <span className="text-xs tabular-nums text-zinc-400">{g.items.filter((a) => selected.has(a.key)).length}/{g.items.length}</span>
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {g.items.map((a) => (
@@ -242,22 +242,22 @@ export default function OnboardPage() {
           <span className="grid h-[72px] w-[72px] place-items-center rounded-[20px] text-white shadow-xl" style={{ background: "#0073EA" }}>
             <Sparkles className="h-8 w-8" />
           </span>
-          <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-[13px] font-bold uppercase tracking-wide text-emerald-600">
+          <span className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-semibold uppercase tracking-wide text-emerald-600">
             <Check className="h-3.5 w-3.5" /> All set
           </span>
-          <h1 className="mt-4 text-[40px] font-extrabold tracking-tight text-zinc-900">Your workspace is ready.</h1>
-          <p className="mt-3 max-w-md text-[15px] leading-relaxed text-zinc-500">
+          <h1 className="mt-4 text-[40px] font-semibold tracking-tight text-zinc-900">Your workspace is ready.</h1>
+          <p className="mt-3 max-w-md text-base leading-relaxed text-zinc-500">
             We&apos;ve pinned {selected.size} apps to your rail and pre-configured them for {deptLabel}. Sidekick is online and ready to draft work for you.
           </p>
           <div className="mt-6 w-full max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 text-left shadow-sm">
-            <div className="mb-2 text-[14px] font-semibold text-zinc-900">What&apos;s set up</div>
-            <ul className="space-y-1.5 text-[14px] text-zinc-600">
+            <div className="mb-2 text-base font-semibold text-zinc-900">What&apos;s set up</div>
+            <ul className="space-y-1.5 text-base text-zinc-600">
               {[`${selected.size} apps pinned to your rail`, "Core workspace (Tasks, Notes, SOPs, Goals)", "Sidekick AI assistant online", `Pre-built agents for ${deptLabel}`].map((t) => (
                 <li key={t} className="flex items-center gap-2"><Check className="h-3.5 w-3.5 text-emerald-500" /> {t}</li>
               ))}
             </ul>
           </div>
-          <button type="button" onClick={() => router.push("/today")} className="mt-7 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-[15px] font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
+          <button type="button" onClick={() => router.push("/today")} className="mt-7 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
             Go to my workspace <ArrowRight className="h-4 w-4" />
           </button>
         </div>
@@ -283,17 +283,17 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-white shadow-sm" style={{ background: gradient }}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[14.5px] font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
+          <span className="text-base font-semibold leading-tight tracking-tight text-zinc-900">{title}</span>
           {badge ? (
             <span
-              className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
+              className="rounded px-1.5 py-0.5 text-micro font-semibold uppercase tracking-wide"
               style={badge === "Core" ? { background: "#f4f4f5", color: "#71717a" } : { background: "rgba(0,115,234,0.1)", color: "#0073EA" }}
             >
               {badge}
             </span>
           ) : null}
         </span>
-        <span className="mt-0.5 block text-[13.5px] leading-snug text-zinc-500">{desc}</span>
+        <span className="mt-0.5 block text-base leading-snug text-zinc-500">{desc}</span>
       </span>
       <span
         className="absolute right-3.5 top-1/2 grid h-[22px] w-[22px] -translate-y-1/2 place-items-center rounded-full transition-all"
@@ -307,14 +307,14 @@ function Card({ selected, onClick, icon, gradient, title, desc, badge }: {
 
 function BackBtn({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[14px] font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-base font-medium text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
       <ArrowLeft className="h-4 w-4" /> Back
     </button>
   );
 }
 function NextBtn({ children, disabled, onClick }: { children: React.ReactNode; disabled?: boolean; onClick: () => void }) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-[14px] font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40">
+    <button type="button" disabled={disabled} onClick={onClick} className="inline-flex items-center gap-2 rounded-xl bg-zinc-900 px-5 py-2.5 text-base font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40">
       {children}
     </button>
   );

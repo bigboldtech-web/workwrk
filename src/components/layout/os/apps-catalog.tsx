@@ -263,13 +263,13 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
+      className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
       }`}
     >
       <Icon className="h-4 w-4 shrink-0 text-zinc-500" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {badge !== undefined ? <span className="text-[12px] text-zinc-500">{badge}</span> : null}
+      {badge !== undefined ? <span className="text-xs text-zinc-500">{badge}</span> : null}
     </Link>
   );
 }
@@ -287,7 +287,7 @@ function MoreNavItem() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-[13px] leading-5 text-zinc-700 hover:bg-white/80"
+        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-sm leading-5 text-zinc-700 hover:bg-white/80"
       >
         <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-500" />
         <span className="min-w-0 flex-1 truncate text-left">More</span>
@@ -339,7 +339,7 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
       <li className="relative group/goalrow">
         <Link
           href="/okrs"
-          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
+          className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
             activeHref === "/okrs"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
@@ -393,7 +393,7 @@ function MyTasksGroup({ activeHref }: { activeHref: string | undefined }) {
       <li className="relative group/taskrow">
         <Link
           href="/tasks"
-          className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
+          className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
             activeHref === "/tasks"
               ? "bg-zinc-200/70 text-zinc-900 font-medium"
               : "text-zinc-700 hover:bg-white/80"
@@ -468,7 +468,7 @@ function SubNavItem({
     <li>
       <Link
         href={href}
-        className={`flex h-7 items-center gap-2 rounded-md px-2 text-[13px] leading-5 ${
+        className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
           active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
         }`}
       >
@@ -484,7 +484,7 @@ function SubNavItem({
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-2 pt-2.5 pb-1 text-[13px] font-semibold text-zinc-500">
+    <div className="px-2 pt-2.5 pb-1 text-sm font-semibold text-zinc-500">
       {children}
     </div>
   );
@@ -493,8 +493,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function EmptyState({ title, body }: { title: string; body?: string }) {
   return (
     <div className="px-3 py-6 text-center">
-      <div className="text-[13px] font-medium text-zinc-700">{title}</div>
-      {body ? <div className="text-[12px] text-zinc-500 mt-1">{body}</div> : null}
+      <div className="text-sm font-medium text-zinc-700">{title}</div>
+      {body ? <div className="text-xs text-zinc-500 mt-1">{body}</div> : null}
     </div>
   );
 }
@@ -521,7 +521,7 @@ const PROFILE_NAV_LABEL = "Me";
 function FavSubLabel({ children }: { children: React.ReactNode }) {
   return (
     <li
-      className="px-2 pt-2 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 select-none"
+      className="px-2 pt-2 pb-0.5 text-micro font-semibold uppercase tracking-wide text-zinc-400 select-none"
       aria-hidden
     >
       {children}
@@ -754,19 +754,19 @@ function HomeSidebar() {
         <button
           type="button"
           onClick={() => setFavoritesOpen((v) => !v)}
-          className="flex h-7 items-center gap-2 px-2 mt-2 text-[13px] font-medium w-full text-zinc-700 hover:text-zinc-900"
+          className="flex h-7 items-center gap-2 px-2 mt-2 text-sm font-medium w-full text-zinc-700 hover:text-zinc-900"
         >
           {favoritesOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
           <span>Favorites</span>
           {total > 0 ? (
-            <span className="ml-1 text-[12px] text-zinc-400 font-normal tabular-nums">
+            <span className="ml-1 text-xs text-zinc-400 font-normal tabular-nums">
               {total}
             </span>
           ) : null}
         </button>
         {favoritesOpen ? (
           total === 0 ? (
-            <div className="px-2.5 py-1 text-[13px] text-zinc-400">
+            <div className="px-2.5 py-1 text-sm text-zinc-400">
               Star a Space or Board to add it here.
             </div>
           ) : (
@@ -783,7 +783,7 @@ function HomeSidebar() {
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -803,7 +803,7 @@ function HomeSidebar() {
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -823,7 +823,7 @@ function HomeSidebar() {
                   <li key={`d-${d.id}`} className="group/fav relative">
                     <Link
                       href={`/docs/${d.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -842,7 +842,7 @@ function HomeSidebar() {
                   <li key={`f-${f.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${f.space.slug}#folder-${f.id}`}
-                      className="flex h-7 items-center gap-2 px-2 rounded-md text-[13px] text-zinc-700 hover:bg-white/80"
+                      className="flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-700 hover:bg-white/80"
                     >
                       <EntityTile size="sm" color={f.color} fallbackIcon={Folder} name={f.name} />
                       <span className="truncate flex-1">{f.name}</span>
@@ -860,7 +860,7 @@ function HomeSidebar() {
                   <li key={`t-${t.id}`} className="group/fav relative">
                     <Link
                       href={`/tables/${t.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -880,7 +880,7 @@ function HomeSidebar() {
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
                       href={`/canvas/${w.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-[13px] ${
+                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
                         active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
                       }`}
                     >
@@ -900,7 +900,7 @@ function HomeSidebar() {
                     href={f.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex h-7 items-center gap-2 px-2 rounded-md text-[13px] text-zinc-700 hover:bg-white/80"
+                    className="flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-700 hover:bg-white/80"
                   >
                     <EntityTile size="sm" color="#A1A1AA" fallbackIcon={FileText} name={f.name} />
                     <span className="truncate flex-1">{f.name}</span>
@@ -923,10 +923,10 @@ function HomeSidebar() {
     return (
       <div key="spaces">
         <div className="flex h-7 items-center gap-2 px-2 mt-1">
-          <span className="text-[13px] font-medium flex-1 text-zinc-700">
+          <span className="text-sm font-medium flex-1 text-zinc-700">
             Spaces
             {q && visibleSpaces.length !== spaces.length ? (
-              <span className="ml-1 text-[12px] text-zinc-400 font-normal">
+              <span className="ml-1 text-xs text-zinc-400 font-normal">
                 {visibleSpaces.length}/{spaces.length}
               </span>
             ) : null}
@@ -959,7 +959,7 @@ function HomeSidebar() {
             );
           })}
           {q && visibleSpaces.length === 0 ? (
-            <li className="px-2 py-2 text-[12.5px] text-zinc-400">
+            <li className="px-2 py-2 text-xs text-zinc-400">
               No Spaces match &ldquo;{searchQuery}&rdquo;
             </li>
           ) : null}
@@ -967,7 +967,7 @@ function HomeSidebar() {
             <button
               type="button"
               onClick={() => setNewSpaceOpen(true)}
-              className="w-full flex h-7 items-center gap-2 px-2 rounded-md text-[13px] text-zinc-500 hover:bg-white/80"
+              className="w-full flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-500 hover:bg-white/80"
             >
               <Plus className="w-4 h-4" />
               <span>New Space</span>

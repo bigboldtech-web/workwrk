@@ -640,7 +640,7 @@ export default function ConversationPage() {
   if (metaError) {
     return (
       <div className="flex h-full items-center justify-center p-8">
-        <p className="text-[14px] text-zinc-500">This conversation isn&apos;t available. It may have been left or removed.</p>
+        <p className="text-base text-zinc-500">This conversation isn&apos;t available. It may have been left or removed.</p>
       </div>
     );
   }
@@ -674,7 +674,7 @@ export default function ConversationPage() {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[15px] font-semibold text-zinc-900">{title}</h1>
+          <h1 className="truncate text-base font-semibold text-zinc-900">{title}</h1>
         </div>
         {meta && meta.type !== "DM" && (
           <button
@@ -688,14 +688,14 @@ export default function ConversationPage() {
                 <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={22} />
               ))}
             </span>
-            <span className="text-[12px] font-medium text-zinc-600 tabular-nums">{meta.members.length}</span>
+            <span className="text-xs font-medium text-zinc-600 tabular-nums">{meta.members.length}</span>
           </button>
         )}
         {freshActiveCall && !callOpen && (
           <button
             type="button"
             onClick={() => startCall(false)}
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[13px] font-medium hover:bg-emerald-100"
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium hover:bg-emerald-100"
             title={freshActiveCall.participants.map((p) => p.name).join(", ")}
           >
             <span className="relative flex h-2 w-2">
@@ -717,7 +717,7 @@ export default function ConversationPage() {
           type="button"
           onClick={() => startCall(false)}
           title="Start a video call"
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)]"
+          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-sm font-medium hover:bg-[var(--os-brand-hover)]"
         >
           <Video className="w-4 h-4" /> {callOpen ? "In call" : "Call"}
         </button>
@@ -735,31 +735,31 @@ export default function ConversationPage() {
             <>
               <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
               <div className="absolute right-0 top-9 z-20 w-52 rounded-lg border border-zinc-200 bg-white shadow-lg py-1">
-                <button type="button" onClick={() => void toggleStar()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={() => void toggleStar()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                   <Star className={`w-4 h-4 ${myStarred ? "fill-amber-400 text-amber-400" : "text-zinc-400"}`} />
                   {myStarred ? "Remove from Starred" : "Star conversation"}
                 </button>
-                <button type="button" onClick={() => void toggleMute()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={() => void toggleMute()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                   {myNotify === "mute" ? <Bell className="w-4 h-4 text-zinc-400" /> : <BellOff className="w-4 h-4 text-zinc-400" />}
                   {myNotify === "mute" ? "Unmute notifications" : "Mute notifications"}
                 </button>
-                <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={copyGuestLink} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                   <Link2 className="w-4 h-4 text-zinc-400" /> Copy guest call link
                 </button>
-                <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                <button type="button" onClick={() => void resetGuestLink()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                   <RefreshCw className="w-4 h-4 text-zinc-400" /> Reset guest call link
                 </button>
                 {(meta?.type === "GROUP" || meta?.type === "CHANNEL") && (
-                  <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                  <button type="button" onClick={() => { setMenuOpen(false); setAddPeopleOpen(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                     <UserPlus className="w-4 h-4 text-zinc-400" /> Add people
                   </button>
                 )}
                 {(meta?.type === "GROUP" || (meta?.type === "CHANNEL" && !isGeneral)) && (
                   <>
-                    <button type="button" onClick={() => void rename()} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                    <button type="button" onClick={() => void rename()} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-zinc-700 hover:bg-zinc-50">
                       <Pencil className="w-4 h-4 text-zinc-400" /> {meta.type === "CHANNEL" ? "Rename channel" : "Rename group"}
                     </button>
-                    <button type="button" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-[13px] text-red-600 hover:bg-red-50">
+                    <button type="button" onClick={() => { setMenuOpen(false); setConfirmLeave(true); }} className="w-full flex items-center gap-2 px-3 h-8 text-sm text-red-600 hover:bg-red-50">
                       <LogOut className="w-4 h-4" /> {meta.type === "CHANNEL" ? "Leave channel" : "Leave group"}
                     </button>
                   </>
@@ -777,7 +777,7 @@ export default function ConversationPage() {
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
         {hasMore && (
           <div className="flex justify-center pb-2">
-            <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="text-[13px] text-zinc-500 hover:text-zinc-800 inline-flex items-center gap-1.5">
+            <button type="button" onClick={() => void loadOlder()} disabled={loadingOlder} className="text-sm text-zinc-500 hover:text-zinc-800 inline-flex items-center gap-1.5">
               {loadingOlder ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Show earlier messages
             </button>
           </div>
@@ -795,7 +795,7 @@ export default function ConversationPage() {
                     <TeamAvatar key={m.userId} name={`${m.user.firstName} ${m.user.lastName}`} avatar={m.user.avatar} size={44} />
                   ))}
                 </div>
-                <p className="text-[15px] text-zinc-800">
+                <p className="text-base text-zinc-800">
                   {meta.type === "CHANNEL" ? (
                     <>This is the very beginning of <span className="font-semibold">{title}</span>.</>
                   ) : (
@@ -814,7 +814,7 @@ export default function ConversationPage() {
             )}
             {messages.length === 0 && !(!hasMore && meta) && (
               <div className="py-14 text-center">
-                <p className="text-[15px] font-medium text-zinc-700">Say hello 👋</p>
+                <p className="text-base font-medium text-zinc-700">Say hello 👋</p>
               </div>
             )}
             {messages.length > 0 && (

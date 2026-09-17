@@ -464,6 +464,21 @@ export async function loadDocInputs(
     inputs.board = item.inputs.board;
     inputs.folder = item.inputs.folder;
     inputs.space = item.inputs.space;
+    // loadItemInputs stops at the item row for an org admin (rule A, sound
+    // for resolveItem only). docAccessible has no admin branch: doc-access.ts
+    // :58-65 reads the item's boardId and hands it to boardReadableWithFolder,
+    // whose getBoardForReader (board.ts:614) denies a MISSING board before its
+    // admin ladder at :617. Refill the board chain the way that path reads it,
+    // else an admin on a task-anchored doc scores as a denial the real gate
+    // never gives. resolveDoc returned above for admins, so this is only ever
+    // reached for the docAccessible consumer (or an org-mismatched item, where
+    // the board is loaded but the org guard still decides).
+    if (inputs.item && !inputs.board) {
+      const board = await loadBoardInputs(inputs.item.boardId, viewer, { folderDepth: "full" });
+      inputs.board = board.inputs.board;
+      inputs.folder = board.inputs.folder;
+      inputs.space = board.inputs.space;
+    }
   }
   return { inputs, found: true };
 }

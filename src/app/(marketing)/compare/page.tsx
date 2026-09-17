@@ -97,21 +97,21 @@ export default function ComparePage() {
             <table className="w-full min-w-[720px] bg-white">
               <thead className="bg-slate-50">
                 <tr>
-                  <th className="text-left p-4 text-xs font-bold uppercase tracking-[0.14em] text-slate-500 w-2/5">Capability</th>
+                  <th className="text-left p-4 text-sm font-bold uppercase tracking-[0.14em] text-slate-500 w-2/5">Capability</th>
                   <th className="p-4 text-center">
-                    <span className="block text-xs font-bold text-violet-700">workwrk</span>
+                    <span className="block text-sm font-bold text-violet-700">workwrk</span>
                   </th>
-                  <th className="p-4 text-center text-xs font-bold text-slate-700">Workday</th>
-                  <th className="p-4 text-center text-xs font-bold text-slate-700">BambooHR</th>
-                  <th className="p-4 text-center text-xs font-bold text-slate-700">Rippling</th>
-                  <th className="p-4 text-center text-xs font-bold text-slate-700">Lattice</th>
-                  <th className="p-4 text-center text-xs font-bold text-slate-700">ClickUp</th>
+                  <th className="p-4 text-center text-sm font-bold text-slate-700">Workday</th>
+                  <th className="p-4 text-center text-sm font-bold text-slate-700">BambooHR</th>
+                  <th className="p-4 text-center text-sm font-bold text-slate-700">Rippling</th>
+                  <th className="p-4 text-center text-sm font-bold text-slate-700">Lattice</th>
+                  <th className="p-4 text-center text-sm font-bold text-slate-700">ClickUp</th>
                 </tr>
               </thead>
               <tbody>
                 {MATRIX.map((row) => (
                   <tr key={row.label} className="border-t border-slate-100">
-                    <td className="p-4 text-sm text-slate-700">{row.label}</td>
+                    <td className="p-4 text-base text-slate-700">{row.label}</td>
                     <Cell v={row.we} highlight />
                     <Cell v={row.workday} />
                     <Cell v={row.bamboo} />
@@ -138,10 +138,10 @@ export default function ComparePage() {
               return (
                 <div key={c.name} className="grid lg:grid-cols-[200px_1fr] gap-6 p-7 bg-white border border-slate-200 rounded-2xl">
                   <div>
-                    <p className={`text-xs font-bold uppercase tracking-[0.16em] ${t.text}`}>vs.</p>
+                    <p className={`text-sm font-bold uppercase tracking-[0.16em] ${t.text}`}>vs.</p>
                     <p className="mt-1 text-2xl font-extrabold text-slate-900 tracking-tight">{c.name}</p>
                   </div>
-                  <div className="space-y-3 text-sm">
+                  <div className="space-y-3 text-base">
                     <p><span className="font-bold text-emerald-700">Where we win.</span> <span className="text-slate-700">{c.we}</span></p>
                     <p><span className="font-bold text-slate-900">Where they win.</span> <span className="text-slate-700">{c.they}</span></p>
                     <p className="text-slate-600 italic"><span className="font-bold not-italic">Honest take.</span> {c.honest}</p>

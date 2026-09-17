@@ -83,9 +83,9 @@ export default function IndustriesPage() {
                     <Icon size={22} strokeWidth={2.4} />
                   </div>
                   <p className="mt-5 font-extrabold text-slate-900 text-xl tracking-tight">{ind.name}</p>
-                  <p className={`mt-1 text-xs font-bold uppercase tracking-[0.14em] ${t.text}`}>{ind.tagline}</p>
-                  <p className="mt-3 text-sm text-slate-600 leading-relaxed">{ind.body}</p>
-                  <span className={`mt-5 inline-flex items-center gap-1 text-sm font-semibold ${t.text} group-hover:gap-2 transition-all`}>
+                  <p className={`mt-1 text-sm font-bold uppercase tracking-[0.14em] ${t.text}`}>{ind.tagline}</p>
+                  <p className="mt-3 text-base text-slate-600 leading-relaxed">{ind.body}</p>
+                  <span className={`mt-5 inline-flex items-center gap-1 text-base font-semibold ${t.text} group-hover:gap-2 transition-all`}>
                     See how → <ArrowRight size={13} />
                   </span>
                 </Link>
@@ -117,8 +117,8 @@ export default function IndustriesPage() {
                 const t = HUES[hue as Hue];
                 return (
                   <div key={title} className={`p-5 bg-white rounded-2xl border ${t.border}`}>
-                    <p className={`font-bold text-sm ${t.textStrong}`}>{title}</p>
-                    <p className="mt-1.5 text-sm text-slate-600">{body}</p>
+                    <p className={`font-bold text-base ${t.textStrong}`}>{title}</p>
+                    <p className="mt-1.5 text-base text-slate-600">{body}</p>
                   </div>
                 );
               })}

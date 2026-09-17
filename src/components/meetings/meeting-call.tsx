@@ -82,7 +82,7 @@ export function MeetingCall({ room, subject, displayName, audioOnly, onLeave }: 
   if (error) {
     return (
       <div className="flex h-full items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50 p-8 text-center">
-        <p className="text-[14px] text-zinc-600">{error}. Check your connection and try again.</p>
+        <p className="text-base text-zinc-600">{error}. Check your connection and try again.</p>
       </div>
     );
   }

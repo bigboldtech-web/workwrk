@@ -210,7 +210,7 @@ function ClickSidebarBody() {
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Escape") closeSearch(); }}
                 placeholder={`Search ${title}…`}
-                className="flex-1 min-w-0 bg-transparent text-[14px] focus:outline-none"
+                className="flex-1 min-w-0 bg-transparent text-base focus:outline-none"
               />
               <button
                 type="button"
@@ -223,7 +223,7 @@ function ClickSidebarBody() {
             </div>
           ) : (
             <div className="flex h-8 items-center gap-1">
-              <h2 className="text-[15px] font-semibold flex-1 truncate text-zinc-900 tracking-[-0.02em]">{title}</h2>
+              <h2 className="text-base font-semibold flex-1 truncate text-zinc-900 tracking-[-0.02em]">{title}</h2>
               <button
                 type="button"
                 onClick={openSearch}
@@ -290,7 +290,7 @@ function ClickSidebarBody() {
           <button
             type="button"
             onClick={openCustomize}
-            className="inline-flex items-center justify-center gap-2 w-full h-[26px] rounded-lg text-[13px] font-medium text-zinc-700 bg-zinc-200/70 hover:bg-zinc-200 transition-colors"
+            className="inline-flex items-center justify-center gap-2 w-full h-[26px] rounded-lg text-sm font-medium text-zinc-700 bg-zinc-200/70 hover:bg-zinc-200 transition-colors"
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500" />
             <span>Customize Sidebar</span>

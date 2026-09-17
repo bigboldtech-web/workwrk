@@ -120,8 +120,8 @@ const QUICK_CHIPS: { key: string; label: string }[] = [
 ];
 
 // Shared micro-styles.
-const LABEL = "text-[11.5px] font-medium uppercase tracking-wide text-zinc-400";
-const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-[13px] text-zinc-700 outline-none dark:bg-[#1B1F26] dark:border-[#2A2F38] dark:text-zinc-200 focus:border-[var(--os-brand)] transition-colors";
+const LABEL = "text-micro font-medium uppercase tracking-wide text-zinc-400";
+const FIELD = "h-8 px-2 rounded-md border border-zinc-200 bg-white text-sm text-zinc-700 outline-none dark:bg-[#1B1F26] dark:border-[#2A2F38] dark:text-zinc-200 focus:border-[var(--os-brand)] transition-colors";
 
 export function DatePlanner({
   item, canEdit, onPatch, statuses = [], compact = false, done = false,
@@ -216,14 +216,14 @@ export function DatePlanner({
     <button
       type="button"
       onClick={() => setTab(key)}
-      className={`flex-1 inline-flex items-center justify-center gap-1.5 h-9 text-[13px] font-medium border-b-2 transition-colors ${
+      className={`flex-1 inline-flex items-center justify-center gap-1.5 h-9 text-sm font-medium border-b-2 transition-colors ${
         tab === key ? "border-[var(--os-brand)] text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"
       }`}
     >
       <Icon className={`w-3.5 h-3.5 ${tab === key ? "text-[var(--os-brand)]" : ""}`} /> {label}
     </button>
   );
-  const chip = "inline-flex items-center h-7 px-2.5 rounded-md text-[13px] border border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 transition-colors";
+  const chip = "inline-flex items-center h-7 px-2.5 rounded-md text-sm border border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:border-zinc-300 transition-colors";
 
   // ── trigger button ───────────────────────────────────────────────
   const trigger = compact ? (
@@ -234,7 +234,7 @@ export function DatePlanner({
       onClick={(e) => { e.stopPropagation(); if (canEdit) setOpen((v) => !v); }}
       className={`inline-flex items-center gap-1 rounded font-medium disabled:cursor-default ${
         due
-          ? `px-1.5 py-0.5 text-[11.5px] ${overdue ? "bg-[var(--signal-danger-bg)] text-[var(--signal-danger-fg)]" : "bg-zinc-100 text-zinc-600"}`
+          ? `px-1.5 py-0.5 text-xs ${overdue ? "bg-[var(--signal-danger-bg)] text-[var(--signal-danger-fg)]" : "bg-zinc-100 text-zinc-600"}`
           : "text-zinc-400 hover:text-zinc-600"
       }`}
       title={due ? "Edit date / recurrence" : "Set date"}
@@ -254,7 +254,7 @@ export function DatePlanner({
       type="button"
       onClick={(e) => { e.stopPropagation(); if (canEdit) setOpen((v) => !v); }}
       disabled={!canEdit}
-      className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 max-w-full"
+      className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 text-xs text-zinc-700 hover:bg-zinc-50 disabled:opacity-60 max-w-full"
     >
       <CalendarDays className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
       <span className={`truncate ${summary ? "" : "text-zinc-400"}`}>{summary || "Set date"}</span>
@@ -326,7 +326,7 @@ export function DatePlanner({
                           <button type="button" className={chip} onClick={() => addReminder(new Date(new Date(due).getTime() - 24 * 60 * 60000))}>1d before</button>
                         </div>
                       ) : (
-                        <p className="text-[13px] text-zinc-400">Set a due date to use quick reminders, or pick a custom time below.</p>
+                        <p className="text-sm text-zinc-400">Set a due date to use quick reminders, or pick a custom time below.</p>
                       )}
                     </div>
                     <div className="space-y-1.5">
@@ -336,13 +336,13 @@ export function DatePlanner({
                     <div className="pt-3 border-t border-zinc-100 space-y-1.5">
                       <span className={`block ${LABEL}`}>Scheduled</span>
                       {remLoading ? (
-                        <div className="flex items-center gap-2 text-[13px] text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                        <div className="flex items-center gap-2 text-sm text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
                       ) : reminders.length === 0 ? (
-                        <p className="text-[13px] text-zinc-400 py-1">No reminders set.</p>
+                        <p className="text-sm text-zinc-400 py-1">No reminders set.</p>
                       ) : (
                         <ul>
                           {reminders.map((r) => (
-                            <li key={r.id} className="flex items-center gap-2 h-8 px-2 -mx-2 rounded-md text-[13.5px] text-zinc-700 hover:bg-zinc-50 transition-colors">
+                            <li key={r.id} className="flex items-center gap-2 h-8 px-2 -mx-2 rounded-md text-base text-zinc-700 hover:bg-zinc-50 transition-colors">
                               <Bell className="w-3.5 h-3.5 text-[var(--signal-warning-fg)] flex-shrink-0" />
                               <span className="flex-1 truncate">{fmtWhen(r.remindAt)}</span>
                               <button type="button" onClick={() => removeReminder(r.id)} className="text-zinc-300 hover:text-red-600 transition-colors" title="Remove"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -401,16 +401,16 @@ function MonthCalendar({ due, onPickDay }: { due: Date | string | null; onPickDa
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <span className="text-[14px] font-semibold text-zinc-800">
+        <span className="text-base font-semibold text-zinc-800">
           {cursor.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
         </span>
         <div className="flex items-center gap-0.5">
           <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"><ChevronLeft className="w-4 h-4" /></button>
-          <button type="button" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); }} className="px-1.5 h-6 inline-flex items-center rounded-md text-[12px] text-zinc-500 hover:bg-zinc-100 transition-colors">Today</button>
+          <button type="button" onClick={() => { const n = new Date(); setCursor(new Date(n.getFullYear(), n.getMonth(), 1)); }} className="px-1.5 h-6 inline-flex items-center rounded-md text-xs text-zinc-500 hover:bg-zinc-100 transition-colors">Today</button>
           <button type="button" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1))} className="w-6 h-6 inline-flex items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition-colors"><ChevronRight className="w-4 h-4" /></button>
         </div>
       </div>
-      <div className="grid grid-cols-7 mb-1.5 text-center text-[11px] font-medium uppercase tracking-wide text-zinc-400">
+      <div className="grid grid-cols-7 mb-1.5 text-center text-micro font-medium uppercase tracking-wide text-zinc-400">
         {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => <span key={d}>{d}</span>)}
       </div>
       <div className="grid grid-cols-7 gap-y-1">
@@ -422,7 +422,7 @@ function MonthCalendar({ due, onPickDay }: { due: Date | string | null; onPickDa
               key={i}
               type="button"
               onClick={() => { const nd = new Date(d); nd.setHours(17, 0, 0, 0); onPickDay(nd); }}
-              className={`h-8 w-8 mx-auto inline-flex items-center justify-center rounded-full text-[13px] transition-colors ${
+              className={`h-8 w-8 mx-auto inline-flex items-center justify-center rounded-full text-sm transition-colors ${
                 isDue ? "bg-[var(--os-brand)] text-white font-semibold"
                 : isToday ? "text-[var(--os-brand)] font-semibold ring-1 ring-inset ring-[var(--os-brand)] hover:bg-zinc-100"
                 : inMonth ? "text-zinc-700 hover:bg-zinc-100"
@@ -489,10 +489,10 @@ function DateTab({
               key={q.key}
               type="button"
               onClick={() => onQuick(q.key)}
-              className="w-full h-7 px-2 rounded-md flex items-center justify-between gap-2 text-[13px] text-zinc-700 hover:bg-zinc-100 transition-colors"
+              className="w-full h-7 px-2 rounded-md flex items-center justify-between gap-2 text-sm text-zinc-700 hover:bg-zinc-100 transition-colors"
             >
               <span className="truncate">{q.label}</span>
-              <span className="text-[12px] text-zinc-400 shrink-0">{quickHint(q.key)}</span>
+              <span className="text-xs text-zinc-400 shrink-0">{quickHint(q.key)}</span>
             </button>
           ))}
         </div>
@@ -506,11 +506,11 @@ function DateTab({
         <button
           type="button"
           onClick={onRepeat}
-          className="w-full flex items-center justify-between h-8 px-2 rounded-md text-[13.5px] text-zinc-700 hover:bg-zinc-100 transition-colors"
+          className="w-full flex items-center justify-between h-8 px-2 rounded-md text-base text-zinc-700 hover:bg-zinc-100 transition-colors"
         >
           <span className="inline-flex items-center gap-2 shrink-0"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
           <span
-            className="text-[12.5px] font-medium text-[var(--os-brand)] truncate min-w-0"
+            className="text-xs font-medium text-[var(--os-brand)] truncate min-w-0"
             title={recurrence ? buildRecurrenceSummary(recurrence) : undefined}
           >
             {recurrence ? buildRecurrenceSummary(recurrence) : ""}
@@ -536,7 +536,7 @@ function CustomReminder({ onAdd }: { onAdd: (at: Date) => void }) {
         type="button"
         disabled={!val}
         onClick={() => { const d = new Date(val); if (!Number.isNaN(d.getTime())) { onAdd(d); setVal(""); } }}
-        className="inline-flex items-center gap-1 h-8 px-3 rounded-md text-[13px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
+        className="inline-flex items-center gap-1 h-8 px-3 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
       >
         <Plus className="w-3.5 h-3.5" /> Add
       </button>
@@ -644,7 +644,7 @@ function RepeatTab({
             </select>
           </div>
 
-          <label className="flex items-center gap-2 text-[13px] text-zinc-600">
+          <label className="flex items-center gap-2 text-sm text-zinc-600">
             Every
             <input
               type="number" min={1} max={365} value={interval}
@@ -666,7 +666,7 @@ function RepeatTab({
                       key={w.v}
                       type="button"
                       onClick={() => toggleWeekday(w.v)}
-                      className={`h-7 rounded-md text-[12.5px] font-medium transition-colors ${
+                      className={`h-7 rounded-md text-xs font-medium transition-colors ${
                         on ? "bg-[var(--os-brand)] text-white" : "border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                       }`}
                     >
@@ -679,7 +679,7 @@ function RepeatTab({
           ) : null}
           {freq === "MONTH" ? (
             <div className="space-y-1">
-              <label className="flex items-center gap-2 text-[13px] text-zinc-600">
+              <label className="flex items-center gap-2 text-sm text-zinc-600">
                 On day
                 <input
                   type="number" min={1} max={31} value={monthDay}
@@ -688,12 +688,12 @@ function RepeatTab({
                 />
               </label>
               {monthDay >= 29 ? (
-                <p className="text-[12px] text-zinc-400">Days 29-31 fall on the last day of shorter months.</p>
+                <p className="text-xs text-zinc-400">Days 29-31 fall on the last day of shorter months.</p>
               ) : null}
             </div>
           ) : null}
           {freq === "YEAR" ? (
-            <div className="flex items-center gap-2 text-[13px] text-zinc-600">
+            <div className="flex items-center gap-2 text-sm text-zinc-600">
               On
               <select value={yearMonth} onChange={(e) => setYearMonth(Number(e.target.value))} className={`${FIELD} flex-1 min-w-0`}>
                 {MONTHS_SHORT.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
@@ -720,12 +720,12 @@ function RepeatTab({
                 <button
                   type="button"
                   onClick={() => setAtTime("")}
-                  className="text-[12px] text-zinc-400 hover:text-zinc-600 transition-colors"
+                  className="text-xs text-zinc-400 hover:text-zinc-600 transition-colors"
                 >
                   clear
                 </button>
               ) : (
-                <span className="text-[12px] text-zinc-400">same time as the due date</span>
+                <span className="text-xs text-zinc-400">same time as the due date</span>
               )}
             </div>
           </div>
@@ -746,10 +746,10 @@ function RepeatTab({
                     trigger === o.v ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_4%,transparent)]" : "border-zinc-200 hover:bg-zinc-50"
                   }`}
                 >
-                  <span className={`block text-[13.5px] font-medium ${trigger === o.v ? "text-[var(--os-brand)]" : "text-zinc-700"}`}>
+                  <span className={`block text-base font-medium ${trigger === o.v ? "text-[var(--os-brand)]" : "text-zinc-700"}`}>
                     {o.label}
                   </span>
-                  <span className="block text-[12px] text-zinc-400">{o.hint}</span>
+                  <span className="block text-xs text-zinc-400">{o.hint}</span>
                 </button>
               ))}
             </div>
@@ -758,18 +758,18 @@ function RepeatTab({
           {/* Ends: Never / On date / After N times */}
           <div className="space-y-1.5">
             <span className={`block ${LABEL}`}>Ends</span>
-            <label className="flex items-center gap-2 text-[13.5px] text-zinc-700">
+            <label className="flex items-center gap-2 text-base text-zinc-700">
               <input type="radio" name="recur-ends" className={radio} checked={ends === "never"} onChange={() => setEnds("never")} />
               Never
             </label>
-            <label className="flex items-center gap-2 text-[13.5px] text-zinc-700">
+            <label className="flex items-center gap-2 text-base text-zinc-700">
               <input type="radio" name="recur-ends" className={radio} checked={ends === "until"} onChange={() => setEnds("until")} />
               On date
               {ends === "until" ? (
                 <input type="date" value={untilDate} onChange={(e) => setUntilDate(e.target.value)} className={`${FIELD} flex-1 min-w-0`} />
               ) : null}
             </label>
-            <label className="flex items-center gap-2 text-[13.5px] text-zinc-700">
+            <label className="flex items-center gap-2 text-base text-zinc-700">
               <input type="radio" name="recur-ends" className={radio} checked={ends === "count"} onChange={() => setEnds("count")} />
               After
               {ends === "count" ? (
@@ -786,7 +786,7 @@ function RepeatTab({
           </div>
 
           <div>
-            <label className="flex items-center gap-2 text-[13.5px] text-zinc-700">
+            <label className="flex items-center gap-2 text-base text-zinc-700">
               <input type="checkbox" className={check} checked={resetOn} onChange={(e) => setResetOn(e.target.checked)} disabled={statuses.length === 0} />
               Update status to:
             </label>
@@ -806,18 +806,18 @@ function RepeatTab({
 
       {/* Live plain-English summary + footer: Don't Recur · Cancel · Save */}
       <div className="pt-3 mt-4 border-t border-zinc-100">
-        <p className="text-[13.5px] text-zinc-500">{buildRecurrenceSummary(draft)}</p>
+        <p className="text-base text-zinc-500">{buildRecurrenceSummary(draft)}</p>
         <div className="flex items-center gap-2 mt-3">
           {rule ? (
-            <button type="button" onClick={() => onSave(null)} className="text-[13px] font-medium text-red-600 hover:text-red-700 transition-colors">Don&apos;t Recur</button>
+            <button type="button" onClick={() => onSave(null)} className="text-sm font-medium text-red-600 hover:text-red-700 transition-colors">Don&apos;t Recur</button>
           ) : null}
           <div className="flex-1" />
-          <button type="button" onClick={onCancel} className="inline-flex items-center h-8 px-3 rounded-md text-[13.5px] text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
+          <button type="button" onClick={onCancel} className="inline-flex items-center h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-100 transition-colors">Cancel</button>
           <button
             type="button"
             onClick={() => onSave(draft)}
             disabled={saveDisabled}
-            className="inline-flex items-center h-8 px-4 rounded-md text-[13.5px] font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
+            className="inline-flex items-center h-8 px-4 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:opacity-90 disabled:opacity-40 transition-opacity"
           >
             Save
           </button>

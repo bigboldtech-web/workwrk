@@ -51,7 +51,7 @@ export function GoalAssessment({ okrId }: { okrId: string }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: v.bg, color: v.color, fontSize: 13, fontWeight: 700 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 999, background: v.bg, color: v.color, fontSize: 13, fontWeight: 600 }}>
           <v.Icon style={{ width: 15, height: 15 }} /> {v.label}
         </span>
         {pace ? <span style={{ fontSize: 12.5, color: "var(--os-ink-3, #9aa3b2)", fontVariantNumeric: "tabular-nums" }}>{pace}</span> : null}

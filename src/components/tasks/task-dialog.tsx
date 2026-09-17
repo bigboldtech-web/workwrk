@@ -325,7 +325,7 @@ export function TaskDialog({
 
           <div className="relative group">
             <textarea
-              className="w-full min-h-[120px] text-[15px] bg-surface-2/30 border border-transparent hover:border-border/50 focus:border-border focus:bg-surface-2/50 rounded-xl outline-none placeholder:text-muted-foreground p-4 transition-all resize-none"
+              className="w-full min-h-[120px] text-base bg-surface-2/30 border border-transparent hover:border-border/50 focus:border-border focus:bg-surface-2/50 rounded-xl outline-none placeholder:text-muted-foreground p-4 transition-all resize-none"
               placeholder="Add description, or write with AI"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -334,7 +334,7 @@ export function TaskDialog({
             {!description && (
               <div className="absolute left-[200px] top-[17px] pointer-events-none text-muted-foreground flex items-center gap-1.5">
                 <Wand2 size={14} className="opacity-70" />
-                <span className="text-[15px]">AI</span>
+                <span className="text-base">AI</span>
               </div>
             )}
           </div>
@@ -375,13 +375,13 @@ export function TaskDialog({
                 <button className="flex items-center gap-2 px-3 py-1.5 bg-transparent hover:bg-surface-2 border border-border rounded-md text-xs font-medium text-foreground transition-all shadow-sm">
                   {assigneeId && assigneeId !== "self" ? (
                     <div className="flex -space-x-1">
-                       <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-[11px] text-white">
+                       <span className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center text-xs text-white">
                          {teamMembers.find(m => m.id === assigneeId)?.firstName[0]}
                        </span>
                     </div>
                   ) : assigneeId === "self" ? (
                     <div className="flex -space-x-1">
-                       <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-[11px] text-white">M</span>
+                       <span className="w-5 h-5 rounded-full bg-teal-500 flex items-center justify-center text-xs text-white">M</span>
                     </div>
                   ) : (
                     <User size={14} className="text-muted-foreground" />
@@ -395,12 +395,12 @@ export function TaskDialog({
                 </div>
                 <DropdownMenuLabel>People</DropdownMenuLabel>
                 <DropdownMenuItem onClick={() => setAssigneeId("self")}>
-                  <div className="w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center text-[12px] text-white">M</div>
+                  <div className="w-6 h-6 rounded-full bg-teal-500 flex items-center justify-center text-xs text-white">M</div>
                   <span>Me</span>
                 </DropdownMenuItem>
                 {teamMembers.filter((m) => m.id !== currentUserId).map((m) => (
                   <DropdownMenuItem key={m.id} onClick={() => setAssigneeId(m.id)}>
-                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-[12px] text-white">
+                    <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-xs text-white">
                       {m.firstName[0]}{m.lastName[0]}
                     </div>
                     <span>{m.firstName} {m.lastName}</span>
@@ -420,16 +420,16 @@ export function TaskDialog({
               <DropdownMenuContent align="start" className="w-[280px] p-4">
                  <div className="grid grid-cols-2 gap-4 mb-4">
                    <div>
-                     <label className="text-[12px] text-muted-foreground mb-1.5 block">Start date</label>
-                     <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-sm bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
+                     <label className="text-xs text-muted-foreground mb-1.5 block">Start date</label>
+                     <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="text-xs bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
                    </div>
                    <div>
-                     <label className="text-[12px] text-muted-foreground mb-1.5 block">Due date</label>
-                     <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={date} className="text-sm bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
+                     <label className="text-xs text-muted-foreground mb-1.5 block">Due date</label>
+                     <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} min={date} className="text-xs bg-surface-2 border border-transparent hover:border-border rounded-md px-2 py-1.5 outline-none w-full transition-colors" />
                    </div>
                  </div>
                  <div className="flex items-center justify-between border-t border-border pt-3">
-                    <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
+                    <label className="flex items-center gap-2 text-xs text-foreground cursor-pointer">
                       <input type="checkbox" checked={allDay} onChange={(e) => setAllDay(e.target.checked)} className="accent-[#a8cc24] w-4 h-4 rounded" />
                       All-day
                     </label>
@@ -502,7 +502,7 @@ export function TaskDialog({
                         <button type="button" onClick={() => toggleSubTask(st)} aria-label="Toggle sub-task">
                           {st.status === "COMPLETED" ? <CheckCircle2 size={16} className="text-[#a8cc24]" /> : <Circle size={16} className="text-muted-foreground" />}
                         </button>
-                        <span className={`flex-1 text-sm ${st.status === "COMPLETED" ? "line-through text-muted-foreground" : "text-foreground font-medium"}`}>
+                        <span className={`flex-1 text-xs ${st.status === "COMPLETED" ? "line-through text-muted-foreground" : "text-foreground font-medium"}`}>
                           {st.title}
                         </span>
                         <button type="button" onClick={() => removeSubTask(st)} className="text-muted-foreground hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -516,7 +516,7 @@ export function TaskDialog({
                         onChange={(e) => setNewSubTaskTitle(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSubTask(); } }}
                         placeholder="Add sub-task…"
-                        className="h-9 text-sm bg-surface-2/40 border-transparent focus-visible:ring-1"
+                        className="h-9 text-xs bg-surface-2/40 border-transparent focus-visible:ring-1"
                       />
                       <Button type="button" size="sm" variant="secondary" onClick={addSubTask} disabled={!newSubTaskTitle.trim()} className="h-9">
                         <Plus size={14} />
@@ -552,7 +552,7 @@ export function TaskDialog({
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-4 bg-surface-2/30 border-t border-border mt-2">
           <div className="flex items-center gap-2">
-             <button className="flex items-center gap-2 px-3 py-1.5 text-[14px] font-medium text-foreground hover:bg-surface-2 rounded-lg border border-border transition-colors shadow-sm bg-surface">
+             <button className="flex items-center gap-2 px-3 py-1.5 text-base font-medium text-foreground hover:bg-surface-2 rounded-lg border border-border transition-colors shadow-sm bg-surface">
                <LayoutTemplate size={14} className="text-muted-foreground" />
                Templates
              </button>

@@ -171,7 +171,7 @@ function LinkRow({
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
               disabled={busy}
-              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
+              className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
               {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Link2 className="h-3 w-3" />}
               Link
@@ -202,7 +202,7 @@ function LinkRow({
                 <button
                   type="button"
                   onClick={() => router.push(href)}
-                  className="flex-1 min-w-0 text-left text-sm font-medium truncate hover:text-zinc-700"
+                  className="flex-1 min-w-0 text-left text-xs font-medium truncate hover:text-zinc-700"
                 >
                   {it.target?.title || "Untitled"}
                 </button>

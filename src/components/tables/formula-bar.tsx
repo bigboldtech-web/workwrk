@@ -36,7 +36,7 @@ const REF_PALETTE = ["#0073EA", "#D83A52", "#007A5A", "#9D5BD2", "#B7791F"];
 /* Both layers of the highlight trick (coloured overlay + transparent-text
  * input) must render text with IDENTICAL metrics or the colours drift off
  * the characters, so the shared classes live in one place. */
-const TEXT_CLS = "font-mono text-[12.5px]";
+const TEXT_CLS = "font-mono text-xs";
 
 type Segment = { text: string; color: string | null };
 
@@ -256,8 +256,8 @@ export function FormulaTextInput({
               }}
               onMouseEnter={() => setMenu((m) => (m ? { ...m, sel: i } : m))}
             >
-              <span className="font-mono text-[12px] font-medium text-zinc-800">{f.signature}</span>
-              <span className="text-[11.5px] leading-snug text-zinc-500">{f.summary}</span>
+              <span className="font-mono text-xs font-medium text-zinc-800">{f.signature}</span>
+              <span className="text-xs leading-snug text-zinc-500">{f.summary}</span>
             </button>
           ))}
         </div>
@@ -316,12 +316,12 @@ function FormulaBarRow({ cell, onCommit, onReadOnlyEdit }: FormulaBarProps) {
     // the input. overflow-visible stays: the autocomplete menu hangs below.
     <div className="flex h-7 shrink-0 items-stretch overflow-visible border-b border-t border-zinc-200 bg-white">
       <div
-        className="flex w-16 shrink-0 items-center justify-center border-r border-zinc-200 font-mono text-[12px] font-medium text-zinc-600"
+        className="flex w-16 shrink-0 items-center justify-center border-r border-zinc-200 font-mono text-xs font-medium text-zinc-600"
         title="Active cell"
       >
         {address}
       </div>
-      <div className="flex w-8 shrink-0 items-center justify-center border-r border-zinc-100 font-serif text-[13px] italic text-zinc-400 select-none" title="Formula" aria-hidden>
+      <div className="flex w-8 shrink-0 items-center justify-center border-r border-zinc-100 font-serif text-sm italic text-zinc-400 select-none" title="Formula" aria-hidden>
         fx
       </div>
       <FormulaTextInput

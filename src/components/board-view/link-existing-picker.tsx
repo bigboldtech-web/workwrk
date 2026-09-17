@@ -130,7 +130,7 @@ export function LinkExistingPicker({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`Search ${pluralize(kindLabel)}…`}
-              className="w-full h-7 pl-7 pr-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+              className="w-full h-7 pl-7 pr-2 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-zinc-400"
               autoFocus
             />
           </div>
@@ -147,12 +147,12 @@ export function LinkExistingPicker({
 
       <div className="max-h-[260px] overflow-y-auto py-1">
         {rows === null ? (
-          <div className="px-3 py-4 inline-flex items-center gap-1.5 text-[12.5px] text-zinc-400">
+          <div className="px-3 py-4 inline-flex items-center gap-1.5 text-xs text-zinc-400">
             <Loader2 className="h-3 w-3 animate-spin" />
             Loading…
           </div>
         ) : filtered.length === 0 ? (
-          <div className="px-3 py-4 text-[12.5px] text-zinc-400">
+          <div className="px-3 py-4 text-xs text-zinc-400">
             {query
               ? `No ${pluralize(kindLabel)} match "${query}"`
               : `No ${pluralize(kindLabel)} to link — create a new one above.`}
@@ -171,9 +171,9 @@ export function LinkExistingPicker({
               >
                 <LinkIcon className="h-3 w-3 text-zinc-400 shrink-0" />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[13px] font-medium text-zinc-900 truncate">{c.title}</span>
+                  <span className="block text-sm font-medium text-zinc-900 truncate">{c.title}</span>
                   {c.subtitle ? (
-                    <span className="block text-[11.5px] text-zinc-500 truncate">{c.subtitle}</span>
+                    <span className="block text-xs text-zinc-500 truncate">{c.subtitle}</span>
                   ) : null}
                 </span>
                 {busy ? (

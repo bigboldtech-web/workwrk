@@ -86,12 +86,11 @@ export const designSystemPlugin = {
       [
         [
           TEXT_PX_RE,
-          // Only the sizes that are bound TODAY are named as targets. The five
-          // standard names (text-xs 12 / sm 13 / base 14 / lg 16 / xl 22) flip
-          // with the type codemod (refresh step 2); until then text-xs is 13
-          // and text-sm/base/lg/xl keep Tailwind's defaults, so pointing at
-          // them here would enlarge text. Update this message in step 2.
-          "Arbitrary text-[Npx]. Use a named size: text-rail 10, text-micro 11, text-xs 13 (until the type codemod), text-row 15, text-prose 15. The other named sizes (12/13/14/16/22 as text-xs/sm/base/lg/xl) land with the codemod in refresh step 2 (design-system 2.2, 8.2).",
+          // All nine sizes are bound since the type codemod (refresh step 2,
+          // scripts/codemod-type-scale.mjs). The sizes it refused (28 and up,
+          // below 10) have no place on the scale; a survivor here is a
+          // decision for the founder, not a mapping to guess.
+          "Arbitrary text-[Npx]. Use a named size: text-rail 10, text-micro 11, text-xs 12, text-sm 13, text-base 14, text-row 15 (container only), text-lg 16, text-xl 22, text-prose 15 (doc editor). Rows inherit 15 from an .os-row container and never set a size (design-system 2.2, 2.3, 8.2).",
         ],
       ],
     ),

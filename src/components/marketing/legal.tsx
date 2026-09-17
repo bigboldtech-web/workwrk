@@ -31,8 +31,8 @@ export function LegalPage({
         <div className="grid lg:grid-cols-[230px_1fr] gap-12 lg:gap-16 items-start">
           {/* Sticky TOC */}
           <nav className="lg:sticky lg:top-24 lg:self-start">
-            <p className={`text-xs font-bold uppercase tracking-[0.16em] ${t.text} mb-4`}>On this page</p>
-            <ol className="space-y-1.5 text-sm">
+            <p className={`text-sm font-bold uppercase tracking-[0.16em] ${t.text} mb-4`}>On this page</p>
+            <ol className="space-y-1.5 text-base">
               {sections.map((s, i) => (
                 <li key={s.id}>
                   <a

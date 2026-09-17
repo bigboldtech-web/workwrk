@@ -239,32 +239,32 @@ export default function AppsSettingsPage() {
     <div className="mx-auto w-full max-w-3xl px-6 py-6">
       {/* Header */}
       <header className="mb-6">
-        <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-400">
+        <div className="flex items-center gap-2 text-xs font-medium text-zinc-400">
           <Link href="/settings" className="hover:text-zinc-700">Settings</Link>
           <ChevronRight className="h-3 w-3" />
           <span>Apps</span>
         </div>
-        <h1 className="mt-1 flex items-center gap-2 text-[19px] font-semibold tracking-tight text-zinc-900">
+        <h1 className="mt-1 flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900">
           <AppWindow className="h-5 w-5 text-[#0073EA]" />
           Apps
         </h1>
-        <p className="mt-1 max-w-2xl text-[14px] leading-relaxed text-zinc-500">
+        <p className="mt-1 max-w-2xl text-base leading-relaxed text-zinc-500">
           The left rail shows every app a person has access to, in the order below.
           There is no personal pinning: what you arrange here is what everyone sees.
         </p>
-        <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-zinc-400">
+        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-zinc-400">
           Hiding an app or raising its access floor changes the rail only. The pages
           themselves stay gated by their own access rules.
         </p>
       </header>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
+        <div className="flex items-center gap-2 text-base text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading app settings…
         </div>
       ) : (
         <section>
-          <h2 className="mb-2.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">
+          <h2 className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Rail apps &amp; order
           </h2>
           <ul className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
@@ -303,16 +303,16 @@ export default function AppsSettingsPage() {
 
                   <div className={`min-w-0 flex-1 ${visible ? "" : "opacity-50"}`}>
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[14px] font-semibold text-zinc-900">
+                      <span className="truncate text-base font-semibold text-zinc-900">
                         {app.label}
                       </span>
                       {always && (
-                        <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-[11px] font-semibold text-[#0073EA]">
+                        <span className="inline-flex items-center gap-1 rounded bg-[#0073EA]/10 px-1.5 py-0.5 text-xs font-semibold text-[#0073EA]">
                           <Lock className="h-2.5 w-2.5" /> Always available
                         </span>
                       )}
                     </div>
-                    <div className="mt-0.5 text-[12px] text-zinc-400">
+                    <div className="mt-0.5 text-xs text-zinc-400">
                       {app.category ?? "Other"}
                       {app.requiredAccess ? (
                         <span> · Baseline: {TIER_SHORT[app.requiredAccess]}</span>
@@ -329,7 +329,7 @@ export default function AppsSettingsPage() {
                     aria-label={`Minimum access for ${app.label}`}
                     title={always ? "Always available to everyone" : undefined}
                     style={{ border: "1px solid #e4e4e7", background: "#fff" }}
-                    className={`h-7 shrink-0 rounded-md px-1.5 text-[12.5px] text-zinc-700 ${
+                    className={`h-7 shrink-0 rounded-md px-1.5 text-xs text-zinc-700 ${
                       saving || always ? "opacity-50" : ""
                     }`}
                   >
@@ -383,7 +383,7 @@ export default function AppsSettingsPage() {
               );
             })}
           </ul>
-          <p className="mt-2 text-[12.5px] text-zinc-400">
+          <p className="mt-2 text-xs text-zinc-400">
             An app also stays off a person&apos;s rail when their access level is below
             its baseline, no matter what is set here. New apps added to the catalog
             appear at the end of this list automatically.

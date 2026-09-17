@@ -300,7 +300,7 @@ export function Button({
   const sizeCls =
     size === "sm" ? "h-9 px-4 text-[14px]" :
     size === "lg" ? "h-12 px-6 text-[15px]" :
-                    "h-10 px-5 text-sm";
+                    "h-10 px-5 text-base";
 
   const t = HUES[hue];
   const variantCls =
@@ -386,16 +386,16 @@ export function HubCard({
         </div>
         <div>
           <p className="font-bold text-slate-900 text-[15px] leading-none">{hub.name}</p>
-          <p className="text-xs text-slate-500 mt-1.5">{hub.tagline}</p>
+          <p className="text-sm text-slate-500 mt-1.5">{hub.tagline}</p>
         </div>
       </div>
 
-      <p className="mt-4 text-sm text-slate-600 leading-relaxed">{description}</p>
+      <p className="mt-4 text-base text-slate-600 leading-relaxed">{description}</p>
 
       {features && features.length > 0 && (
         <ul className="mt-4 space-y-1.5">
           {features.map((f) => (
-            <li key={f} className="flex items-start gap-2 text-sm text-slate-700">
+            <li key={f} className="flex items-start gap-2 text-base text-slate-700">
               <span className="mt-1.5 w-1 h-1 rounded-full bg-slate-400 flex-shrink-0" aria-hidden />
               {f}
             </li>
@@ -404,7 +404,7 @@ export function HubCard({
       )}
 
       {href && (
-        <div className="mt-5 inline-flex items-center gap-1 text-sm font-semibold text-slate-900 group-hover:gap-2 transition-all">
+        <div className="mt-5 inline-flex items-center gap-1 text-base font-semibold text-slate-900 group-hover:gap-2 transition-all">
           Explore {hub.name}
           <ArrowRight size={14} />
         </div>
@@ -442,7 +442,7 @@ export function FeatureCard({
         </div>
       )}
       <h3 className="mt-4 font-bold text-slate-900 text-lg tracking-tight">{title}</h3>
-      <p className="mt-2 text-sm text-slate-600 leading-relaxed">{body}</p>
+      <p className="mt-2 text-base text-slate-600 leading-relaxed">{body}</p>
     </div>
   );
 }
@@ -472,7 +472,7 @@ export function StatCard({
         {value}
       </p>
       {body && (
-        <p className={`mt-4 text-sm leading-relaxed ${invert ? "text-white/70" : "text-slate-600"}`}>
+        <p className={`mt-4 text-base leading-relaxed ${invert ? "text-white/70" : "text-slate-600"}`}>
           {body}
         </p>
       )}
@@ -616,7 +616,7 @@ export function FAQ({
             {items.map((it, i) => (
               <details key={i} className="group p-6 lg:p-7 [&_summary::-webkit-details-marker]:hidden">
                 <summary className="flex items-center justify-between gap-6 cursor-pointer list-none">
-                  <span className="font-semibold text-slate-900 text-base lg:text-[17px]">{it.q}</span>
+                  <span className="font-semibold text-slate-900 text-lg lg:text-[17px]">{it.q}</span>
                   <span className="w-8 h-8 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center text-slate-600 transition-all group-open:rotate-45">
                     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 1v12M1 7h12" /></svg>
                   </span>
@@ -685,7 +685,7 @@ export function Quote({
       >
         &ldquo;{quote}&rdquo;
       </blockquote>
-      <figcaption className="mt-7 text-sm text-slate-500">
+      <figcaption className="mt-7 text-base text-slate-500">
         <span className="font-bold text-slate-900">{author}</span> &middot; {role}, {company}
       </figcaption>
     </figure>

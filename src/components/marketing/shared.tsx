@@ -122,7 +122,7 @@ export function dateRange(s: string | null, e: string | null) {
 }
 
 export function Loading() {
-  return <div className="text-sm text-muted py-20 text-center">Loading…</div>;
+  return <div className="text-base text-muted py-20 text-center">Loading…</div>;
 }
 
 export function Empty({
@@ -138,11 +138,11 @@ export function Empty({
     <div className="text-center py-20">
       <Icon size={40} className="mx-auto mb-3 text-muted-2" />
       <p className="font-medium mb-1">{title}</p>
-      <p className="text-sm text-muted mb-4 max-w-sm mx-auto">{hint}</p>
+      <p className="text-base text-muted mb-4 max-w-sm mx-auto">{hint}</p>
       <button
         type="button"
         onClick={onAction}
-        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-medium bg-amber-600 hover:bg-amber-700"
+        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-base font-medium bg-amber-600 hover:bg-amber-700"
       >
         <Plus size={14} /> {actionLabel}
       </button>
@@ -166,18 +166,18 @@ function MktgModal({ title, onClose, children }: { title: string; onClose: () =>
 }
 
 function MktgRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return <div><label className="block text-xs font-medium text-muted-2 mb-1">{label}</label>{children}</div>;
+  return <div><label className="block text-sm font-medium text-muted-2 mb-1">{label}</label>{children}</div>;
 }
 
 function MktgActions({ onClose, onSubmit, saving, disabled }: { onClose: () => void; onSubmit: () => void; saving: boolean; disabled: boolean }) {
   return (
     <div className="flex items-center justify-end gap-2 pt-3">
-      <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-muted hover:bg-surface-2">Cancel</button>
+      <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-base text-muted hover:bg-surface-2">Cancel</button>
       <button
         type="button"
         onClick={onSubmit}
         disabled={saving || disabled}
-        className="px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700"
+        className="px-4 py-2 rounded-lg text-base font-medium text-white disabled:opacity-50 inline-flex items-center gap-1.5 bg-amber-600 hover:bg-amber-700"
       >
         {saving ? "Saving…" : (<><Zap size={12} /> Create</>)}
       </button>

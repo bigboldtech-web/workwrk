@@ -689,7 +689,7 @@ export default function ReviewCycleDetailPage() {
         {cycle.status === "DRAFT" && canLaunch && (
           <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-200 bg-white p-3">
             <div className="flex-1 min-w-[220px]">
-              <p className="text-sm font-medium">This cycle hasn&apos;t been launched yet</p>
+              <p className="text-xs font-medium">This cycle hasn&apos;t been launched yet</p>
               <p className="text-xs text-zinc-500">
                 Launching creates a review for every active employee and notifies them to
                 start their self-assessment.
@@ -724,14 +724,14 @@ export default function ReviewCycleDetailPage() {
             <>
               {/* Status */}
               <div className="flex items-center gap-2">
-                <span className="text-sm text-zinc-500">Your review status:</span>
+                <span className="text-xs text-zinc-500">Your review status:</span>
                 {getStatusBadge(myReview.status)}
                 {myReview.status !== "PENDING" && myReview.status !== "SELF_ASSESSMENT" && (
                   <span className="text-xs text-green-400">Self-assessment submitted</span>
                 )}
                 {/* Autosave indicator. Visible while the draft is editable. */}
                 {canSelfAssessAutosave && (
-                  <span className="ml-auto inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
+                  <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-zinc-500">
                     {autosaveSelf.status === "saving" ? (
                       <><Cloud size={11} className="animate-pulse" /> Saving…</>
                     ) : autosaveSelf.status === "saved" ? (
@@ -749,26 +749,26 @@ export default function ReviewCycleDetailPage() {
 
               {/* Auto-populated Metrics (READ ONLY) */}
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Auto-Populated Metrics</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-xs">Auto-Populated Metrics</CardTitle></CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-3 gap-4">
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-zinc-500"}`}>
+                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.avgKpiScore != null ? getScoreColor(selfData.metrics.avgKpiScore) : "text-zinc-500"}`}>
                         {selfData.metrics.avgKpiScore ?? "N/A"}
                       </p>
-                      <p className="text-[11px] text-zinc-500">Avg KPI Score</p>
+                      <p className="text-xs text-zinc-500">Avg KPI Score</p>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-zinc-500"}`}>
+                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.avgSopScore != null ? getScoreColor(selfData.metrics.avgSopScore) : "text-zinc-500"}`}>
                         {selfData.metrics.avgSopScore ?? "N/A"}
                       </p>
-                      <p className="text-[11px] text-zinc-500">SOP Compliance</p>
+                      <p className="text-xs text-zinc-500">SOP Compliance</p>
                     </div>
                     <div className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
-                      <p className={`text-2xl font-bold font-mono ${selfData.metrics.okrAvgProgress != null ? getScoreColor(selfData.metrics.okrAvgProgress) : "text-zinc-500"}`}>
+                      <p className={`text-2xl font-semibold font-mono ${selfData.metrics.okrAvgProgress != null ? getScoreColor(selfData.metrics.okrAvgProgress) : "text-zinc-500"}`}>
                         {selfData.metrics.okrAvgProgress != null ? `${selfData.metrics.okrAvgProgress}%` : "N/A"}
                       </p>
-                      <p className="text-[11px] text-zinc-500">OKR Progress</p>
+                      <p className="text-xs text-zinc-500">OKR Progress</p>
                     </div>
                   </div>
                 </CardContent>
@@ -779,21 +779,21 @@ export default function ReviewCycleDetailPage() {
                   shipped. */}
               {(selfData.metrics.okrs?.length ?? 0) > 0 && (
                 <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">Your OKRs this period</CardTitle></CardHeader>
+                  <CardHeader className="pb-2"><CardTitle className="text-xs">Your OKRs this period</CardTitle></CardHeader>
                   <CardContent className="space-y-3">
                     {selfData.metrics.okrs?.map((okr) => (
                       <div key={okr.id} className="rounded-lg border border-zinc-200 bg-white p-3">
                         <div className="flex items-center justify-between gap-3 mb-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{okr.title}</p>
-                            <p className="text-[11px] text-zinc-500">{okr.level} · {okr.quarter || "—"}</p>
+                            <p className="text-xs font-medium truncate">{okr.title}</p>
+                            <p className="text-xs text-zinc-500">{okr.level} · {okr.quarter || "—"}</p>
                           </div>
                           <span className={`text-xs font-mono tabular-nums shrink-0 ${getScoreColor(okr.progress)}`}>
                             {okr.progress}%
                           </span>
                         </div>
                         {okr.keyResults?.map((kr) => (
-                          <div key={kr.id} className="mt-1.5 text-[12px] flex items-center gap-2">
+                          <div key={kr.id} className="mt-1.5 text-xs flex items-center gap-2">
                             <span className="text-zinc-500 truncate flex-1">{kr.title}</span>
                             <span className="font-mono tabular-nums">
                               {kr.currentValue}/{kr.targetValue}{kr.unit ? ` ${kr.unit}` : ""}
@@ -805,7 +805,7 @@ export default function ReviewCycleDetailPage() {
                         ))}
                       </div>
                     ))}
-                    <p className="text-[11px] text-zinc-500 leading-relaxed pt-1">
+                    <p className="text-xs text-zinc-500 leading-relaxed pt-1">
                       These came from your own check-ins during this review period. Use them as
                       proof points in the reflection below.
                     </p>
@@ -816,16 +816,16 @@ export default function ReviewCycleDetailPage() {
               {/* KRA Self-Ratings */}
               {(selfData.kraAssignments?.length ?? 0) > 0 && (
                 <Card>
-                  <CardHeader className="pb-2"><CardTitle className="text-sm">Rate Your KRA Performance</CardTitle></CardHeader>
+                  <CardHeader className="pb-2"><CardTitle className="text-xs">Rate Your KRA Performance</CardTitle></CardHeader>
                   <CardContent className="space-y-4">
                     {selfData.kraAssignments?.map((a) => (
                       <div key={a.kra.id} className="rounded-lg border border-zinc-200 bg-white p-4">
                         <div className="flex items-center justify-between mb-2">
                           <div>
-                            <p className="text-sm font-medium">{a.kra.name}</p>
-                            <Badge variant="outline" className="text-[11px]">{a.kra.category}</Badge>
+                            <p className="text-xs font-medium">{a.kra.name}</p>
+                            <Badge variant="outline" className="text-xs">{a.kra.category}</Badge>
                           </div>
-                          <span className="text-sm text-zinc-500">{a.weightage}% weightage</span>
+                          <span className="text-xs text-zinc-500">{a.weightage}% weightage</span>
                         </div>
                         <div className="space-y-2 mt-3">
                           <Label className="text-xs">Self Rating (1-5)</Label>
@@ -835,7 +835,7 @@ export default function ReviewCycleDetailPage() {
                                 key={n}
                                 disabled={!canSelfAssess}
                                 onClick={() => setKraRatings((prev) => ({ ...prev, [a.kra.id]: { ...prev[a.kra.id], rating: n, achievements: prev[a.kra.id]?.achievements || "" } }))}
-                                className={`h-8 w-8 rounded text-sm font-bold transition-colors ${
+                                className={`h-8 w-8 rounded text-xs font-semibold transition-colors ${
                                   kraRatings[a.kra.id]?.rating === n
                                     ? "bg-[#0073EA] text-white"
                                     : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
@@ -862,7 +862,7 @@ export default function ReviewCycleDetailPage() {
 
               {/* Self-Reflection */}
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Self-Reflection</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-xs">Self-Reflection</CardTitle></CardHeader>
                 <CardContent className="space-y-3">
                   <div className="space-y-2">
                     <Label className="text-xs">What went well this period?</Label>
@@ -899,7 +899,7 @@ export default function ReviewCycleDetailPage() {
                     <div className="flex items-center gap-4">
                       <div>
                         <p className="text-xs text-zinc-500">Overall Score</p>
-                        <p className={`text-2xl font-bold font-mono ${getScoreColor(myReview.overallScore || 0)}`}>{myReview.overallScore ?? "—"}</p>
+                        <p className={`text-2xl font-semibold font-mono ${getScoreColor(myReview.overallScore || 0)}`}>{myReview.overallScore ?? "—"}</p>
                       </div>
                       <div>
                         <p className="text-xs text-zinc-500">Outcome</p>
@@ -909,7 +909,7 @@ export default function ReviewCycleDetailPage() {
                     {myReview.managerComments && (
                       <div className="mt-3 border-t border-zinc-200 pt-3">
                         <p className="text-xs text-zinc-500 mb-1">Manager Comments</p>
-                        <p className="text-sm">{myReview.managerComments}</p>
+                        <p className="text-xs">{myReview.managerComments}</p>
                       </div>
                     )}
                     <div className="mt-4 border-t border-zinc-200 pt-3">
@@ -940,7 +940,7 @@ export default function ReviewCycleDetailPage() {
           ) : !selectedReview ? (
             /* Team list */
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Your Team&apos;s Reviews</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-xs">Your Team&apos;s Reviews</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {teamReviews.map((review) => (
                   <div
@@ -969,7 +969,7 @@ export default function ReviewCycleDetailPage() {
                       <AvatarFallback className="text-xs">{review.subject.firstName[0]}{review.subject.lastName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{review.subject.firstName} {review.subject.lastName}</p>
+                      <p className="text-xs font-medium">{review.subject.firstName} {review.subject.lastName}</p>
                       <p className="text-xs text-zinc-500">{review.subject.role?.title || ""} {review.subject.department ? `· ${review.subject.department.name}` : ""}</p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1003,7 +1003,7 @@ export default function ReviewCycleDetailPage() {
 
               <Card>
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">
+                  <CardTitle className="text-xs">
                     Reviewing: {selectedReview.subject.firstName} {selectedReview.subject.lastName}
                   </CardTitle>
                 </CardHeader>
@@ -1028,13 +1028,13 @@ export default function ReviewCycleDetailPage() {
                             <span className="text-xs">{r.kraName}</span>
                             <span className="text-xs font-mono text-[color:var(--accent-strong)]">{r.rating}/5</span>
                           </div>
-                          {r.achievements && <p className="text-[11px] text-zinc-500 ml-2">{r.achievements}</p>}
+                          {r.achievements && <p className="text-xs text-zinc-500 ml-2">{r.achievements}</p>}
                         </div>
                       ))}
                       {selectedReview.selfRatings.reflection && (
                         <div className="mt-2 space-y-1 border-t border-zinc-200 pt-2">
-                          {selectedReview.selfRatings.reflection.wentWell && <p className="text-[11px] text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
-                          {selectedReview.selfRatings.reflection.couldImprove && <p className="text-[11px] text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
+                          {selectedReview.selfRatings.reflection.wentWell && <p className="text-xs text-green-400">Went well: {selectedReview.selfRatings.reflection.wentWell}</p>}
+                          {selectedReview.selfRatings.reflection.couldImprove && <p className="text-xs text-orange-400">Could improve: {selectedReview.selfRatings.reflection.couldImprove}</p>}
                         </div>
                       )}
                     </div>
@@ -1045,7 +1045,7 @@ export default function ReviewCycleDetailPage() {
                     <div className="mb-4 rounded-lg border border-zinc-200 bg-background p-3">
                       <p className="text-xs font-medium text-zinc-500 mb-2">Peer Feedback ({selectedReview.peerFeedback?.length ?? 0})</p>
                       {selectedReview.peerFeedback?.map((pf, i: number) => (
-                        <div key={i} className="mb-2 text-[11px]">
+                        <div key={i} className="mb-2 text-xs">
                           {!pf.anonymous && pf.giver && <span className="text-[color:var(--accent-strong)]">{pf.giver.firstName} {pf.giver.lastName}: </span>}
                           {pf.strengths && <p className="text-green-400">Strengths: {pf.strengths}</p>}
                           {pf.improvements && <p className="text-orange-400">Improvements: {pf.improvements}</p>}
@@ -1059,7 +1059,7 @@ export default function ReviewCycleDetailPage() {
 
               {/* Behavioral Ratings */}
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Behavioral Assessment</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-xs">Behavioral Assessment</CardTitle></CardHeader>
                 <CardContent className="space-y-4">
                   {Object.entries(behavioralLabels).map(([key, { label, anchors }]) => (
                     <div key={key}>
@@ -1080,7 +1080,7 @@ export default function ReviewCycleDetailPage() {
                           </button>
                         ))}
                       </div>
-                      <p className="text-[11px] text-zinc-500 mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">{behavioral[key] ? anchors[(behavioral[key] || 1) - 1] : "Select rating"}</p>
                     </div>
                   ))}
                 </CardContent>
@@ -1109,7 +1109,7 @@ export default function ReviewCycleDetailPage() {
               </Card>
 
               <div className="flex justify-end gap-2 items-center">
-                <span className="mr-auto inline-flex items-center gap-1.5 text-[12px] text-zinc-500">
+                <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-zinc-500">
                   {autosaveMgr.status === "saving" ? (
                     <><Cloud size={11} className="animate-pulse" /> Saving draft…</>
                   ) : autosaveMgr.status === "saved" ? (
@@ -1141,7 +1141,7 @@ export default function ReviewCycleDetailPage() {
             <Card><CardContent className="p-8 text-center text-zinc-500">No peer feedback requests for you in this cycle.</CardContent></Card>
           ) : (
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Peer Feedback Requests</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-xs">Peer Feedback Requests</CardTitle></CardHeader>
               <CardContent className="space-y-2">
                 {peerRequests.map((pf) => (
                   <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-3">
@@ -1149,11 +1149,11 @@ export default function ReviewCycleDetailPage() {
                       <AvatarFallback className="text-xs">{pf.receiver.firstName[0]}{pf.receiver.lastName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">Feedback for: {pf.receiver.firstName} {pf.receiver.lastName}</p>
+                      <p className="text-xs font-medium">Feedback for: {pf.receiver.firstName} {pf.receiver.lastName}</p>
                       <p className="text-xs text-zinc-500">{pf.review?.cycle?.name || ""}</p>
                     </div>
                     {pf.status === "SUBMITTED" ? (
-                      <Badge variant="success" className="text-[11px]">Submitted</Badge>
+                      <Badge variant="success" className="text-xs">Submitted</Badge>
                     ) : (
                       <Button size="sm" onClick={() => setShowPeerDialog(pf)}>Give Feedback</Button>
                     )}
@@ -1175,13 +1175,13 @@ export default function ReviewCycleDetailPage() {
               {calibrationData.warning && (
                 <div className="flex items-center gap-2 rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
                   <AlertTriangle size={16} className="text-orange-400" />
-                  <p className="text-sm text-orange-400">{calibrationData.warning}</p>
+                  <p className="text-xs text-orange-400">{calibrationData.warning}</p>
                 </div>
               )}
 
               {/* Bell Curve Distribution */}
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Rating Distribution</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-xs">Rating Distribution</CardTitle></CardHeader>
                 <CardContent>
                   <div className="flex items-end gap-2 h-24">
                     {[
@@ -1195,9 +1195,9 @@ export default function ReviewCycleDetailPage() {
                       const height = (band.count / maxCount) * 100;
                       return (
                         <div key={band.label} className="flex-1 flex flex-col items-center gap-1">
-                          <span className="text-[11px] font-mono">{band.count}</span>
+                          <span className="text-xs font-mono">{band.count}</span>
                           <div className={`w-full rounded-t ${band.color}`} style={{ height: `${Math.max(height, 4)}%` }} />
-                          <span className="text-[11px] text-zinc-500">{band.label}</span>
+                          <span className="text-xs text-zinc-500">{band.label}</span>
                         </div>
                       );
                     })}
@@ -1226,17 +1226,17 @@ export default function ReviewCycleDetailPage() {
                       {calibrationData.calibrationData.map((d) => (
                         <tr key={d.reviewId} className="border-b border-zinc-200/50 hover:bg-zinc-50/50">
                           <td className="p-3">
-                            <p className="text-sm font-medium">{d.subject.firstName} {d.subject.lastName}</p>
-                            <p className="text-[11px] text-zinc-500">{d.subject.department?.name}</p>
+                            <p className="text-xs font-medium">{d.subject.firstName} {d.subject.lastName}</p>
+                            <p className="text-xs text-zinc-500">{d.subject.department?.name}</p>
                           </td>
-                          <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.kpiScore)}`}>{d.kpiScore}</td>
-                          <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.selfRating)}`}>{d.selfRating}</td>
-                          <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.managerRating)}`}>{d.managerRating}</td>
-                          <td className={`p-3 text-center font-mono text-sm ${getScoreColor(d.peerRating)}`}>{d.peerRating}</td>
-                          <td className={`p-3 text-center font-mono text-sm font-bold ${getScoreColor(d.compositeScore)}`}>{d.compositeScore}</td>
+                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.kpiScore)}`}>{d.kpiScore}</td>
+                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.selfRating)}`}>{d.selfRating}</td>
+                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.managerRating)}`}>{d.managerRating}</td>
+                          <td className={`p-3 text-center font-mono text-xs ${getScoreColor(d.peerRating)}`}>{d.peerRating}</td>
+                          <td className={`p-3 text-center font-mono text-xs font-semibold ${getScoreColor(d.compositeScore)}`}>{d.compositeScore}</td>
                           <td className="p-3 text-center">
                             {d.calibratedScore != null ? (
-                              <span className={`font-mono text-sm font-bold ${getScoreColor(d.calibratedScore)}`}>{d.calibratedScore}</span>
+                              <span className={`font-mono text-xs font-semibold ${getScoreColor(d.calibratedScore)}`}>{d.calibratedScore}</span>
                             ) : (
                               <span className="text-xs text-zinc-500">—</span>
                             )}
@@ -1275,7 +1275,7 @@ export default function ReviewCycleDetailPage() {
         {/* ===== DASHBOARD TAB ===== */}
         <TabsContent value="dashboard" className="mt-4 space-y-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Review Cycle Progress</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-xs">Review Cycle Progress</CardTitle></CardHeader>
             <CardContent>
               <div className="grid grid-cols-5 gap-3">
                 {[
@@ -1287,8 +1287,8 @@ export default function ReviewCycleDetailPage() {
                 ].map((stat) => (
                   <div key={stat.label} className="rounded-lg border border-zinc-200 bg-white p-3 text-center">
                     <stat.icon size={16} className={`mx-auto mb-1 ${stat.color}`} />
-                    <p className="text-xl font-bold font-mono">{stat.value}</p>
-                    <p className="text-[11px] text-zinc-500">{stat.label}</p>
+                    <p className="text-lg font-semibold font-mono">{stat.value}</p>
+                    <p className="text-xs text-zinc-500">{stat.label}</p>
                   </div>
                 ))}
               </div>
@@ -1297,20 +1297,20 @@ export default function ReviewCycleDetailPage() {
 
           {/* People who haven't completed */}
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Pending Actions</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-xs">Pending Actions</CardTitle></CardHeader>
             <CardContent className="space-y-2">
               {cycle.reviews?.filter((r) => r.status === "PENDING").length === 0 ? (
-                <p className="text-sm text-zinc-500 text-center py-4">Everyone has started their reviews!</p>
+                <p className="text-xs text-zinc-500 text-center py-4">Everyone has started their reviews!</p>
               ) : (
                 cycle.reviews?.filter((r) => r.status === "PENDING").map((r) => (
                   <div key={r.id} className="flex items-center gap-3 rounded-lg border border-zinc-200 p-2">
                     <Avatar className="h-7 w-7">
-                      <AvatarFallback className="text-[11px]">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
+                      <AvatarFallback className="text-xs">{r.subject.firstName[0]}{r.subject.lastName[0]}</AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm">{r.subject.firstName} {r.subject.lastName}</p>
+                      <p className="text-xs">{r.subject.firstName} {r.subject.lastName}</p>
                     </div>
-                    <Badge variant="warning" className="text-[11px]">Self-Assessment Pending</Badge>
+                    <Badge variant="warning" className="text-xs">Self-Assessment Pending</Badge>
                   </div>
                 ))
               )}
@@ -1343,7 +1343,7 @@ export default function ReviewCycleDetailPage() {
                   <button
                     key={n}
                     onClick={() => setPeerCollabRating(n)}
-                    className={`h-9 w-9 rounded text-sm font-bold transition-colors ${
+                    className={`h-9 w-9 rounded text-xs font-semibold transition-colors ${
                       peerCollabRating === n ? "bg-[#0073EA] text-white" : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
                     }`}
                   >
@@ -1388,7 +1388,7 @@ export default function ReviewCycleDetailPage() {
                       }}
                       className="rounded"
                     />
-                    <span className="text-sm">{u.firstName} {u.lastName}</span>
+                    <span className="text-xs">{u.firstName} {u.lastName}</span>
                   </label>
                 ))}
             </div>
@@ -1434,10 +1434,10 @@ export default function ReviewCycleDetailPage() {
           {letterError ? (
             <div className="py-6 text-center">
               <AlertTriangle size={20} className="mx-auto mb-2 text-orange-400" />
-              <p className="text-sm text-zinc-500">{letterError}</p>
+              <p className="text-xs text-zinc-500">{letterError}</p>
             </div>
           ) : !letter ? (
-            <div className="py-8 text-center text-sm text-zinc-500">Generating…</div>
+            <div className="py-8 text-center text-xs text-zinc-500">Generating…</div>
           ) : (
             <div className="space-y-4 py-2">
               <div>
@@ -1445,26 +1445,26 @@ export default function ReviewCycleDetailPage() {
                 <p className="text-xs text-zinc-500">Performance Appraisal · {letter.cycleName}</p>
               </div>
               <div className="rounded-lg border border-zinc-200 p-3">
-                <p className="text-sm font-medium">{letter.employeeName}</p>
+                <p className="text-xs font-medium">{letter.employeeName}</p>
                 <p className="text-xs text-zinc-500">
                   {[letter.role, letter.department].filter(Boolean).join(" · ") || "—"}
                 </p>
-                <p className="text-[12px] text-zinc-500 mt-1">
+                <p className="text-xs text-zinc-500 mt-1">
                   Period {fmtDate(letter.periodStart)} → {fmtDate(letter.periodEnd)} · Reviewer {letter.reviewerName || "—"}
                 </p>
               </div>
               <div className="flex items-center gap-4 rounded-lg border border-zinc-200 p-3">
                 <div>
-                  <p className="text-[11px] text-zinc-500 uppercase">Overall</p>
-                  <p className={`text-3xl font-bold font-mono ${getScoreColor(letter.overallScore)}`}>{letter.overallScore}</p>
+                  <p className="text-micro text-zinc-500 uppercase">Overall</p>
+                  <p className={`text-3xl font-semibold font-mono ${getScoreColor(letter.overallScore)}`}>{letter.overallScore}</p>
                 </div>
                 <div>
-                  <p className="text-[11px] text-zinc-500 uppercase">Band</p>
+                  <p className="text-micro text-zinc-500 uppercase">Band</p>
                   <Badge className="bg-blue-500/15 text-blue-500">{letter.performanceBand}</Badge>
                 </div>
                 <div>
-                  <p className="text-[11px] text-zinc-500 uppercase">Recommended increment</p>
-                  <p className="text-sm font-semibold">{letter.hikeRecommendation?.label || "—"}</p>
+                  <p className="text-micro text-zinc-500 uppercase">Recommended increment</p>
+                  <p className="text-xs font-semibold">{letter.hikeRecommendation?.label || "—"}</p>
                 </div>
                 {letter.outcome && (
                   <div className="ml-auto">{getOutcomeBadge(letter.outcome)}</div>
@@ -1486,13 +1486,13 @@ export default function ReviewCycleDetailPage() {
               {letter.managerComments && (
                 <div>
                   <p className="text-xs font-medium text-zinc-500 mb-1">Manager comments</p>
-                  <p className="text-sm">{letter.managerComments}</p>
+                  <p className="text-xs">{letter.managerComments}</p>
                 </div>
               )}
               {letter.recommendation && (
                 <div>
                   <p className="text-xs font-medium text-zinc-500 mb-1">Recommendation</p>
-                  <p className="text-sm">{letter.recommendation}</p>
+                  <p className="text-xs">{letter.recommendation}</p>
                 </div>
               )}
             </div>

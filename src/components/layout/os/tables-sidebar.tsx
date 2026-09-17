@@ -182,7 +182,7 @@ export function TablesSidebar() {
       <button
         type="button"
         onClick={() => void createSheet()}
-        className="flex w-full items-center gap-2 h-7 px-2 rounded-md text-[13.5px] text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+        className="flex w-full items-center gap-2 h-7 px-2 rounded-md text-base text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
       >
         <Plus className="w-3.5 h-3.5 shrink-0" />
         <span>New sheet</span>
@@ -190,7 +190,7 @@ export function TablesSidebar() {
 
       <SectionLabel>Sheets</SectionLabel>
       {sheets === null ? (
-        <div className="px-2 py-1.5 text-[12.5px] text-zinc-400">Loading…</div>
+        <div className="px-2 py-1.5 text-xs text-zinc-400">Loading…</div>
       ) : filtered.length === 0 ? (
         <EmptyCard text={q ? "No sheets match" : "Create your first sheet"} />
       ) : (
@@ -201,7 +201,7 @@ export function TablesSidebar() {
               <li key={s.id}>
                 <Link
                   href={`/tables/${s.id}`}
-                  className={`flex items-center gap-2 h-7 px-2 rounded-md text-[14px] ${
+                  className={`flex items-center gap-2 h-7 px-2 rounded-md text-base ${
                     active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
                   }`}
                   onContextMenu={(e) => { e.preventDefault(); setRowMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
@@ -230,7 +230,7 @@ export function TablesSidebar() {
           <Link
             key={r.href}
             href={r.href}
-            className={`flex items-center gap-2 h-7 px-2 rounded-md text-[13px] ${
+            className={`flex items-center gap-2 h-7 px-2 rounded-md text-sm ${
               r.href === activeHubHref
                 ? "bg-zinc-100 text-zinc-900 font-medium"
                 : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
@@ -246,14 +246,14 @@ export function TablesSidebar() {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="px-2 pt-4 pb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">{children}</div>;
+  return <div className="px-2 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">{children}</div>;
 }
 
 function EmptyCard({ text }: { text: string }) {
   return (
     <div className="mx-0.5 my-1 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3 py-5 text-center">
       <Table2 className="w-4 h-4 mx-auto text-zinc-300" />
-      <p className="mt-1.5 text-[12.5px] text-zinc-400 leading-snug">{text}</p>
+      <p className="mt-1.5 text-xs text-zinc-400 leading-snug">{text}</p>
     </div>
   );
 }

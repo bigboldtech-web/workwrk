@@ -305,7 +305,7 @@ export function TeamWorkspaces() {
             <span style={{ color: active.hue }}>build for themselves.</span>
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             Pick a team. WorkwrK reshapes around how that team actually

@@ -61,14 +61,14 @@ export function ChangePasswordDialog({
   }
 
   const inputCls =
-    "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-[14px] text-zinc-800 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/25 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
-  const labelCls = "mb-1 block text-[12px] font-semibold uppercase tracking-wide text-zinc-400";
+    "w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-base text-zinc-800 outline-none focus:border-[#0073EA] focus:ring-2 focus:ring-[#0073EA]/25 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100";
+  const labelCls = "mb-1 block text-xs font-semibold uppercase tracking-wide text-zinc-400";
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="block max-w-[420px] gap-0 p-0">
         <form onSubmit={submit} className="px-6 pt-6 pb-5">
-          <DialogTitle className="flex items-center gap-2 text-[15px] font-semibold">
+          <DialogTitle className="flex items-center gap-2 text-base font-semibold">
             <KeyRound className="h-4 w-4 text-[#0073EA]" />
             Change password
           </DialogTitle>
@@ -94,7 +94,7 @@ export function ChangePasswordDialog({
                 <button
                   type="button"
                   onClick={() => setShow((s) => !s)}
-                  className="mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-zinc-400 hover:text-zinc-600"
+                  className="mb-1 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-zinc-600"
                 >
                   {show ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
                   {show ? "Hide" : "Show"}
@@ -121,7 +121,7 @@ export function ChangePasswordDialog({
           </div>
 
           {err && (
-            <div className="mt-3 flex items-start gap-2 text-[13px] text-[#E2445C]">
+            <div className="mt-3 flex items-start gap-2 text-sm text-[#E2445C]">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>{err}</span>
             </div>
@@ -131,14 +131,14 @@ export function ChangePasswordDialog({
             <button
               type="button"
               onClick={() => onOpenChange(false)}
-              className="rounded-lg border border-zinc-200 px-3.5 py-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-lg border border-zinc-200 px-3.5 py-2 text-base font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={submitting || !current || !next || !confirm}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#0073EA] px-3.5 py-2 text-[14px] font-semibold text-white hover:bg-[#0060B9] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#0073EA] px-3.5 py-2 text-base font-semibold text-white hover:bg-[#0060B9] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Update password

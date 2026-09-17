@@ -129,7 +129,7 @@ export function ProcessFlowBuilder({
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center">
         <GitBranch className="mx-auto mb-3 text-muted" size={28} />
-        <p className="text-sm text-muted">No steps yet. Add one to start your process flow.</p>
+        <p className="text-xs text-muted">No steps yet. Add one to start your process flow.</p>
         {editing && (
           <Button onClick={addStep} className="mt-4 gap-1.5" size="sm">
             <Plus size={14} /> Add first step
@@ -165,7 +165,7 @@ export function ProcessFlowBuilder({
                     </button>
                   )}
                   <div
-                    className="flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold"
+                    className="flex items-center justify-center w-8 h-8 rounded-full text-xs font-semibold"
                     style={{ background: `${meta.tone}14`, color: meta.tone }}
                   >
                     {idx + 1}
@@ -187,17 +187,17 @@ export function ProcessFlowBuilder({
                     <Badge
                       variant="outline"
                       style={{ borderColor: `${meta.tone}55`, color: meta.tone }}
-                      className="text-[11px] uppercase tracking-wide"
+                      className="text-micro uppercase tracking-wide"
                     >
                       {meta.label}
                     </Badge>
                     {step.actor && (
-                      <span className="text-[12px] text-muted flex items-center gap-1">
+                      <span className="text-xs text-muted flex items-center gap-1">
                         <User size={11} /> {step.actor}
                       </span>
                     )}
                     {step.durationMinutes ? (
-                      <span className="text-[12px] text-muted flex items-center gap-1">
+                      <span className="text-xs text-muted flex items-center gap-1">
                         <Timer size={11} /> {step.durationMinutes} min
                       </span>
                     ) : null}
@@ -232,7 +232,7 @@ export function ProcessFlowBuilder({
                     <div className="mt-3 space-y-3 border-t border-border pt-3">
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div>
-                          <Label className="text-[12px]">Type</Label>
+                          <Label className="text-xs">Type</Label>
                           <Select
                             value={step.type}
                             onValueChange={(v) => toggleType(step.id, v as ProcessFlowStepType)}
@@ -246,7 +246,7 @@ export function ProcessFlowBuilder({
                           </Select>
                         </div>
                         <div>
-                          <Label className="text-[12px]">Actor / role</Label>
+                          <Label className="text-xs">Actor / role</Label>
                           <Input
                             value={step.actor ?? ""}
                             onChange={(e) => updateStep(step.id, { actor: e.target.value })}
@@ -254,7 +254,7 @@ export function ProcessFlowBuilder({
                           />
                         </div>
                         <div>
-                          <Label className="text-[12px]">Expected (min)</Label>
+                          <Label className="text-xs">Expected (min)</Label>
                           <Input
                             type="number"
                             min={0}
@@ -268,7 +268,7 @@ export function ProcessFlowBuilder({
                       </div>
 
                       <div>
-                        <Label className="text-[12px]">Description</Label>
+                        <Label className="text-xs">Description</Label>
                         <Textarea
                           rows={2}
                           value={step.description ?? ""}
@@ -280,7 +280,7 @@ export function ProcessFlowBuilder({
                       {step.type === "decision" && (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
-                            <Label className="text-[12px]">Branches</Label>
+                            <Label className="text-xs">Branches</Label>
                             <Button
                               type="button"
                               variant="outline"

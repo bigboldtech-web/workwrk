@@ -31,9 +31,9 @@ export default function IntegrationsPage() {
     <div className="px-6 pt-6">
       <header className="mb-1 flex items-center gap-2">
         <Plug className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Integrations</h1>
+        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Integrations</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-base text-zinc-500">
         Connect WorkwrK to the tools your team already uses.
       </p>
 
@@ -46,8 +46,8 @@ export default function IntegrationsPage() {
           >
             <Icon className="h-5 w-5 shrink-0 text-zinc-500" />
             <div className="min-w-0 flex-1">
-              <div className="text-[14px] font-medium text-zinc-900">{title}</div>
-              <div className="text-[13.5px] text-zinc-500">{desc}</div>
+              <div className="text-base font-medium text-zinc-900">{title}</div>
+              <div className="text-base text-zinc-500">{desc}</div>
             </div>
             <ChevronRight className="h-4 w-4 text-zinc-400" />
           </Link>

@@ -106,7 +106,7 @@ export default async function BlogPostPage({
         <Container>
           <Link
             href="/blog"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
+            className="inline-flex items-center gap-1.5 text-base font-semibold text-slate-600 hover:text-slate-900 transition"
           >
             <ArrowLeft size={14} /> All posts
           </Link>
@@ -119,7 +119,7 @@ export default async function BlogPostPage({
               {post.title}
             </h1>
             <p className="mt-6 text-lg text-slate-600 leading-relaxed">{post.excerpt}</p>
-            <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-slate-500">
+            <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-base text-slate-500">
               <span className="font-semibold text-slate-900">{post.author}</span>
               <span>·</span>
               <span>{post.authorRole}</span>
@@ -154,7 +154,7 @@ export default async function BlogPostPage({
           <Container>
             <div className="max-w-3xl mx-auto flex flex-wrap gap-2">
               {post.tags.map((tag) => (
-                <span key={tag} className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                <span key={tag} className={`inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                   {tag}
                 </span>
               ))}
@@ -181,8 +181,8 @@ export default async function BlogPostPage({
                       {r.category}
                     </span>
                     <p className="mt-4 font-bold text-slate-900 text-lg tracking-tight leading-snug">{r.title}</p>
-                    <p className="mt-3 text-sm text-slate-600 line-clamp-2">{r.excerpt}</p>
-                    <span className={`mt-4 inline-flex items-center gap-1 text-sm font-semibold ${rt.text} group-hover:gap-2 transition-all`}>
+                    <p className="mt-3 text-base text-slate-600 line-clamp-2">{r.excerpt}</p>
+                    <span className={`mt-4 inline-flex items-center gap-1 text-base font-semibold ${rt.text} group-hover:gap-2 transition-all`}>
                       Read <ArrowRight size={13} />
                     </span>
                   </Link>

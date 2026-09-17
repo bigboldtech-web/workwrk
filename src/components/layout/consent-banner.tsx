@@ -24,9 +24,9 @@ import type { ConsentState } from "@/lib/compliance/consent-client";
  * on the white UI regardless of theme.
  */
 const BTN_SECONDARY =
-  "inline-flex h-9 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3.5 text-[14px] font-medium text-zinc-700 hover:bg-zinc-50";
+  "inline-flex h-9 items-center gap-1.5 rounded-md border border-zinc-200 bg-white px-3.5 text-base font-medium text-zinc-700 hover:bg-zinc-50";
 const BTN_PRIMARY =
-  "inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[14px] font-medium text-white hover:bg-[#0060B9]";
+  "inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-base font-medium text-white hover:bg-[#0060B9]";
 const LINK = "font-medium text-[#0073EA] underline underline-offset-2 hover:text-[#0060B9]";
 
 export function ConsentBanner() {
@@ -56,14 +56,14 @@ export function ConsentBanner() {
                 <Shield size={18} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900">
+                <p className="text-base font-semibold tracking-[-0.01em] text-zinc-900">
                   {isStrict
                     ? "We use cookies — your choice"
                     : isOptOut
                       ? "Your privacy choices"
                       : "Cookie notice"}
                 </p>
-                <p className="mt-1.5 text-[14px] leading-relaxed text-zinc-500">
+                <p className="mt-1.5 text-base leading-relaxed text-zinc-500">
                   We use essential cookies to run the site. With your permission we also use
                   optional cookies for preferences, analytics, and marketing.{" "}
                   <Link href="/cookies" className={LINK}>
@@ -102,7 +102,7 @@ export function ConsentBanner() {
         ) : (
           <>
             <div className="mb-3.5 flex items-center justify-between">
-              <p className="text-[15px] font-semibold tracking-[-0.01em] text-zinc-900">
+              <p className="text-base font-semibold tracking-[-0.01em] text-zinc-900">
                 Manage cookie preferences
               </p>
               <button
@@ -178,7 +178,7 @@ function Row({
       }`}
     >
       <div className="flex-1">
-        <p className="text-sm font-medium text-zinc-900">{title}</p>
+        <p className="text-xs font-medium text-zinc-900">{title}</p>
         <p className="mt-0.5 text-xs text-zinc-500">{description}</p>
       </div>
       <input

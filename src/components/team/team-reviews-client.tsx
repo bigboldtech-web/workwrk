@@ -91,7 +91,7 @@ export function TeamReviewsClient({ pending, acted }: Props) {
         {localPending.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white px-6 py-8 text-center">
             <CheckCircle2 className="w-6 h-6 mx-auto text-emerald-600 mb-2" />
-            <div className="text-sm font-medium">Inbox zero.</div>
+            <div className="text-xs font-medium">Inbox zero.</div>
             <div className="text-xs text-zinc-500 mt-1">Nothing waiting for you right now.</div>
           </div>
         ) : (
@@ -154,11 +154,11 @@ function PendingCard({
         onClick={onToggle}
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50"
       >
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-zinc-100 text-sm font-medium">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-zinc-100 text-xs font-medium">
           {initials}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">{subjectName}</div>
+          <div className="text-xs font-medium truncate">{subjectName}</div>
           <div className="text-xs text-zinc-500">
             {formatWeekRange(review.periodStart)} · submitted{" "}
             {review.submittedAt ? new Date(review.submittedAt).toLocaleDateString() : "recently"}
@@ -175,12 +175,12 @@ function PendingCard({
             ) : (
               <ul className="space-y-1.5">
                 {review.kraProgress.map((kp) => (
-                  <li key={kp.kraId} className="text-sm">
+                  <li key={kp.kraId} className="text-xs">
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-zinc-500 w-12">{kp.progressPct}%</span>
-                      <span className="flex-1 truncate font-mono text-[12px] text-zinc-500">{kp.kraId}</span>
+                      <span className="flex-1 truncate font-mono text-xs text-zinc-500">{kp.kraId}</span>
                     </div>
-                    {kp.note ? <div className="text-[12px] text-zinc-500 ml-12">{kp.note}</div> : null}
+                    {kp.note ? <div className="text-xs text-zinc-500 ml-12">{kp.note}</div> : null}
                   </li>
                 ))}
               </ul>
@@ -193,8 +193,8 @@ function PendingCard({
             ) : (
               <ul className="space-y-1">
                 {review.kpiSnapshots.map((k) => (
-                  <li key={k.kpiId} className="text-sm flex items-center gap-2">
-                    <span className="font-mono text-[12px] text-zinc-500 flex-1 truncate">{k.kpiId}</span>
+                  <li key={k.kpiId} className="text-xs flex items-center gap-2">
+                    <span className="font-mono text-xs text-zinc-500 flex-1 truncate">{k.kpiId}</span>
                     <span>{k.value ?? "—"}</span>
                   </li>
                 ))}
@@ -214,14 +214,14 @@ function PendingCard({
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
             <div className="flex items-center gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => onRequestChanges(notes.trim() || undefined)}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm border border-red-500/40 text-red-700 hover:bg-red-500/10 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs border border-red-500/40 text-red-700 hover:bg-red-500/10 disabled:opacity-50"
               >
                 <MessageSquareWarning className="w-3.5 h-3.5" />
                 {busy ? "Saving…" : "Request changes"}
@@ -230,7 +230,7 @@ function PendingCard({
                 type="button"
                 onClick={() => onApprove(notes.trim() || undefined)}
                 disabled={busy}
-                className="ml-auto inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-sm text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+                className="ml-auto inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-xs text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
               >
                 <Check className="w-3.5 h-3.5" />
                 {busy ? "Saving…" : "Approve"}
@@ -250,10 +250,10 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
     <div className={`px-4 py-2.5 rounded-md border ${
       approved ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5"
     }`}>
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-xs">
         <span className="font-medium flex-1 truncate">{subjectName}</span>
         <span className="text-xs text-zinc-500">{formatWeekRange(review.periodStart)}</span>
-        <span className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+        <span className={`text-micro uppercase tracking-wide px-1.5 py-0.5 rounded ${
           approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
         }`}>
           {approved ? "Approved" : "Changes"}
@@ -269,7 +269,7 @@ function ActedCard({ review }: { review: ManagerReviewQueueItem }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <h3 className="text-[12px] uppercase tracking-wide text-zinc-500 mb-1.5">{title}</h3>
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-1.5">{title}</h3>
       {children}
     </div>
   );
@@ -282,8 +282,8 @@ function Empty() {
 function Narrative({ label, body }: { label: string; body: string | null }) {
   return (
     <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2">
-      <div className="text-[12px] text-zinc-500">{label}</div>
-      <div className="text-sm whitespace-pre-wrap break-words mt-1">{body || <span className="text-zinc-500">—</span>}</div>
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="text-xs whitespace-pre-wrap break-words mt-1">{body || <span className="text-zinc-500">—</span>}</div>
     </div>
   );
 }

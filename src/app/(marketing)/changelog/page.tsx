@@ -126,9 +126,9 @@ export default function ChangelogPage() {
                 </span>
                 <div className="flex flex-wrap items-baseline gap-3">
                   <h2 className="font-extrabold text-2xl text-slate-900 tracking-tight">{entry.title}</h2>
-                  <span className="text-xs font-mono text-slate-400">{entry.version}</span>
+                  <span className="text-sm font-mono text-slate-400">{entry.version}</span>
                 </div>
-                <p className="text-sm text-slate-500 mt-1">{entry.date}</p>
+                <p className="text-base text-slate-500 mt-1">{entry.date}</p>
                 <ul className="mt-5 space-y-2.5">
                   {entry.items.map((item, i) => {
                     const meta = TYPE_META[item.type];

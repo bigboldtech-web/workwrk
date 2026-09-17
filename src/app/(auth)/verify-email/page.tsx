@@ -45,10 +45,10 @@ function VerifyEmailInner() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Verifying…</h1>
-          <p className="text-sm text-slate-500 mt-1.5">Checking your token.</p>
+          <h1 className="text-3xl font-semibold tracking-tight">Verifying…</h1>
+          <p className="text-base text-slate-500 mt-1.5">Checking your token.</p>
         </div>
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex items-center gap-2 text-base text-slate-500">
           <Loader2 size={14} className="animate-spin" /> Talking to the server
         </div>
       </div>
@@ -59,21 +59,21 @@ function VerifyEmailInner() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Email verified</h1>
-          <p className="text-sm text-slate-500 mt-1.5">
+          <h1 className="text-3xl font-semibold tracking-tight">Email verified</h1>
+          <p className="text-base text-slate-500 mt-1.5">
             You're in. Jump straight to your workspace.
           </p>
         </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm flex items-center gap-2">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-base flex items-center gap-2">
           <CheckCircle2 size={16} /> All set.
         </div>
         <Link
           href="/dashboard"
-          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
         >
           Open dashboard <ArrowRight size={14} />
         </Link>
-        <p className="text-sm text-slate-600 text-center">
+        <p className="text-base text-slate-600 text-center">
           Not signed in?{" "}
           <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
             Log in
@@ -87,14 +87,14 @@ function VerifyEmailInner() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Already verified</h1>
-          <p className="text-sm text-slate-500 mt-1.5">
+          <h1 className="text-3xl font-semibold tracking-tight">Already verified</h1>
+          <p className="text-base text-slate-500 mt-1.5">
             This email has been confirmed previously. No action needed.
           </p>
         </div>
         <Link
           href="/dashboard"
-          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
         >
           Open dashboard <ArrowRight size={14} />
         </Link>
@@ -105,19 +105,19 @@ function VerifyEmailInner() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Link expired or invalid</h1>
-        <p className="text-sm text-slate-500 mt-1.5">{msg}</p>
+        <h1 className="text-3xl font-semibold tracking-tight">Link expired or invalid</h1>
+        <p className="text-base text-slate-500 mt-1.5">{msg}</p>
       </div>
-      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-sm flex items-center gap-2">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-4 py-3 text-base flex items-center gap-2">
         <AlertCircle size={16} /> {msg}
       </div>
       <Link
         href="/login"
-        className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+        className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
       >
         Back to sign in <ArrowRight size={14} />
       </Link>
-      <p className="text-sm text-slate-600 text-center">
+      <p className="text-base text-slate-600 text-center">
         Need a new link?{" "}
         <Link href="/forgot-password" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Request one

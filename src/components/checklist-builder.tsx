@@ -279,7 +279,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
         {sections.length === 0 && (
           <div className="text-center py-16 px-4">
             <ListChecks size={40} className="mx-auto text-muted mb-3" />
-            <p className="text-sm text-muted mb-1">No sections yet</p>
+            <p className="text-xs text-muted mb-1">No sections yet</p>
             <p className="text-xs text-muted-2 mb-4">Add sections and steps to build your process</p>
             {editing && (
               <div className="flex items-center justify-center gap-2">
@@ -301,7 +301,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                   <div className="group/divider relative h-0">
                     <div className="absolute inset-x-0 -top-1 h-2 z-10 flex items-center justify-center opacity-0 group-hover/divider:opacity-100 transition-opacity cursor-pointer"
                       onClick={() => addSectionAt(sIdx)}>
-                      <div className="flex items-center gap-2 px-3 py-0.5 rounded-full bg-[#0073EA] text-white text-[11px] font-medium shadow-sm">
+                      <div className="flex items-center gap-2 px-3 py-0.5 rounded-full bg-[#0073EA] text-white text-xs font-medium shadow-sm">
                         <Plus size={10} /> Add Section
                       </div>
                     </div>
@@ -315,11 +315,11 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                   </button>
                   {editing ? (
                     <Input value={section.title} onChange={(e) => updateSectionTitle(section.id, e.target.value)}
-                      placeholder="Section title..." className="bg-transparent border-none h-7 text-sm font-semibold flex-1 p-0 focus-visible:ring-0" />
+                      placeholder="Section title..." className="bg-transparent border-none h-7 text-xs font-semibold flex-1 p-0 focus-visible:ring-0" />
                   ) : (
-                    <span className="text-sm font-semibold flex-1">{section.title || "Untitled"}</span>
+                    <span className="text-xs font-semibold flex-1">{section.title || "Untitled"}</span>
                   )}
-                  <span className="text-[11px] text-muted-2 shrink-0">{section.steps.length} tasks</span>
+                  <span className="text-xs text-muted-2 shrink-0">{section.steps.length} tasks</span>
                   {editing && (
                     <div className="flex items-center gap-0.5 shrink-0">
                       <Button variant="ghost" size="icon" className="h-6 w-6 text-muted" onClick={() => duplicateSection(section.id)}><Copy size={10} /></Button>
@@ -347,11 +347,11 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                           ) : (
                             <div className="h-4 w-4 rounded-full border-2 border-border shrink-0" />
                           )}
-                          <span className={`text-sm flex-1 truncate ${step.title ? "" : "text-muted italic"}`}>
+                          <span className={`text-xs flex-1 truncate ${step.title ? "" : "text-muted italic"}`}>
                             {step.title || "Untitled step"}
                           </span>
-                          {hasInputs && <Badge variant="outline" className="text-[10px] shrink-0">{step.inputs.length} fields</Badge>}
-                          {step.type === "approval" && <Badge className="text-[10px] bg-amber-500/10 text-amber-400 shrink-0">Approval</Badge>}
+                          {hasInputs && <Badge variant="outline" className="text-micro shrink-0">{step.inputs.length} fields</Badge>}
+                          {step.type === "approval" && <Badge className="text-micro bg-amber-500/10 text-amber-400 shrink-0">Approval</Badge>}
                           {editing && (
                             <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100">
                               <Button variant="ghost" size="icon" className="h-5 w-5 text-muted" onClick={(e) => { e.stopPropagation(); moveStep(section.id, step.id, "up"); }}><ArrowUp size={10} /></Button>
@@ -434,9 +434,9 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
               <Label className="text-xs text-muted uppercase tracking-wider">Description</Label>
               {editing ? (
                 <Textarea value={selectedStepObj.description || ""} onChange={(e) => updateStep(selectedStep.sectionId, selectedStep.stepId, { description: e.target.value })}
-                  placeholder="Describe what needs to be done in this step..." rows={3} className="text-sm" />
+                  placeholder="Describe what needs to be done in this step..." rows={3} className="text-xs" />
               ) : (
-                <p className="text-sm text-muted">{selectedStepObj.description || "No description"}</p>
+                <p className="text-xs text-muted">{selectedStepObj.description || "No description"}</p>
               )}
             </div>
 
@@ -446,7 +446,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                 <Label className="text-xs text-muted uppercase tracking-wider">Content</Label>
                 {editing && (
                   <div className="relative">
-                    <Button variant="ghost" size="sm" className="h-6 text-[11px] gap-1 text-muted" onClick={() => setShowContentPicker(!showContentPicker)}>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-muted" onClick={() => setShowContentPicker(!showContentPicker)}>
                       <Type size={10} /> Add Content
                     </Button>
                     {showContentPicker && (
@@ -483,7 +483,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                 <Label className="text-xs text-muted uppercase tracking-wider">Form Inputs</Label>
                 {editing && (
                   <div className="relative">
-                    <Button variant="ghost" size="sm" className="h-6 text-[11px] gap-1 text-muted" onClick={() => setShowInputPicker(!showInputPicker)}>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs gap-1 text-muted" onClick={() => setShowInputPicker(!showInputPicker)}>
                       <Hash size={10} /> Add Input
                     </Button>
                     {showInputPicker && (
@@ -512,7 +512,7 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                       <>
                         <div className="flex items-center gap-2">
                           <Input value={input.label} onChange={(e) => updateInput(input.id, { label: e.target.value })} placeholder="Field label..." className="bg-transparent border-border h-7 text-xs flex-1" />
-                          <label className="flex items-center gap-1 text-[11px] text-muted shrink-0 cursor-pointer">
+                          <label className="flex items-center gap-1 text-xs text-muted shrink-0 cursor-pointer">
                             <input type="checkbox" checked={input.required} onChange={(e) => updateInput(input.id, { required: e.target.checked })} className="rounded" />
                             Required
                           </label>
@@ -525,8 +525,8 @@ export function ChecklistBuilder({ sections, onChange, editing, onAiGenerate }: 
                     ) : (
                       <div className="flex items-center gap-2">
                         <span className="text-xs">{input.label}</span>
-                        <span className="text-[11px] text-muted-2">({INPUT_TYPES.find((t) => t.value === input.type)?.label})</span>
-                        {input.required && <span className="text-[11px] text-red-400">*Required</span>}
+                        <span className="text-xs text-muted-2">({INPUT_TYPES.find((t) => t.value === input.type)?.label})</span>
+                        {input.required && <span className="text-xs text-red-400">*Required</span>}
                       </div>
                     )}
                   </div>

@@ -272,7 +272,7 @@ export function RichEditor({
   }
 
   return (
-    <div className={`border border-border rounded-lg overflow-visible bg-background relative ${compact ? "text-sm" : ""}`}>
+    <div className={`border border-border rounded-lg overflow-visible bg-background relative ${compact ? "text-xs" : ""}`}>
       {/* Hidden file input for image upload */}
       <input
         ref={fileInputRef}
@@ -350,7 +350,7 @@ export function RichEditor({
         {slashOpen && editable && (
           <div className="absolute left-4 top-8 z-30 w-64 max-h-72 overflow-y-auto rounded-lg border border-border bg-surface shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-              <span className="text-[11px] uppercase tracking-wider text-muted">Insert</span>
+              <span className="text-micro uppercase tracking-wider text-muted">Insert</span>
               <button onClick={() => setSlashOpen(false)} className="text-muted hover:text-foreground">
                 <X size={12} />
               </button>
@@ -363,7 +363,7 @@ export function RichEditor({
                   <li key={c.id}>
                     <button
                       onClick={() => runSlashCommand(c.id)}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-[rgba(212,255,46,0.08)] hover:text-[#d4ff2e] text-left"
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-[rgba(212,255,46,0.08)] hover:text-[#d4ff2e] text-left"
                     >
                       <span className="text-muted">{c.icon}</span>
                       <span>{c.label}</span>

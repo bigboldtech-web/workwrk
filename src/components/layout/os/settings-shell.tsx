@@ -240,14 +240,14 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         <Link
           href={closeHref}
           onClick={onExitClick}
-          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[14px] font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-base font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
           title="Back to workspace (Esc)"
         >
           <ArrowLeft className="h-4 w-4" />
           Back
         </Link>
         <span className="mx-1 h-5 w-px bg-zinc-200" />
-        <div className="flex min-w-0 items-center gap-1.5 text-[14px]">
+        <div className="flex min-w-0 items-center gap-1.5 text-base">
           <span className="truncate font-medium text-zinc-900">{org ?? "Workspace"}</span>
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
           <span className="text-zinc-500">Settings</span>
@@ -274,7 +274,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
         {/* ClickUp settings nav: white column, "All settings" header,
             sentence-case section labels, compact stadium-pill rows. */}
         <nav className="flex w-[248px] shrink-0 flex-col border-r border-zinc-200 bg-white px-2 py-2">
-          <div className="px-2.5 pb-2 pt-2 text-[15px] font-bold text-zinc-900">All settings</div>
+          <div className="px-2.5 pb-2 pt-2 text-base font-semibold text-zinc-900">All settings</div>
           <div className="flex-1 overflow-y-auto">
             {DOORS.map((door) => {
               // Admin door is hidden entirely for non-admins.
@@ -287,14 +287,14 @@ export function SettingsShell({ children }: { children: ReactNode }) {
                 >
                   <div className="flex items-center gap-1.5 px-2.5 pb-0.5">
                     <DoorIcon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                    <span className="text-[12px] font-semibold uppercase tracking-wide text-zinc-500">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                       {door.label}
                     </span>
                   </div>
                   {door.groups.map((group, gi) => (
                     <div key={group.label ?? `g${gi}`}>
                       {group.label ? (
-                        <div className="px-2.5 pb-1 pt-3 text-[12px] font-medium text-zinc-400">
+                        <div className="px-2.5 pb-1 pt-3 text-xs font-medium text-zinc-400">
                           {group.label}
                         </div>
                       ) : (
@@ -306,10 +306,10 @@ export function SettingsShell({ children }: { children: ReactNode }) {
                           if (!item.href) {
                             return (
                               <li key={item.label}>
-                                <span className="flex h-7 cursor-default select-none items-center gap-2.5 rounded-full px-2.5 text-[14px] text-zinc-400">
+                                <span className="flex h-7 cursor-default select-none items-center gap-2.5 rounded-full px-2.5 text-base text-zinc-400">
                                   <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
                                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                                  <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] font-medium text-zinc-400">Soon</span>
+                                  <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-400">Soon</span>
                                 </span>
                               </li>
                             );
@@ -319,7 +319,7 @@ export function SettingsShell({ children }: { children: ReactNode }) {
                             <li key={item.label}>
                               <Link
                                 href={item.href}
-                                className={`flex h-7 items-center gap-2.5 rounded-full px-2.5 text-[14px] transition-colors ${
+                                className={`flex h-7 items-center gap-2.5 rounded-full px-2.5 text-base transition-colors ${
                                   active
                                     ? "bg-zinc-100 font-medium text-zinc-900"
                                     : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"

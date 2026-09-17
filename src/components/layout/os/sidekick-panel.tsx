@@ -344,7 +344,7 @@ export function OsSidekickPanel() {
               <ChevronDown />
             </button>
           ) : (
-            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--os-ink)" }}>All chats</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "var(--os-ink)" }}>All chats</div>
           )}
           <div className="os-sk__topbar-spacer" />
           <button type="button" className="os-sk__iconbtn" title="More" aria-label="More">
@@ -431,7 +431,7 @@ export function OsSidekickPanel() {
                   <span className="os-sk__sec-icon"><s.icon /></span>
                   <span className="os-sk__sec-row-label">{s.label}</span>
                   {s.tag ? (
-                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 700 }}>
+                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 600 }}>
                       {s.tag}
                     </span>
                   ) : null}
@@ -445,7 +445,7 @@ export function OsSidekickPanel() {
                   <span className="os-sk__sec-icon"><s.icon /></span>
                   <span className="os-sk__sec-row-label">{s.label}</span>
                   {s.tag ? (
-                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 700 }}>
+                    <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 999, background: "var(--os-brand-soft)", color: "var(--os-brand-deep)", fontWeight: 600 }}>
                       {s.tag}
                     </span>
                   ) : null}

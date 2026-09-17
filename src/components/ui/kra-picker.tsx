@@ -62,14 +62,14 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#0073EA]"
+        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-[#0073EA]"
       >
         <span className="flex-1 min-w-0 text-left">
           {selected ? (
             <span className="flex items-center gap-2 min-w-0">
               <span className="truncate min-w-0">{selected.name}</span>
               {selected.category && (
-                <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted">{selected.category}</span>
+                <span className="shrink-0 rounded bg-surface-2 px-1.5 py-0.5 text-xs text-muted">{selected.category}</span>
               )}
             </span>
           ) : (
@@ -89,7 +89,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search KRAs..."
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted"
+              className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted"
             />
             {search && (
               <button onClick={() => setSearch("")} className="text-muted hover:text-foreground">
@@ -105,7 +105,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
             )}
             {sortedCategories.map((cat) => (
               <div key={cat}>
-                <div className="sticky top-0 bg-surface px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                <div className="sticky top-0 bg-surface px-2 py-1 text-micro font-semibold uppercase tracking-wider text-muted">
                   {cat}
                 </div>
                 {grouped[cat].map((k) => (
@@ -114,7 +114,7 @@ export function KraPicker({ kras, value, onChange, placeholder = "Select KRA", e
                     type="button"
                     onClick={() => { onChange(k.id); setOpen(false); setSearch(""); }}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-left transition-colors hover:bg-surface-2",
+                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left transition-colors hover:bg-surface-2",
                       k.id === value && "bg-[rgba(0,115,234,0.08)] text-[#0073EA]"
                     )}
                   >

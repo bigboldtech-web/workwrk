@@ -130,8 +130,8 @@ export default function AdminCompaniesPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Companies</h1>
-        <p className="text-muted text-sm mt-1">Manage all subscriber organizations — {total} total</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
+        <p className="text-muted text-base mt-1">Manage all subscriber organizations — {total} total</p>
       </div>
 
       {/* Filters */}
@@ -169,20 +169,20 @@ export default function AdminCompaniesPage() {
               <RefreshCw className="h-5 w-5 animate-spin text-muted" />
             </div>
           ) : companies.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted">
+            <div className="p-8 text-center text-base text-muted">
               No companies found.
             </div>
           ) : (
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Activity</th>
-                  <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">Joined</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Actions</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Activity</th>
+                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -192,25 +192,25 @@ export default function AdminCompaniesPage() {
                       <div className="flex items-center gap-2">
                         <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
-                          <span className="text-sm font-medium">{c.name}</span>
-                          <p className="text-[11px] text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
+                          <span className="text-base font-medium">{c.name}</span>
+                          <p className="text-xs text-muted">{c.slug}{c.domain ? ` · ${c.domain}` : ""}</p>
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-center">
-                      <span className={`text-xs font-semibold ${getPlanColor(c.plan)}`}>{c.plan}</span>
+                      <span className={`text-sm font-semibold ${getPlanColor(c.plan)}`}>{c.plan}</span>
                     </td>
-                    <td className="p-4 text-center text-sm">{c._count.users}</td>
+                    <td className="p-4 text-center text-base">{c._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(c.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-[11px] text-muted">
+                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
                         <span title="Tasks"><CheckSquare size={10} className="inline mr-0.5" />{c._count.tasks}</span>
                         <span title="KRAs"><Target size={10} className="inline mr-0.5" />{c._count.kras}</span>
                         <span title="SOPs"><BookOpen size={10} className="inline mr-0.5" />{c._count.sops}</span>
                         <span title="Reviews"><Star size={10} className="inline mr-0.5" />{c._count.reviewCycles}</span>
                       </div>
                     </td>
-                    <td className="p-4 text-right text-xs text-muted">
+                    <td className="p-4 text-right text-sm text-muted">
                       {new Date(c.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
                     <td className="p-4 text-center">
@@ -234,7 +234,7 @@ export default function AdminCompaniesPage() {
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between">
-          <p className="text-xs text-muted">
+          <p className="text-sm text-muted">
             Page {page} of {totalPages} ({total} companies)
           </p>
           <div className="flex gap-2">
@@ -264,36 +264,36 @@ export default function AdminCompaniesPage() {
               <div className="grid grid-cols-5 gap-3 text-center">
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Users size={14} className="mx-auto mb-1 text-blue-400" />
-                  <p className="text-lg font-bold">{selected._count.users}</p>
-                  <p className="text-[11px] text-muted">Users</p>
+                  <p className="text-lg font-semibold">{selected._count.users}</p>
+                  <p className="text-xs text-muted">Users</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <CheckSquare size={14} className="mx-auto mb-1 text-green-400" />
-                  <p className="text-lg font-bold">{selected._count.tasks}</p>
-                  <p className="text-[11px] text-muted">Tasks</p>
+                  <p className="text-lg font-semibold">{selected._count.tasks}</p>
+                  <p className="text-xs text-muted">Tasks</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Target size={14} className="mx-auto mb-1 text-orange-400" />
-                  <p className="text-lg font-bold">{selected._count.kras}</p>
-                  <p className="text-[11px] text-muted">KRAs</p>
+                  <p className="text-lg font-semibold">{selected._count.kras}</p>
+                  <p className="text-xs text-muted">KRAs</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <BookOpen size={14} className="mx-auto mb-1 text-[#d4ff2e]" />
-                  <p className="text-lg font-bold">{selected._count.sops}</p>
-                  <p className="text-[11px] text-muted">SOPs</p>
+                  <p className="text-lg font-semibold">{selected._count.sops}</p>
+                  <p className="text-xs text-muted">SOPs</p>
                 </div>
                 <div className="rounded-lg bg-surface-2 p-3">
                   <Star size={14} className="mx-auto mb-1 text-yellow-400" />
-                  <p className="text-lg font-bold">{selected._count.reviewCycles}</p>
-                  <p className="text-[11px] text-muted">Reviews</p>
+                  <p className="text-lg font-semibold">{selected._count.reviewCycles}</p>
+                  <p className="text-xs text-muted">Reviews</p>
                 </div>
               </div>
 
               {/* Info */}
-              <div className="space-y-2 text-sm">
+              <div className="space-y-2 text-base">
                 <div className="flex justify-between">
                   <span className="text-muted">Slug</span>
-                  <span className="font-mono text-xs">{selected.slug}</span>
+                  <span className="font-mono text-sm">{selected.slug}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">Domain</span>
@@ -308,7 +308,7 @@ export default function AdminCompaniesPage() {
               {/* Editable fields */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted mb-1 block">Plan</label>
+                  <label className="text-sm text-muted mb-1 block">Plan</label>
                   <Select value={editPlan} onValueChange={setEditPlan}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
@@ -317,7 +317,7 @@ export default function AdminCompaniesPage() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs text-muted mb-1 block">Status</label>
+                  <label className="text-sm text-muted mb-1 block">Status</label>
                   <Select value={editStatus} onValueChange={setEditStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>

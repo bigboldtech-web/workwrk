@@ -98,7 +98,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-4">
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-900">Files</h2>
+        <h2 className="text-xs font-semibold text-zinc-900">Files</h2>
         {canEdit ? (
           <>
             <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => void uploadFiles(e.target.files)} />
@@ -106,7 +106,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
               type="button"
               disabled={uploading}
               onClick={() => inputRef.current?.click()}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[13px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
             >
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload
             </button>
@@ -115,9 +115,9 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
       </div>
 
       {files === null ? (
-        <div className="flex items-center gap-2 py-4 text-[13px] text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+        <div className="flex items-center gap-2 py-4 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : files.length === 0 ? (
-        <p className="py-3 text-[13px] text-zinc-400">
+        <p className="py-3 text-sm text-zinc-400">
           No files yet.{canEdit ? " Drag files anywhere on this page to upload — they also appear in Library → Files." : ""}
         </p>
       ) : (
@@ -130,10 +130,10 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
                   <Icon className="h-4 w-4 text-zinc-500" />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <a href={f.url} target="_blank" rel="noopener" className="block truncate text-[14px] text-zinc-800 hover:text-[#0073EA]" title={f.name}>
+                  <a href={f.url} target="_blank" rel="noopener" className="block truncate text-base text-zinc-800 hover:text-[#0073EA]" title={f.name}>
                     {f.name}
                   </a>
-                  <span className="text-[12px] text-zinc-400">
+                  <span className="text-xs text-zinc-400">
                     {fmtSize(f.size)} · {new Date(f.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                   </span>
                 </div>

@@ -130,7 +130,7 @@ export default function FeaturesPage() {
                 <a
                   key={hub.slug}
                   href={`#${hub.slug}`}
-                  className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
+                  className={`inline-flex items-center gap-1.5 text-sm font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
                 >
                   <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: t.hex }} />
                   {hub.name}
@@ -189,7 +189,7 @@ export default function FeaturesPage() {
                         <p className="font-bold text-slate-900 tracking-tight">{sub.title}</p>
                         <ArrowRight size={14} className={`${t.text} opacity-60 group-hover:opacity-100 group-hover:translate-x-0.5 transition`} />
                       </div>
-                      <p className="mt-2 text-sm text-slate-600 leading-relaxed">{sub.body}</p>
+                      <p className="mt-2 text-base text-slate-600 leading-relaxed">{sub.body}</p>
                     </Link>
                   ))}
                 </div>

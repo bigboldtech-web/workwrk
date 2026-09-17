@@ -95,7 +95,7 @@ export default function AboutPage() {
                   <span className="absolute -left-[2.4rem] top-0.5 w-6 h-6 rounded-full bg-white border-2 border-emerald-500 flex items-center justify-center">
                     <span className="w-2 h-2 rounded-full bg-emerald-500" />
                   </span>
-                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">{year}</p>
+                  <p className="text-sm font-bold uppercase tracking-[0.18em] text-emerald-700">{year}</p>
                   <H3 className="mt-1">{title}</H3>
                   <p className="mt-2 text-slate-600 text-[15px] leading-relaxed">{body}</p>
                 </li>

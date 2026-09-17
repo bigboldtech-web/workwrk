@@ -30,20 +30,20 @@ export function ModuleDisabledScreen({
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
           {label} isn&apos;t turned on
         </h1>
-        <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 text-zinc-500 dark:text-zinc-400">
+        <p className="mx-auto mt-2 max-w-sm text-sm leading-5 text-zinc-500 dark:text-zinc-400">
           {label} is a premium module ({competesWith}). {blurb}
         </p>
         {canEnable ? (
           <Link
             href="/settings/modules"
-            className="mt-6 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90"
+            className="mt-6 inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90"
             style={{ background: "var(--os-brand)" }}
           >
             <Settings2 className="h-4 w-4" aria-hidden />
             Enable in Settings → Modules
           </Link>
         ) : (
-          <p className="mt-6 text-[13px] text-zinc-500 dark:text-zinc-400">
+          <p className="mt-6 text-sm text-zinc-500 dark:text-zinc-400">
             Ask a workspace admin to enable it in Settings → Modules.
           </p>
         )}

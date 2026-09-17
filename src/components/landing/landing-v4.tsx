@@ -117,7 +117,7 @@ function Hero() {
               </Link>
             </div>
 
-            <p className="mt-6 text-xs" style={{ color: "var(--m-text-soft)" }}>
+            <p className="mt-6 text-sm" style={{ color: "var(--m-text-soft)" }}>
               Free forever for up to 5 people. No credit card.
             </p>
           </div>

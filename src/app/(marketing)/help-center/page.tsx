@@ -74,7 +74,7 @@ export default function HelpCenterPage() {
               <input
                 type="search"
                 placeholder="Search for a guide, a feature, an error message..."
-                className="w-full pl-12 pr-4 h-14 rounded-2xl bg-white border border-slate-200 text-base placeholder:text-slate-400 focus:outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-100 transition shadow-sm"
+                className="w-full pl-12 pr-4 h-14 rounded-2xl bg-white border border-slate-200 text-lg placeholder:text-slate-400 focus:outline-none focus:border-violet-500 focus:ring-4 focus:ring-violet-100 transition shadow-sm"
               />
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
             </div>
@@ -103,7 +103,7 @@ export default function HelpCenterPage() {
                     <Icon size={18} strokeWidth={2.4} />
                   </div>
                   <p className="mt-4 font-bold text-slate-900 tracking-tight">{g.title}</p>
-                  <p className="mt-2 text-xs text-slate-500">{g.mins} min read</p>
+                  <p className="mt-2 text-sm text-slate-500">{g.mins} min read</p>
                 </Link>
               );
             })}
@@ -132,8 +132,8 @@ export default function HelpCenterPage() {
                     <Icon size={18} strokeWidth={2.4} />
                   </div>
                   <p className="mt-4 font-bold text-slate-900">{hub.name}</p>
-                  <p className="mt-1 text-xs text-slate-500">~25 guides</p>
-                  <p className={`mt-3 inline-flex items-center gap-1 text-xs font-semibold ${t.text} group-hover:gap-2 transition-all`}>
+                  <p className="mt-1 text-sm text-slate-500">~25 guides</p>
+                  <p className={`mt-3 inline-flex items-center gap-1 text-sm font-semibold ${t.text} group-hover:gap-2 transition-all`}>
                     Browse <ArrowRight size={11} />
                   </p>
                 </Link>
@@ -148,18 +148,18 @@ export default function HelpCenterPage() {
           <div className="grid lg:grid-cols-3 gap-5">
             <Link href="/blog" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
               <H3>Read essays</H3>
-              <p className="mt-3 text-sm text-slate-600">Operator playbooks and category essays from the team and our customers.</p>
-              <p className="mt-5 text-sm font-semibold text-violet-700 inline-flex items-center gap-1">Go to blog <ArrowRight size={13} /></p>
+              <p className="mt-3 text-base text-slate-600">Operator playbooks and category essays from the team and our customers.</p>
+              <p className="mt-5 text-base font-semibold text-violet-700 inline-flex items-center gap-1">Go to blog <ArrowRight size={13} /></p>
             </Link>
             <Link href="/changelog" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
               <H3>What&apos;s new</H3>
-              <p className="mt-3 text-sm text-slate-600">Every shipped feature, every Tuesday. Years of context at a glance.</p>
-              <p className="mt-5 text-sm font-semibold text-fuchsia-700 inline-flex items-center gap-1">See changelog <ArrowRight size={13} /></p>
+              <p className="mt-3 text-base text-slate-600">Every shipped feature, every Tuesday. Years of context at a glance.</p>
+              <p className="mt-5 text-base font-semibold text-fuchsia-700 inline-flex items-center gap-1">See changelog <ArrowRight size={13} /></p>
             </Link>
             <Link href="/developers" className="p-7 bg-white border border-slate-200 rounded-2xl hover:border-slate-300 transition">
               <H3>For developers</H3>
-              <p className="mt-3 text-sm text-slate-600">API reference, SDKs, webhooks, embeds — everything to extend workwrk.</p>
-              <p className="mt-5 text-sm font-semibold text-emerald-700 inline-flex items-center gap-1">Developer docs <ArrowRight size={13} /></p>
+              <p className="mt-3 text-base text-slate-600">API reference, SDKs, webhooks, embeds — everything to extend workwrk.</p>
+              <p className="mt-5 text-base font-semibold text-emerald-700 inline-flex items-center gap-1">Developer docs <ArrowRight size={13} /></p>
             </Link>
           </div>
         </Container>

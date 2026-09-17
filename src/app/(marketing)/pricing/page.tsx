@@ -181,10 +181,10 @@ export default function PricingPage() {
                       <tier.icon size={18} strokeWidth={2.2} />
                     </span>
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-700">
+                      <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700">
                         {tier.name}
                       </p>
-                      <p className="text-xs text-slate-500 mt-0.5">{tier.sub}</p>
+                      <p className="text-sm text-slate-500 mt-0.5">{tier.sub}</p>
                     </div>
                   </div>
                   <p className="mt-5 flex items-baseline gap-1.5">
@@ -192,13 +192,13 @@ export default function PricingPage() {
                       {tier.price}
                     </span>
                     {tier.priceSuffix && (
-                      <span className="text-sm text-slate-500 font-medium">{tier.priceSuffix}</span>
+                      <span className="text-base text-slate-500 font-medium">{tier.priceSuffix}</span>
                     )}
                   </p>
-                  <p className="mt-2.5 text-sm text-slate-600 leading-relaxed">{tier.description}</p>
+                  <p className="mt-2.5 text-base text-slate-600 leading-relaxed">{tier.description}</p>
                   <Link
                     href={tier.cta.href}
-                    className={`mt-6 inline-flex items-center justify-center gap-1.5 w-full h-11 rounded-full font-semibold text-sm transition-colors ${
+                    className={`mt-6 inline-flex items-center justify-center gap-1.5 w-full h-11 rounded-full font-semibold text-base transition-colors ${
                       tier.featured
                         ? "bg-slate-900 text-white hover:bg-slate-800"
                         : "bg-white border border-slate-200 text-slate-900 hover:border-slate-300 hover:bg-slate-50"
@@ -212,7 +212,7 @@ export default function PricingPage() {
             })}
           </div>
 
-          <p className="mt-10 text-center text-sm text-slate-500">
+          <p className="mt-10 text-center text-base text-slate-500">
             All plans include unlimited storage, 99.9% uptime, daily backups, and email support.
           </p>
         </Container>
@@ -228,16 +228,16 @@ export default function PricingPage() {
           </div>
 
           <div className="mt-10 overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[720px] text-base">
               <thead>
                 <tr className="border-b-2 border-slate-200">
                   <th className="text-left p-4 font-bold text-slate-900 w-2/5">Feature</th>
                   {TIERS.map((t) => (
                     <th key={t.name} className="text-center p-4">
-                      <span className={`block text-xs font-bold uppercase tracking-[0.16em] ${HUES[t.hue].text}`}>
+                      <span className={`block text-sm font-bold uppercase tracking-[0.16em] ${HUES[t.hue].text}`}>
                         {t.name}
                       </span>
-                      <span className="block text-xs text-slate-500 mt-0.5">{t.price}</span>
+                      <span className="block text-sm text-slate-500 mt-0.5">{t.price}</span>
                     </th>
                   ))}
                 </tr>
@@ -259,7 +259,7 @@ export default function PricingPage() {
                           ) : v === false ? (
                             <Minus size={16} className="inline text-slate-300" />
                           ) : (
-                            <span className="text-xs text-slate-600">{v as string}</span>
+                            <span className="text-sm text-slate-600">{v as string}</span>
                           )}
                         </td>
                       ))}
@@ -279,7 +279,7 @@ export default function PricingPage() {
             <div>
               <Eyebrow hue="amber" className="mb-4">Add-ons</Eyebrow>
               <H3>Optional, when you need them.</H3>
-              <p className="mt-4 text-slate-600 text-sm">
+              <p className="mt-4 text-slate-600 text-base">
                 Most teams never need these. They&apos;re available a-la-carte
                 for the edge cases — and they never gate the core product.
               </p>
@@ -333,10 +333,10 @@ function AddonCard({
   return (
     <div className="p-5 bg-white border border-slate-200 rounded-2xl">
       <div className="flex items-center justify-between gap-2">
-        <p className="font-bold text-slate-900 text-sm">{title}</p>
-        <span className={`text-xs font-bold ${t.text}`}>{price}</span>
+        <p className="font-bold text-slate-900 text-base">{title}</p>
+        <span className={`text-sm font-bold ${t.text}`}>{price}</span>
       </div>
-      <p className="mt-2 text-xs text-slate-600 leading-relaxed">{body}</p>
+      <p className="mt-2 text-sm text-slate-600 leading-relaxed">{body}</p>
     </div>
   );
 }

@@ -94,7 +94,7 @@ export function MessageFeed({ messages, meId, memberNames, onRetry, onJoinCall, 
       {items.map((it) => it.kind === "day" ? (
         <div key={it.key} className="relative flex items-center justify-center py-3">
           <span className="absolute inset-x-0 top-1/2 h-px bg-zinc-100" />
-          <span className="relative rounded-full border border-zinc-200 bg-white px-3 py-1 text-[12px] font-semibold text-zinc-600 shadow-sm">
+          <span className="relative rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-semibold text-zinc-600 shadow-sm">
             {it.label}
           </span>
         </div>
@@ -157,16 +157,16 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         {head ? (
           <TeamAvatar name={`${msg.author.firstName} ${msg.author.lastName}`} avatar={msg.author.avatar} size={30} />
         ) : (
-          <span className="hidden group-hover:block text-[11px] text-zinc-400 tabular-nums pt-1.5 text-right pr-0.5">{time}</span>
+          <span className="hidden group-hover:block text-xs text-zinc-400 tabular-nums pt-1.5 text-right pr-0.5">{time}</span>
         )}
       </div>
       <div className="min-w-0 flex-1 pb-0.5">
         {head && (
           <div className="flex items-baseline gap-2">
-            <span className="text-[14px] font-semibold text-zinc-900">
+            <span className="text-base font-semibold text-zinc-900">
               {mine ? "You" : `${msg.author.firstName} ${msg.author.lastName}`}
             </span>
-            <span className="text-[11px] text-zinc-400 tabular-nums">{time}</span>
+            <span className="text-xs text-zinc-400 tabular-nums">{time}</span>
           </div>
         )}
 
@@ -174,13 +174,13 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           live ? (
             <div className="mt-1 rounded-lg border border-[var(--signal-success-border)] bg-[var(--signal-success-bg)] px-3 py-2">
               <div className="flex items-center gap-2">
-                <span className="text-[14px] font-semibold text-zinc-900">
+                <span className="text-base font-semibold text-zinc-900">
                   {live.participants.map((p) => p.name).slice(0, 3).join(", ")}
                   {live.participants.length > 3 ? ` +${live.participants.length - 3}` : ""} {live.participants.length === 1 ? "is" : "are"} in the call
                 </span>
-                <span className="inline-flex items-center rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">Live</span>
+                <span className="inline-flex items-center rounded-full bg-emerald-600 px-2 py-0.5 text-micro font-semibold uppercase tracking-wide text-white">Live</span>
               </div>
-              <button type="button" onClick={onJoinCall} className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 text-[13px] font-medium text-emerald-800 hover:bg-emerald-100">
+              <button type="button" onClick={onJoinCall} className="mt-2 inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100">
                 <Video className="h-4 w-4" /> Join call
               </button>
             </div>
@@ -188,8 +188,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
             <div className="mt-1 flex items-start gap-3">
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><Phone className="w-4 h-4" /></span>
               <span>
-                <span className="block text-[14px] font-semibold text-zinc-900">A call happened</span>
-                <span className="block text-[13px] text-zinc-500">
+                <span className="block text-base font-semibold text-zinc-900">A call happened</span>
+                <span className="block text-sm text-zinc-500">
                   {formatCallRoll(msg.metadata?.names, meId ? memberNames.get(meId) : undefined)} in the call for {msg.metadata.durationMin ?? 0}m.
                 </span>
               </span>
@@ -197,8 +197,8 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           ) : (
             <div className="mt-1 inline-flex items-center gap-3 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
               <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[var(--os-brand-soft)] text-[var(--os-brand)]"><Video className="w-4 h-4" /></span>
-              <span className="text-[14px] text-zinc-800">{msg.body}</span>
-              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[var(--os-brand)] text-white text-[13px] font-medium hover:bg-[var(--os-brand-hover)]">
+              <span className="text-base text-zinc-800">{msg.body}</span>
+              <button type="button" onClick={onJoinCall} className="h-7 px-3 rounded-md bg-[var(--os-brand)] text-white text-sm font-medium hover:bg-[var(--os-brand-hover)]">
                 Join
               </button>
             </div>
@@ -213,10 +213,10 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 if (e.key === "Escape") { setEditing(false); setDraft(msg.body); }
               }}
               rows={Math.min(6, Math.max(1, draft.split("\n").length))}
-              className="w-full resize-none rounded-md border border-zinc-300 px-2 py-1.5 text-[14px] leading-6 outline-none focus:border-[var(--os-brand)]"
+              className="w-full resize-none rounded-md border border-zinc-300 px-2 py-1.5 text-base leading-6 outline-none focus:border-[var(--os-brand)]"
               autoFocus
             />
-            <div className="mt-1 flex items-center gap-2 text-[12px]">
+            <div className="mt-1 flex items-center gap-2 text-xs">
               <button type="button" onClick={saveEdit} className="inline-flex items-center gap-1 text-[var(--os-brand)] font-medium"><Check className="w-3.5 h-3.5" /> Save</button>
               <button type="button" onClick={() => { setEditing(false); setDraft(msg.body); }} className="inline-flex items-center gap-1 text-zinc-500"><X className="w-3.5 h-3.5" /> Cancel</button>
               <span className="text-zinc-400">Enter saves · Esc cancels</span>
@@ -226,11 +226,11 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           <>
             {(msg.body || deleted) && (
               deleted ? (
-                <p className="text-[14px] leading-6 italic text-zinc-400">Message removed</p>
+                <p className="text-base leading-6 italic text-zinc-400">Message removed</p>
               ) : (
                 <div className={`text-zinc-800 ${msg.pending ? "opacity-60" : ""}`}>
                   <RichBody body={msg.body} memberNames={memberNames} />
-                  {msg.editedAt && <span className="ml-1 text-[11px] text-zinc-400">(edited)</span>}
+                  {msg.editedAt && <span className="ml-1 text-xs text-zinc-400">(edited)</span>}
                 </div>
               )
             )}
@@ -243,10 +243,10 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                   </a>
                 ) : (
                   <a key={i} href={a.url} target="_blank" rel="noopener noreferrer" download={a.name}
-                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-[13px] text-zinc-700 hover:bg-zinc-100">
+                    className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100">
                     <Paperclip className="w-3.5 h-3.5 text-zinc-400" />
                     <span className="max-w-[220px] truncate">{a.name}</span>
-                    {a.size > 0 && <span className="text-[11px] text-zinc-400">{prettySize(a.size)}</span>}
+                    {a.size > 0 && <span className="text-xs text-zinc-400">{prettySize(a.size)}</span>}
                   </a>
                 ))}
               </div>
@@ -263,7 +263,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 type="button"
                 onClick={() => onReact(msg, emoji)}
                 title={users.map((u) => (u === meId ? "You" : memberNames.get(u) ?? "Someone")).join(", ")}
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-[12px] tabular-nums ${
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full border text-xs tabular-nums ${
                   meId && users.includes(meId)
                     ? "border-[var(--os-brand)]/40 bg-[var(--os-brand-soft)] text-[var(--os-brand)]"
                     : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300"
@@ -280,7 +280,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
           <button
             type="button"
             onClick={() => onOpenThread(msg)}
-            className="mt-1 inline-flex items-center gap-1.5 text-[12px] font-medium text-[var(--os-brand)] hover:underline"
+            className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-[var(--os-brand)] hover:underline"
           >
             <MessageSquare className="w-3.5 h-3.5" />
             {msg.replyCount} {msg.replyCount === 1 ? "reply" : "replies"}
@@ -288,7 +288,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
         )}
 
         {msg.failed && (
-          <button type="button" onClick={() => onRetry(msg)} className="mt-0.5 inline-flex items-center gap-1 text-[12px] text-red-600 hover:text-red-700">
+          <button type="button" onClick={() => onRetry(msg)} className="mt-0.5 inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700">
             <RefreshCw className="w-3 h-3" /> Failed to send — retry
           </button>
         )}
@@ -298,7 +298,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
       {canAct && !editing && (
         <div className="absolute -top-3 right-2 hidden group-hover:flex items-center rounded-lg border border-zinc-200 bg-white shadow-sm">
           {["✅", "👀", "🙌"].map((e) => (
-            <button key={e} type="button" onClick={() => onReact(msg, e)} title={`React ${e}`} className="h-7 w-7 inline-flex items-center justify-center text-[14px] hover:bg-zinc-100 rounded-md">
+            <button key={e} type="button" onClick={() => onReact(msg, e)} title={`React ${e}`} className="h-7 w-7 inline-flex items-center justify-center text-base hover:bg-zinc-100 rounded-md">
               {e}
             </button>
           ))}
@@ -311,7 +311,7 @@ function MessageRow({ msg, head, live, mine, meId, memberNames, onRetry, onJoinC
                 <div className="fixed inset-0 z-10" onClick={() => setReactOpen(false)} />
                 <div className="absolute right-0 top-8 z-20 flex gap-0.5 rounded-lg border border-zinc-200 bg-white p-1 shadow-lg">
                   {QUICK_REACTIONS.map((e) => (
-                    <button key={e} type="button" onClick={() => { setReactOpen(false); onReact(msg, e); }} className="h-7 w-7 rounded-md hover:bg-zinc-100 text-[15px]">
+                    <button key={e} type="button" onClick={() => { setReactOpen(false); onReact(msg, e); }} className="h-7 w-7 rounded-md hover:bg-zinc-100 text-base">
                       {e}
                     </button>
                   ))}

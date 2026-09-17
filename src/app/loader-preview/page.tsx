@@ -8,7 +8,7 @@ import { DotsLoader } from "@/components/brand/dots-loader";
 export default function LoaderPreviewPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#FBFBFC", padding: 40, fontFamily: "var(--font-inter), Inter, system-ui, sans-serif" }}>
-      <h1 style={{ fontSize: 22, fontWeight: 800, color: "#181B34", marginBottom: 4 }}>WorkwrK loader preview</h1>
+      <h1 style={{ fontSize: 22, fontWeight: 600, color: "#181B34", marginBottom: 4 }}>WorkwrK loader preview</h1>
       <p style={{ fontSize: 13, color: "#676879", marginBottom: 32 }}>
         Bounce in a row, converge and orbit as a circle, expand back, on a loop.
       </p>

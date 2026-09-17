@@ -106,7 +106,7 @@ export default function FAQPage() {
                 <a
                   key={g.name}
                   href={`#${g.name.toLowerCase()}`}
-                  className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
+                  className={`inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full bg-white border ${t.border} ${t.text} hover:brightness-105 transition`}
                 >
                   {g.name}
                 </a>
@@ -131,7 +131,7 @@ export default function FAQPage() {
                   {g.items.map((it, ii) => (
                     <details key={ii} className="group p-6 lg:p-7 [&_summary::-webkit-details-marker]:hidden">
                       <summary className="flex items-center justify-between gap-6 cursor-pointer list-none">
-                        <span className="font-semibold text-slate-900 text-base">{it.q}</span>
+                        <span className="font-semibold text-slate-900 text-lg">{it.q}</span>
                         <span className={`w-8 h-8 rounded-full ${t.bgTint} ${t.text} flex items-center justify-center transition group-open:rotate-45`}>
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M7 1v12M1 7h12" /></svg>
                         </span>

@@ -249,7 +249,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
             {loading || folders === null ? (
               <div className="flex items-center gap-2 text-xs text-muted py-4"><Loader2 size={14} className="animate-spin" /> Loading categories…</div>
             ) : folders.length === 0 ? (
-              <div className="text-center py-8 text-sm text-muted">
+              <div className="text-center py-8 text-xs text-muted">
                 No folders yet. Create one above to start scoping SOPs.
               </div>
             ) : (
@@ -270,7 +270,7 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                                 if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
                               }}
                               autoFocus
-                              className="h-7 text-sm"
+                              className="h-7 text-xs"
                               disabled={renaming}
                             />
                             <Button size="sm" variant="outline" className="h-7 px-2" onClick={saveRename} disabled={renaming || !renameValue.trim()} aria-label="Save rename">
@@ -282,10 +282,10 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                           </div>
                         ) : (
                           <>
-                            <div className="text-sm font-medium truncate">{f.name}</div>
+                            <div className="text-xs font-medium truncate">{f.name}</div>
                             <div className="flex items-center gap-2 mt-0.5">
-                              <Badge variant="outline" className="text-[11px] h-4">{f._count?.sops ?? 0} SOP{f._count?.sops === 1 ? "" : "s"}</Badge>
-                              <Badge variant="outline" className="text-[11px] h-4">{f._count?.access ?? 0} user{f._count?.access === 1 ? "" : "s"}</Badge>
+                              <Badge variant="outline" className="text-xs h-4">{f._count?.sops ?? 0} SOP{f._count?.sops === 1 ? "" : "s"}</Badge>
+                              <Badge variant="outline" className="text-xs h-4">{f._count?.access ?? 0} user{f._count?.access === 1 ? "" : "s"}</Badge>
                             </div>
                           </>
                         )}
@@ -350,11 +350,11 @@ export function FolderManager({ open, onOpenChange }: { open: boolean; onOpenCha
                         </div>
                         <Avatar className="h-6 w-6">
                           {u.avatar ? <AvatarImage src={u.avatar} alt="" /> : null}
-                          <AvatarFallback className="text-[10px]">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
+                          <AvatarFallback className="text-micro">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
                         </Avatar>
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm">{u.firstName} {u.lastName}</div>
-                          {u.role?.title && <div className="text-[11px] text-muted">{u.role.title}{u.department?.name ? ` · ${u.department.name}` : ""}</div>}
+                          <div className="text-xs">{u.firstName} {u.lastName}</div>
+                          {u.role?.title && <div className="text-xs text-muted">{u.role.title}{u.department?.name ? ` · ${u.department.name}` : ""}</div>}
                         </div>
                       </button>
                       {checked && (

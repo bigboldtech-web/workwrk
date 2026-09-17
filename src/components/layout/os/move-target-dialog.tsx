@@ -92,7 +92,7 @@ export function MoveTargetDialog({
   const moveSpace = (parentSpaceId: string | null) =>
     void doMove(`/api/spaces/${entityId}/move`, { parentSpaceId });
 
-  const rowBtn = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13.5px] text-zinc-800 hover:bg-zinc-100 disabled:opacity-50";
+  const rowBtn = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-base text-zinc-800 hover:bg-zinc-100 disabled:opacity-50";
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
@@ -101,7 +101,7 @@ export function MoveTargetDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
-          <h2 className="truncate text-[15px] font-semibold text-zinc-900">Move “{entityName}”</h2>
+          <h2 className="truncate text-base font-semibold text-zinc-900">Move “{entityName}”</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
             <X className="h-4 w-4" />
           </button>
@@ -109,7 +109,7 @@ export function MoveTargetDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {spaces === null ? (
-            <div className="flex items-center gap-2 px-2 py-6 text-[13px] text-zinc-400">
+            <div className="flex items-center gap-2 px-2 py-6 text-sm text-zinc-400">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : (
@@ -148,11 +148,11 @@ export function MoveTargetDialog({
                   {kind === "board" && expanded === s.id ? (
                     <div className="ml-6 border-l border-zinc-100 pl-1">
                       {folders[s.id] === "loading" ? (
-                        <div className="flex items-center gap-2 px-2 py-1.5 text-[12.5px] text-zinc-400">
+                        <div className="flex items-center gap-2 px-2 py-1.5 text-xs text-zinc-400">
                           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading folders…
                         </div>
                       ) : (folders[s.id] as FolderT[]).length === 0 ? (
-                        <div className="px-2 py-1.5 text-[12.5px] text-zinc-400">No folders</div>
+                        <div className="px-2 py-1.5 text-xs text-zinc-400">No folders</div>
                       ) : (
                         (folders[s.id] as FolderT[]).map((f) => (
                           <button key={f.id} type="button" className={rowBtn} disabled={busy} onClick={() => moveBoard(s.id, f.id)}>
@@ -167,7 +167,7 @@ export function MoveTargetDialog({
               ))}
 
               {spaces.length === 0 ? (
-                <div className="px-2 py-6 text-[13px] text-zinc-400">No Spaces available.</div>
+                <div className="px-2 py-6 text-sm text-zinc-400">No Spaces available.</div>
               ) : null}
             </>
           )}

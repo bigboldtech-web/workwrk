@@ -59,7 +59,7 @@ function avatarInitials(u: UserOption): string {
 }
 function Avatar({ user }: { user: UserOption }) {
   return (
-    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-[11px] font-semibold text-zinc-600 shrink-0">
+    <span className="h-6 w-6 rounded-full bg-zinc-100 border border-zinc-200 inline-flex items-center justify-center text-xs font-semibold text-zinc-600 shrink-0">
       {avatarInitials(user)}
     </span>
   );
@@ -204,7 +204,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
     <Dialog open={open} onOpenChange={handleOpen}>
       <DialogContent className="max-w-[480px] p-0 gap-0">
         <div className="px-6 pt-6 pb-3">
-          <DialogTitle className="text-[16px] font-semibold inline-flex items-center gap-2">
+          <DialogTitle className="text-lg font-semibold inline-flex items-center gap-2">
             <FolderTree className="h-4 w-4 text-zinc-500" /> Share {folderName}
           </DialogTitle>
           <DialogDescription className="mt-1">
@@ -214,7 +214,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
 
         {/* Add people */}
         <div className="px-6 pb-3 border-t border-zinc-100 pt-4">
-          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">Add people</div>
+          <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-2">Add people</div>
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1" ref={pickerRef}>
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
@@ -224,12 +224,12 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                 onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
                 onFocus={() => setPickerOpen(true)}
                 placeholder="Type a name or email…"
-                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
+                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
               />
               {pickerOpen ? (
                 <div className="absolute left-0 right-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
                   {candidates.length === 0 ? (
-                    <div className="px-3 py-3 text-[13px] text-zinc-400">
+                    <div className="px-3 py-3 text-sm text-zinc-400">
                       {query ? `No match for "${query}"` : "Start typing to find people"}
                     </div>
                   ) : (
@@ -243,8 +243,8 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                       >
                         <Avatar user={u} />
                         <span className="flex-1 min-w-0">
-                          <span className="block text-[13.5px] font-medium truncate">{displayName(u)}</span>
-                          <span className="block text-[12px] text-zinc-500 truncate">{u.email}</span>
+                          <span className="block text-base font-medium truncate">{displayName(u)}</span>
+                          <span className="block text-xs text-zinc-500 truncate">{u.email}</span>
                         </span>
                         {busyAddId === u.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
@@ -260,7 +260,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
             <select
               value={addRole}
               onChange={(e) => setAddRole(e.target.value as FolderRole)}
-              className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-[13px] focus:outline-none focus:border-zinc-400"
+              className="h-9 px-2 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-zinc-400"
               title="Access level for people you add"
             >
               {ROLE_OPTIONS.map((r) => (
@@ -272,13 +272,13 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
 
         {/* Members */}
         <div className="px-6 pb-5 border-t border-zinc-100 pt-4">
-          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             {members === null ? "Shared with" : `Shared with · ${members.length}`}
           </div>
           {members === null ? (
-            <div className="text-[13px] text-zinc-400">Loading…</div>
+            <div className="text-sm text-zinc-400">Loading…</div>
           ) : members.length === 0 ? (
-            <div className="text-[13px] text-zinc-400">
+            <div className="text-sm text-zinc-400">
               Not shared with anyone yet. Space members already have access.
             </div>
           ) : (
@@ -289,14 +289,14 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                   <li key={m.user.id} className="flex items-center gap-2.5 px-3 py-2">
                     <Avatar user={m.user} />
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[13.5px] font-medium truncate">{displayName(m.user)}</span>
-                      <span className="block text-[12px] text-zinc-500 truncate">{m.user.email}</span>
+                      <span className="block text-base font-medium truncate">{displayName(m.user)}</span>
+                      <span className="block text-xs text-zinc-500 truncate">{m.user.email}</span>
                     </span>
                     <select
                       value={m.role === "OWNER" ? "ADMIN" : m.role}
                       onChange={(e) => changeRole(m, e.target.value as FolderRole)}
                       disabled={busy}
-                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-[12.5px] focus:outline-none focus:border-zinc-400"
+                      className="h-7 px-1.5 rounded-md border border-zinc-200 bg-white text-xs focus:outline-none focus:border-zinc-400"
                     >
                       {ROLE_OPTIONS.map((r) => (
                         <option key={r.value} value={r.value}>{r.label}</option>

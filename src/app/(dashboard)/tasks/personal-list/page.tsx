@@ -44,9 +44,9 @@ export default async function PersonalListPage(props: {
     <div className="flex flex-col h-full bg-white">
       {/* Breadcrumb — personal, no Space */}
       <div className="px-4 pt-1.5 pb-1 flex items-center gap-1">
-        <span className="text-[14px] text-zinc-500">My Wrk</span>
-        <span className="text-zinc-300 text-[14px] px-0.5">/</span>
-        <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900">
+        <span className="text-base text-zinc-500">My Wrk</span>
+        <span className="text-zinc-300 text-base px-0.5">/</span>
+        <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900">
           <Lock className="w-4 h-4 text-zinc-500" />
           <span className="truncate">Personal List</span>
         </h1>

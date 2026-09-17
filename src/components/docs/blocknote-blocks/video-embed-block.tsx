@@ -134,7 +134,7 @@ function VideoInput({ editable, onSubmit }: { editable: boolean; onSubmit: (url:
     if (!raw) return;
     onSubmit(extractIframeSrc(raw) ?? raw);
   };
-  if (!editable) return <div className="my-1 text-sm text-zinc-400">Empty video</div>;
+  if (!editable) return <div className="my-1 text-xs text-zinc-400">Empty video</div>;
   return (
     <div className="my-1.5 flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2">
       <Film className="w-4 h-4 text-zinc-400 shrink-0" />
@@ -143,13 +143,13 @@ function VideoInput({ editable, onSubmit }: { editable: boolean; onSubmit: (url:
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && url.trim()) { e.preventDefault(); submit(); } }}
         placeholder="Paste a video link or embed code (YouTube, Vimeo, Loom, Dadan…)"
-        className="flex-1 bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-400"
+        className="flex-1 bg-transparent text-xs text-zinc-800 outline-none placeholder:text-zinc-400"
       />
       <button
         type="button"
         onClick={submit}
         disabled={!url.trim()}
-        className="text-[13.5px] font-medium text-[var(--os-brand)] disabled:opacity-40"
+        className="text-base font-medium text-[var(--os-brand)] disabled:opacity-40"
       >
         Embed
       </button>

@@ -49,7 +49,7 @@ export default function DemoPage() {
               </div>
 
               <div className="mt-9">
-                <p className="text-sm font-bold text-slate-900 mb-3">What we&apos;ll cover</p>
+                <p className="text-base font-bold text-slate-900 mb-3">What we&apos;ll cover</p>
                 <CheckList
                   hue="emerald"
                   items={[
@@ -108,8 +108,8 @@ function DemoFacet({
       <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${t.bgTint} ${t.text} border ${t.border}`}>
         <Icon size={17} strokeWidth={2.4} />
       </div>
-      <p className="mt-3 font-bold text-slate-900 text-sm">{title}</p>
-      <p className="mt-1 text-xs text-slate-600 leading-relaxed">{body}</p>
+      <p className="mt-3 font-bold text-slate-900 text-base">{title}</p>
+      <p className="mt-1 text-sm text-slate-600 leading-relaxed">{body}</p>
     </div>
   );
 }
@@ -119,7 +119,7 @@ function DemoFormCard() {
     <div className="sticky top-24 bg-white rounded-3xl border border-slate-200 shadow-[0_30px_80px_-20px_rgba(15,23,42,0.18)] overflow-hidden">
       <div className="bg-slate-950 px-8 py-7 text-white">
         <H3 className="text-white">Book your demo</H3>
-        <p className="mt-2 text-sm text-white/80">We respond within 4 business hours.</p>
+        <p className="mt-2 text-base text-white/80">We respond within 4 business hours.</p>
       </div>
       <form className="p-7 space-y-4" action="#" method="post">
         <Field label="Full name *" name="name" placeholder="Priya Iyer" required />
@@ -136,7 +136,7 @@ function DemoFormCard() {
         >
           Request demo <ArrowRight size={15} />
         </button>
-        <p className="text-xs text-slate-500 text-center">
+        <p className="text-sm text-slate-500 text-center">
           We&apos;ll never share your details. Read our <Link href="/privacy" className="text-slate-700 underline underline-offset-2">privacy policy</Link>.
         </p>
       </form>
@@ -162,10 +162,10 @@ function Field({
   required?: boolean;
 }) {
   const base =
-    "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-100 transition";
+    "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-fuchsia-500 focus:ring-2 focus:ring-fuchsia-100 transition";
   return (
     <label className="block">
-      <span className="block text-xs font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
+      <span className="block text-sm font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
       {as === "textarea" ? (
         <textarea
           name={name}

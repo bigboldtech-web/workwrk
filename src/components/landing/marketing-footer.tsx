@@ -78,7 +78,7 @@ export function MarketingFooter() {
           />
         </div>
 
-        <div className="mt-16 pt-8 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400">
+        <div className="mt-16 pt-8 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4 text-sm text-slate-400">
           <span>&copy; {new Date().getFullYear()} WorkwrK Technologies. All rights reserved.</span>
           <div className="flex items-center gap-5">
             <Link href="/privacy" className="hover:text-slate-700 transition">Privacy</Link>
@@ -101,13 +101,13 @@ function FooterCol({
 }) {
   return (
     <div className="col-span-1 md:col-span-2">
-      <p className="font-bold text-slate-900 mb-4 text-sm tracking-tight">{title}</p>
+      <p className="font-bold text-slate-900 mb-4 text-base tracking-tight">{title}</p>
       <ul className="space-y-2.5">
         {links.map(([label, href]) => (
           <li key={href}>
             <Link
               href={href}
-              className="text-sm text-slate-500 hover:text-slate-900 transition-colors"
+              className="text-base text-slate-500 hover:text-slate-900 transition-colors"
             >
               {label}
             </Link>

@@ -16,7 +16,7 @@ export function AskSidekickButton({ prompt, className }: { prompt?: string; clas
       onClick={() => askSidekick(prompt)}
       className={
         className ??
-        "text-sm text-zinc-600 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100 hover:text-zinc-900"
+        "text-xs text-zinc-600 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100 hover:text-zinc-900"
       }
     >
       <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />

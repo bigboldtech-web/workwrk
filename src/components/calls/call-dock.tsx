@@ -51,7 +51,7 @@ function Avatar({ p, className = "" }: { p: CallDockParticipant; className?: str
   return (
     <span
       title={p.name}
-      className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-zinc-800 ${className}`}
+      className={`flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold text-white ring-2 ring-zinc-800 ${className}`}
       style={{ backgroundColor: `hsl(${hueOf(p.identity)} 52% 42%)` }}
     >
       {initialsOf(p.name)}
@@ -77,7 +77,7 @@ function CallTimer() {
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(iv);
   }, []);
-  return <span className="shrink-0 font-mono text-[11px] tabular-nums text-zinc-400">{fmtElapsed(elapsed)}</span>;
+  return <span className="shrink-0 font-mono text-xs tabular-nums text-zinc-400">{fmtElapsed(elapsed)}</span>;
 }
 
 export function CallDock() {
@@ -185,14 +185,14 @@ export function CallDock() {
               <Avatar key={p.identity} p={p} className={i > 0 ? "-ml-2" : ""} />
             ))}
             {people.length > 3 ? (
-              <span className="-ml-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-600 text-[10px] font-semibold text-zinc-100 ring-2 ring-zinc-800">
+              <span className="-ml-2 flex h-6 w-6 items-center justify-center rounded-full bg-zinc-600 text-micro font-semibold text-zinc-100 ring-2 ring-zinc-800">
                 +{people.length - 3}
               </span>
             ) : null}
           </span>
         ) : null}
 
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-zinc-100">
+        <span className="min-w-0 flex-1 truncate text-xs font-medium text-zinc-100">
           {minimized ? roster : activeCall.subject}
         </span>
 

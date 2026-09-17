@@ -191,7 +191,7 @@ export function SopCategoryManager() {
                 onChange={(e) => setNewCategoryName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && createCategory()}
                 placeholder="Category name"
-                className="h-8 text-sm w-48"
+                className="h-8 text-xs w-48"
                 autoFocus
               />
               <Button size="sm" onClick={createCategory} disabled={busy || !newCategoryName.trim()}>
@@ -213,7 +213,7 @@ export function SopCategoryManager() {
         ) : categories.length === 0 ? (
           <div className="text-center py-10">
             <BookOpen size={32} className="mx-auto text-muted mb-2" />
-            <p className="text-sm text-muted">No categories yet. Add your first one above.</p>
+            <p className="text-xs text-muted">No categories yet. Add your first one above.</p>
           </div>
         ) : (
           <div className="rounded-lg border border-border divide-y divide-border">
@@ -240,23 +240,23 @@ export function SopCategoryManager() {
                           if (e.key === "Enter") renameItem();
                           if (e.key === "Escape") setEditing(null);
                         }}
-                        className="h-7 text-sm flex-1"
+                        className="h-7 text-xs flex-1"
                         autoFocus
                       />
                     ) : (
                       <button
                         type="button"
                         onClick={() => toggleExpand(cat.id)}
-                        className="flex-1 text-left text-sm font-medium truncate"
+                        className="flex-1 text-left text-xs font-medium truncate"
                       >
                         {cat.name}
                       </button>
                     )}
 
-                    <Badge variant="outline" className="text-[11px] shrink-0">
+                    <Badge variant="outline" className="text-xs shrink-0">
                       {cat.subcategories.length} sub
                     </Badge>
-                    <Badge variant="secondary" className="text-[11px] shrink-0">
+                    <Badge variant="secondary" className="text-xs shrink-0">
                       {cat.sopCount ?? 0} SOP{cat.sopCount === 1 ? "" : "s"}
                     </Badge>
 
@@ -327,7 +327,7 @@ export function SopCategoryManager() {
                             ) : (
                               <span className="flex-1 text-xs truncate">{sub.name}</span>
                             )}
-                            <Badge variant="secondary" className="text-[11px] shrink-0">
+                            <Badge variant="secondary" className="text-xs shrink-0">
                               {sub.sopCount ?? 0} SOP{sub.sopCount === 1 ? "" : "s"}
                             </Badge>
 

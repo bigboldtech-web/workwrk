@@ -1934,13 +1934,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
               <PanelSection label="Arrowhead (end)">
                 {HEAD_OPTS.map(({ type, glyph, label }) => (
                   <button key={type} type="button" title={`End: ${label}`} onClick={() => applyHead("end", type)}
-                    style={{ ...panelBtn(endHeadVal === type), fontSize: 15, fontWeight: 700 }}>{glyph}</button>
+                    style={{ ...panelBtn(endHeadVal === type), fontSize: 15, fontWeight: 600 }}>{glyph}</button>
                 ))}
               </PanelSection>
               <PanelSection label="Arrowhead (start)">
                 {HEAD_OPTS.map(({ type, glyph, label }) => (
                   <button key={type} type="button" title={`Start: ${label}`} onClick={() => applyHead("start", type)}
-                    style={{ ...panelBtn(startHeadVal === type), fontSize: 15, fontWeight: 700, transform: type === "arrow" || type === "triangle" ? "scaleX(-1)" : undefined }}>{glyph}</button>
+                    style={{ ...panelBtn(startHeadVal === type), fontSize: 15, fontWeight: 600, transform: type === "arrow" || type === "triangle" ? "scaleX(-1)" : undefined }}>{glyph}</button>
                 ))}
               </PanelSection>
             </>
@@ -1949,7 +1949,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
             <PanelSection label="Font size">
               {FONT_SIZES.map(({ label, size }) => (
                 <button key={label} type="button" title={`${label === "S" ? "Small" : label === "M" ? "Medium" : "Large"}`} onClick={() => applyFontSize(size)}
-                  style={{ ...panelBtn(fontSize === size), fontWeight: 700, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
+                  style={{ ...panelBtn(fontSize === size), fontWeight: 600, fontSize: label === "S" ? 11 : label === "M" ? 13 : 15 }}>
                   {label}
                 </button>
               ))}
@@ -2021,7 +2021,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
               style={{ ...toolBtn(active), position: "relative" }}>
               <Icon style={{ width: 17, height: 17 }} />
               {hint ? (
-                <span style={{ position: "absolute", bottom: 1, right: 3, fontSize: 8, fontWeight: 700, lineHeight: 1, color: active ? "rgba(255,255,255,.85)" : "var(--os-ink-3, #9aa3b2)" }}>{hint}</span>
+                <span style={{ position: "absolute", bottom: 1, right: 3, fontSize: 8, fontWeight: 600, lineHeight: 1, color: active ? "rgba(255,255,255,.85)" : "var(--os-ink-3, #9aa3b2)" }}>{hint}</span>
               ) : null}
             </button>
           );

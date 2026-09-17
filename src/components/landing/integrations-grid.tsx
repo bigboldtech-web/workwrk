@@ -99,7 +99,7 @@ export function IntegrationsGrid() {
             you already pay for.
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             26+ native connectors. Webhooks on every entity. A REST +

@@ -40,7 +40,7 @@ export function MarketingTopbar() {
           <LogoLockup size={20} />
         </Link>
 
-        <nav className="hidden lg:flex items-center gap-1 text-sm">
+        <nav className="hidden lg:flex items-center gap-1 text-base">
           <MenuTrigger
             label="Product"
             isOpen={openMenu === "product"}
@@ -72,19 +72,19 @@ export function MarketingTopbar() {
         <div className="hidden sm:flex items-center gap-1">
           <Link
             href={appHref("/login")}
-            className="text-sm text-slate-600 hover:text-slate-900 px-3 py-2 rounded-lg transition-colors"
+            className="text-base text-slate-600 hover:text-slate-900 px-3 py-2 rounded-lg transition-colors"
           >
             Log in
           </Link>
           <Link
             href="/demo"
-            className="hidden md:inline-flex items-center text-sm text-slate-700 hover:text-slate-900 px-3 py-2 rounded-lg font-medium transition-colors"
+            className="hidden md:inline-flex items-center text-base text-slate-700 hover:text-slate-900 px-3 py-2 rounded-lg font-medium transition-colors"
           >
             Get a demo
           </Link>
           <Link
             href="/signup"
-            className="inline-flex items-center h-9 px-4 rounded-full bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 transition-colors"
+            className="inline-flex items-center h-9 px-4 rounded-full bg-slate-900 text-white text-base font-semibold hover:bg-slate-800 transition-colors"
           >
             Sign up
           </Link>
@@ -182,15 +182,15 @@ function ProductMenu() {
             className="group flex items-start gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors"
           >
             <div
-              className={`w-9 h-9 rounded-lg flex items-center justify-center ${t.bgTint} ${t.text} text-sm font-bold flex-shrink-0`}
+              className={`w-9 h-9 rounded-lg flex items-center justify-center ${t.bgTint} ${t.text} text-base font-bold flex-shrink-0`}
             >
               {hub.name[0]}
             </div>
             <div>
-              <p className="font-semibold text-slate-900 text-sm leading-none">
+              <p className="font-semibold text-slate-900 text-base leading-none">
                 {hub.name}
               </p>
-              <p className="text-xs text-slate-500 mt-1">{hub.tagline}</p>
+              <p className="text-sm text-slate-500 mt-1">{hub.tagline}</p>
             </div>
           </Link>
         );
@@ -199,7 +199,7 @@ function ProductMenu() {
         href="/features"
         className="col-span-2 mt-2 flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
       >
-        <span className="text-sm font-semibold text-slate-900">See all features</span>
+        <span className="text-base font-semibold text-slate-900">See all features</span>
         <ArrowRight size={14} className="text-slate-500" />
       </Link>
     </div>
@@ -231,8 +231,8 @@ function SolutionsMenu() {
             href={`/industries/${ind.slug}`}
             className="group flex flex-col gap-0.5 p-3 rounded-xl hover:bg-slate-50 transition-colors"
           >
-            <p className="font-semibold text-slate-900 text-sm">{ind.name}</p>
-            <p className="text-xs text-slate-500">{ind.desc}</p>
+            <p className="font-semibold text-slate-900 text-base">{ind.name}</p>
+            <p className="text-sm text-slate-500">{ind.desc}</p>
           </Link>
         ))}
       </div>
@@ -240,7 +240,7 @@ function SolutionsMenu() {
         href="/industries"
         className="mt-3 flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition-colors"
       >
-        <span className="text-sm font-semibold text-slate-900">All industries</span>
+        <span className="text-base font-semibold text-slate-900">All industries</span>
         <ArrowRight size={14} className="text-slate-500" />
       </Link>
     </div>
@@ -267,8 +267,8 @@ function ResourcesMenu() {
           href={r.href}
           className="flex flex-col gap-0.5 p-3 rounded-xl hover:bg-slate-50 transition-colors"
         >
-          <span className="font-semibold text-slate-900 text-sm">{r.label}</span>
-          <span className="text-xs text-slate-500">{r.desc}</span>
+          <span className="font-semibold text-slate-900 text-base">{r.label}</span>
+          <span className="text-sm text-slate-500">{r.desc}</span>
         </Link>
       ))}
     </div>
@@ -293,7 +293,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
         </button>
       </div>
       <div className="px-6 py-6 space-y-8">
-        <nav className="flex flex-col text-base font-semibold text-slate-900 divide-y divide-slate-100">
+        <nav className="flex flex-col text-lg font-semibold text-slate-900 divide-y divide-slate-100">
           <Link href="/features"    onClick={onClose} className="py-3.5">Product</Link>
           <Link href="/industries"  onClick={onClose} className="py-3.5">Solutions</Link>
           <Link href="/pricing"     onClick={onClose} className="py-3.5">Pricing</Link>
@@ -319,7 +319,7 @@ function MobileMenu({ onClose }: { onClose: () => void }) {
           <Link
             href={appHref("/login")}
             onClick={onClose}
-            className="block text-center py-3 text-sm text-slate-600"
+            className="block text-center py-3 text-base text-slate-600"
           >
             Already have an account? Log in
           </Link>

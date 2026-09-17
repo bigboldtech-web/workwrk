@@ -83,8 +83,8 @@ export default function PartnersPage() {
                     <p.icon size={20} strokeWidth={2.4} />
                   </div>
                   <p className="mt-5 font-bold text-slate-900 text-lg tracking-tight">{p.title}</p>
-                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{p.body}</p>
-                  <div className={`mt-5 inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
+                  <p className="mt-2 text-base text-slate-600 leading-relaxed">{p.body}</p>
+                  <div className={`mt-5 inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-7 rounded-full ${t.bgTint} ${t.text} border ${t.border}`}>
                     {p.reward}
                   </div>
                 </div>
@@ -115,7 +115,7 @@ export default function PartnersPage() {
       <Section py="md">
         <Container>
           <div className="text-center">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">Active partners</p>
+            <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">Active partners</p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-x-10 gap-y-4">
               {PARTNERS_PREVIEW.map((p) => (
                 <span key={p} className="text-slate-400 font-bold text-lg tracking-tight">{p}</span>

@@ -80,14 +80,14 @@ export function ManagerTeamDashboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <Users size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
-            <p className="text-2xl font-bold">{stats.teamSize}</p>
+            <p className="text-2xl font-semibold">{stats.teamSize}</p>
             <p className="text-xs text-muted">Team Size</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Target size={20} className="mx-auto text-blue-400 mb-1" />
-            <p className={`text-2xl font-bold font-mono ${stats.avgTeamScore > 0 ? getScoreColor(stats.avgTeamScore) : "text-muted"}`}>
+            <p className={`text-2xl font-semibold font-mono ${stats.avgTeamScore > 0 ? getScoreColor(stats.avgTeamScore) : "text-muted"}`}>
               {stats.avgTeamScore > 0 ? stats.avgTeamScore : "N/A"}
             </p>
             <p className="text-xs text-muted">Avg Team Score</p>
@@ -96,14 +96,14 @@ export function ManagerTeamDashboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <BarChart3 size={20} className="mx-auto text-green-400 mb-1" />
-            <p className="text-2xl font-bold">{stats.teamCompletionRate}%</p>
+            <p className="text-2xl font-semibold">{stats.teamCompletionRate}%</p>
             <p className="text-xs text-muted">KPI Completion</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <ClipboardCheck size={20} className="mx-auto text-amber-400 mb-1" />
-            <p className="text-2xl font-bold">{stats.pendingApprovalCount}</p>
+            <p className="text-2xl font-semibold">{stats.pendingApprovalCount}</p>
             <p className="text-xs text-muted">Pending Approvals</p>
           </CardContent>
         </Card>
@@ -112,7 +112,7 @@ export function ManagerTeamDashboard() {
       {/* Direct Reports */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
+          <CardTitle className="text-xs flex items-center gap-2">
             <Users size={14} className="text-[color:var(--accent-strong)]" /> My Team
           </CardTitle>
         </CardHeader>
@@ -127,21 +127,21 @@ export function ManagerTeamDashboard() {
                   </Avatar>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium">{member.firstName} {member.lastName}</p>
-                      {member.role && <span className="text-[11px] text-muted">{member.role}</span>}
+                      <p className="text-xs font-medium">{member.firstName} {member.lastName}</p>
+                      {member.role && <span className="text-xs text-muted">{member.role}</span>}
                     </div>
                     <div className="flex items-center gap-2 mt-1">
                       <Progress value={completionPct} className="h-1 flex-1 max-w-[120px]" />
-                      <span className="text-[11px] text-muted">{member.kpiCompleted}/{member.kpiTotal} KPIs</span>
+                      <span className="text-xs text-muted">{member.kpiCompleted}/{member.kpiTotal} KPIs</span>
                     </div>
                   </div>
                   <div className="text-right shrink-0">
                     {member.compositeScore != null ? (
-                      <p className={`text-lg font-bold font-mono ${getScoreColor(member.compositeScore)}`}>{member.compositeScore}</p>
+                      <p className={`text-lg font-semibold font-mono ${getScoreColor(member.compositeScore)}`}>{member.compositeScore}</p>
                     ) : member.avgKpiScore > 0 ? (
-                      <p className={`text-lg font-bold font-mono ${getScoreColor(member.avgKpiScore)}`}>{member.avgKpiScore}%</p>
+                      <p className={`text-lg font-semibold font-mono ${getScoreColor(member.avgKpiScore)}`}>{member.avgKpiScore}%</p>
                     ) : (
-                      <p className="text-sm text-muted">—</p>
+                      <p className="text-xs text-muted">—</p>
                     )}
                   </div>
                   <ArrowRight size={14} className="text-muted shrink-0" />
@@ -156,7 +156,7 @@ export function ManagerTeamDashboard() {
       {pendingApprovals && pendingApprovals.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
+            <CardTitle className="text-xs flex items-center gap-2">
               <AlertCircle size={14} className="text-amber-400" /> KPIs Awaiting Approval
             </CardTitle>
           </CardHeader>
@@ -164,12 +164,12 @@ export function ManagerTeamDashboard() {
             {pendingApprovals.slice(0, 10).map((record) => (
               <div key={record.id} className="flex items-center justify-between p-2 rounded-lg border border-border">
                 <div>
-                  <p className="text-sm">{record.kpi?.name}</p>
-                  <p className="text-[11px] text-muted">
+                  <p className="text-xs">{record.kpi?.name}</p>
+                  <p className="text-xs text-muted">
                     {record.user?.firstName} {record.user?.lastName} &middot; Value: {record.actualValue} {record.kpi?.unit}
                   </p>
                 </div>
-                <Badge variant="warning" className="text-[11px]">Submitted</Badge>
+                <Badge variant="warning" className="text-xs">Submitted</Badge>
               </div>
             ))}
           </CardContent>

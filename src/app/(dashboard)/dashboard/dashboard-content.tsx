@@ -156,15 +156,15 @@ function EmployeeOfMonthCard() {
           </div>
           <div className="flex-1">
             <p className="text-xs text-muted uppercase tracking-wider font-medium">Employee of the Month</p>
-            <p className="text-lg font-bold">{eom.user?.firstName} {eom.user?.lastName}</p>
+            <p className="text-lg font-semibold">{eom.user?.firstName} {eom.user?.lastName}</p>
             <div className="flex items-center gap-2 text-xs text-muted">
               {eom.user?.role?.title && <span>{eom.user.role.title}</span>}
               {eom.user?.department?.name && <span>&middot; {eom.user.department.name}</span>}
             </div>
           </div>
           <div className="text-right">
-            <p className="text-2xl font-bold font-mono text-yellow-400">{Math.round(eom.score)}</p>
-            <p className="text-[11px] text-muted">Score</p>
+            <p className="text-2xl font-semibold font-mono text-yellow-400">{Math.round(eom.score)}</p>
+            <p className="text-xs text-muted">Score</p>
           </div>
         </div>
       </CardContent>
@@ -360,7 +360,7 @@ export default function DashboardContent() {
                 )}
               </div>
               <div className="mt-3">
-                <p className="text-2xl font-bold">{stat.value}</p>
+                <p className="text-2xl font-semibold">{stat.value}</p>
                 <p className="text-xs text-muted mt-0.5">{stat.change}</p>
               </div>
               <p className="text-xs text-muted mt-2 font-medium">{stat.title}</p>
@@ -378,7 +378,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-[15px]">Top Performers</CardTitle>
+              <CardTitle className="text-base">Top Performers</CardTitle>
               <Badge variant="secondary" className="text-xs">This Month</Badge>
             </div>
           </CardHeader>
@@ -388,15 +388,15 @@ export default function DashboardContent() {
                 key={person.id}
                 className="flex items-center gap-3 rounded-lg border border-border bg-background/50 p-3"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-bold text-[color:var(--accent-strong)]">
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[rgba(212,255,46,0.12)] text-xs font-semibold text-[color:var(--accent-strong)]">
                   {i + 1}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{person.name}</p>
+                  <p className="text-xs font-medium truncate">{person.name}</p>
                   <p className="text-xs text-muted">{person.role}</p>
                 </div>
                 <div className="text-right">
-                  <p className={`text-sm font-bold font-mono ${getScoreColor(person.score)}`}>
+                  <p className={`text-xs font-semibold font-mono ${getScoreColor(person.score)}`}>
                     {person.score}
                   </p>
                 </div>
@@ -412,7 +412,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-[15px]">KPI Updates</CardTitle>
+              <CardTitle className="text-base">KPI Updates</CardTitle>
               <Link href="/kra-kpi" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
@@ -430,11 +430,11 @@ export default function DashboardContent() {
                 >
                   <Target size={14} className="text-[color:var(--accent-strong)] mt-0.5 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{record.kpiName}</p>
+                    <p className="text-xs font-medium truncate">{record.kpiName}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[11px] text-muted">{record.userName}</span>
+                      <span className="text-xs text-muted">{record.userName}</span>
                       {achievement != null && (
-                        <span className={`text-[11px] font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[color:var(--accent-strong)]" : "text-orange-400"}`}>
+                        <span className={`text-xs font-mono font-semibold ${achievement >= 100 ? "text-green-400" : achievement >= 70 ? "text-[color:var(--accent-strong)]" : "text-orange-400"}`}>
                           {achievement}%
                         </span>
                       )}
@@ -453,7 +453,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-[15px]">Alerts</CardTitle>
+              <CardTitle className="text-base">Alerts</CardTitle>
               <Badge variant="destructive" className="text-xs">
                 {alerts.filter(a => a.type === "danger" || a.type === "warning").length} Action Required
               </Badge>
@@ -465,8 +465,8 @@ export default function DashboardContent() {
                 key={i}
                 className={`rounded-lg border-l-2 p-3 ${getAlertStyle(alert.type)}`}
               >
-                <p className="text-sm">{alert.message}</p>
-                <p className="text-[11px] text-muted mt-1">{alert.time}</p>
+                <p className="text-xs">{alert.message}</p>
+                <p className="text-xs text-muted mt-1">{alert.time}</p>
               </div>
             ))}
             {alerts.length === 0 && (
@@ -479,7 +479,7 @@ export default function DashboardContent() {
         <Card className="xl:col-span-1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-[15px]">Recent Activity</CardTitle>
+              <CardTitle className="text-base">Recent Activity</CardTitle>
               <Link href="/activity" className="text-xs text-[color:var(--accent-strong)] hover:text-[#e2ff6b]">
                 View all
               </Link>
@@ -511,7 +511,7 @@ export default function DashboardContent() {
                     <Icon size={12} className="text-[color:var(--accent-strong)] mt-0.5 flex-shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs leading-snug line-clamp-2">{item.description}</p>
-                      <p className="text-[11px] text-muted mt-0.5">
+                      <p className="text-xs text-muted mt-0.5">
                         {item.actor?.firstName} {item.actor?.lastName} · {timeAgo}
                       </p>
                     </div>
@@ -546,8 +546,8 @@ export default function DashboardContent() {
                     className="flex items-center justify-between gap-3 p-3 rounded-lg border border-border bg-background/60 hover:bg-[color:var(--surface-elevated)] transition-fast"
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{s.title}</p>
-                      <p className="text-[12px] text-muted">{qCount} question{qCount === 1 ? "" : "s"} · takes ~{Math.max(1, qCount)} min</p>
+                      <p className="text-xs font-medium truncate">{s.title}</p>
+                      <p className="text-xs text-muted">{qCount} question{qCount === 1 ? "" : "s"} · takes ~{Math.max(1, qCount)} min</p>
                     </div>
                     <span className="text-xs text-[color:var(--accent-strong)] font-medium flex-shrink-0">Respond →</span>
                   </Link>
@@ -589,12 +589,12 @@ export default function DashboardContent() {
                           <span className="text-muted"> → </span>
                           <span className="font-medium">{k.receiver.firstName} {k.receiver.lastName}</span>
                         </p>
-                        <p className="text-sm mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
+                        <p className="text-xs mt-1.5 italic text-foreground leading-relaxed">&ldquo;{k.message}&rdquo;</p>
                         <div className="flex items-center gap-2 mt-2">
                           {k.companyValue && (
-                            <Badge variant="outline" className="text-[11px] uppercase tracking-wider border-[#0073EA]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
+                            <Badge variant="outline" className="text-micro uppercase tracking-wider border-[#0073EA]/40 text-[color:var(--accent-strong)]">{k.companyValue}</Badge>
                           )}
-                          <span className="text-[11px] text-muted">{timeAgo}</span>
+                          <span className="text-xs text-muted">{timeAgo}</span>
                         </div>
                       </div>
                     </div>
@@ -618,7 +618,7 @@ export default function DashboardContent() {
       <Card>
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-[15px]">Department Performance</CardTitle>
+            <CardTitle className="text-base">Department Performance</CardTitle>
             <Badge variant="secondary" className="text-xs">This Quarter</Badge>
           </div>
         </CardHeader>
@@ -626,7 +626,7 @@ export default function DashboardContent() {
           <div className="space-y-4">
             {departmentPerformance.map((dept) => (
               <div key={dept.name} className="flex items-center gap-4">
-                <div className="w-24 text-sm font-medium">{dept.name}</div>
+                <div className="w-24 text-xs font-medium">{dept.name}</div>
                 <div className="flex-1">
                   <Progress
                     value={dept.score}
@@ -634,7 +634,7 @@ export default function DashboardContent() {
                     indicatorClassName={dept.color}
                   />
                 </div>
-                <div className={`w-12 text-right text-sm font-bold font-mono ${getScoreColor(dept.score)}`}>
+                <div className={`w-12 text-right text-xs font-semibold font-mono ${getScoreColor(dept.score)}`}>
                   {dept.score}
                 </div>
                 <div className="w-20 text-right text-xs text-muted">

@@ -23,7 +23,7 @@ export default function PrivacyPage() {
           <div className="max-w-3xl">
             <Eyebrow hue="violet" className="mb-5">Privacy</Eyebrow>
             <H1>Privacy Policy.</H1>
-            <p className="mt-5 text-base text-slate-600">
+            <p className="mt-5 text-lg text-slate-600">
               Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
             </p>
             <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">

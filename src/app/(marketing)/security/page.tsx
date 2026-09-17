@@ -71,7 +71,7 @@ export default function SecurityPage() {
               return (
                 <div key={c.name} className={`p-4 rounded-xl border ${t.border} ${t.bgTint} text-center`}>
                   <ShieldCheck size={20} className={`mx-auto ${t.text}`} />
-                  <p className={`mt-2 text-xs font-bold ${t.textStrong}`}>{c.name}</p>
+                  <p className={`mt-2 text-sm font-bold ${t.textStrong}`}>{c.name}</p>
                 </div>
               );
             })}
@@ -103,7 +103,7 @@ export default function SecurityPage() {
                 We run a private HackerOne program. Critical findings paid up to $20,000.
                 Public PGP key for direct reports. Acknowledged within 24h, triaged within 72h.
               </p>
-              <div className="mt-7 space-y-2 text-sm">
+              <div className="mt-7 space-y-2 text-base">
                 <p><span className="font-bold text-slate-900">Email:</span> <Link href="mailto:security@workwrk.com" className="text-emerald-700 underline underline-offset-2">security@workwrk.com</Link></p>
                 <p><span className="font-bold text-slate-900">PGP key:</span> <Link href="/security.asc" className="text-emerald-700 underline underline-offset-2">/security.asc</Link></p>
                 <p><span className="font-bold text-slate-900">HackerOne:</span> Private program (invite via email)</p>
@@ -119,9 +119,9 @@ export default function SecurityPage() {
                   ["Low",      "$150 – $500",         "Self-XSS, minor leaks, edge config issues"],
                 ].map(([sev, amt, eg]) => (
                   <li key={sev} className="py-4 grid grid-cols-3 gap-3 items-center">
-                    <p className="text-sm font-bold text-slate-900">{sev}</p>
-                    <p className="text-sm text-emerald-700 font-bold">{amt}</p>
-                    <p className="text-xs text-slate-500">{eg}</p>
+                    <p className="text-base font-bold text-slate-900">{sev}</p>
+                    <p className="text-base text-emerald-700 font-bold">{amt}</p>
+                    <p className="text-sm text-slate-500">{eg}</p>
                   </li>
                 ))}
               </ul>

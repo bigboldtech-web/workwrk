@@ -186,7 +186,7 @@ export function OsItemDetail({
         <button type="button" className={`os-tab ${tab === "updates" ? "is-active" : ""}`} onClick={() => setTab("updates")}>
           <MessageCircle />
           <span>Updates</span>
-          {comments ? <span style={{ fontSize: 10, fontWeight: 700, color: "var(--os-ink-3)" }}>{comments.length}</span> : null}
+          {comments ? <span style={{ fontSize: 10, fontWeight: 600, color: "var(--os-ink-3)" }}>{comments.length}</span> : null}
         </button>
         <button type="button" className={`os-tab ${tab === "activity" ? "is-active" : ""}`} onClick={() => setTab("activity")}>
           <History />
@@ -221,7 +221,7 @@ export function OsItemDetail({
             width: "100%",
             fontFamily: "var(--os-font)",
             fontSize: 28,
-            fontWeight: 700,
+            fontWeight: 600,
             color: "var(--os-ink)",
             letterSpacing: "-0.02em",
             background: "transparent",

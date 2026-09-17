@@ -109,19 +109,19 @@ export function SpaceBookmarks({
           <span className="mb-2 inline-flex h-9 w-9 items-center justify-center rounded-full bg-zinc-100">
             <BookmarkIcon className="h-4 w-4 text-zinc-500" />
           </span>
-          <p className="mb-3 max-w-[240px] text-[12.5px] text-zinc-600">
+          <p className="mb-3 max-w-[240px] text-xs text-zinc-600">
             Save any URL from around the web so the team can reach it in one click.
           </p>
           {canEdit ? (
             <button
               type="button"
               onClick={startAdd}
-              className="rounded-md bg-zinc-100 px-3 py-1.5 text-[12.5px] text-zinc-700 hover:bg-zinc-200"
+              className="rounded-md bg-zinc-100 px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-200"
             >
               Add a bookmark
             </button>
           ) : (
-            <p className="text-[12px] text-zinc-400">No bookmarks yet.</p>
+            <p className="text-xs text-zinc-400">No bookmarks yet.</p>
           )}
         </div>
       ) : (
@@ -136,8 +136,8 @@ export function SpaceBookmarks({
                 title={b.url}
               >
                 <Favicon src={b.favicon} />
-                <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-800">{b.title}</span>
-                <span className="shrink-0 truncate text-[11px] text-zinc-400">{hostOf(b.url)}</span>
+                <span className="min-w-0 flex-1 truncate text-sm text-zinc-800">{b.title}</span>
+                <span className="shrink-0 truncate text-xs text-zinc-400">{hostOf(b.url)}</span>
               </a>
               {canEdit ? (
                 <button
@@ -167,13 +167,13 @@ export function SpaceBookmarks({
                   if (e.key === "Escape") { setAdding(false); setUrl(""); }
                 }}
                 placeholder="Paste a link…"
-                className="min-w-0 flex-1 rounded-md border border-zinc-200 px-2 py-1 text-[13px] outline-none focus:border-[var(--os-brand)]"
+                className="min-w-0 flex-1 rounded-md border border-zinc-200 px-2 py-1 text-sm outline-none focus:border-[var(--os-brand)]"
               />
               <button
                 type="button"
                 onClick={() => void add()}
                 disabled={saving || !url.trim()}
-                className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--os-brand)] px-2.5 text-[12.5px] font-medium text-white disabled:opacity-40"
+                className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--os-brand)] px-2.5 text-xs font-medium text-white disabled:opacity-40"
               >
                 {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                 Save
@@ -183,7 +183,7 @@ export function SpaceBookmarks({
             <button
               type="button"
               onClick={startAdd}
-              className="inline-flex items-center gap-1 text-[12.5px] text-zinc-500 hover:text-zinc-800"
+              className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-800"
             >
               <Plus className="h-3.5 w-3.5" /> Add a bookmark
             </button>

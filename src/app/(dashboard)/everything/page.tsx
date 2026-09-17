@@ -24,11 +24,11 @@ export default async function EverythingPage() {
     <div className="flex flex-col h-full bg-white">
       {/* Header — board-page style: title + item count */}
       <div className="px-4 pt-1.5 pb-1 flex items-center gap-2">
-        <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900">
+        <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900">
           <Layers className="w-4 h-4 text-zinc-500" />
           <span>Everything</span>
         </h1>
-        <span className="text-[13px] text-zinc-500 tabular-nums">
+        <span className="text-sm text-zinc-500 tabular-nums">
           {items.length === 500 ? "500+" : items.length} item{items.length === 1 ? "" : "s"}
         </span>
       </div>

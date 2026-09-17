@@ -118,7 +118,7 @@ export function KraCategoryPicker({
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]"
+        className="flex h-10 w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-[#d4ff2e]"
       >
         <span className="flex-1 truncate text-left">
           {value || <span className="text-muted">{placeholder}</span>}
@@ -145,7 +145,7 @@ export function KraCategoryPicker({
                         if (e.key === "Escape") setEditingId(null);
                       }}
                       autoFocus
-                      className="flex-1 bg-transparent text-sm outline-none border-b border-[#d4ff2e] py-1.5 px-1"
+                      className="flex-1 bg-transparent text-xs outline-none border-b border-[#d4ff2e] py-1.5 px-1"
                     />
                     <button onClick={() => saveEdit(c.id, c.name)} className="p-1 text-[#d4ff2e] hover:text-[#d4ff2e]">
                       <Check size={14} />
@@ -159,7 +159,7 @@ export function KraCategoryPicker({
                     <button
                       type="button"
                       onClick={() => { onChange(c.name); setOpen(false); }}
-                      className={`flex-1 text-left text-sm py-1.5 px-1 rounded ${value === c.name ? "text-[#d4ff2e]" : "text-foreground"}`}
+                      className={`flex-1 text-left text-xs py-1.5 px-1 rounded ${value === c.name ? "text-[#d4ff2e]" : "text-foreground"}`}
                     >
                       {c.name}
                       {value === c.name && <span className="ml-2 text-[#d4ff2e] text-xs">✓</span>}
@@ -197,7 +197,7 @@ export function KraCategoryPicker({
                   }}
                   placeholder="Category name"
                   autoFocus
-                  className="flex-1 h-8 rounded-md border border-border bg-background px-2 text-sm outline-none focus:ring-1 focus:ring-[#d4ff2e]"
+                  className="flex-1 h-8 rounded-md border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-[#d4ff2e]"
                 />
                 <button
                   onClick={addCategory}

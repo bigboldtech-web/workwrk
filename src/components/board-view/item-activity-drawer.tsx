@@ -182,7 +182,7 @@ export function ItemActivityDrawer(props: Props) {
 function CountBadge({ count }: { count?: number }) {
   if (count === undefined || count <= 0) return null;
   return (
-    <span className="ml-1 px-1.5 py-0.5 rounded-full text-[10px] bg-zinc-50 text-zinc-500">{count}</span>
+    <span className="ml-1 px-1.5 py-0.5 rounded-full text-micro bg-zinc-50 text-zinc-500">{count}</span>
   );
 }
 
@@ -205,7 +205,7 @@ function UpdatesTab({
           onChange={(e) => setComposer(e.target.value)}
           placeholder="Write a new update — mention a teammate with @, attach a file, share progress…"
           rows={3}
-          className="w-full bg-transparent text-sm outline-none resize-none placeholder-muted-2"
+          className="w-full bg-transparent text-xs outline-none resize-none placeholder-muted-2"
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
@@ -214,7 +214,7 @@ function UpdatesTab({
           }}
         />
         <div className="flex items-center justify-between pt-2 mt-2 border-t border-zinc-200">
-          <p className="text-[11px] text-zinc-500">⌘/Ctrl + Enter to post</p>
+          <p className="text-xs text-zinc-500">⌘/Ctrl + Enter to post</p>
           <button
             type="button"
             onClick={onSubmit}
@@ -234,7 +234,7 @@ function UpdatesTab({
       ) : updates.length === 0 ? (
         <div className="text-center py-12">
           <MessageCircle size={32} className="mx-auto text-zinc-500 mb-3" />
-          <p className="text-sm font-medium mb-1">No updates yet</p>
+          <p className="text-xs font-medium mb-1">No updates yet</p>
           <p className="text-xs text-zinc-500">Share progress, mention a teammate, or attach a file to get things moving.</p>
         </div>
       ) : (
@@ -245,7 +245,7 @@ function UpdatesTab({
                 <Avatar name={u.authorName} image={u.authorImage} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium">{u.authorName ?? "Unknown"}</p>
-                  <p className="text-[11px] text-zinc-500">{fmtAbs(new Date(u.createdAt))}</p>
+                  <p className="text-xs text-zinc-500">{fmtAbs(new Date(u.createdAt))}</p>
                 </div>
                 <button
                   type="button"
@@ -257,7 +257,7 @@ function UpdatesTab({
                   <Trash2 size={12} />
                 </button>
               </div>
-              <div className="text-sm whitespace-pre-wrap">{u.body}</div>
+              <div className="text-xs whitespace-pre-wrap">{u.body}</div>
             </li>
           ))}
         </ul>
@@ -270,7 +270,7 @@ function FilesPlaceholder() {
   return (
     <div className="p-8 text-center">
       <Paperclip size={32} className="mx-auto text-zinc-500 mb-3" />
-      <p className="text-sm font-medium mb-1">Files coming soon</p>
+      <p className="text-xs font-medium mb-1">Files coming soon</p>
       <p className="text-xs text-zinc-500">
         Most modules already have their own attachment surface — we&apos;re unifying them into this tab in a later polish phase.
       </p>
@@ -290,7 +290,7 @@ function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: 
     return (
       <div className="text-center py-12 px-6">
         <ActivityIcon size={32} className="mx-auto text-zinc-500 mb-3" />
-        <p className="text-sm font-medium mb-1">No activity yet</p>
+        <p className="text-xs font-medium mb-1">No activity yet</p>
         <p className="text-xs text-zinc-500">Every field change, owner assignment, and status flip will land here automatically.</p>
       </div>
     );
@@ -305,7 +305,7 @@ function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: 
               <span className="font-medium">{a.actorName ?? "System"}</span>{" "}
               <span className="text-zinc-500">{renderActivity(a)}</span>
             </p>
-            <p className="text-[11px] text-zinc-500 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">{fmtAbs(new Date(a.createdAt))}</p>
           </div>
         </li>
       ))}
@@ -336,7 +336,7 @@ function renderActivity(a: ActivityRow) {
 }
 
 function Avatar({ name, image, small }: { name: string | null; image: string | null; small?: boolean }) {
-  const dim = small ? "w-5 h-5 text-[10px]" : "w-7 h-7 text-[12px]";
+  const dim = small ? "w-5 h-5 text-micro" : "w-7 h-7 text-xs";
   if (image) {
     return <img src={image} alt={name ?? ""} className={`${dim} rounded-full object-cover`} />;
   }

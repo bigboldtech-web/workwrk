@@ -602,7 +602,7 @@ export default async function SpacePage(props: {
           <div className="flex-1" />
           <Link
             href="/automation/workflows"
-            className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+            className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >
             <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -698,7 +698,7 @@ export default async function SpacePage(props: {
                           <li key={it.id}>
                             <Link
                               href={`/boards/${it.board.slug}?item=${it.id}`}
-                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[13.5px]"
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-base"
                             >
                               <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                               <span className="text-zinc-900 truncate">{it.title}</span>
@@ -721,7 +721,7 @@ export default async function SpacePage(props: {
                           <li key={d.id}>
                             <Link
                               href={`/docs/${d.id}`}
-                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-[13.5px]"
+                              className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-base"
                             >
                               <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                               <span className="text-zinc-900 truncate">{d.title}</span>
@@ -756,7 +756,7 @@ export default async function SpacePage(props: {
                               className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"
                             >
                               <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" style={f.color ? { color: f.color } : undefined} />
-                              <span className="text-sm text-zinc-900 truncate flex-1">{f.name}</span>
+                              <span className="text-xs text-zinc-900 truncate flex-1">{f.name}</span>
                             </Link>
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
                               <FolderMoreTrigger
@@ -776,7 +776,7 @@ export default async function SpacePage(props: {
                       <p className="text-xs text-zinc-500 px-2 py-3">No lists yet.</p>
                     ) : (
                       <div className="rounded-lg border border-zinc-200 overflow-hidden">
-                        <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-[12px] uppercase tracking-wide text-zinc-500">
+                        <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-xs uppercase tracking-wide text-zinc-500">
                           <span>Name</span>
                           <span>Color</span>
                           <span>Progress</span>
@@ -790,7 +790,7 @@ export default async function SpacePage(props: {
                             >
                               <Link href={`/boards/${b.slug}`} className="flex items-center gap-2 min-w-0">
                                 <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                                <span className="text-[13.5px] text-zinc-900 truncate">{b.name}</span>
+                                <span className="text-base text-zinc-900 truncate">{b.name}</span>
                               </Link>
                               <span className="flex items-center gap-1.5">
                                 <span
@@ -798,13 +798,13 @@ export default async function SpacePage(props: {
                                   style={{ background: b.color ?? "#A1A1AA" }}
                                   aria-hidden
                                 />
-                                <span className="text-[12px] text-zinc-500">{b.color ?? "—"}</span>
+                                <span className="text-xs text-zinc-500">{b.color ?? "—"}</span>
                               </span>
                               <span className="flex items-center gap-2">
                                 <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
                                   <span className="block h-full bg-zinc-300" style={{ width: "0%" }} />
                                 </span>
-                                <span className="text-[11.5px] text-zinc-500 tabular-nums shrink-0">0/—</span>
+                                <span className="text-xs text-zinc-500 tabular-nums shrink-0">0/—</span>
                               </span>
                               <span className="inline-flex items-center gap-2">
                                 <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
@@ -845,7 +845,7 @@ export default async function SpacePage(props: {
                         />
                         <ul className="flex-1 grid grid-cols-1 gap-1.5 min-w-0">
                           {statusSegments.map((s) => (
-                            <li key={s.key} className="flex items-center gap-2 text-[12.5px]">
+                            <li key={s.key} className="flex items-center gap-2 text-xs">
                               <span
                                 className="h-2 w-2 rounded-full shrink-0"
                                 style={{ backgroundColor: s.color }}
@@ -948,7 +948,7 @@ function SpaceGanttSection({
           <Link
             href={`/spaces/${spaceSlug}?view=gantt`}
             aria-disabled={isCurrentWindow}
-            className={`h-7 px-2.5 text-[12px] font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
+            className={`h-7 px-2.5 text-xs font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
               isCurrentWindow
                 ? "text-zinc-400 cursor-default"
                 : "text-zinc-700 hover:bg-zinc-50"
@@ -958,16 +958,16 @@ function SpaceGanttSection({
             Today
           </Link>
         </div>
-        <h2 className="text-[14px] font-semibold text-zinc-900">{rangeLabel}</h2>
+        <h2 className="text-base font-semibold text-zinc-900">{rangeLabel}</h2>
         <div className="flex-1" />
-        <span className="text-[11.5px] text-zinc-400 hidden sm:inline">
+        <span className="text-xs text-zinc-400 hidden sm:inline">
           Items with startAt + dueAt render as duration bars · single-day items show as markers
         </span>
       </div>
 
       {boardOrder.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-          <div className="text-sm font-medium text-zinc-900 mb-1">No items on the timeline</div>
+          <div className="text-xs font-medium text-zinc-900 mb-1">No items on the timeline</div>
           <p className="text-xs text-zinc-500">
             Add a DATE field to a Board and assign dates to surface items here.
           </p>
@@ -975,10 +975,10 @@ function SpaceGanttSection({
       ) : (
         <div className="rounded-xl border border-zinc-200 bg-white overflow-x-auto">
           <div
-            className="grid text-[12px]"
+            className="grid text-xs"
             style={{ gridTemplateColumns: `200px repeat(${weekCount}, minmax(96px, 1fr))` }}
           >
-            <div className="bg-zinc-50 border-b border-zinc-200 px-3 py-2 text-[11.5px] uppercase tracking-wide text-zinc-500 font-semibold sticky left-0 z-10">
+            <div className="bg-zinc-50 border-b border-zinc-200 px-3 py-2 text-micro uppercase tracking-wide text-zinc-500 font-semibold sticky left-0 z-10">
               Board
             </div>
             {weeks.map((w, i) => {
@@ -990,7 +990,7 @@ function SpaceGanttSection({
               return (
                 <div
                   key={i}
-                  className={`border-l border-zinc-100 border-b border-zinc-200 px-2 py-2 text-[11.5px] font-medium ${
+                  className={`border-l border-zinc-100 border-b border-zinc-200 px-2 py-2 text-xs font-medium ${
                     isThisWeek ? "text-zinc-900 bg-zinc-50" : "text-zinc-500 bg-zinc-50"
                   }`}
                 >
@@ -1056,7 +1056,7 @@ function BoardRow({
   return (
     <>
       <div
-        className="border-b border-zinc-100 px-3 py-2 text-[13px] font-medium text-zinc-800 truncate sticky left-0 bg-white z-10 flex items-center"
+        className="border-b border-zinc-100 px-3 py-2 text-sm font-medium text-zinc-800 truncate sticky left-0 bg-white z-10 flex items-center"
         style={{ minHeight: rowHeight }}
       >
         <Link href={`/boards/${board.slug}`} className="hover:text-zinc-900 truncate">{board.name}</Link>
@@ -1087,7 +1087,7 @@ function BoardRow({
               title={`${item.title} — ${item.startDate.toLocaleDateString()}${
                 item.startDate.getTime() !== item.endDate.getTime() ? ` → ${item.endDate.toLocaleDateString()}` : ""
               }`}
-              className="absolute px-2 py-1 rounded text-[11.5px] font-medium text-white truncate hover:opacity-90 leading-tight"
+              className="absolute px-2 py-1 rounded text-xs font-medium text-white truncate hover:opacity-90 leading-tight"
               style={{
                 left: `calc(${leftPct}% + 2px)`,
                 width: `calc(${widthPct}% - 4px)`,
@@ -1187,7 +1187,7 @@ function SpaceCalendarSection({
           <Link
             href={buildHref(new Date(now.getFullYear(), now.getMonth(), 1))}
             aria-disabled={isCurrentMonth}
-            className={`h-7 px-2.5 text-[12px] font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
+            className={`h-7 px-2.5 text-xs font-medium border-l border-zinc-200 inline-flex items-center rounded-r-md ${
               isCurrentMonth
                 ? "text-zinc-400 cursor-default"
                 : "text-zinc-700 hover:bg-zinc-50"
@@ -1197,16 +1197,16 @@ function SpaceCalendarSection({
             Today
           </Link>
         </div>
-        <h2 className="text-[14px] font-semibold text-zinc-900">{monthLabel}</h2>
+        <h2 className="text-base font-semibold text-zinc-900">{monthLabel}</h2>
         <div className="flex-1" />
-        <span className="text-[11.5px] text-zinc-400 hidden sm:inline">
+        <span className="text-xs text-zinc-400 hidden sm:inline">
           Items with a DATE field value · add one in the Field Shelf to surface
         </span>
       </div>
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <div className="grid grid-cols-7 bg-zinc-50 border-b border-zinc-200">
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-            <div key={d} className="px-2 py-2 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div key={d} className="px-2 py-2 text-micro font-semibold uppercase tracking-wide text-zinc-500">
               {d}
             </div>
           ))}
@@ -1225,7 +1225,7 @@ function SpaceCalendarSection({
                 {cell.day !== null ? (
                   <div className="flex items-center justify-between mb-1">
                     <span
-                      className={`text-[12px] tabular-nums ${
+                      className={`text-xs tabular-nums ${
                         isToday
                           ? "inline-flex h-5 w-5 items-center justify-center rounded-full text-white font-semibold"
                           : "text-zinc-700"
@@ -1235,7 +1235,7 @@ function SpaceCalendarSection({
                       {cell.day}
                     </span>
                     {dayItems.length > 0 ? (
-                      <span className="text-[11px] text-zinc-400 tabular-nums">{dayItems.length}</span>
+                      <span className="text-xs text-zinc-400 tabular-nums">{dayItems.length}</span>
                     ) : null}
                   </div>
                 ) : null}
@@ -1247,7 +1247,7 @@ function SpaceCalendarSection({
                       <li key={it.id}>
                         <Link
                           href={`/boards/${it.board.slug}?item=${it.id}`}
-                          className="flex items-center gap-1.5 px-1 py-0.5 rounded text-[11.5px] text-zinc-700 hover:bg-zinc-50 truncate"
+                          className="flex items-center gap-1.5 px-1 py-0.5 rounded text-xs text-zinc-700 hover:bg-zinc-50 truncate"
                         >
                           <span
                             className="h-1.5 w-1.5 rounded-full shrink-0"
@@ -1260,7 +1260,7 @@ function SpaceCalendarSection({
                     );
                   })}
                   {dayItems.length > 3 ? (
-                    <li className="px-1 text-[11px] text-zinc-400">+{dayItems.length - 3} more</li>
+                    <li className="px-1 text-xs text-zinc-400">+{dayItems.length - 3} more</li>
                   ) : null}
                 </ul>
               </div>
@@ -1296,7 +1296,7 @@ function SpaceTeamSection({
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-        <div className="text-sm font-medium text-zinc-900 mb-1">No items assigned yet</div>
+        <div className="text-xs font-medium text-zinc-900 mb-1">No items assigned yet</div>
         <p className="text-xs text-zinc-500">
           Items show up here once an owner has been assigned on a Board in this Space.
         </p>
@@ -1353,7 +1353,7 @@ function SpaceTeamSection({
 
   return (
     <section>
-      <h2 className="text-[12px] uppercase tracking-wide text-zinc-500 mb-2">
+      <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
         {items.length} item{items.length === 1 ? "" : "s"} · per-person workload
       </h2>
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -1370,8 +1370,8 @@ function SpaceTeamSection({
               <div className="px-3 py-2.5 border-b border-zinc-200">
                 <div className="flex items-center gap-2">
                   <OwnerBadge name={name} avatar={facet?.avatar ?? null} size="md" />
-                  <span className="text-[13.5px] font-semibold text-zinc-800 flex-1 truncate">{name}</span>
-                  <span className="text-[11.5px] text-zinc-500 tabular-nums">{cards.length}</span>
+                  <span className="text-base font-semibold text-zinc-800 flex-1 truncate">{name}</span>
+                  <span className="text-xs text-zinc-500 tabular-nums">{cards.length}</span>
                 </div>
                 {segments.length > 0 ? (
                   <div
@@ -1411,7 +1411,7 @@ function SpaceTeamSection({
               </div>
               <ul className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
                 {cards.length === 0 ? (
-                  <li className="text-[11.5px] text-zinc-400 px-1.5 py-1">No items</li>
+                  <li className="text-xs text-zinc-400 px-1.5 py-1">No items</li>
                 ) : (
                   cards.map((it) => {
                     const palette = it.status ? statusPalette.get(it.status) : null;
@@ -1423,10 +1423,10 @@ function SpaceTeamSection({
                           className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                           style={{ borderLeft: `3px solid ${accent}` }}
                         >
-                          <div className="text-[13.5px] font-medium text-zinc-900 line-clamp-2 mb-1">
+                          <div className="text-base font-medium text-zinc-900 line-clamp-2 mb-1">
                             {it.title}
                           </div>
-                          <div className="flex items-center justify-between text-[11.5px] text-zinc-500">
+                          <div className="flex items-center justify-between text-xs text-zinc-500">
                             <span className="inline-flex items-center gap-1.5 truncate max-w-[160px]">
                               <span
                                 className="h-1.5 w-1.5 rounded-full shrink-0"
@@ -1448,7 +1448,7 @@ function SpaceTeamSection({
         })}
       </div>
       {items.length === 200 ? (
-        <div className="mt-2 text-[11.5px] text-zinc-400">
+        <div className="mt-2 text-xs text-zinc-400">
           Showing 200 most-recently-updated items.
         </div>
       ) : null}
@@ -1478,7 +1478,7 @@ function SpaceBoardSection({
   if (items.length === 0) {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-        <div className="text-sm font-medium text-zinc-900 mb-1">No items to board yet</div>
+        <div className="text-xs font-medium text-zinc-900 mb-1">No items to board yet</div>
         <p className="text-xs text-zinc-500">
           Items show up as cards once a Board in this Space has rows.
         </p>
@@ -1504,7 +1504,7 @@ function SpaceBoardSection({
 
   return (
     <section>
-      <h2 className="text-[12px] uppercase tracking-wide text-zinc-500 mb-2">
+      <h2 className="text-xs uppercase tracking-wide text-zinc-500 mb-2">
         {items.length} item{items.length === 1 ? "" : "s"} across this Space · read-only
       </h2>
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -1524,14 +1524,14 @@ function SpaceBoardSection({
                   style={{ backgroundColor: palette.color }}
                   aria-hidden
                 />
-                <span className="text-[12.5px] font-semibold uppercase tracking-wide text-zinc-700 flex-1 truncate">
+                <span className="text-xs font-semibold uppercase tracking-wide text-zinc-700 flex-1 truncate">
                   {palette.label}
                 </span>
-                <span className="text-[11.5px] text-zinc-500 tabular-nums">{cards.length}</span>
+                <span className="text-xs text-zinc-500 tabular-nums">{cards.length}</span>
               </div>
               <ul className="flex-1 overflow-y-auto p-1.5 space-y-1.5">
                 {cards.length === 0 ? (
-                  <li className="text-[11.5px] text-zinc-400 px-1.5 py-1">No items</li>
+                  <li className="text-xs text-zinc-400 px-1.5 py-1">No items</li>
                 ) : (
                   cards.map((it) => (
                     <li key={it.id}>
@@ -1540,10 +1540,10 @@ function SpaceBoardSection({
                         className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                         style={{ borderLeft: `3px solid ${accent}` }}
                       >
-                        <div className="text-[13.5px] font-medium text-zinc-900 line-clamp-2 mb-1">
+                        <div className="text-base font-medium text-zinc-900 line-clamp-2 mb-1">
                           {it.title}
                         </div>
-                        <div className="flex items-center justify-between text-[11.5px] text-zinc-500">
+                        <div className="flex items-center justify-between text-xs text-zinc-500">
                           <span className="truncate max-w-[140px]">{it.board.name}</span>
                           <span className="tabular-nums">{timeAgo(it.updatedAt)}</span>
                         </div>
@@ -1557,7 +1557,7 @@ function SpaceBoardSection({
         })}
       </div>
       {items.length === 200 ? (
-        <div className="mt-2 text-[11.5px] text-zinc-400">
+        <div className="mt-2 text-xs text-zinc-400">
           Showing 200 most-recently-updated items. Open a Board for the full set + drag-to-rebucket.
         </div>
       ) : null}
@@ -1582,7 +1582,7 @@ function OwnerBadge({
   avatar: string | null;
   size?: "sm" | "md";
 }) {
-  const dim = size === "sm" ? "h-5 w-5 text-[10px]" : "h-6 w-6 text-[11px]";
+  const dim = size === "sm" ? "h-5 w-5 text-micro" : "h-6 w-6 text-xs";
   const initials = name
     .split(" ").map((p) => p[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
   if (avatar) {
@@ -1652,7 +1652,7 @@ function FilterChipStrip({
           <Link
             key={`s-${c.key}`}
             href={href}
-            className="inline-flex items-center gap-1.5 h-6 pl-1.5 pr-1 rounded-full text-[12px] font-medium border border-zinc-200 bg-white hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-6 pl-1.5 pr-1 rounded-full text-xs font-medium border border-zinc-200 bg-white hover:bg-zinc-50"
           >
             <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} aria-hidden />
             <span className="text-zinc-700">{c.label}</span>
@@ -1668,7 +1668,7 @@ function FilterChipStrip({
           <Link
             key={`o-${c.id}`}
             href={href}
-            className="inline-flex items-center gap-1.5 h-6 pl-1 pr-1 rounded-full text-[12px] font-medium border border-zinc-200 bg-white hover:bg-zinc-50"
+            className="inline-flex items-center gap-1.5 h-6 pl-1 pr-1 rounded-full text-xs font-medium border border-zinc-200 bg-white hover:bg-zinc-50"
           >
             <OwnerBadge name={c.name} avatar={c.avatar} />
             <span className="text-zinc-700">{c.name}</span>
@@ -1679,7 +1679,7 @@ function FilterChipStrip({
       {statusChips.length + ownerChips.length > 1 ? (
         <Link
           href={clearAllHref}
-          className="inline-flex items-center h-6 px-2 rounded-full text-[12px] text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50"
+          className="inline-flex items-center h-6 px-2 rounded-full text-xs text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50"
         >
           Clear all
         </Link>
@@ -1723,7 +1723,7 @@ function ListDueMenu({
   return (
     <details className="relative">
       <summary
-        className={`list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12.5px] hover:bg-zinc-50 select-none border ${
+        className={`list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs hover:bg-zinc-50 select-none border ${
           opts.due === "any"
             ? "border-zinc-200 bg-white text-zinc-700"
             : "border-zinc-900 bg-zinc-900 text-white"
@@ -1741,12 +1741,12 @@ function ListDueMenu({
             <Link
               key={d.key}
               href={buildListHref(spaceSlug, { ...opts, due: d.key })}
-              className={`flex items-center justify-between px-3 py-1.5 text-[13.5px] ${
+              className={`flex items-center justify-between px-3 py-1.5 text-base ${
                 active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
             >
               <span>{d.label}</span>
-              {active ? <span className="text-zinc-400 text-[11px]">✓</span> : null}
+              {active ? <span className="text-zinc-400 text-xs">✓</span> : null}
             </Link>
           );
         })}
@@ -1766,7 +1766,7 @@ function ListGroupByMenu({
   return (
     <details className="relative">
       <summary
-        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[12.5px] text-zinc-700 hover:bg-zinc-50 select-none"
+        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs text-zinc-700 hover:bg-zinc-50 select-none"
       >
         <span className="text-zinc-400">Group:</span>
         <span className="font-medium">{activeLabel.replace(/^Group by /, "") || "None"}</span>
@@ -1779,12 +1779,12 @@ function ListGroupByMenu({
             <Link
               key={g.key}
               href={buildListHref(spaceSlug, { ...opts, groupBy: g.key })}
-              className={`flex items-center justify-between px-3 py-1.5 text-[13.5px] ${
+              className={`flex items-center justify-between px-3 py-1.5 text-base ${
                 active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
             >
               <span>{g.label}</span>
-              {active ? <span className="text-zinc-400 text-[11px]">✓</span> : null}
+              {active ? <span className="text-zinc-400 text-xs">✓</span> : null}
             </Link>
           );
         })}
@@ -1804,7 +1804,7 @@ function ListSortMenu({
   return (
     <details className="relative">
       <summary
-        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[12.5px] text-zinc-700 hover:bg-zinc-50 select-none"
+        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs text-zinc-700 hover:bg-zinc-50 select-none"
       >
         <span className="text-zinc-400">Sort:</span>
         <span className="font-medium">{activeLabel}</span>
@@ -1817,12 +1817,12 @@ function ListSortMenu({
             <Link
               key={s.key}
               href={buildListHref(spaceSlug, { ...opts, sort: s.key })}
-              className={`flex items-center justify-between px-3 py-1.5 text-[13.5px] ${
+              className={`flex items-center justify-between px-3 py-1.5 text-base ${
                 active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
             >
               <span>{s.label}</span>
-              {active ? <span className="text-zinc-400 text-[11px]">✓</span> : null}
+              {active ? <span className="text-zinc-400 text-xs">✓</span> : null}
             </Link>
           );
         })}
@@ -1846,7 +1846,7 @@ function ListStatusFilter({
   return (
     <details className="relative">
       <summary
-        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[12.5px] text-zinc-700 hover:bg-zinc-50 select-none"
+        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs text-zinc-700 hover:bg-zinc-50 select-none"
       >
         <span className="text-zinc-400">Status:</span>
         <span className="font-medium">
@@ -1858,7 +1858,7 @@ function ListStatusFilter({
         {activeCount > 0 ? (
           <Link
             href={buildListHref(spaceSlug, { ...opts, statuses: null })}
-            className="block px-3 py-1.5 text-[13px] text-zinc-500 hover:bg-zinc-50 border-b border-zinc-100"
+            className="block px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-50 border-b border-zinc-100"
           >
             Clear filter
           </Link>
@@ -1871,7 +1871,7 @@ function ListStatusFilter({
             <Link
               key={s.key}
               href={buildListHref(spaceSlug, { ...opts, statuses: next.size > 0 ? next : null })}
-              className={`flex items-center gap-2 px-3 py-1.5 text-[13.5px] ${
+              className={`flex items-center gap-2 px-3 py-1.5 text-base ${
                 active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
             >
@@ -1881,7 +1881,7 @@ function ListStatusFilter({
                 aria-hidden
               />
               <span className="flex-1 truncate">{s.label}</span>
-              {active ? <span className="text-zinc-400 text-[11px]">✓</span> : null}
+              {active ? <span className="text-zinc-400 text-xs">✓</span> : null}
             </Link>
           );
         })}
@@ -1905,7 +1905,7 @@ function ListOwnerFilter({
   return (
     <details className="relative">
       <summary
-        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-[12.5px] text-zinc-700 hover:bg-zinc-50 select-none"
+        className="list-none cursor-pointer inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs text-zinc-700 hover:bg-zinc-50 select-none"
       >
         <span className="text-zinc-400">Owner:</span>
         <span className="font-medium">
@@ -1917,7 +1917,7 @@ function ListOwnerFilter({
         {activeCount > 0 ? (
           <Link
             href={buildListHref(spaceSlug, { ...opts, owners: null })}
-            className="block px-3 py-1.5 text-[13px] text-zinc-500 hover:bg-zinc-50 border-b border-zinc-100"
+            className="block px-3 py-1.5 text-sm text-zinc-500 hover:bg-zinc-50 border-b border-zinc-100"
           >
             Clear filter
           </Link>
@@ -1930,14 +1930,14 @@ function ListOwnerFilter({
             <Link
               key={o.id}
               href={buildListHref(spaceSlug, { ...opts, owners: next.size > 0 ? next : null })}
-              className={`flex items-center gap-2 px-3 py-1.5 text-[13.5px] ${
+              className={`flex items-center gap-2 px-3 py-1.5 text-base ${
                 active ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
               }`}
             >
               <OwnerBadge name={o.name} avatar={o.avatar} size="md" />
               <span className="flex-1 truncate">{o.name}</span>
-              <span className="text-[11px] text-zinc-400 tabular-nums">{o.count}</span>
-              {active ? <span className="text-zinc-400 text-[11px]">✓</span> : null}
+              <span className="text-xs text-zinc-400 tabular-nums">{o.count}</span>
+              {active ? <span className="text-zinc-400 text-xs">✓</span> : null}
             </Link>
           );
         })}
@@ -1997,7 +1997,7 @@ function SpaceListSection({
   if (items.length === 0 && !filterActive) {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white p-10 text-center">
-        <div className="text-sm font-medium text-zinc-900 mb-1">No items in this Space yet</div>
+        <div className="text-xs font-medium text-zinc-900 mb-1">No items in this Space yet</div>
         <p className="text-xs text-zinc-500">
           Items show up here once a Board in this Space has rows. Switch to{" "}
           <span className="text-zinc-700 font-medium">Overview</span> to add primitives.
@@ -2008,14 +2008,14 @@ function SpaceListSection({
   return (
     <section>
       <div className="flex items-center gap-2 mb-2 flex-wrap">
-        <h2 className="text-[12px] uppercase tracking-wide text-zinc-500 flex-1">
+        <h2 className="text-xs uppercase tracking-wide text-zinc-500 flex-1">
           {items.length} item{items.length === 1 ? "" : "s"}
           {filterActive ? " · filtered" : " across this Space"}
         </h2>
         <Link
           href={mineHref}
           aria-pressed={mineActive}
-          className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[12.5px] border transition-colors ${
+          className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs border transition-colors ${
             mineActive
               ? "border-zinc-900 bg-zinc-900 text-white font-medium"
               : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
@@ -2051,7 +2051,7 @@ function SpaceListSection({
       ) : null}
       {items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-zinc-200 bg-white p-8 text-center">
-          <div className="text-sm font-medium text-zinc-900 mb-1">No items match this filter</div>
+          <div className="text-xs font-medium text-zinc-900 mb-1">No items match this filter</div>
           <p className="text-xs text-zinc-500">
             Clear the status filter or pick different statuses to see results.
           </p>
@@ -2104,7 +2104,7 @@ function ListBody({
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
         <SpaceListItemsTable items={items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
         {items.length === 200 ? (
-          <div className="px-3 py-2 text-[11.5px] text-zinc-400 bg-zinc-50 border-t border-zinc-100">
+          <div className="px-3 py-2 text-xs text-zinc-400 bg-zinc-50 border-t border-zinc-100">
             Showing 200 most-recently-updated items. Open a Board for the full set.
           </div>
         ) : null}
@@ -2189,14 +2189,14 @@ function ListBody({
               {g.avatarInitials ? (
                 <OwnerBadge name={g.label} avatar={g.avatarUrl} />
               ) : null}
-              <span className="text-[13px] font-semibold text-zinc-800 flex-1 truncate">{g.label}</span>
-              <span className="text-[12px] text-zinc-500 tabular-nums">{g.items.length}</span>
+              <span className="text-sm font-semibold text-zinc-800 flex-1 truncate">{g.label}</span>
+              <span className="text-xs text-zinc-500 tabular-nums">{g.items.length}</span>
             </summary>
             <SpaceListItemsTable items={g.items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
           </details>
         ))}
       {items.length === 200 ? (
-        <div className="px-3 py-2 text-[11.5px] text-zinc-400 rounded-md bg-zinc-50 border border-zinc-200">
+        <div className="px-3 py-2 text-xs text-zinc-400 rounded-md bg-zinc-50 border border-zinc-200">
           Showing 200 most-recently-updated items. Open a Board for the full set.
         </div>
       ) : null}
@@ -2218,7 +2218,7 @@ function OverviewCard({
   return (
     <section className="h-full w-full rounded-xl border border-zinc-200 bg-white p-4 flex flex-col overflow-hidden">
       <div className="dash-card-handle flex items-center justify-between mb-2 cursor-grab active:cursor-grabbing select-none">
-        <h2 className="text-sm font-semibold text-zinc-900">{title}</h2>
+        <h2 className="text-xs font-semibold text-zinc-900">{title}</h2>
         {action ? <div className="shrink-0">{action}</div> : null}
       </div>
       <div className="flex-1 overflow-y-auto">{children}</div>

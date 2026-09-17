@@ -35,7 +35,7 @@ export function AdminShell({
         <div className="h-16 flex items-center px-4 border-b border-border">
           <div className="flex items-center gap-2">
             <Shield size={20} className="text-red-400" />
-            <span className="font-bold text-sm">WorkwrK Admin</span>
+            <span className="font-semibold text-base">WorkwrK Admin</span>
           </div>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
@@ -46,7 +46,7 @@ export function AdminShell({
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-base font-medium transition-all",
                   isActive
                     ? "bg-red-500/10 text-red-400 border border-red-500/20"
                     : "text-muted hover:bg-surface-2 hover:text-foreground"
@@ -62,7 +62,7 @@ export function AdminShell({
           <button
             type="button"
             onClick={() => signOut({ callbackUrl: "/login" })}
-            className="w-full flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm text-muted hover:bg-surface-2 hover:text-foreground transition-all"
+            className="w-full flex items-center gap-2 rounded-lg px-3 py-2.5 text-base text-muted hover:bg-surface-2 hover:text-foreground transition-all"
           >
             <LogOut size={16} />
             <span>Log out</span>
@@ -73,8 +73,8 @@ export function AdminShell({
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 border-b border-border flex items-center justify-between px-6 bg-background/80 backdrop-blur">
-          <h1 className="text-sm font-medium text-muted">WorkwrK Staff · Platform back-office</h1>
-          <div className="flex items-center gap-2 text-xs text-muted">
+          <h1 className="text-base font-medium text-muted">WorkwrK Staff · Platform back-office</h1>
+          <div className="flex items-center gap-2 text-sm text-muted">
             <Shield size={12} className="text-red-400" />
             {email}
           </div>

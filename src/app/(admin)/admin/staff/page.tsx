@@ -95,7 +95,7 @@ export default function PlatformStaffPage() {
             <ShieldCheck size={20} className="text-red-400" />
             Platform Staff
           </h1>
-          <p className="text-sm text-muted mt-1 max-w-2xl">
+          <p className="text-base text-muted mt-1 max-w-2xl">
             WorkwrK employees allowed into this back-office. Gated by email — completely
             separate from any customer&apos;s roles, so a tenant&apos;s admin can never get in.
           </p>
@@ -108,7 +108,7 @@ export default function PlatformStaffPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Add staff member</CardTitle>
+          <CardTitle className="text-base">Add staff member</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col sm:flex-row gap-2">
@@ -134,7 +134,7 @@ export default function PlatformStaffPage() {
               Add
             </Button>
           </div>
-          <p className="text-xs text-muted mt-2">
+          <p className="text-sm text-muted mt-2">
             They must also have a WorkwrK login (same credentials). Email is matched
             case-insensitively.
           </p>
@@ -143,22 +143,22 @@ export default function PlatformStaffPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Current staff ({staff.length})</CardTitle>
+          <CardTitle className="text-base">Current staff ({staff.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex items-center gap-2 text-sm text-muted py-4">
+            <div className="flex items-center gap-2 text-base text-muted py-4">
               <Loader2 size={16} className="animate-spin" /> Loading…
             </div>
           ) : staff.length === 0 ? (
-            <p className="text-sm text-muted py-4">No staff yet.</p>
+            <p className="text-base text-muted py-4">No staff yet.</p>
           ) : (
             <ul className="divide-y divide-border">
               {staff.map((s) => (
                 <li key={s.id} className="flex items-center justify-between gap-3 py-2.5">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{s.email}</div>
-                    {s.name ? <div className="text-xs text-muted truncate">{s.name}</div> : null}
+                    <div className="text-base font-medium truncate">{s.email}</div>
+                    {s.name ? <div className="text-sm text-muted truncate">{s.name}</div> : null}
                   </div>
                   <Button
                     variant="ghost"

@@ -27,7 +27,7 @@ export function ThreadPanel({ parent, replies, meId, members, memberNames, onClo
   return (
     <div className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[420px] flex-col border-l border-zinc-200 bg-white shadow-xl">
       <header className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 shrink-0">
-        <h2 className="flex-1 text-[14px] font-semibold text-zinc-900">Thread</h2>
+        <h2 className="flex-1 text-base font-semibold text-zinc-900">Thread</h2>
         <button type="button" onClick={onClose} aria-label="Close thread" className="inline-flex items-center justify-center h-7 w-7 rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700">
           <X className="w-4 h-4" />
         </button>
@@ -45,7 +45,7 @@ export function ThreadPanel({ parent, replies, meId, members, memberNames, onClo
         />
         <div className="my-2 flex items-center gap-2">
           <span className="h-px flex-1 bg-zinc-100" />
-          <span className="text-[11px] text-zinc-400">
+          <span className="text-xs text-zinc-400">
             {replies.filter((r) => !r.deletedAt).length} {replies.filter((r) => !r.deletedAt).length === 1 ? "reply" : "replies"}
           </span>
           <span className="h-px flex-1 bg-zinc-100" />

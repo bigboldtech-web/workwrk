@@ -90,10 +90,10 @@ function RegisterForm() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {invited ? `Join ${invitation?.organizationName ?? "the team"}` : "Start your free trial"}
         </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
+        <p className="text-base text-slate-500 mt-1.5">
           {invited
             ? invitation
               ? `Invited as ${invitation.accessLevel.replace(/_/g, " ").toLowerCase()}. One form and you're in.`
@@ -104,13 +104,13 @@ function RegisterForm() {
 
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3 py-2">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-base px-3 py-2">
             {error}
           </div>
         )}
 
         {invited && invitation && (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-sm px-3 py-2 flex items-center gap-2">
+          <div className="rounded-lg border border-blue-200 bg-blue-50 text-blue-800 text-base px-3 py-2 flex items-center gap-2">
             <CheckCircle2 size={14} />
             <span>Joining as <strong>{invitation.email}</strong></span>
           </div>
@@ -118,7 +118,7 @@ function RegisterForm() {
 
         {!invited && (
           <div className="space-y-1.5">
-            <label htmlFor="orgName" className="text-xs font-medium text-slate-700">
+            <label htmlFor="orgName" className="text-sm font-medium text-slate-700">
               Company name
             </label>
             <input
@@ -128,14 +128,14 @@ function RegisterForm() {
               onChange={(e) => update("organizationName", e.target.value)}
               placeholder="ScaleOps"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         )}
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label htmlFor="firstName" className="text-xs font-medium text-slate-700">
+            <label htmlFor="firstName" className="text-sm font-medium text-slate-700">
               First name
             </label>
             <input
@@ -146,11 +146,11 @@ function RegisterForm() {
               placeholder="Priya"
               autoComplete="given-name"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
           <div className="space-y-1.5">
-            <label htmlFor="lastName" className="text-xs font-medium text-slate-700">
+            <label htmlFor="lastName" className="text-sm font-medium text-slate-700">
               Last name
             </label>
             <input
@@ -161,14 +161,14 @@ function RegisterForm() {
               placeholder="Sharma"
               autoComplete="family-name"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         </div>
 
         {!invited && (
           <div className="space-y-1.5">
-            <label htmlFor="email" className="text-xs font-medium text-slate-700">
+            <label htmlFor="email" className="text-sm font-medium text-slate-700">
               Work email
             </label>
             <input
@@ -179,13 +179,13 @@ function RegisterForm() {
               placeholder="priya@company.com"
               autoComplete="email"
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
         )}
 
         <div className="space-y-1.5">
-          <label htmlFor="password" className="text-xs font-medium text-slate-700">
+          <label htmlFor="password" className="text-sm font-medium text-slate-700">
             Password
           </label>
           <input
@@ -197,14 +197,14 @@ function RegisterForm() {
             autoComplete="new-password"
             minLength={8}
             required
-            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+            className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
           />
         </div>
 
         <button
           type="submit"
           disabled={loading || (invited && !invitation)}
-          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>
@@ -219,7 +219,7 @@ function RegisterForm() {
         </button>
       </form>
 
-      <p className="text-sm text-slate-600 text-center">
+      <p className="text-base text-slate-600 text-center">
         Already have an account?{" "}
         <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
           Sign in

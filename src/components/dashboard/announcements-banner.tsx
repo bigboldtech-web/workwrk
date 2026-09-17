@@ -59,9 +59,9 @@ export function AnnouncementsBanner() {
                 <Icon size={18} className="mt-0.5 shrink-0 text-muted" />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold">{a.title}</p>
+                    <p className="text-xs font-semibold">{a.title}</p>
                     {a.pinned && <Pin size={12} className="text-[color:var(--accent-strong)]" />}
-                    {isUrgent && <span className="text-[11px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">Urgent</span>}
+                    {isUrgent && <span className="text-xs px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 font-medium">Urgent</span>}
                   </div>
                   <p className="text-xs text-muted mt-0.5">{a.content}</p>
                 </div>

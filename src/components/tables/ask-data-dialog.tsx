@@ -70,7 +70,7 @@ export function AskDataDialog({ open, onOpenChange, tableId, columns, buildRows 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-[560px] p-0 gap-0">
         <div className="px-6 pt-6 pb-3">
-          <DialogTitle className="text-[16px] font-semibold inline-flex items-center gap-2">
+          <DialogTitle className="text-lg font-semibold inline-flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-[var(--os-brand)]" /> Ask your data
           </DialogTitle>
           <DialogDescription className="mt-1">
@@ -89,13 +89,13 @@ export function AskDataDialog({ open, onOpenChange, tableId, columns, buildRows 
               }}
               rows={2}
               placeholder="e.g. What's the total revenue by region?"
-              className="flex-1 resize-none bg-transparent text-[14px] outline-none placeholder:text-zinc-400 min-h-[40px] max-h-[120px]"
+              className="flex-1 resize-none bg-transparent text-base outline-none placeholder:text-zinc-400 min-h-[40px] max-h-[120px]"
             />
             <button
               type="button"
               onClick={() => void ask(question)}
               disabled={busy || !question.trim()}
-              className="h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-[13.5px] font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
+              className="h-8 px-3 rounded-md bg-[var(--os-brand)] text-white text-base font-medium hover:opacity-90 disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CornerDownLeft className="h-3.5 w-3.5" />}
               Ask
@@ -109,7 +109,7 @@ export function AskDataDialog({ open, onOpenChange, tableId, columns, buildRows 
                   key={ex}
                   type="button"
                   onClick={() => { setQuestion(ex); void ask(ex); }}
-                  className="text-[12.5px] px-2.5 py-1 rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+                  className="text-xs px-2.5 py-1 rounded-full border border-zinc-200 text-zinc-600 hover:bg-zinc-50"
                 >
                   {ex}
                 </button>
@@ -117,18 +117,18 @@ export function AskDataDialog({ open, onOpenChange, tableId, columns, buildRows 
             </div>
           ) : null}
 
-          {error ? <div className="mt-3 text-[13px] text-red-500">{error}</div> : null}
+          {error ? <div className="mt-3 text-sm text-red-500">{error}</div> : null}
 
           {busy ? (
-            <div className="mt-4 text-[13px] text-zinc-400 inline-flex items-center gap-2">
+            <div className="mt-4 text-sm text-zinc-400 inline-flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" /> Reading your sheet…
             </div>
           ) : null}
 
           {answer ? (
             <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-3.5">
-              <div className="text-[13.5px] text-zinc-800 whitespace-pre-wrap leading-relaxed">{answer}</div>
-              {note ? <div className="mt-2 text-[11.5px] text-zinc-400">{note}</div> : null}
+              <div className="text-base text-zinc-800 whitespace-pre-wrap leading-relaxed">{answer}</div>
+              {note ? <div className="mt-2 text-xs text-zinc-400">{note}</div> : null}
             </div>
           ) : null}
         </div>

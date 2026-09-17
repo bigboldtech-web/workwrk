@@ -134,9 +134,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   className={cn(clickable && "cursor-pointer")}
                   onClick={clickable ? () => { t.onClick?.(); remove(t.id); } : undefined}
                 >
-                  <p className="text-[14.5px] font-semibold leading-tight">{t.title}</p>
+                  <p className="text-base font-semibold leading-tight">{t.title}</p>
                   {t.description && (
-                    <p className="text-[13.5px] mt-1 opacity-80 leading-snug line-clamp-3">{t.description}</p>
+                    <p className="text-base mt-1 opacity-80 leading-snug line-clamp-3">{t.description}</p>
                   )}
                 </div>
                 {t.actions && t.actions.length > 0 && (
@@ -146,7 +146,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                         key={i}
                         onClick={() => { a.onClick(); remove(t.id); }}
                         className={cn(
-                          "rounded-md px-2.5 py-1 text-[12.5px] font-medium transition-fast",
+                          "rounded-md px-2.5 py-1 text-xs font-medium transition-fast",
                           a.primary
                             ? "bg-[var(--os-brand)] text-white hover:bg-[var(--os-brand-hover)]"
                             : "border border-current/20 opacity-80 hover:opacity-100",

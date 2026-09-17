@@ -500,7 +500,7 @@ function TrainYourOwn() {
             Don&apos;t just hire ours. <br className="hidden sm:block" />
             <span style={{ color: "var(--brand-red)" }}>Train your own.</span>
           </h3>
-          <p className="mt-6 text-base lg:text-lg leading-relaxed text-white/70 max-w-xl">
+          <p className="mt-6 text-lg lg:text-lg leading-relaxed text-white/70 max-w-xl">
             Drag triggers from any workflow. Pick the actions it can take.
             Scope what data it sees. Validate before it ships. No code, no
             ML team, no waiting.

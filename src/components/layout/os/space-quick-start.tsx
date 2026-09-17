@@ -80,7 +80,7 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-6">
       <div className="mb-4">
-        <div className="text-sm font-semibold text-zinc-900 mb-1">Get started in this Space</div>
+        <div className="text-xs font-semibold text-zinc-900 mb-1">Get started in this Space</div>
         <p className="text-xs text-zinc-500">
           Add a primitive to begin tracking work. You can change everything later — nothing is locked in.
         </p>
@@ -163,8 +163,8 @@ function Tile({
         <Icon className="w-4 h-4" style={{ color: accent }} />
         {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : null}
       </div>
-      <div className="text-[13.5px] font-semibold text-zinc-900">{label}</div>
-      <div className="text-[11.5px] text-zinc-500 mt-0.5">{blurb}</div>
+      <div className="text-base font-semibold text-zinc-900">{label}</div>
+      <div className="text-xs text-zinc-500 mt-0.5">{blurb}</div>
     </button>
   );
 }

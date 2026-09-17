@@ -306,7 +306,7 @@ function BoardMoreMenu({
   if (mode === "rename") {
     return (
       <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl p-3">
-        <div className="text-[12px] uppercase tracking-wide text-zinc-400 font-semibold mb-2">
+        <div className="text-xs uppercase tracking-wide text-zinc-400 font-semibold mb-2">
           Rename board
         </div>
         <input
@@ -325,7 +325,7 @@ function BoardMoreMenu({
             }
             if (e.key === "Escape") onClose();
           }}
-          className="w-full h-9 px-2.5 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-zinc-400"
+          className="w-full h-9 px-2.5 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
           autoFocus
         />
         <div className="flex justify-end gap-1.5 mt-2.5">
@@ -333,7 +333,7 @@ function BoardMoreMenu({
             type="button"
             onClick={() => setMode("menu")}
             disabled={Boolean(busy)}
-            className="h-7 px-2.5 rounded-md text-[13px] text-zinc-600 hover:bg-zinc-100"
+            className="h-7 px-2.5 rounded-md text-sm text-zinc-600 hover:bg-zinc-100"
           >
             Cancel
           </button>
@@ -346,7 +346,7 @@ function BoardMoreMenu({
               if (ok) onClose();
             }}
             disabled={Boolean(busy) || !draft.trim()}
-            className="h-7 px-2.5 rounded-md text-[13px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             Save
@@ -359,7 +359,7 @@ function BoardMoreMenu({
   if (mode === "icon") {
     return (
       <div className="bg-white rounded-xl border border-zinc-200 shadow-2xl p-3">
-        <div className="text-[12px] uppercase tracking-wide text-zinc-400 font-semibold mb-2">
+        <div className="text-xs uppercase tracking-wide text-zinc-400 font-semibold mb-2">
           Change icon &amp; color
         </div>
         <div className="flex items-center gap-3">
@@ -372,14 +372,14 @@ function BoardMoreMenu({
               setColor(nextColor);
             }}
           />
-          <div className="text-[13px] text-zinc-500">Same icon catalog used by Spaces.</div>
+          <div className="text-sm text-zinc-500">Same icon catalog used by Spaces.</div>
         </div>
         <div className="flex justify-end gap-1.5 mt-3">
           <button
             type="button"
             onClick={() => setMode("menu")}
             disabled={Boolean(busy)}
-            className="h-7 px-2.5 rounded-md text-[13px] text-zinc-600 hover:bg-zinc-100"
+            className="h-7 px-2.5 rounded-md text-sm text-zinc-600 hover:bg-zinc-100"
           >
             Cancel
           </button>
@@ -390,7 +390,7 @@ function BoardMoreMenu({
               if (ok) onClose();
             }}
             disabled={Boolean(busy)}
-            className="h-7 px-2.5 rounded-md text-[13px] font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {busy === "icon" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
             Save

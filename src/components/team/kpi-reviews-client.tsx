@@ -78,7 +78,7 @@ export function KpiReviewsClient({ pending, acted }: Props) {
         {localPending.length === 0 ? (
           <div className="rounded-lg border border-zinc-200 bg-white px-6 py-8 text-center">
             <CheckCircle2 className="w-6 h-6 mx-auto text-emerald-600 mb-2" />
-            <div className="text-sm font-medium">Inbox zero.</div>
+            <div className="text-xs font-medium">Inbox zero.</div>
             <div className="text-xs text-zinc-500 mt-1">No KPI scores waiting for your approval.</div>
           </div>
         ) : (
@@ -133,25 +133,25 @@ function PendingKpiCard({
   return (
     <article className="rounded-lg border border-zinc-200 bg-white px-4 py-3">
       <div className="flex items-center gap-3">
-        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-zinc-100 text-sm font-medium shrink-0">
+        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-zinc-100 text-xs font-medium shrink-0">
           {initials}
         </span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium truncate">{nameOf(item.subject)}</div>
+          <div className="text-xs font-medium truncate">{nameOf(item.subject)}</div>
           <div className="text-xs text-zinc-500 truncate">{item.kpi.name} · {item.period}</div>
         </div>
         <div className="text-right shrink-0">
-          <div className="text-sm font-semibold tabular-nums">
+          <div className="text-xs font-semibold tabular-nums">
             {item.score != null ? `${Math.round(item.score)}%` : "—"}
           </div>
-          <div className="text-[12px] text-zinc-500 tabular-nums">
+          <div className="text-xs text-zinc-500 tabular-nums">
             {fmt(item.actualValue)} / {fmt(item.targetValue)}
           </div>
         </div>
       </div>
 
       {item.notes ? (
-        <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm whitespace-pre-wrap break-words">
+        <div className="mt-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs whitespace-pre-wrap break-words">
           {item.notes}
         </div>
       ) : null}
@@ -162,14 +162,14 @@ function PendingKpiCard({
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder={`Note to ${item.subject?.firstName ?? "report"} (optional, sent with your decision)`}
-          className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+          className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
         />
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => onRequestChanges(notes.trim() || undefined)}
             disabled={busy}
-            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-sm border border-red-500/40 text-red-700 hover:bg-red-500/10 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-xs border border-red-500/40 text-red-700 hover:bg-red-500/10 disabled:opacity-50"
           >
             <MessageSquareWarning className="w-3.5 h-3.5" />
             {busy ? "Saving…" : "Request changes"}
@@ -178,7 +178,7 @@ function PendingKpiCard({
             type="button"
             onClick={() => onApprove(notes.trim() || undefined)}
             disabled={busy}
-            className="ml-auto inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-sm text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="ml-auto inline-flex items-center gap-1.5 h-9 px-4 rounded-md text-xs text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             <Check className="w-3.5 h-3.5" />
             {busy ? "Saving…" : "Approve"}
@@ -197,11 +197,11 @@ function ActedKpiCard({ item }: { item: KpiReviewQueueItem }) {
         approved ? "border-emerald-500/30 bg-emerald-500/5" : "border-red-500/30 bg-red-500/5"
       }`}
     >
-      <div className="flex items-center gap-2 text-sm">
+      <div className="flex items-center gap-2 text-xs">
         <span className="font-medium truncate">{nameOf(item.subject)}</span>
         <span className="text-xs text-zinc-500 truncate flex-1">{item.kpi.name} · {item.period}</span>
         <span
-          className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+          className={`text-micro uppercase tracking-wide px-1.5 py-0.5 rounded ${
             approved ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700"
           }`}
         >

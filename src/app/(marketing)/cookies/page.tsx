@@ -33,7 +33,7 @@ export default function CookiesPage() {
           <div className="max-w-3xl">
             <Eyebrow hue="amber" className="mb-5">Legal</Eyebrow>
             <H1>Cookie Policy.</H1>
-            <p className="mt-5 text-base text-slate-600">
+            <p className="mt-5 text-lg text-slate-600">
               Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
             </p>
             <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">
@@ -52,9 +52,9 @@ export default function CookiesPage() {
           )},
           { id: "list", title: "2. The cookies we use", body: (
             <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm">
+              <table className="w-full text-base">
                 <thead>
-                  <tr className="bg-slate-50 text-left text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+                  <tr className="bg-slate-50 text-left text-sm font-bold uppercase tracking-[0.14em] text-slate-500">
                     <th className="p-3">Name</th>
                     <th className="p-3">Purpose</th>
                     <th className="p-3">Duration</th>
@@ -64,7 +64,7 @@ export default function CookiesPage() {
                 <tbody>
                   {COOKIES.map((c) => (
                     <tr key={c.name} className="border-t border-slate-100">
-                      <td className="p-3 font-mono text-xs text-slate-900">{c.name}</td>
+                      <td className="p-3 font-mono text-sm text-slate-900">{c.name}</td>
                       <td className="p-3 text-slate-700">{c.purpose}</td>
                       <td className="p-3 text-slate-500">{c.duration}</td>
                       <td className="p-3">

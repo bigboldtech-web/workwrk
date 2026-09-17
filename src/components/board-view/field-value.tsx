@@ -295,7 +295,7 @@ function UserValue({
     return (
       <span className="inline-flex items-center gap-1.5">
         <PersonAvatar person={person} size={20} />
-        <span className="text-sm truncate">{`${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email}</span>
+        <span className="text-xs truncate">{`${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.email}</span>
       </span>
     );
   }
@@ -334,7 +334,7 @@ function PeopleValue({
           <PersonAvatar person={p} size={22} />
         </span>
       ))}
-      {ids.length > 4 ? <span className="text-[12px] text-zinc-500 pl-2.5">+{ids.length - 4}</span> : null}
+      {ids.length > 4 ? <span className="text-xs text-zinc-500 pl-2.5">+{ids.length - 4}</span> : null}
     </span>
   );
 
@@ -360,7 +360,7 @@ function PeopleValue({
                 key={p.id}
                 type="button"
                 onClick={() => toggle(p.id)}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50"
               >
                 <PersonAvatar person={p} size={20} />
                 <span className="flex-1 truncate">{`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email}</span>
@@ -438,7 +438,7 @@ function LocationValue({
         href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(v)}`}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex items-center gap-1 text-sm text-[var(--os-brand)] hover:underline max-w-full"
+        className="inline-flex items-center gap-1 text-xs text-[var(--os-brand)] hover:underline max-w-full"
       >
         <MapPin className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate">{v}</span>
@@ -452,7 +452,7 @@ function LocationValue({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft || null); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-      className="w-full bg-transparent text-sm outline-none border-b border-transparent focus:border-[var(--os-brand)]"
+      className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
       placeholder="Add a location…"
     />
   );
@@ -531,12 +531,12 @@ function TextValue({
   if (readOnly) {
     if (!v) return <span className="text-xs text-zinc-500">—</span>;
     if (field.type === "URL" && /^https?:\/\//.test(v)) {
-      return <a href={v} className="text-sm text-[var(--os-brand)] hover:underline truncate inline-block max-w-full" target="_blank" rel="noreferrer">{v}</a>;
+      return <a href={v} className="text-xs text-[var(--os-brand)] hover:underline truncate inline-block max-w-full" target="_blank" rel="noreferrer">{v}</a>;
     }
     if (field.type === "EMAIL" && v.includes("@")) {
-      return <a href={`mailto:${v}`} className="text-sm text-[var(--os-brand)] hover:underline">{v}</a>;
+      return <a href={`mailto:${v}`} className="text-xs text-[var(--os-brand)] hover:underline">{v}</a>;
     }
-    return <span className="text-sm">{v}</span>;
+    return <span className="text-xs">{v}</span>;
   }
   return (
     <input
@@ -545,7 +545,7 @@ function TextValue({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
       onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-      className="w-full bg-transparent text-sm outline-none border-b border-transparent focus:border-[var(--os-brand)]"
+      className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
       placeholder="—"
     />
   );
@@ -569,7 +569,7 @@ function LongTextValue({
   }
   if (readOnly) {
     if (!v) return <span className="text-xs text-zinc-500">—</span>;
-    return <span className="text-sm whitespace-pre-wrap break-words">{v}</span>;
+    return <span className="text-xs whitespace-pre-wrap break-words">{v}</span>;
   }
   return (
     <textarea
@@ -577,7 +577,7 @@ function LongTextValue({
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => { if (draft !== v) onChange?.(draft); }}
-      className="w-full px-2 py-1 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+      className="w-full px-2 py-1 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
       placeholder="—"
     />
   );
@@ -620,7 +620,7 @@ function NumberValue({
 
   if (readOnly) {
     if (n == null) return <span className="text-xs text-zinc-500">—</span>;
-    return <span className="text-sm">{formatDisplay(n)}</span>;
+    return <span className="text-xs">{formatDisplay(n)}</span>;
   }
   return (
     <input
@@ -634,7 +634,7 @@ function NumberValue({
         if (!Number.isFinite(parsed)) return;
         if (parsed !== n) onChange?.(parsed);
       }}
-      className="w-full bg-transparent text-sm outline-none border-b border-transparent focus:border-[var(--os-brand)]"
+      className="w-full bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
       placeholder="—"
     />
   );
@@ -659,9 +659,9 @@ function DateValue({
     // Invalid dates fall back to the raw string — no try/catch around
     // JSX (new Date never throws; it yields NaN time instead).
     const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return <span className="text-sm">{v}</span>;
+    if (Number.isNaN(d.getTime())) return <span className="text-xs">{v}</span>;
     return (
-      <span className="text-sm">
+      <span className="text-xs">
         {field.type === "DATETIME" ? d.toLocaleString() : d.toLocaleDateString()}
       </span>
     );
@@ -672,7 +672,7 @@ function DateValue({
       type={kind === "DATETIME" ? "datetime-local" : "date"}
       value={toInputDate(v, kind)}
       onChange={(e) => onChange?.(e.target.value || null)}
-      className="bg-transparent text-sm outline-none border-b border-transparent focus:border-[var(--os-brand)]"
+      className="bg-transparent text-xs outline-none border-b border-transparent focus:border-[var(--os-brand)]"
     />
   );
 }
@@ -764,7 +764,7 @@ function DropdownValue({
               key={c.value}
               type="button"
               onClick={() => { onChange?.(c.value); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50"
             >
               <span
                 className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
@@ -908,12 +908,12 @@ function KraValue({
               key={k.id}
               type="button"
               onClick={() => { onChange?.(k.id); setOpen(false); }}
-              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+              className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50"
             >
               <Target className="w-3.5 h-3.5 text-zinc-500" />
               <span className="flex-1 truncate">
                 {k.name}
-                {k.category ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
+                {k.category ? <span className="ml-2 text-micro uppercase tracking-wide text-zinc-500">{k.category}</span> : null}
               </span>
               {k.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
@@ -1060,11 +1060,11 @@ function LinkedEntityValue({
           <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? emptyHint : "No matches."}</div>
         ) : (
           filtered.map((it) => (
-            <button key={it.id} type="button" onClick={() => { onChange?.(it.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+            <button key={it.id} type="button" onClick={() => { onChange?.(it.id); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50">
               <Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="flex-1 truncate">
                 {it.label}
-                {it.sub ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                {it.sub ? <span className="ml-2 text-micro uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
               </span>
               {it.id === v ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
@@ -1075,7 +1075,7 @@ function LinkedEntityValue({
             type="button"
             onClick={create}
             disabled={creating}
-            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
+            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
             <span className="truncate">
@@ -1149,7 +1149,7 @@ function RelationshipValue({
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium bg-zinc-100 text-zinc-700">
       <RelIcon className="w-3 h-3" />
       <span className="truncate max-w-[150px]">{current?.label ?? rel.id}</span>
-      <span className="text-[10px] uppercase tracking-wide text-zinc-400">{rel.kind}</span>
+      <span className="text-micro uppercase tracking-wide text-zinc-400">{rel.kind}</span>
     </span>
   ) : (
     <span className="text-xs text-zinc-500">—</span>
@@ -1198,7 +1198,7 @@ function RelationshipValue({
         {/* Kind toggle */}
         <div className="flex items-center gap-1 px-2 pb-1.5 pt-1 border-b border-zinc-100">
           {RELATION_KINDS.map((r) => (
-            <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-[12px] font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
+            <button key={r.kind} type="button" onClick={() => { setKind(r.kind); setQ(""); }} className={`flex-1 inline-flex items-center justify-center gap-1 h-6 rounded text-xs font-medium ${kind === r.kind ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}>
               <r.Icon className="w-3 h-3" /> {r.label}
             </button>
           ))}
@@ -1215,11 +1215,11 @@ function RelationshipValue({
           <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? `No ${active.label.toLowerCase()} yet.` : "No matches."}</div>
         ) : (
           filtered.map((it) => (
-            <button key={it.id} type="button" onClick={() => { onChange?.({ kind, id: it.id }); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50">
+            <button key={it.id} type="button" onClick={() => { onChange?.({ kind, id: it.id }); setOpen(false); }} className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50">
               <active.Icon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
               <span className="flex-1 truncate">
                 {it.label}
-                {it.sub ? <span className="ml-2 text-[11px] uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
+                {it.sub ? <span className="ml-2 text-micro uppercase tracking-wide text-zinc-500">{it.sub}</span> : null}
               </span>
               {rel && rel.kind === kind && rel.id === it.id ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>

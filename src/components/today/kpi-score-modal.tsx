@@ -100,10 +100,10 @@ export function KpiScoreModal({
               onChange={(e) => setActual(e.target.value)}
               autoFocus
               placeholder={String(prompt.targetValue ?? "")}
-              className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-xs focus:outline-none focus:border-[var(--os-brand)]"
             />
             {prompt.kpi.lowerIsBetter ? (
-              <div className="text-[11px] uppercase tracking-wide text-zinc-500 mt-1">Lower is better</div>
+              <div className="text-micro uppercase tracking-wide text-zinc-500 mt-1">Lower is better</div>
             ) : null}
           </div>
           <div>
@@ -114,7 +114,7 @@ export function KpiScoreModal({
               rows={2}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
             />
           </div>
           {error ? <div className="text-xs text-red-500">{error}</div> : null}
@@ -124,7 +124,7 @@ export function KpiScoreModal({
           <button
             type="button"
             onClick={() => onOpenChange(false)}
-            className="text-sm text-zinc-500 hover:text-zinc-900 px-3 py-2"
+            className="text-xs text-zinc-500 hover:text-zinc-900 px-3 py-2"
             disabled={submitting}
           >
             Cancel
@@ -133,7 +133,7 @@ export function KpiScoreModal({
             type="button"
             onClick={submit}
             disabled={submitting || actual === ""}
-            className="px-4 py-2 rounded-md text-sm font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="px-4 py-2 rounded-md text-xs font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {submitting ? "Submitting…" : "Submit"}
           </button>

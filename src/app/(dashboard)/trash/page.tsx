@@ -90,12 +90,12 @@ export default function TrashPage() {
         {err ? (
           <OsEmptyView Icon={Trash2} iconGradient={GRAD.redPink} title="Couldn't load Trash" subtitle={err} cta="Retry" onCta={() => void load()} />
         ) : items === null ? (
-          <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+          <div className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
         ) : items.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
             <Trash2 className="mx-auto h-8 w-8 text-zinc-300" />
-            <div className="mt-3 text-sm font-medium text-zinc-700">Trash is empty</div>
-            <div className="mt-1 text-[14px] text-zinc-500">Deleted Spaces, Lists, Tasks and documents (SOPs, Tables, Files …) appear here and are recoverable for 60 days.</div>
+            <div className="mt-3 text-xs font-medium text-zinc-700">Trash is empty</div>
+            <div className="mt-1 text-base text-zinc-500">Deleted Spaces, Lists, Tasks and documents (SOPs, Tables, Files …) appear here and are recoverable for 60 days.</div>
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
@@ -107,16 +107,16 @@ export default function TrashPage() {
                   <li key={it.id} className="flex items-center gap-3 px-4 py-3">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><meta.Icon className="h-4 w-4" /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14.5px] font-medium text-zinc-900">{it.label}</div>
-                      <div className="truncate text-[12px] text-zinc-400">
+                      <div className="truncate text-base font-medium text-zinc-900">{it.label}</div>
+                      <div className="truncate text-xs text-zinc-400">
                         {meta.label} · deleted {new Date(it.deletedAt).toLocaleDateString()}{it.deletedByName ? ` by ${it.deletedByName}` : ""}
                       </div>
                     </div>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[12px] font-medium ${left <= 7 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>{left}d left</span>
-                    <button type="button" disabled={busy === it.id} onClick={() => restore(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${left <= 7 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>{left}d left</span>
+                    <button type="button" disabled={busy === it.id} onClick={() => restore(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
                       {busy === it.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
                     </button>
-                    <button type="button" disabled={busy === it.id} onClick={() => deleteForever(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-[14px] text-red-600 hover:bg-red-50 disabled:opacity-50">
+                    <button type="button" disabled={busy === it.id} onClick={() => deleteForever(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-red-600 hover:bg-red-50 disabled:opacity-50">
                       <Trash2 className="h-3.5 w-3.5" /> Delete
                     </button>
                   </li>

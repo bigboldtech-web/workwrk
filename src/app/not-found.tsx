@@ -20,16 +20,16 @@ export default function NotFound() {
         <div className="w-12 h-12 mx-auto rounded-xl bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-4">
           <SearchX className="w-6 h-6 text-zinc-500" />
         </div>
-        <h1 className="text-[17px] font-semibold text-zinc-900 dark:text-zinc-100">
+        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
           Page not found
         </h1>
-        <p className="text-[14px] text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
+        <p className="text-base text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
           The link may be broken, or the page may have moved.
         </p>
         <div className="mt-6 flex items-center justify-center gap-2">
           <Link
             href="/"
-            className="inline-flex items-center h-9 px-4 rounded-full bg-zinc-900 text-white text-[14px] font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            className="inline-flex items-center h-9 px-4 rounded-full bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
             Back home
           </Link>

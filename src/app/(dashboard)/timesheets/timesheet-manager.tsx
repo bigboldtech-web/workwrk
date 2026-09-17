@@ -99,10 +99,10 @@ export function TimesheetManager({
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Clock size={20} /> Timesheets
           </h1>
-          <p className="text-muted text-sm mt-1">
+          <p className="text-muted text-xs mt-1">
             Log hours for the week or run a clock. Submit weekly for manager approval.
           </p>
         </div>
@@ -323,13 +323,13 @@ function MyWeek({
               <div className="flex items-center gap-3 min-w-0 flex-1">
                 <span className="w-2 h-2 rounded-full bg-[#00C875] animate-pulse" />
                 <div className="min-w-0">
-                  <div className="text-sm font-medium">Clocked in</div>
+                  <div className="text-xs font-medium">Clocked in</div>
                   <div className="text-xs text-muted">
                     Started {new Date(active.clockedInAt).toLocaleTimeString()}
                     {active.task && ` · ${active.task.title}`}
                   </div>
                 </div>
-                <div className="text-2xl font-mono font-bold tabular-nums ml-auto">
+                <div className="text-2xl font-mono font-semibold tabular-nums ml-auto">
                   {fmtElapsed((now - new Date(active.clockedInAt).getTime()) / 1000)}
                 </div>
               </div>
@@ -340,7 +340,7 @@ function MyWeek({
           ) : (
             <>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium">Not clocked in</div>
+                <div className="text-xs font-medium">Not clocked in</div>
                 <div className="text-xs text-muted">
                   Start a punch and the timer runs until you stop.
                 </div>
@@ -359,12 +359,12 @@ function MyWeek({
           <div className="flex items-center justify-between flex-wrap gap-3">
             <CardTitle className="text-base flex items-center gap-2">
               Week of {week[0]?.toLocaleDateString()} → {week[6]?.toLocaleDateString()}
-              <Badge variant="outline" className={`text-[11px] ${STATUS_STYLE[data.status]}`}>
+              <Badge variant="outline" className={`text-xs ${STATUS_STYLE[data.status]}`}>
                 {data.status}
               </Badge>
             </CardTitle>
             <div className="flex items-center gap-2">
-              <span className="text-sm font-mono">
+              <span className="text-xs font-mono">
                 Total: <strong>{totalWeekHours.toFixed(2)}h</strong>
               </span>
               {data.status === "DRAFT" && (
@@ -409,7 +409,7 @@ function MyWeek({
       {data.status === "REJECTED" && (
         <Card>
           <CardContent className="p-4 border border-red-400/30 bg-red-400/5 rounded-lg">
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-xs">
               <XCircle size={14} className="text-red-400" />
               <span className="font-medium text-red-400">Week was rejected.</span>
               <span className="text-muted">Retract above to fix and resubmit.</span>
@@ -448,10 +448,10 @@ function DayRow({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="w-12 text-xs text-muted">{weekday}</div>
-          <div className="text-sm font-medium">{day.toLocaleDateString()}</div>
+          <div className="text-xs font-medium">{day.toLocaleDateString()}</div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-sm tabular-nums">{fmtHours(totalHours)}</span>
+          <span className="font-mono text-xs tabular-nums">{fmtHours(totalHours)}</span>
           {!locked && (
             <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setAdding((v) => !v)}>
               <Plus size={14} />
@@ -474,7 +474,7 @@ function DayRow({
                 {!e.task && !e.description && <span className="italic">(no description)</span>}
               </span>
               {e.source === "PUNCH" && (
-                <span className="text-[11px] uppercase tracking-wide opacity-60">punched</span>
+                <span className="text-micro uppercase tracking-wide opacity-60">punched</span>
               )}
               {!locked && (
                 <button
@@ -611,11 +611,11 @@ function ApprovalQueue({
     }
   }
 
-  if (loading) return <div className="text-sm text-muted text-center py-8">Loading…</div>;
+  if (loading) return <div className="text-xs text-muted text-center py-8">Loading…</div>;
   if (rows.length === 0) {
     return (
       <Card>
-        <CardContent className="p-10 text-center text-sm text-muted">
+        <CardContent className="p-10 text-center text-xs text-muted">
           Nothing waiting on you.
         </CardContent>
       </Card>
@@ -645,7 +645,7 @@ function ApprovalQueue({
                   aria-label={`Select ${r.user?.firstName ?? "row"}`}
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium">
+                  <div className="text-xs font-medium">
                     {r.user ? `${r.user.firstName} ${r.user.lastName}` : "—"}
                   </div>
                   <div className="text-xs text-muted">

@@ -45,7 +45,7 @@ export function HowItWorks() {
             <span style={{ color: "var(--brand-blue)" }}>in under five minutes.</span>
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             No sales call. No SOW. Pick the hubs you need today, invite
@@ -108,7 +108,7 @@ export function HowItWorks() {
           >
             Start your workspace <ArrowRight size={15} />
           </a>
-          <p className="mt-4 text-sm" style={{ color: "var(--m-text-soft)" }}>
+          <p className="mt-4 text-base" style={{ color: "var(--m-text-soft)" }}>
             Free forever up to 5 people · 60-second signup
           </p>
         </motion.div>

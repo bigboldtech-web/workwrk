@@ -39,7 +39,7 @@ export function NamedRangesDialog({ open, onOpenChange, host, onChanged, initial
         {open && host ? (
           <NamedRangesBody host={host} onChanged={onChanged} initialRef={initialRef} />
         ) : (
-          <div className="px-6 py-8 text-[13px] text-zinc-400">Loading…</div>
+          <div className="px-6 py-8 text-sm text-zinc-400">Loading…</div>
         )}
       </DialogContent>
     </Dialog>
@@ -94,17 +94,17 @@ function NamedRangesBody({
   return (
     <>
         <div className="px-6 pt-6 pb-3">
-          <DialogTitle className="text-[16px] font-semibold inline-flex items-center gap-2">
+          <DialogTitle className="text-lg font-semibold inline-flex items-center gap-2">
             <Tag className="h-4 w-4 text-zinc-500" /> Named ranges
           </DialogTitle>
           <DialogDescription className="mt-1">
-            Give a range a name and use it in formulas — <code className="text-[12px] bg-zinc-100 px-1 py-0.5 rounded">=SUM(Revenue)</code>.
+            Give a range a name and use it in formulas — <code className="text-xs bg-zinc-100 px-1 py-0.5 rounded">=SUM(Revenue)</code>.
           </DialogDescription>
         </div>
 
         {/* Add */}
         <div className="px-6 pb-3 border-t border-zinc-100 pt-4">
-          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">Add a name</div>
+          <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-2">Add a name</div>
           <div className="flex items-start gap-1.5">
             <div className="flex-1">
               <input
@@ -112,45 +112,45 @@ function NamedRangesBody({
                 onChange={(e) => { setName(e.target.value); setError(null); }}
                 onKeyDown={(e) => { if (e.key === "Enter" && canAdd) add(); }}
                 placeholder="Revenue"
-                className={`w-full h-9 px-2.5 rounded-md border bg-white text-[14px] focus:outline-none ${nameHint ? "border-red-300 focus:border-red-400" : "border-zinc-200 focus:border-zinc-400"}`}
+                className={`w-full h-9 px-2.5 rounded-md border bg-white text-base focus:outline-none ${nameHint ? "border-red-300 focus:border-red-400" : "border-zinc-200 focus:border-zinc-400"}`}
               />
-              {nameHint ? <div className="text-[11.5px] text-red-500 mt-1 leading-snug">{nameHint}</div> : null}
+              {nameHint ? <div className="text-xs text-red-500 mt-1 leading-snug">{nameHint}</div> : null}
             </div>
-            <span className="h-9 inline-flex items-center text-[13px] text-zinc-400">=</span>
+            <span className="h-9 inline-flex items-center text-sm text-zinc-400">=</span>
             <input
               value={ref}
               onChange={(e) => { setRef(e.target.value); setError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter" && canAdd) add(); }}
               placeholder="A1:B10"
-              className="flex-1 h-9 px-2.5 rounded-md border border-zinc-200 bg-white text-[14px] font-mono focus:outline-none focus:border-zinc-400"
+              className="flex-1 h-9 px-2.5 rounded-md border border-zinc-200 bg-white text-base font-mono focus:outline-none focus:border-zinc-400"
             />
             <button
               type="button"
               onClick={add}
               disabled={!canAdd}
-              className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-[13.5px] font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
+              className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
             >
               {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
               Add
             </button>
           </div>
-          {error ? <div className="text-[12.5px] text-red-500 mt-2">{error}</div> : null}
+          {error ? <div className="text-xs text-red-500 mt-2">{error}</div> : null}
         </div>
 
         {/* List */}
         <div className="px-6 pb-5 border-t border-zinc-100 pt-4">
-          <div className="text-[12px] uppercase tracking-wide text-zinc-500 font-semibold mb-2">
+          <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-2">
             {ranges.length === 0 ? "Named ranges" : `Named ranges · ${ranges.length}`}
           </div>
           {ranges.length === 0 ? (
-            <div className="text-[13px] text-zinc-400">None yet. Add one above.</div>
+            <div className="text-sm text-zinc-400">None yet. Add one above.</div>
           ) : (
             <ul className="rounded-lg border border-zinc-200 divide-y divide-zinc-100 max-h-[280px] overflow-y-auto">
               {ranges.map((r) => (
                 <li key={r.name} className="flex items-center gap-2.5 px-3 py-2">
                   <span className="flex-1 min-w-0">
-                    <span className="block text-[13.5px] font-medium truncate">{r.name}</span>
-                    <span className="block text-[12px] text-zinc-500 font-mono truncate">={r.ref}</span>
+                    <span className="block text-base font-medium truncate">{r.name}</span>
+                    <span className="block text-xs text-zinc-500 font-mono truncate">={r.ref}</span>
                   </span>
                   <button
                     type="button"

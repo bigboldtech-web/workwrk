@@ -63,7 +63,7 @@ export function BoardFileGalleryView({ boardId, onOpenItem }: BoardFileGalleryVi
 
   if (files === null) {
     return (
-      <div className="rounded-lg border border-zinc-200 bg-white px-4 py-12 flex items-center justify-center gap-2 text-sm text-zinc-500">
+      <div className="rounded-lg border border-zinc-200 bg-white px-4 py-12 flex items-center justify-center gap-2 text-xs text-zinc-500">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading files…
       </div>
     );
@@ -73,8 +73,8 @@ export function BoardFileGalleryView({ boardId, onOpenItem }: BoardFileGalleryVi
     return (
       <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
         <Paperclip className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-        <h3 className="text-[15px] font-semibold text-zinc-900 mb-1">No files on this List yet</h3>
-        <p className="text-[13.5px] text-zinc-500 max-w-sm mx-auto">
+        <h3 className="text-base font-semibold text-zinc-900 mb-1">No files on this List yet</h3>
+        <p className="text-base text-zinc-500 max-w-sm mx-auto">
           {error ?? "Attach files from any task's drawer (Files section) and they'll collect here as a gallery."}
         </p>
       </div>
@@ -105,8 +105,8 @@ export function BoardFileGalleryView({ boardId, onOpenItem }: BoardFileGalleryVi
             </button>
             <div className="px-2.5 py-2 flex items-center gap-1.5">
               <div className="flex-1 min-w-0">
-                <div className="truncate text-[13px] font-medium text-zinc-800" title={f.name}>{f.name}</div>
-                <div className="text-[11.5px] text-zinc-400">{fmtSize(f.size)}</div>
+                <div className="truncate text-sm font-medium text-zinc-800" title={f.name}>{f.name}</div>
+                <div className="text-xs text-zinc-400">{fmtSize(f.size)}</div>
               </div>
               <a
                 href={f.url}

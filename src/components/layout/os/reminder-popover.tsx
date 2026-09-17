@@ -64,14 +64,14 @@ export function ReminderPopover() {
   }
 
   if (!open) return null;
-  const chip = "px-2.5 py-1 rounded-md text-[13px] border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10";
+  const chip = "px-2.5 py-1 rounded-md text-sm border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10";
 
   return (
     <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] bg-black/30" onClick={() => setOpen(false)}>
       <div className="w-[400px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 dark:border-[#2A2F38]">
           <AlarmClock className="w-4 h-4 text-[#FB5A6F]" />
-          <div className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 flex-1">New reminder</div>
+          <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100 flex-1">New reminder</div>
           <button type="button" onClick={() => setOpen(false)} className="w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-4 space-y-3">
@@ -81,7 +81,7 @@ export function ReminderPopover() {
             onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
             autoFocus
             placeholder="Remind me to…"
-            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-[14px] text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
+            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 outline-none focus:border-zinc-400"
           />
           <div className="flex items-center gap-1.5 flex-wrap">
             <button type="button" className={chip} onClick={() => setWhen(toLocalInput(inHour()))}>In 1 hour</button>
@@ -92,16 +92,16 @@ export function ReminderPopover() {
             type="datetime-local"
             value={when}
             onChange={(e) => setWhen(e.target.value)}
-            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-[14px] text-zinc-900 dark:text-zinc-100 outline-none focus:border-zinc-400 [color-scheme:light] dark:[color-scheme:dark]"
+            className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-base text-zinc-900 dark:text-zinc-100 outline-none focus:border-zinc-400 [color-scheme:light] dark:[color-scheme:dark]"
           />
-          <label className="flex items-center gap-2 text-[14px] text-zinc-700 dark:text-zinc-200 cursor-pointer select-none">
+          <label className="flex items-center gap-2 text-base text-zinc-700 dark:text-zinc-200 cursor-pointer select-none">
             <input type="checkbox" checked={email} onChange={(e) => setEmail(e.target.checked)} className="accent-[#0073EA]" />
             Also email me
           </label>
         </div>
         <div className="flex justify-end gap-2 px-4 h-14 items-center border-t border-zinc-100 dark:border-[#2A2F38]">
-          <button type="button" onClick={() => setOpen(false)} className="px-3 h-8 rounded-md text-[14px] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
-          <button type="button" onClick={() => void create()} disabled={!title.trim() || saving} className="px-3.5 h-8 rounded-md text-[14px] font-medium text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-40 inline-flex items-center gap-1.5">
+          <button type="button" onClick={() => setOpen(false)} className="px-3 h-8 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
+          <button type="button" onClick={() => void create()} disabled={!title.trim() || saving} className="px-3.5 h-8 rounded-md text-base font-medium text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-40 inline-flex items-center gap-1.5">
             {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Set reminder
           </button>
         </div>

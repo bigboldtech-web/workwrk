@@ -175,7 +175,7 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
 
       {/* Raised hands chip */}
       {hands.size > 0 && (
-        <div className="absolute left-3 top-3 z-[4] flex items-center gap-1.5 rounded-full bg-amber-400/95 px-3 py-1.5 text-[13px] font-medium text-amber-950 shadow">
+        <div className="absolute left-3 top-3 z-[4] flex items-center gap-1.5 rounded-full bg-amber-400/95 px-3 py-1.5 text-sm font-medium text-amber-950 shadow">
           <Hand className="h-4 w-4" />
           {[...hands.values()].slice(0, 3).join(", ")}{hands.size > 3 ? ` +${hands.size - 3}` : ""}
         </div>
@@ -188,7 +188,7 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
             key={e}
             type="button"
             onClick={() => react(e)}
-            className="flex h-8 w-8 items-center justify-center rounded-full text-[17px] hover:bg-white/15"
+            className="flex h-8 w-8 items-center justify-center rounded-full text-lg hover:bg-white/15"
             aria-label={`React ${e}`}
           >
             {e}
@@ -197,7 +197,7 @@ function ReactionLayer({ trailingControls }: { trailingControls?: React.ReactNod
         <button
           type="button"
           onClick={toggleHand}
-          className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium ${myHand ? "bg-amber-400 text-amber-950" : "text-white hover:bg-white/15"}`}
+          className={`flex h-8 items-center gap-1 rounded-full px-2.5 text-sm font-medium ${myHand ? "bg-amber-400 text-amber-950" : "text-white hover:bg-white/15"}`}
         >
           <Hand className="h-4 w-4" /> {myHand ? "Lower" : "Raise"}
         </button>

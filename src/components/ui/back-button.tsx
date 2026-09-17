@@ -33,7 +33,7 @@ export function BackButton({ fallbackHref, label, className }: BackButtonProps) 
       title={label ?? "Back"}
       className={
         className ??
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-[13.5px] font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink)]"
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-base font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink)]"
       }
     >
       <ArrowLeft className="h-4 w-4" />

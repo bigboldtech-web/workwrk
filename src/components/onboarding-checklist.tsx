@@ -113,7 +113,7 @@ export function OnboardingChecklist() {
             style={{
               fontFamily: "var(--font-geist-mono), monospace",
               fontSize: 13,
-              fontWeight: 700,
+              fontWeight: 600,
               color: "#4a9eff",
               letterSpacing: "-0.02em",
               fontVariantNumeric: "tabular-nums",

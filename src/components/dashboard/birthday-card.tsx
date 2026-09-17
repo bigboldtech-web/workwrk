@@ -49,8 +49,8 @@ export function BirthdayCard() {
             <Cake size={28} className="text-[#E2445C]" />
             <Gift size={28} className="text-[color:var(--accent-strong)]" />
           </div>
-          <h2 className="text-xl font-bold mb-2 text-foreground">Happy Birthday! 🎂</h2>
-          <p className="text-sm text-muted mb-1">
+          <h2 className="text-lg font-semibold mb-2 text-foreground">Happy Birthday! 🎂</h2>
+          <p className="text-xs text-muted mb-1">
             Thank you for being a wonderful part of{" "}
             <span className="font-semibold text-[color:var(--accent-strong)]">{companyName}</span>!
           </p>
@@ -70,7 +70,7 @@ export function BirthdayCard() {
           <div className="mb-3">
             <div className="flex items-center gap-2 mb-2">
               <Cake size={16} className="text-amber-400" />
-              <span className="text-sm font-semibold">Today&apos;s Birthdays</span>
+              <span className="text-xs font-semibold">Today&apos;s Birthdays</span>
             </div>
             <div className="flex flex-wrap gap-3">
               {todayBirthdays.map((u) => (
@@ -80,8 +80,8 @@ export function BirthdayCard() {
                     <AvatarFallback className="text-xs bg-amber-500/20 text-amber-400">{u.firstName[0]}{u.lastName[0]}</AvatarFallback>
                   </Avatar>
                   <div>
-                    <p className="text-sm font-medium">{u.firstName} {u.lastName} 🎂</p>
-                    <p className="text-[11px] text-muted">{u.department?.name || u.role?.title || ""}</p>
+                    <p className="text-xs font-medium">{u.firstName} {u.lastName} 🎂</p>
+                    <p className="text-xs text-muted">{u.department?.name || u.role?.title || ""}</p>
                   </div>
                 </div>
               ))}

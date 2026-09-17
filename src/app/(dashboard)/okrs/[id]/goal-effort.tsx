@@ -63,7 +63,7 @@ export function GoalEffort({ okrId }: { okrId: string }) {
       <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, color: "var(--os-ink-3, #9aa3b2)", textTransform: "uppercase", letterSpacing: ".03em" }}>
         <Icon style={{ width: 13, height: 13 }} /> {label}
       </span>
-      <span style={{ fontSize: 20, fontWeight: 700, color: "var(--os-ink, #1e293b)", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      <span style={{ fontSize: 20, fontWeight: 600, color: "var(--os-ink, #1e293b)", fontVariantNumeric: "tabular-nums" }}>{value}</span>
     </div>
   );
 
@@ -81,7 +81,7 @@ export function GoalEffort({ okrId }: { okrId: string }) {
           <ul style={{ display: "flex", flexDirection: "column", gap: 4, margin: 0, padding: 0, listStyle: "none" }}>
             {data.contributors.slice(0, 6).map((c) => (
               <li key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <span style={{ width: 22, height: 22, borderRadius: 22, background: "#0073EA", color: "#fff", fontSize: 10, fontWeight: 700, display: "grid", placeItems: "center", flex: "none" }}>{initials(c.name)}</span>
+                <span style={{ width: 22, height: 22, borderRadius: 22, background: "#0073EA", color: "#fff", fontSize: 10, fontWeight: 600, display: "grid", placeItems: "center", flex: "none" }}>{initials(c.name)}</span>
                 <span style={{ flex: 1, minWidth: 0, color: "var(--os-ink, #1e293b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
                 <span style={{ color: "var(--os-ink-3, #9aa3b2)", fontVariantNumeric: "tabular-nums" }}>{c.hours}h · {c.tasks} task{c.tasks === 1 ? "" : "s"}</span>
               </li>

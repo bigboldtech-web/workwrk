@@ -357,7 +357,7 @@ function LinkSection({
               <button
                 type="button"
                 onClick={() => setPickerOpen((v) => !v)}
-                className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
                 title={`Link an existing ${linkExisting.kindLabel}`}
               >
                 <Link2 className="h-3 w-3" />
@@ -368,7 +368,7 @@ function LinkSection({
               <button
                 type="button"
                 onClick={() => setAdding(true)}
-                className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+                className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
               >
                 <Plus className="h-3 w-3" />
                 Add
@@ -399,7 +399,7 @@ function LinkSection({
               if (e.key === "Escape") { setDraft(""); setAdding(false); }
             }}
             placeholder={`New ${title.toLowerCase().replace(/s$/, "")} title…`}
-            className="flex-1 h-8 px-2 rounded-md border border-zinc-200 bg-white text-sm focus:outline-none focus:border-zinc-400"
+            className="flex-1 h-8 px-2 rounded-md border border-zinc-200 bg-white text-xs focus:outline-none focus:border-zinc-400"
             autoFocus
             disabled={busy}
           />
@@ -440,7 +440,7 @@ function LinkSection({
                 <button
                   type="button"
                   onClick={() => router.push(href)}
-                  className="flex-1 min-w-0 text-left text-sm font-medium truncate hover:text-zinc-700"
+                  className="flex-1 min-w-0 text-left text-xs font-medium truncate hover:text-zinc-700"
                 >
                   {it.target?.title || "Untitled"}
                 </button>
@@ -587,7 +587,7 @@ function FileLinkSection({
             <button
               type="button"
               onClick={() => setPickerOpen((v) => !v)}
-              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
+              className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1"
               title="Link an existing file"
             >
               <Link2 className="h-3 w-3" />
@@ -598,7 +598,7 @@ function FileLinkSection({
               type="button"
               onClick={() => inputRef.current?.click()}
               disabled={uploading}
-              className="text-[12px] text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
+              className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
               {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
               Upload
@@ -654,12 +654,12 @@ function FileLinkSection({
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 min-w-0 text-sm font-medium truncate hover:text-zinc-700"
+                    className="flex-1 min-w-0 text-xs font-medium truncate hover:text-zinc-700"
                   >
                     {it.target?.title || "Untitled file"}
                   </a>
                   {it.target?.subtitle ? (
-                    <span className="text-[11.5px] text-zinc-400 truncate max-w-[140px]" title={it.target.subtitle}>
+                    <span className="text-xs text-zinc-400 truncate max-w-[140px]" title={it.target.subtitle}>
                       {it.target.subtitle}
                     </span>
                   ) : null}

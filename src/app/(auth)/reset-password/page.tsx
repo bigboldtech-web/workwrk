@@ -49,18 +49,18 @@ function ResetPasswordForm() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Reset link invalid</h1>
-          <p className="text-sm text-slate-500 mt-1.5">
+          <h1 className="text-3xl font-semibold tracking-tight">Reset link invalid</h1>
+          <p className="text-base text-slate-500 mt-1.5">
             This reset link is missing or expired. Request a fresh one.
           </p>
         </div>
         <Link
           href="/forgot-password"
-          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
         >
           Request new link <ArrowRight size={14} />
         </Link>
-        <p className="text-sm text-slate-600 text-center">
+        <p className="text-base text-slate-600 text-center">
           Back to{" "}
           <Link href="/login" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
             sign in
@@ -73,10 +73,10 @@ function ResetPasswordForm() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {success ? "Password reset" : "Set a new password"}
         </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
+        <p className="text-base text-slate-500 mt-1.5">
           {success
             ? "Redirecting you to sign in…"
             : "Eight characters or more. Mix letters, numbers, and a symbol for safety."}
@@ -84,19 +84,19 @@ function ResetPasswordForm() {
       </div>
 
       {success ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-sm flex items-center gap-2">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 px-4 py-3 text-base flex items-center gap-2">
           <CheckCircle2 size={16} /> Done. Taking you to sign in…
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           {error && (
-            <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3 py-2">
+            <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-base px-3 py-2">
               {error}
             </div>
           )}
 
           <div className="space-y-1.5">
-            <label htmlFor="password" className="text-xs font-medium text-slate-700">
+            <label htmlFor="password" className="text-sm font-medium text-slate-700">
               New password
             </label>
             <input
@@ -108,12 +108,12 @@ function ResetPasswordForm() {
               autoComplete="new-password"
               minLength={8}
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="confirmPassword" className="text-xs font-medium text-slate-700">
+            <label htmlFor="confirmPassword" className="text-sm font-medium text-slate-700">
               Confirm password
             </label>
             <input
@@ -125,14 +125,14 @@ function ResetPasswordForm() {
               autoComplete="new-password"
               minLength={8}
               required
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {loading ? (
               <>

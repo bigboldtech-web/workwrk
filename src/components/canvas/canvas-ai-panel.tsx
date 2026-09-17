@@ -85,10 +85,10 @@ function Markdown({ text }: { text: string }) {
   lines.forEach((raw, i) => {
     const line = raw.trim();
     if (!line) { flush(); return; }
-    if (/^#{1,3}\s/.test(line)) { flush(); out.push(<div key={i} style={{ fontSize: 12.5, fontWeight: 700, color: inkT.ink, margin: "6px 0 2px" }}>{line.replace(/^#{1,3}\s/, "")}</div>); return; }
+    if (/^#{1,3}\s/.test(line)) { flush(); out.push(<div key={i} style={{ fontSize: 12.5, fontWeight: 600, color: inkT.ink, margin: "6px 0 2px" }}>{line.replace(/^#{1,3}\s/, "")}</div>); return; }
     if (/^[-*]\s/.test(line)) { bullets.push(line.replace(/^[-*]\s/, "")); return; }
     // a bold-only line reads as a subheading
-    if (/^\*\*.+\*\*:?$/.test(line)) { flush(); out.push(<div key={i} style={{ fontSize: 12.5, fontWeight: 700, color: inkT.ink, margin: "6px 0 2px" }}>{line.replace(/\*\*/g, "").replace(/:$/, "")}</div>); return; }
+    if (/^\*\*.+\*\*:?$/.test(line)) { flush(); out.push(<div key={i} style={{ fontSize: 12.5, fontWeight: 600, color: inkT.ink, margin: "6px 0 2px" }}>{line.replace(/\*\*/g, "").replace(/:$/, "")}</div>); return; }
     flush();
     out.push(<p key={i} style={{ margin: "0 0 6px", fontSize: 12.5, lineHeight: 1.45, color: inkT.ink2 }}>{renderInline(line, i)}</p>);
   });
@@ -479,7 +479,7 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                 </div>
                 {analysis ? (
                   <div style={{ background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 10, padding: "9px 11px", maxHeight: 240, overflowY: "auto" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "#6965db", marginBottom: 4 }}>{analysis.action === "critique" ? "Design review" : "How it works"}</div>
+                    <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", color: "#6965db", marginBottom: 4 }}>{analysis.action === "critique" ? "Design review" : "How it works"}</div>
                     <Markdown text={analysis.text} />
                   </div>
                 ) : null}

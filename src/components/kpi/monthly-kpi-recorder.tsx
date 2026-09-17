@@ -239,17 +239,17 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
         <CardContent className="p-8 text-center">
           <Target size={40} className="mx-auto text-[color:var(--accent-strong)] mb-4" />
           <h3 className="text-lg font-semibold mb-2">Record Monthly KPIs</h3>
-          <p className="text-sm text-muted mb-6">
+          <p className="text-xs text-muted mb-6">
             Select a period to record or update KPI scores
           </p>
           <div className="flex items-center justify-center gap-3">
             <Button onClick={() => setSelectedPeriod(lastPeriod)} variant="outline" className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(lastPeriod)}
-              <Badge variant="secondary" className="text-[11px]">Last Month</Badge>
+              <Badge variant="secondary" className="text-xs">Last Month</Badge>
             </Button>
             <Button onClick={() => setSelectedPeriod(currentPeriod)} className="gap-2">
               <Calendar size={14} /> {formatPeriodLabel(currentPeriod)}
-              <Badge variant="secondary" className="text-[11px]">This Month</Badge>
+              <Badge variant="secondary" className="text-xs">This Month</Badge>
             </Button>
           </div>
         </CardContent>
@@ -263,7 +263,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
       <Card>
         <CardContent className="p-8 text-center">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#0073EA] border-t-transparent mx-auto" />
-          <p className="text-sm text-muted mt-3">Loading KPIs...</p>
+          <p className="text-xs text-muted mt-3">Loading KPIs...</p>
         </CardContent>
       </Card>
     );
@@ -276,7 +276,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
         <CardContent className="p-8 text-center">
           <Target size={40} className="mx-auto text-muted mb-4" />
           <h3 className="text-lg font-semibold mb-2">No KPIs Assigned</h3>
-          <p className="text-sm text-muted">
+          <p className="text-xs text-muted">
             Assign KRAs with KPIs to this person first, then come back to record scores.
           </p>
           <Button variant="outline" size="sm" className="mt-4" onClick={() => setSelectedPeriod(null)}>
@@ -302,7 +302,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                 Change Period
               </Button>
               <div>
-                <h3 className="text-sm font-semibold">{formatPeriodLabel(selectedPeriod)}</h3>
+                <h3 className="text-xs font-semibold">{formatPeriodLabel(selectedPeriod)}</h3>
                 <p className="text-xs text-muted">
                   {filledCount} of {totalKpis} KPIs recorded
                 </p>
@@ -338,11 +338,11 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
               <div className="flex items-center gap-3">
                 {isExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
                 <div className="text-left">
-                  <p className="text-sm font-medium">{kra.kraName}</p>
+                  <p className="text-xs font-medium">{kra.kraName}</p>
                   <p className="text-xs text-muted-2">{kraFilled}/{kra.kpis.length} KPIs filled</p>
                 </div>
               </div>
-              <Badge variant="outline" className="text-[11px]">{kra.kpis.length} KPIs</Badge>
+              <Badge variant="outline" className="text-xs">{kra.kpis.length} KPIs</Badge>
             </button>
 
             {isExpanded && (
@@ -391,9 +391,9 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                         {/* KPI Name */}
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm">{kpi.name}</p>
+                            <p className="text-xs">{kpi.name}</p>
                             <span
-                              className={`text-[11px] px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
+                              className={`text-micro px-1.5 py-0.5 rounded-full uppercase tracking-wide ${cadenceChipColor}`}
                               title={isMonthly ? "Monthly KPI" : `Defined ${cadenceLabel.toLowerCase()} — recording the monthly slice`}
                             >
                               {cadenceLabel}
@@ -404,13 +404,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                           </div>
                           <div className="flex items-center gap-2 flex-wrap">
                             {kpi.unit && (
-                              <span className="text-[11px] text-muted-2">Unit: {kpi.unit}</span>
+                              <span className="text-xs text-muted-2">Unit: {kpi.unit}</span>
                             )}
                             {kpi.lowerIsBetter && (
-                              <span className="text-[11px] text-amber-400">Lower is better</span>
+                              <span className="text-xs text-amber-400">Lower is better</span>
                             )}
                             {!isMonthly && (
-                              <span className="text-[11px] text-muted-2">
+                              <span className="text-xs text-muted-2">
                                 {definedFreq === "QUARTERLY" || definedFreq === "ANNUALLY"
                                   ? `Tracked ${cadenceLabel.toLowerCase()} — enter this month's contribution`
                                   : `Tracked ${cadenceLabel.toLowerCase()} — enter the month's rolled-up actual`}
@@ -425,7 +425,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                              means; the record stores rating / ceiling · 100
                              as its score. */
                           <div className="min-w-[220px]">
-                            <p className="text-[11px] text-muted-2 uppercase">
+                            <p className="text-micro text-muted-2 uppercase">
                               Rating
                               {kpi.targetValue && kpi.targetValue > 0 ? ` · target ${kpi.targetValue}` : ""}
                             </p>
@@ -451,7 +451,7 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                 );
                               })}
                             </div>
-                            <p className="text-[11px] text-muted-2 mt-0.5 h-3 leading-3">
+                            <p className="text-xs text-muted-2 mt-0.5 h-3 leading-3">
                               {actual != null && RATING_ANCHORS[actual] ? RATING_ANCHORS[actual] : " "}
                             </p>
                           </div>
@@ -462,12 +462,12 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
                                 number you enter under Actual compares apples
                                 to apples. */}
                             <div className="text-center min-w-[100px]" title={targetHint ?? undefined}>
-                              <p className="text-[11px] text-muted-2 uppercase">Target / month</p>
-                              <p className="text-sm font-mono font-bold">
+                              <p className="text-micro text-muted-2 uppercase">Target / month</p>
+                              <p className="text-xs font-mono font-semibold">
                                 {adjTarget != null ? adjTarget : "—"}
                               </p>
                               {targetHint && (
-                                <p className="text-[10px] text-muted-2 leading-tight">
+                                <p className="text-micro text-muted-2 leading-tight">
                                   from {kpi.targetValue} {kpi.frequency?.toLowerCase()}
                                 </p>
                               )}
@@ -475,13 +475,13 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                             {/* Actual Value Input */}
                             <div className="min-w-[100px]">
-                              <p className="text-[11px] text-muted-2 uppercase">Actual</p>
+                              <p className="text-micro text-muted-2 uppercase">Actual</p>
                               <Input
                                 type="number"
                                 value={fd.actualValue}
                                 onChange={(e) => updateField(kpi.kpiId, "actualValue", e.target.value)}
                                 placeholder="0"
-                                className="h-8 text-sm bg-transparent border-border w-full"
+                                className="h-8 text-xs bg-transparent border-border w-full"
                               />
                             </div>
                           </>
@@ -489,8 +489,8 @@ export function MonthlyKpiRecorder({ userId, self = false }: Props) {
 
                         {/* Score */}
                         <div className="text-center min-w-[60px]">
-                          <p className="text-[11px] text-muted-2 uppercase">Score</p>
-                          <p className={`text-sm font-mono font-bold ${
+                          <p className="text-micro text-muted-2 uppercase">Score</p>
+                          <p className={`text-xs font-mono font-semibold ${
                             score == null ? "text-muted-2"
                             : score >= 90 ? "text-green-400"
                             : score >= 70 ? "text-[color:var(--accent-strong)]"

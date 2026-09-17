@@ -231,12 +231,12 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
               // eslint-disable-next-line @next/next/no-img-element
               <img src={current.logo} alt="" className="w-10 h-10 rounded-md object-cover shrink-0" />
             ) : (
-              <span className="w-10 h-10 rounded-md bg-zinc-900 text-white flex items-center justify-center text-base font-bold shrink-0">
+              <span className="w-10 h-10 rounded-md bg-zinc-900 text-white flex items-center justify-center text-base font-semibold shrink-0">
                 {current ? orgInitials(current.name) : "·"}
               </span>
             )}
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                 {current?.name ?? "Workspace"}
               </div>
               <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
@@ -265,7 +265,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
             <button
               type="button"
               onClick={() => setTab("settings")}
-              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-sm transition-colors ${
+              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-xs transition-colors ${
                 tab === "settings"
                   ? "bg-zinc-100 dark:bg-white/5 text-zinc-900 dark:text-zinc-100 font-medium"
                   : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
@@ -277,7 +277,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
             <button
               type="button"
               onClick={() => setTab("people")}
-              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-sm transition-colors ${
+              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-xs transition-colors ${
                 tab === "people"
                   ? "bg-zinc-100 dark:bg-white/5 text-zinc-900 dark:text-zinc-100 font-medium"
                   : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
@@ -293,7 +293,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
           <>
             {/* Manage section */}
             <div className="px-4 pb-2 pt-1">
-              <div className="text-[12px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Manage</div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Manage</div>
               <ul className="space-y-0.5">
                 <li><MenuItem variant="inset" icon={Sparkles}   label="Apps"        onClick={() => comingSoon("Apps")} /></li>
                 <li><MenuItem variant="inset" icon={LayoutGrid} label="Templates"   href="/templates" onClick={onClose} /></li>
@@ -306,14 +306,14 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
 
             {/* Switch Workspaces */}
             <div className="px-4 py-2">
-              <div className="text-[12px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Switch Workspaces</div>
+              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Switch Workspaces</div>
               <ul className="space-y-0.5">
                 {memberships == null ? (
-                  <li className="px-2 py-2 text-[14px] text-zinc-400 dark:text-zinc-400 flex items-center gap-2">
+                  <li className="px-2 py-2 text-base text-zinc-400 dark:text-zinc-400 flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
                   </li>
                 ) : memberships.length === 0 ? (
-                  <li className="px-2 py-2 text-[14px] text-zinc-400 dark:text-zinc-400">No workspaces found.</li>
+                  <li className="px-2 py-2 text-base text-zinc-400 dark:text-zinc-400">No workspaces found.</li>
                 ) : (
                   memberships.map((m) => (
                     <li key={m.id}>
@@ -324,7 +324,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={m.organization.logo} alt="" className="w-6 h-6 rounded-md object-cover shrink-0" />
                           ) : (
-                            <span className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center text-[11px] font-bold shrink-0">
+                            <span className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center text-xs font-semibold shrink-0">
                               {orgInitials(m.organization.name)}
                             </span>
                           )
@@ -346,7 +346,7 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
                 type="button"
                 onClick={createWorkspace}
                 disabled={creating}
-                className="w-full flex items-center justify-center gap-1.5 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/10 text-sm text-zinc-700 dark:text-zinc-200 disabled:opacity-60"
+                className="w-full flex items-center justify-center gap-1.5 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/10 text-xs text-zinc-700 dark:text-zinc-200 disabled:opacity-60"
               >
                 <Plus className="w-3.5 h-3.5" />
                 {creating ? "Creating…" : "Create Workspace"}
@@ -487,22 +487,22 @@ function DeleteWorkspaceModal({
       <div className="w-full max-w-md rounded-xl border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] shadow-2xl">
         {doneMessage ? (
           <div className="p-5">
-            <h2 className="text-[16px] font-semibold text-zinc-900 dark:text-zinc-100">Deletion scheduled</h2>
-            <p className="mt-2 text-[14px] text-zinc-600 dark:text-zinc-300">{doneMessage}</p>
-            <p className="mt-2 text-[13.5px] text-zinc-500 dark:text-zinc-400">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Deletion scheduled</h2>
+            <p className="mt-2 text-base text-zinc-600 dark:text-zinc-300">{doneMessage}</p>
+            <p className="mt-2 text-base text-zinc-500 dark:text-zinc-400">
               You can undo this during the grace period — contact support or restore from the
               admin tools before the window closes.
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={onClose}
-                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-[14px] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-base text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
               >
                 Close
               </button>
               <button
                 onClick={() => signOut({ callbackUrl: "/login" })}
-                className="h-8 rounded-md bg-zinc-900 px-3 text-[14px] font-medium text-white hover:bg-zinc-800"
+                className="h-8 rounded-md bg-zinc-900 px-3 text-base font-medium text-white hover:bg-zinc-800"
               >
                 Sign out
               </button>
@@ -512,9 +512,9 @@ function DeleteWorkspaceModal({
           <div className="p-5">
             <div className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
-              <h2 className="text-[16px] font-semibold text-zinc-900 dark:text-zinc-100">Delete this workspace?</h2>
+              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Delete this workspace?</h2>
             </div>
-            <p className="mt-2 text-[14px] text-zinc-600 dark:text-zinc-300">
+            <p className="mt-2 text-base text-zinc-600 dark:text-zinc-300">
               This schedules the entire{" "}
               <span className="font-semibold text-zinc-900 dark:text-zinc-100">{org.name}</span> workspace —
               and all of its data — for deletion. It stays recoverable for a 30-day grace period, then is
@@ -523,7 +523,7 @@ function DeleteWorkspaceModal({
                 : "You'll be signed out."}
             </p>
 
-            <label className="mt-4 block text-[13.5px] font-medium text-zinc-700 dark:text-zinc-200">
+            <label className="mt-4 block text-base font-medium text-zinc-700 dark:text-zinc-200">
               Type the workspace name to confirm
             </label>
             <div className="mt-1 rounded-md border border-zinc-300 dark:border-[#2A2F38] dark:bg-[#14171D] px-2.5 focus-within:border-zinc-900 dark:focus-within:border-zinc-100">
@@ -531,11 +531,11 @@ function DeleteWorkspaceModal({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={org.name}
-                className="h-9 w-full bg-transparent text-[14px] text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                className="h-9 w-full bg-transparent text-base text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
               />
             </div>
 
-            <label className="mt-3 block text-[13.5px] font-medium text-zinc-700 dark:text-zinc-200">
+            <label className="mt-3 block text-base font-medium text-zinc-700 dark:text-zinc-200">
               Type <span className="font-semibold">DELETE</span> to confirm
             </label>
             <div className="mt-1 rounded-md border border-zinc-300 dark:border-[#2A2F38] dark:bg-[#14171D] px-2.5 focus-within:border-zinc-900 dark:focus-within:border-zinc-100">
@@ -543,21 +543,21 @@ function DeleteWorkspaceModal({
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 placeholder="DELETE"
-                className="h-9 w-full bg-transparent text-[14px] text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+                className="h-9 w-full bg-transparent text-base text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
               />
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={onClose}
-                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-[14px] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
+                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-base text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
               >
                 Cancel
               </button>
               <button
                 onClick={submit}
                 disabled={!canSubmit}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-3 text-[14px] font-medium text-white hover:bg-red-700 disabled:opacity-40"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-3 text-base font-medium text-white hover:bg-red-700 disabled:opacity-40"
               >
                 {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                 Delete workspace

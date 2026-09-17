@@ -102,8 +102,8 @@ export function KudosReactions({
             aria-pressed={active}
             aria-label={`React ${c.emoji} (${c.count})`}
           >
-            <span className="text-sm leading-none">{c.emoji}</span>
-            <span className="font-mono text-[12px]">{c.count}</span>
+            <span className="text-xs leading-none">{c.emoji}</span>
+            <span className="font-mono text-xs">{c.count}</span>
           </button>
         );
       })}
@@ -136,7 +136,7 @@ export function KudosReactions({
                   onClick={() => react(e)}
                   disabled={busy}
                   className={cn(
-                    "h-9 w-9 flex items-center justify-center rounded-md text-[18px] leading-none transition-colors hover:bg-surface-2",
+                    "h-9 w-9 flex items-center justify-center rounded-md text-lg leading-none transition-colors hover:bg-surface-2",
                     mine.includes(e) && "bg-[rgba(212,255,46,0.12)]",
                   )}
                   aria-label={`React ${e}`}
@@ -150,7 +150,7 @@ export function KudosReactions({
       </div>
 
       {totalReactions > 0 && !compact && (
-        <span className="text-[12px] text-muted ml-auto">
+        <span className="text-xs text-muted ml-auto">
           {totalReactions} reaction{totalReactions === 1 ? "" : "s"}
         </span>
       )}

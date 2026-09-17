@@ -245,7 +245,7 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] overflow-hidden">
         <div className="overflow-y-auto px-6 py-6 max-w-3xl mx-auto w-full">
           {loading ? (
-            <div className="text-center py-20 text-sm text-muted-2 inline-flex items-center gap-2 mx-auto"><Loader2 size={14} className="animate-spin" /> Loading…</div>
+            <div className="text-center py-20 text-xs text-muted-2 inline-flex items-center gap-2 mx-auto"><Loader2 size={14} className="animate-spin" /> Loading…</div>
           ) : (
             <RichEditor
               content={html}
@@ -262,7 +262,7 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
         {showVersions && (
           <aside className="border-l border-border bg-surface overflow-y-auto">
             <header className="sticky top-0 z-10 bg-surface border-b border-border px-4 py-3 flex items-center justify-between">
-              <p className="text-sm font-semibold">Version history</p>
+              <p className="text-xs font-semibold">Version history</p>
               <button
                 type="button"
                 onClick={() => setShowVersions(false)}
@@ -283,14 +283,14 @@ export function FullScreenDocEditor({ docId, onClose, breadcrumbs }: Props) {
                     <button
                       type="button"
                       onClick={() => restoreVersion(v.id)}
-                      className="inline-flex items-center gap-1 text-[11px] font-medium text-[#0073EA] hover:text-[#005BB8]"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-[#0073EA] hover:text-[#005BB8]"
                       title="Restore this version"
                     >
                       <RotateCcw size={10} /> Restore
                     </button>
                   </div>
                   <p className="text-xs text-foreground truncate">{v.title}</p>
-                  <p className="text-[11px] text-muted-2 mt-1">
+                  <p className="text-xs text-muted-2 mt-1">
                     {v.authorName ? `${v.authorName} · ` : ""}{fmtAbs(new Date(v.createdAt))}
                   </p>
                 </div>

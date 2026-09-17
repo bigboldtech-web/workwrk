@@ -22,7 +22,7 @@ export function PriorityFlag({ value, showLabel = false }: { value: string | nul
   return (
     <span className="inline-flex items-center gap-1.5">
       <Flag className="w-3.5 h-3.5" style={{ color: opt.color }} fill={opt.color} />
-      {showLabel ? <span className="text-sm" style={{ color: opt.color }}>{opt.label}</span> : null}
+      {showLabel ? <span className="text-xs" style={{ color: opt.color }}>{opt.label}</span> : null}
     </span>
   );
 }

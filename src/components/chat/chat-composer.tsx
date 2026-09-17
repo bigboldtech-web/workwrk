@@ -282,7 +282,7 @@ ${cur}` : body));
               key={p.id}
               type="button"
               onMouseDown={(e) => { e.preventDefault(); pickMention(p); }}
-              className={`w-full flex items-center gap-2 px-2.5 h-8 text-left text-[13px] ${i === mentionIndex ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"}`}
+              className={`w-full flex items-center gap-2 px-2.5 h-8 text-left text-sm ${i === mentionIndex ? "bg-zinc-100 text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"}`}
             >
               <TeamAvatar name={p.name} avatar={p.avatar} size={20} />
               {p.name}
@@ -295,7 +295,7 @@ ${cur}` : body));
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5 pb-2">
           {files.map((f, i) => (
-            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1.5 h-7 pl-2 pr-1.5 rounded-lg bg-zinc-100 text-[12px] text-zinc-700">
+            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1.5 h-7 pl-2 pr-1.5 rounded-lg bg-zinc-100 text-xs text-zinc-700">
               <Paperclip className="w-3 h-3 text-zinc-400" />
               <span className="max-w-[180px] truncate">{f.name}</span>
               <button type="button" onClick={() => setFiles((prev) => prev.filter((_, x) => x !== i))} aria-label={`Remove ${f.name}`} className="text-zinc-400 hover:text-zinc-700">
@@ -360,7 +360,7 @@ ${cur}` : body));
           onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
           placeholder={placeholder}
           rows={Math.min(6, Math.max(1, input.split("\n").length))}
-          className="w-full resize-none bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400 leading-6 max-h-40"
+          className="w-full resize-none bg-transparent outline-none text-base text-zinc-800 placeholder:text-zinc-400 leading-6 max-h-40"
         />
         {/* Slack's toolbar row: attach · emoji · mention | camera · mic … send */}
         <div className="mt-1 flex items-center gap-0.5">
@@ -398,7 +398,7 @@ ${cur}` : body));
                       key={e}
                       type="button"
                       onClick={() => { setEmojiOpen(false); insertAtCaret(e); }}
-                      className="flex h-8 w-8 items-center justify-center rounded-md text-[17px] hover:bg-zinc-100"
+                      className="flex h-8 w-8 items-center justify-center rounded-md text-lg hover:bg-zinc-100"
                     >
                       {e}
                     </button>

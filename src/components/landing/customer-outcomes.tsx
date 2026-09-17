@@ -165,7 +165,7 @@ export function CustomerOutcomes() {
             <span style={{ color: "var(--m-text-muted)" }}>Stories that prove it.</span>
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             500+ teams across 8 countries replaced a 15-tool stack with

@@ -27,18 +27,18 @@ export default function DashboardError({
         <div className="w-12 h-12 mx-auto rounded-xl bg-red-50 flex items-center justify-center mb-4">
           <AlertTriangle className="w-6 h-6 text-red-500" />
         </div>
-        <h1 className="text-[17px] font-semibold text-zinc-900">
+        <h1 className="text-lg font-semibold text-zinc-900">
           This page couldn&apos;t load
         </h1>
-        <p className="text-[14px] text-zinc-500 mt-2 leading-relaxed">
+        <p className="text-base text-zinc-500 mt-2 leading-relaxed">
           Something went wrong while rendering this page. You can retry, or jump
           to somewhere that always works.
         </p>
         {error?.digest ? (
-          <p className="mt-2 text-[12px] text-zinc-400">Reference: {error.digest}</p>
+          <p className="mt-2 text-xs text-zinc-400">Reference: {error.digest}</p>
         ) : null}
         {process.env.NODE_ENV !== "production" && error?.message ? (
-          <pre className="mt-3 text-left text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-md p-3 overflow-auto max-h-56 whitespace-pre-wrap">
+          <pre className="mt-3 text-left text-xs text-red-600 bg-red-50 border border-red-100 rounded-md p-3 overflow-auto max-h-56 whitespace-pre-wrap">
             {error.message}
           </pre>
         ) : null}
@@ -46,21 +46,21 @@ export default function DashboardError({
           <button
             type="button"
             onClick={() => reset()}
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full bg-zinc-900 text-white text-[14px] font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
           >
             <RotateCw className="w-3.5 h-3.5" />
             Try again
           </button>
           <Link
             href="/spaces"
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-[14px] hover:bg-zinc-50"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-base hover:bg-zinc-50"
           >
             <LayoutGrid className="w-3.5 h-3.5" />
             All spaces
           </Link>
           <Link
             href="/today"
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-[14px] hover:bg-zinc-50"
+            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-base hover:bg-zinc-50"
           >
             <Home className="w-3.5 h-3.5" />
             Home

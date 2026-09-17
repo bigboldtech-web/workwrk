@@ -21,7 +21,7 @@ function Block({ node, names }: { node: BlockNode; names: string[] }) {
   switch (node.t) {
     case "codeblock":
       return (
-        <pre className="my-1 overflow-x-auto rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-[13px] leading-5 text-zinc-800">
+        <pre className="my-1 overflow-x-auto rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm leading-5 text-zinc-800">
           <code>{node.text}</code>
         </pre>
       );
@@ -29,7 +29,7 @@ function Block({ node, names }: { node: BlockNode; names: string[] }) {
       return (
         <blockquote className="my-0.5 border-l-[3px] border-zinc-300 pl-3 text-zinc-600">
           {node.lines.map((line, i) => (
-            <p key={i} className="text-[14px] leading-6"><Inline nodes={line} names={names} /></p>
+            <p key={i} className="text-base leading-6"><Inline nodes={line} names={names} /></p>
           ))}
         </blockquote>
       );
@@ -37,7 +37,7 @@ function Block({ node, names }: { node: BlockNode; names: string[] }) {
       return (
         <ul className="my-0.5 list-disc pl-5">
           {node.items.map((item, i) => (
-            <li key={i} className="text-[14px] leading-6"><Inline nodes={item} names={names} /></li>
+            <li key={i} className="text-base leading-6"><Inline nodes={item} names={names} /></li>
           ))}
         </ul>
       );
@@ -45,13 +45,13 @@ function Block({ node, names }: { node: BlockNode; names: string[] }) {
       return (
         <ol start={node.start} className="my-0.5 list-decimal pl-5">
           {node.items.map((item, i) => (
-            <li key={i} className="text-[14px] leading-6"><Inline nodes={item} names={names} /></li>
+            <li key={i} className="text-base leading-6"><Inline nodes={item} names={names} /></li>
           ))}
         </ol>
       );
     default:
       return (
-        <p className="whitespace-pre-wrap break-words text-[14px] leading-6">
+        <p className="whitespace-pre-wrap break-words text-base leading-6">
           <Inline nodes={node.children} names={names} />
         </p>
       );
@@ -64,7 +64,7 @@ function Inline({ nodes, names }: { nodes: InlineNode[]; names: string[] }) {
       {nodes.map((n, i) => {
         switch (n.t) {
           case "code":
-            return <code key={i} className="rounded bg-zinc-100 px-1 py-0.5 text-[13px] text-rose-600">{n.text}</code>;
+            return <code key={i} className="rounded bg-zinc-100 px-1 py-0.5 text-sm text-rose-600">{n.text}</code>;
           case "link":
             return <a key={i} href={n.href} target="_blank" rel="noopener noreferrer" className="text-[#0073EA] underline underline-offset-2">{n.label}</a>;
           case "url":

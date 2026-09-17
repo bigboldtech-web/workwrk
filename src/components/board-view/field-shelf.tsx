@@ -278,7 +278,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
               >
                 <X className="w-4 h-4" />
               </button>
-              <span className="text-[14px] font-semibold">Fields</span>
+              <span className="text-base font-semibold">Fields</span>
             </div>
 
             <ViewTabStrip className="px-5 mt-3">
@@ -294,7 +294,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search for new or existing fields"
-                  className="w-full h-8 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-[14px] focus:outline-none focus:border-[var(--os-brand)]"
+                  className="w-full h-8 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-[var(--os-brand)]"
                 />
               </div>
             </div>
@@ -312,8 +312,8 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
               {tab === "create" ? (
                 !customFieldsEnabled ? (
                   <div className="mx-2 mt-2 rounded-lg border border-zinc-200 bg-zinc-50/60 px-4 py-5 text-center">
-                    <p className="text-[13.5px] text-zinc-600 font-medium">Custom Fields are turned off for this Space</p>
-                    <p className="mt-1 text-[13px] text-zinc-400 leading-snug">
+                    <p className="text-base text-zinc-600 font-medium">Custom Fields are turned off for this Space</p>
+                    <p className="mt-1 text-sm text-zinc-400 leading-snug">
                       Enable the Custom Fields module in the Space&apos;s settings (Space &ldquo;&hellip;&rdquo; &rarr; Modules) to create new field types. You can still show or hide columns from the &ldquo;Add existing&rdquo; tab.
                     </p>
                   </div>
@@ -391,7 +391,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
 function ShelfSection({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
   return (
     <section className="px-2">
-      <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 mb-2 flex items-center gap-1.5">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 mb-2 flex items-center gap-1.5">
         {title}
         {count != null ? <span className="text-zinc-300 font-medium">{count}</span> : null}
       </h3>
@@ -407,10 +407,10 @@ function BuiltinRow({ col, shown, locked, soon, onToggle }: { col: BuiltinColumn
   return (
     <li className={`group flex items-center gap-2.5 px-2 py-1.5 rounded-md ${soon ? "opacity-60" : "hover:bg-zinc-50"}`}>
       <I className="w-4 h-4 shrink-0" style={{ color: col.color }} />
-      <span className="text-sm flex-1 text-zinc-700 truncate">{col.label}</span>
+      <span className="text-xs flex-1 text-zinc-700 truncate">{col.label}</span>
       {soon ? (
         <span className="inline-flex items-center gap-1.5" title="Coming soon — no data for this yet">
-          <span className="text-[11px] uppercase tracking-wide text-zinc-400">Soon</span>
+          <span className="text-micro uppercase tracking-wide text-zinc-400">Soon</span>
           <EyeOff className="w-4 h-4 text-zinc-300" aria-hidden />
         </span>
       ) : locked ? (
@@ -472,10 +472,10 @@ function CreateNewTab({
         className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50 disabled:hover:bg-transparent disabled:cursor-not-allowed"
       >
         <e.Icon className="w-4 h-4 shrink-0" style={{ color: e.color }} />
-        <span className="text-sm flex-1 truncate">{e.label}</span>
-        {!e.tier1 ? <span className="text-[11px] uppercase tracking-wide text-zinc-400">Soon</span> : null}
+        <span className="text-xs flex-1 truncate">{e.label}</span>
+        {!e.tier1 ? <span className="text-micro uppercase tracking-wide text-zinc-400">Soon</span> : null}
         {e.tier1 ? (
-          <span className="text-[12px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
+          <span className="text-xs text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
             <Plus className="w-3 h-3" /> Create
           </span>
         ) : null}
@@ -487,7 +487,7 @@ function CreateNewTab({
     <div className="space-y-4 pt-1">
       {showSuggestions ? (
         <section className="px-1">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">AI Suggestions</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">AI Suggestions</h3>
           <ul className="space-y-0.5">
             {suggestions.map((s) => (
               <li key={`${s.type}:${s.label}`}>
@@ -499,8 +499,8 @@ function CreateNewTab({
                   className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
                 >
                   <FieldTypeIcon type={s.type} className="w-4 h-4 shrink-0" />
-                  <span className="text-sm flex-1 truncate">{s.label}</span>
-                  <span className="text-[12px] text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
+                  <span className="text-xs flex-1 truncate">{s.label}</span>
+                  <span className="text-xs text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
                     <Plus className="w-3 h-3" /> Create
                   </span>
                 </button>
@@ -511,12 +511,12 @@ function CreateNewTab({
       ) : null}
       {popular.length > 0 ? (
         <section className="px-1">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">Popular</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">Popular</h3>
           <ul className="space-y-0.5">{popular.map(Row)}</ul>
         </section>
       ) : null}
       <section className="px-1">
-        <h3 className="text-[12px] font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">All</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 px-1 mb-1">All</h3>
         <ul className="space-y-0.5">{all.map(Row)}</ul>
       </section>
     </div>
@@ -584,8 +584,8 @@ function WorkspaceFieldsSection({
               className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50"
             >
               <FieldTypeIcon type={c.field.type as FieldType} className="w-4 h-4 shrink-0" />
-              <span className="text-sm flex-1 truncate">{c.field.label}</span>
-              <span className="text-[12px] text-zinc-500 truncate max-w-[100px]">from {c.boardName}</span>
+              <span className="text-xs flex-1 truncate">{c.field.label}</span>
+              <span className="text-xs text-zinc-500 truncate max-w-[100px]">from {c.boardName}</span>
               <Plus className="w-3.5 h-3.5 text-zinc-400 opacity-0 group-hover:opacity-100" />
             </button>
           </li>
@@ -672,13 +672,13 @@ function FieldRow({
               if (e.key === "Escape") { setDraft(field.label); setEditing(false); }
             }}
             autoFocus
-            className="flex-1 bg-transparent outline-none border-b border-[var(--os-brand)] text-sm"
+            className="flex-1 bg-transparent outline-none border-b border-[var(--os-brand)] text-xs"
           />
         ) : (
           <button
             type="button"
             onClick={() => canEdit && setEditing(true)}
-            className="flex-1 text-left text-sm truncate"
+            className="flex-1 text-left text-xs truncate"
           >
             {field.label}
           </button>
@@ -777,7 +777,7 @@ function ChoiceEditor({
               }
             }}
             onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); }}
-            className="flex-1 bg-transparent text-[14px] outline-none border-b border-transparent focus:border-[var(--os-brand)]"
+            className="flex-1 bg-transparent text-base outline-none border-b border-transparent focus:border-[var(--os-brand)]"
           />
           {canEdit ? (
             <button
@@ -821,7 +821,7 @@ function ChoiceEditor({
             onKeyDown={(e) => { if (e.key === "Enter") addChoice(); }}
             onBlur={() => { if (draft.trim()) addChoice(); }}
             placeholder="Add an option…"
-            className="flex-1 bg-transparent text-[14px] outline-none placeholder:text-zinc-400"
+            className="flex-1 bg-transparent text-base outline-none placeholder:text-zinc-400"
           />
         </div>
       ) : choices.length === 0 ? (

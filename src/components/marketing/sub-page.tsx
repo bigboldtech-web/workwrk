@@ -101,7 +101,7 @@ export function FeatureSubPage({
               <Button href="/demo" variant="outline" size="lg">Get a tour</Button>
             </div>
             {hub && (
-              <p className="mt-7 text-sm text-slate-500">
+              <p className="mt-7 text-base text-slate-500">
                 Part of the <Link href={`/features#${hub.slug}`} className={`font-semibold ${HUES[hue].text} underline-offset-2 hover:underline`}>{hub.name}</Link> hub.
               </p>
             )}
@@ -140,11 +140,11 @@ export function FeatureSubPage({
                       className="relative pl-14 pr-5 py-4 bg-white border border-slate-200 rounded-2xl flex items-center gap-4"
                     >
                       <span
-                        className={`absolute left-4 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-extrabold bg-gradient-to-br ${t.gradVia}`}
+                        className={`absolute left-4 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center text-white text-sm font-extrabold bg-gradient-to-br ${t.gradVia}`}
                       >
                         {i + 1}
                       </span>
-                      <span className="text-sm text-slate-700">{step}</span>
+                      <span className="text-base text-slate-700">{step}</span>
                     </li>
                   );
                 })}
@@ -176,7 +176,7 @@ export function FeatureSubPage({
                       <p className={`font-bold text-slate-900 tracking-tight`}>{r.title}</p>
                       <ArrowRight size={14} className={`${t.text} group-hover:translate-x-0.5 transition`} />
                     </div>
-                    <p className="mt-1.5 text-sm text-slate-600">{r.body}</p>
+                    <p className="mt-1.5 text-base text-slate-600">{r.body}</p>
                   </Link>
                 );
               })}
@@ -262,7 +262,7 @@ export function IndustrySubPage({
                 const t = HUES[hue];
                 return (
                   <li key={i} className="p-4 bg-white border border-slate-200 rounded-xl flex items-start gap-3">
-                    <span className={`mt-0.5 w-7 h-7 rounded-lg ${t.bgTint} ${t.text} border ${t.border} flex items-center justify-center text-xs font-extrabold flex-shrink-0`}>
+                    <span className={`mt-0.5 w-7 h-7 rounded-lg ${t.bgTint} ${t.text} border ${t.border} flex items-center justify-center text-sm font-extrabold flex-shrink-0`}>
                       {i + 1}
                     </span>
                     <span className="text-[15px] text-slate-700 leading-snug">{p}</span>
@@ -300,7 +300,7 @@ export function IndustrySubPage({
                 {kpis.map((k) => {
                   const t = HUES[hue];
                   return (
-                    <span key={k} className={`inline-flex items-center text-xs font-bold px-3 h-8 rounded-full bg-white border ${t.border} ${t.textStrong}`}>
+                    <span key={k} className={`inline-flex items-center text-sm font-bold px-3 h-8 rounded-full bg-white border ${t.border} ${t.textStrong}`}>
                       {k}
                     </span>
                   );

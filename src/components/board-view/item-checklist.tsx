@@ -36,11 +36,11 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
   return (
     <div>
       <h3 className="text-xs uppercase tracking-wide text-zinc-500 mb-2 flex items-center gap-2">
-        Checklist {items.length > 0 ? <span className="text-[11.5px] text-zinc-400 normal-case tracking-normal">{done}/{items.length}</span> : null}
+        Checklist {items.length > 0 ? <span className="text-xs text-zinc-400 normal-case tracking-normal">{done}/{items.length}</span> : null}
       </h3>
       <div className="space-y-1">
         {items.map((it, idx) => (
-          <div key={idx} className="group flex items-center gap-2 text-sm">
+          <div key={idx} className="group flex items-center gap-2 text-xs">
             <button type="button" onClick={() => canEdit && toggle(idx)} disabled={!canEdit} className="text-zinc-400 hover:text-[var(--os-brand)] disabled:hover:text-zinc-400">
               {it.done ? <CheckSquare className="w-4 h-4 text-[var(--os-brand)]" /> : <Square className="w-4 h-4" />}
             </button>
@@ -59,7 +59,7 @@ export function ItemChecklist({ item, canEdit, onSave }: { item: BoardItemRow; c
               onKeyDown={(e) => { if (e.key === "Enter") add(); }}
               onBlur={add}
               placeholder="Add a checklist item…"
-              className="flex-1 text-sm bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-xs bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
         ) : null}

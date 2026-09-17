@@ -145,7 +145,7 @@ export function DocEditorDialog({
           </div>
           <div className="flex items-center gap-1">
             {saving && (
-              <span className="text-[12px] text-muted-2 inline-flex items-center gap-1 mr-2">
+              <span className="text-xs text-muted-2 inline-flex items-center gap-1 mr-2">
                 <Loader2 size={11} className="animate-spin" /> Saving…
               </span>
             )}
@@ -203,7 +203,7 @@ export function DocEditorDialog({
               onBlur={save}
               readOnly={readOnly}
               placeholder="Untitled"
-              className="w-full text-4xl font-bold bg-transparent outline-none placeholder:text-muted-2 mb-6"
+              className="w-full text-4xl font-semibold bg-transparent outline-none placeholder:text-muted-2 mb-6"
             />
 
             {/* Inline-format toolbar — appears above the body, monday-ish.
@@ -234,7 +234,7 @@ export function DocEditorDialog({
               onInput={() => {
                 if (bodyRef.current) setLocalBody(bodyRef.current.innerHTML);
               }}
-              className="prose prose-sm md:prose-base max-w-none text-foreground min-h-[40vh] focus:outline-none [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mt-6 [&_h1]:mb-2 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_blockquote]:border-l-4 [&_blockquote]:border-violet-300 [&_blockquote]:pl-4 [&_blockquote]:text-muted [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6"
+              className="prose prose-sm md:prose-base max-w-none text-foreground min-h-[40vh] focus:outline-none [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:mt-6 [&_h1]:mb-2 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_blockquote]:border-l-4 [&_blockquote]:border-violet-300 [&_blockquote]:pl-4 [&_blockquote]:text-muted [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6"
             />
 
             {/* Block-add + AI strip — surfaces when body is empty. */}
@@ -246,7 +246,7 @@ export function DocEditorDialog({
                     bodyRef.current?.focus();
                     format("formatBlock", "p");
                   }}
-                  className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border text-sm text-muted-2 hover:text-foreground hover:bg-surface-2"
+                  className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-border text-xs text-muted-2 hover:text-foreground hover:bg-surface-2"
                 >
                   <Plus size={13} /> Add a block — text, heading, list…
                 </button>
@@ -254,7 +254,7 @@ export function DocEditorDialog({
                   <button
                     type="button"
                     onClick={() => setShowAiPrompt(true)}
-                    className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 dark:border-violet-700/40 bg-violet-50 dark:bg-violet-900/10 text-sm text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/20"
+                    className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 dark:border-violet-700/40 bg-violet-50 dark:bg-violet-900/10 text-xs text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/20"
                   >
                     <Sparkles size={13} /> Start with AI — describe what you want…
                   </button>
@@ -274,7 +274,7 @@ export function DocEditorDialog({
                   onChange={(e) => setAiPrompt(e.target.value)}
                   placeholder="Outline an onboarding SOP for a new account manager…"
                   rows={3}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm resize-none focus:outline-none focus:ring-1 focus:ring-violet-400"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs resize-none focus:outline-none focus:ring-1 focus:ring-violet-400"
                 />
                 <div className="flex items-center justify-end gap-2 mt-2">
                   <button

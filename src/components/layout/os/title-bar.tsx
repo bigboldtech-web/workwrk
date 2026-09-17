@@ -70,14 +70,14 @@ export function OsTitleBar({
             {people.slice(0, 3).map((p, i) => (
               <span
                 key={i}
-                className="w-6 h-6 rounded-full border-2 border-white text-[11px] font-semibold text-white flex items-center justify-center"
+                className="w-6 h-6 rounded-full border-2 border-white text-xs font-semibold text-white flex items-center justify-center"
                 style={{ background: p.color }}
               >
                 {p.initials}
               </span>
             ))}
             {morePeople > 0 ? (
-              <span className="w-6 h-6 rounded-full border-2 border-white bg-zinc-100 text-[11px] font-medium text-zinc-700 flex items-center justify-center">
+              <span className="w-6 h-6 rounded-full border-2 border-white bg-zinc-100 text-xs font-medium text-zinc-700 flex items-center justify-center">
                 +{morePeople}
               </span>
             ) : null}
@@ -88,14 +88,14 @@ export function OsTitleBar({
           <>
             <button
               type="button"
-              className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+              className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             >
               <BloomMark size={14} />
               Ask AI
             </button>
             <button
               type="button"
-              className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+              className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             >
               <Share2 className="w-3.5 h-3.5" />
               Share
@@ -103,7 +103,7 @@ export function OsTitleBar({
             {showInvite ? (
               <button
                 type="button"
-                className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+                className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
               >
                 <UserPlus className="w-3.5 h-3.5" />
                 Invite

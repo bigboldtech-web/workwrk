@@ -63,7 +63,7 @@ function getPlanBadge(plan: string) {
     ENTERPRISE: "bg-amber-500/10 text-amber-400 border-amber-500/20",
   };
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${colors[plan] || ""}`}>
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${colors[plan] || ""}`}>
       {plan}
     </span>
   );
@@ -148,8 +148,8 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Admin Dashboard</h1>
-          <p className="text-muted text-sm mt-1">Platform overview and subscriber management</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Admin Dashboard</h1>
+          <p className="text-muted text-base mt-1">Platform overview and subscriber management</p>
         </div>
         <Button variant="outline" size="sm" onClick={fetchData}>
           <RefreshCw size={14} className="mr-2" /> Refresh
@@ -166,9 +166,9 @@ export default function AdminDashboard() {
                   <stat.icon className={`h-5 w-5 ${stat.color}`} />
                 </div>
               </div>
-              <p className="text-2xl font-bold">{stat.value}</p>
-              <p className="text-xs text-muted mt-0.5">{stat.change}</p>
-              <p className="text-xs text-muted mt-1 font-medium">{stat.title}</p>
+              <p className="text-2xl font-semibold">{stat.value}</p>
+              <p className="text-sm text-muted mt-0.5">{stat.change}</p>
+              <p className="text-sm text-muted mt-1 font-medium">{stat.title}</p>
             </CardContent>
           </Card>
         ))}
@@ -178,14 +178,14 @@ export default function AdminDashboard() {
       {stats?.planBreakdown && stats.planBreakdown.length > 0 && (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Plan Distribution</CardTitle>
+            <CardTitle className="text-lg">Plan Distribution</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex gap-6">
               {stats.planBreakdown.map((p) => (
                 <div key={p.plan} className="flex items-center gap-3">
                   {getPlanBadge(p.plan)}
-                  <span className="text-sm font-bold">{p.count}</span>
+                  <span className="text-base font-semibold">{p.count}</span>
                 </div>
               ))}
             </div>
@@ -196,26 +196,26 @@ export default function AdminDashboard() {
       {/* Companies Table */}
       <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-base">Subscriber Companies</CardTitle>
-          <a href="/admin/companies" className="text-xs text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
+          <CardTitle className="text-lg">Subscriber Companies</CardTitle>
+          <a href="/admin/companies" className="text-sm text-[#d4ff2e] hover:text-[#e2ff6b] transition-colors">
             View all →
           </a>
         </CardHeader>
         <CardContent className="p-0">
           {companies.length === 0 ? (
-            <div className="p-8 text-center text-sm text-muted">
+            <div className="p-8 text-center text-base text-muted">
               No companies registered yet. Share your registration page to get started.
             </div>
           ) : (
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
-                  <th className="text-left p-4 text-xs font-medium text-muted uppercase tracking-wider">Company</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Plan</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Users</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Status</th>
-                  <th className="text-center p-4 text-xs font-medium text-muted uppercase tracking-wider">Usage</th>
-                  <th className="text-right p-4 text-xs font-medium text-muted uppercase tracking-wider">Joined</th>
+                  <th className="text-left p-4 text-sm font-medium text-muted uppercase tracking-wider">Company</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Plan</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Users</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Status</th>
+                  <th className="text-center p-4 text-sm font-medium text-muted uppercase tracking-wider">Usage</th>
+                  <th className="text-right p-4 text-sm font-medium text-muted uppercase tracking-wider">Joined</th>
                 </tr>
               </thead>
               <tbody>
@@ -225,22 +225,22 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2">
                         <Building2 size={14} className="text-[#d4ff2e]" />
                         <div>
-                          <span className="text-sm font-medium">{company.name}</span>
-                          <p className="text-[11px] text-muted">{company.slug}</p>
+                          <span className="text-base font-medium">{company.name}</span>
+                          <p className="text-xs text-muted">{company.slug}</p>
                         </div>
                       </div>
                     </td>
                     <td className="p-4 text-center">{getPlanBadge(company.plan)}</td>
-                    <td className="p-4 text-center text-sm text-muted">{company._count.users}</td>
+                    <td className="p-4 text-center text-base text-muted">{company._count.users}</td>
                     <td className="p-4 text-center">{getStatusBadge(company.status)}</td>
                     <td className="p-4 text-center">
-                      <div className="flex items-center justify-center gap-3 text-[11px] text-muted">
+                      <div className="flex items-center justify-center gap-3 text-xs text-muted">
                         <span>{company._count.tasks} tasks</span>
                         <span>{company._count.kras} KRAs</span>
                         <span>{company._count.sops} SOPs</span>
                       </div>
                     </td>
-                    <td className="p-4 text-right text-xs text-muted">
+                    <td className="p-4 text-right text-sm text-muted">
                       {new Date(company.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                     </td>
                   </tr>
@@ -254,11 +254,11 @@ export default function AdminDashboard() {
       {/* Quick Info */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
+          <CardTitle className="text-lg flex items-center gap-2">
             <Activity size={16} className="text-[#d4ff2e]" /> System Info
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2 text-sm text-muted">
+        <CardContent className="space-y-2 text-base text-muted">
           <div className="flex justify-between">
             <span>Platform</span>
             <span className="text-foreground font-medium">WorkwrK v1.0</span>

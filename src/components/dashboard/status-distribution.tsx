@@ -67,7 +67,7 @@ export function StatusDistribution({ segs, total }: { segs: StatusSeg[]; total: 
       </div>
       <ul className="space-y-1.5">
         {segs.map((s) => (
-          <li key={s.key} className="flex items-center gap-2 text-[13px]">
+          <li key={s.key} className="flex items-center gap-2 text-sm">
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: s.color }} aria-hidden />
             <span className="min-w-0 flex-1 truncate text-zinc-600">{s.label}</span>
             <span className="tabular-nums text-zinc-700">{s.count}</span>

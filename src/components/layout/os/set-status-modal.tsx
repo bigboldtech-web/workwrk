@@ -93,7 +93,7 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
         className="w-full max-w-[480px] bg-white dark:bg-[#14171D] text-zinc-900 rounded-xl shadow-2xl border border-zinc-200 dark:border-[#2A2F38] overflow-hidden"
       >
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
-          <h2 className="text-[15px] font-semibold text-zinc-900">Set status</h2>
+          <h2 className="text-base font-semibold text-zinc-900">Set status</h2>
           <button
             type="button"
             onClick={onClose}
@@ -119,11 +119,11 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="What's on your mind?"
-            className="flex-1 bg-white border border-zinc-200 rounded-md px-3 py-2 text-[14px] text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#0073EA]"
+            className="flex-1 bg-white border border-zinc-200 rounded-md px-3 py-2 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#0073EA]"
           />
         </div>
         <div className="px-5 pb-5">
-          <div className="text-[12px] uppercase tracking-wide text-zinc-400 mb-2">For Cashkr Team</div>
+          <div className="text-xs uppercase tracking-wide text-zinc-400 mb-2">For Cashkr Team</div>
           <div className="space-y-1">
             {PRESETS.map((p) => (
               <button
@@ -132,9 +132,9 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
                 onClick={() => applyPreset(p)}
                 className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-50 text-left"
               >
-                <span className="text-[18px]">{p.emoji}</span>
-                <span className="text-[14px] font-medium text-zinc-900">{p.label}</span>
-                <span className="text-[13px] text-zinc-500">— {p.expiry}</span>
+                <span className="text-lg">{p.emoji}</span>
+                <span className="text-base font-medium text-zinc-900">{p.label}</span>
+                <span className="text-sm text-zinc-500">— {p.expiry}</span>
               </button>
             ))}
           </div>
@@ -143,7 +143,7 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={save}
-            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-[#0073EA] hover:bg-[#0060B9] text-white text-[13.5px] font-medium"
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-[#0073EA] hover:bg-[#0060B9] text-white text-base font-medium"
           >
             Save
             <CornerDownLeft className="w-3 h-3" />

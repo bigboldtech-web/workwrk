@@ -30,13 +30,13 @@ export function PivotChart({ result, type, height = 340 }: { result: PivotResult
   const values = result.rows.map((r) => (result.columns.length > 0 ? r.cells : [r.total]));
 
   if (categories.length === 0 || seriesNames.length === 0) {
-    return <div className="h-full flex items-center justify-center text-[13px] text-zinc-400">Nothing to chart yet.</div>;
+    return <div className="h-full flex items-center justify-center text-sm text-zinc-400">Nothing to chart yet.</div>;
   }
 
   const legend = (
     <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-3">
       {seriesNames.map((s, i) => (
-        <span key={s} className="inline-flex items-center gap-1.5 text-[12px] text-zinc-600">
+        <span key={s} className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
           <span className="h-2.5 w-2.5 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
           {s}
         </span>
@@ -74,7 +74,7 @@ export function PivotChart({ result, type, height = 340 }: { result: PivotResult
         </svg>
         <div className="flex flex-wrap gap-x-4 gap-y-1 justify-center mt-2">
           {slices.map((s, i) => (
-            <span key={s.label} className="inline-flex items-center gap-1.5 text-[12px] text-zinc-600">
+            <span key={s.label} className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
               <span className="h-2.5 w-2.5 rounded-sm" style={{ background: PALETTE[i % PALETTE.length] }} />
               {s.label} · {fmt(s.value)}
             </span>

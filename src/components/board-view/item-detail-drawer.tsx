@@ -100,7 +100,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <section>
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">Details</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Details</h3>
             <div className="space-y-3">
               {fields.map((f) => {
                 const value = getValue(item, f.key);
@@ -119,7 +119,7 @@ export function ItemDetailDrawer<T>(props: Props<T>) {
           </section>
 
           <section>
-            <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-500 mb-3">Custom fields</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-3">Custom fields</h3>
             <CustomFieldsPanel entityType={entityType} entityId={id} showEmptyState />
           </section>
 
@@ -171,7 +171,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm resize-none"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs resize-none"
           />
         </div>
       );
@@ -183,7 +183,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="number"
             defaultValue={value == null ? "" : Number(value)}
             onBlur={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           />
         </div>
       );
@@ -195,7 +195,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="date"
             defaultValue={value ? String(value).slice(0, 10) : ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           />
         </div>
       );
@@ -219,7 +219,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
           <select
             defaultValue={(value as string) ?? ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           >
             <option value="">— None —</option>
             {choices.map((c) => (
@@ -270,7 +270,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             placeholder="https://"
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           />
         </div>
       );
@@ -282,7 +282,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="email"
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           />
         </div>
       );
@@ -295,7 +295,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
             type="text"
             defaultValue={(value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-zinc-50 text-xs"
           />
         </div>
       );
@@ -304,7 +304,7 @@ function FieldEditor({ field, value, editable, onChange }: FieldEditorProps) {
 
 function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
   if (value == null || value === "") {
-    return <p className="text-sm text-zinc-500">—</p>;
+    return <p className="text-xs text-zinc-500">—</p>;
   }
   if (field.fieldType === "SELECT") {
     const choice = field.options?.choices?.find((c) => c.value === value);
@@ -331,17 +331,17 @@ function DisplayValue({ field, value }: { field: BoardField; value: unknown }) {
     );
   }
   if (field.fieldType === "CHECKBOX") {
-    return <p className="text-sm">{value ? "Yes" : "No"}</p>;
+    return <p className="text-xs">{value ? "Yes" : "No"}</p>;
   }
   if (field.fieldType === "DATE") {
-    return <p className="text-sm">{new Date(String(value)).toLocaleDateString()}</p>;
+    return <p className="text-xs">{new Date(String(value)).toLocaleDateString()}</p>;
   }
   if (field.fieldType === "URL" && typeof value === "string") {
     return (
-      <a href={value} target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--os-brand)] hover:underline truncate block">
+      <a href={value} target="_blank" rel="noopener noreferrer" className="text-xs text-[var(--os-brand)] hover:underline truncate block">
         {value}
       </a>
     );
   }
-  return <p className="text-sm whitespace-pre-wrap">{String(value)}</p>;
+  return <p className="text-xs whitespace-pre-wrap">{String(value)}</p>;
 }

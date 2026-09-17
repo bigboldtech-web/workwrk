@@ -199,7 +199,7 @@ export default function ProcessRunPage() {
           <CardContent className="p-8 text-center">
             <AlertCircle size={40} className="mx-auto text-red-400 mb-4" />
             <h1 className="text-lg font-semibold mb-2">Process Not Found</h1>
-            <p className="text-sm text-muted">{error || "This link may have expired or been removed."}</p>
+            <p className="text-base text-muted">{error || "This link may have expired or been removed."}</p>
           </CardContent>
         </Card>
       </div>
@@ -218,7 +218,7 @@ export default function ProcessRunPage() {
 
     const common = {
       disabled,
-      className: `bg-transparent border-border text-sm ${disabled ? "opacity-50" : ""}`,
+      className: `bg-transparent border-border text-base ${disabled ? "opacity-50" : ""}`,
     };
 
     switch (input.type) {
@@ -282,7 +282,7 @@ export default function ProcessRunPage() {
         );
       case "checkbox":
         return (
-          <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <label className="flex items-center gap-2 text-base cursor-pointer">
             <input
               type="checkbox"
               disabled={disabled}
@@ -299,7 +299,7 @@ export default function ProcessRunPage() {
             disabled={disabled}
             value={value as string}
             onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            className={`w-full rounded-md border px-3 py-2 text-sm bg-transparent border-border ${disabled ? "opacity-50" : ""}`}
+            className={`w-full rounded-md border px-3 py-2 text-base bg-transparent border-border ${disabled ? "opacity-50" : ""}`}
           >
             <option value="">Select...</option>
             {(input.options || []).map((opt) => (
@@ -314,7 +314,7 @@ export default function ProcessRunPage() {
         return (
           <div className="space-y-1">
             {(input.options || []).map((opt) => (
-              <label key={opt} className="flex items-center gap-2 text-sm cursor-pointer">
+              <label key={opt} className="flex items-center gap-2 text-base cursor-pointer">
                 <input
                   type="checkbox"
                   disabled={disabled}
@@ -340,14 +340,14 @@ export default function ProcessRunPage() {
             {fileUrl ? (
               <div className="flex items-center gap-2 p-2 rounded border border-border bg-surface">
                 <Upload size={14} className="text-green-400" />
-                <a href={fileUrl} target="_blank" rel="noopener" className="text-xs text-[#d4ff2e] hover:underline truncate flex-1">
+                <a href={fileUrl} target="_blank" rel="noopener" className="text-sm text-[#d4ff2e] hover:underline truncate flex-1">
                   {fileUrl.split("/").pop()}
                 </a>
               </div>
             ) : (
               <label className={`flex items-center gap-2 p-3 rounded border border-dashed border-border cursor-pointer hover:border-[#d4ff2e] transition-colors ${disabled ? "pointer-events-none" : ""}`}>
                 <Upload size={16} className="text-muted" />
-                <span className="text-xs text-muted">Click to upload file (max 10MB)</span>
+                <span className="text-sm text-muted">Click to upload file (max 10MB)</span>
                 <input type="file" className="hidden" disabled={disabled} onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
@@ -387,31 +387,31 @@ export default function ProcessRunPage() {
       {/* Header */}
       <div className="border-b border-border bg-surface">
         <div className="mx-auto max-w-3xl px-6 py-6">
-          <div className="flex items-center gap-2 text-xs text-muted mb-2">
-            <span className="bg-gradient-to-r text-[#d4ff2e] font-bold text-sm">
+          <div className="flex items-center gap-2 text-sm text-muted mb-2">
+            <span className="bg-gradient-to-r text-[#d4ff2e] font-semibold text-base">
               WorkwrK
             </span>
             <span>/</span>
             <span>{data.sopTitle}</span>
           </div>
-          <h1 className="text-xl font-bold text-foreground">{data.title}</h1>
+          <h1 className="text-xl font-semibold text-foreground">{data.title}</h1>
           {data.description && (
-            <p className="text-sm text-muted mt-1">{data.description}</p>
+            <p className="text-base text-muted mt-1">{data.description}</p>
           )}
           <div className="flex items-center gap-4 mt-4">
             <div className="flex-1">
               <Progress value={data.progress} className="h-2.5" />
             </div>
-            <span className="text-sm font-bold text-[#d4ff2e]">{data.progress}%</span>
+            <span className="text-base font-semibold text-[#d4ff2e]">{data.progress}%</span>
           </div>
           {data.dueDate && (
-            <div className="flex items-center gap-1 mt-2 text-xs text-muted">
+            <div className="flex items-center gap-1 mt-2 text-sm text-muted">
               <Clock size={12} />
               Due: {new Date(data.dueDate).toLocaleDateString()}
             </div>
           )}
           {isComplete && (
-            <div className="mt-3 rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-sm text-green-400 text-center">
+            <div className="mt-3 rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-base text-green-400 text-center">
               Process completed!
             </div>
           )}
@@ -444,11 +444,11 @@ export default function ProcessRunPage() {
                     <CheckCircle2 size={20} className="text-green-400" />
                   ) : (
                     <div className="h-5 w-5 rounded-full border-2 border-muted-2 flex items-center justify-center">
-                      <span className="text-[11px] text-muted">{sectionProgress}%</span>
+                      <span className="text-xs text-muted">{sectionProgress}%</span>
                     </div>
                   )}
-                  <span className="font-medium text-sm">{section.title}</span>
-                  <span className="text-xs text-muted-2">
+                  <span className="font-medium text-base">{section.title}</span>
+                  <span className="text-sm text-muted-2">
                     {completedCount}/{section.steps.length}
                   </span>
                 </div>
@@ -508,7 +508,7 @@ export default function ProcessRunPage() {
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <p
-                                className={`text-sm ${
+                                className={`text-base ${
                                   isStepComplete
                                     ? "line-through text-muted-2"
                                     : "text-foreground"
@@ -517,23 +517,23 @@ export default function ProcessRunPage() {
                                 {step.title}
                               </p>
                               {isApproval && !isStepComplete && (
-                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                   Approval
                                 </span>
                               )}
                               {hasRequiredInputs && !isStepComplete && (
-                                <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
                                   Has required fields
                                 </span>
                               )}
                             </div>
                             {step.description && (
-                              <p className="text-xs text-muted-2 mt-0.5">
+                              <p className="text-sm text-muted-2 mt-0.5">
                                 {step.description}
                               </p>
                             )}
                           </div>
-                          <span className="text-xs text-muted-2 mt-0.5 shrink-0">
+                          <span className="text-sm text-muted-2 mt-0.5 shrink-0">
                             {idx + 1}
                           </span>
                         </div>
@@ -554,7 +554,7 @@ export default function ProcessRunPage() {
                                 return (
                                   <p
                                     key={cb.id}
-                                    className="text-xs text-muted whitespace-pre-wrap"
+                                    className="text-sm text-muted whitespace-pre-wrap"
                                   >
                                     {cb.content}
                                   </p>
@@ -591,7 +591,7 @@ export default function ProcessRunPage() {
                             {step.inputs!.map((input) => (
                               <div key={input.id} className="space-y-1">
                                 {input.type !== "checkbox" && (
-                                  <Label className="text-xs text-muted">
+                                  <Label className="text-sm text-muted">
                                     {input.label}
                                     {input.required && (
                                       <span className="text-red-400 ml-0.5">*</span>

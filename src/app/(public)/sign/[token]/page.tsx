@@ -63,8 +63,8 @@ export default function SignPage() {
     } catch { setErr("Couldn't submit."); } finally { setSubmitting(false); }
   }
 
-  if (err && !data) return <Centered><p className="text-sm text-zinc-500">{err}</p></Centered>;
-  if (!data) return <Centered><div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div></Centered>;
+  if (err && !data) return <Centered><p className="text-base text-zinc-500">{err}</p></Centered>;
+  if (!data) return <Centered><div className="flex items-center gap-2 text-base text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div></Centered>;
 
   if (done) {
     return (
@@ -72,7 +72,7 @@ export default function SignPage() {
         <div className="text-center">
           <CheckCircle2 className="mx-auto h-10 w-10 text-emerald-500" />
           <h1 className="mt-3 text-lg font-semibold text-zinc-900">Signed — thank you</h1>
-          <p className="mt-1 text-sm text-zinc-500">Your signature for &ldquo;{data.title}&rdquo; has been recorded.</p>
+          <p className="mt-1 text-base text-zinc-500">Your signature for &ldquo;{data.title}&rdquo; has been recorded.</p>
         </div>
       </Centered>
     );
@@ -90,7 +90,7 @@ export default function SignPage() {
     if (!mine) return <div key={f.id} className="rounded border border-dashed border-zinc-200 bg-zinc-50/40" style={base} />;
     if (f.type === "signature" || f.type === "initials") {
       return (
-        <button key={f.id} type="button" onClick={() => setPadFor(f.id)} className="flex items-center justify-center overflow-hidden rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] text-[12px] font-medium text-[#0060B9] hover:bg-[#d8e9fa]" style={base}>
+        <button key={f.id} type="button" onClick={() => setPadFor(f.id)} className="flex items-center justify-center overflow-hidden rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] text-xs font-medium text-[#0060B9] hover:bg-[#d8e9fa]" style={base}>
           {val ? <img src={val} alt="signature" className="max-h-full max-w-full object-contain" /> : <span className="inline-flex items-center gap-1"><PenLine className="h-3.5 w-3.5" /> {f.type === "initials" ? "Initials" : "Sign"}</span>}
         </button>
       );
@@ -107,7 +107,7 @@ export default function SignPage() {
     if (f.type === "dropdown") {
       return (
         <select key={f.id} value={val || f.defaultValue || ""} onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
-          className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1 text-[13px] text-zinc-800 outline-none" style={base}>
+          className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1 text-sm text-zinc-800 outline-none" style={base}>
           <option value="">{f.label || "Select…"}</option>
           {(f.options ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
@@ -117,7 +117,7 @@ export default function SignPage() {
       <input key={f.id} type={f.type === "date" ? "date" : f.type === "email" ? "email" : "text"} value={val}
         onChange={(e) => setValues((v) => ({ ...v, [f.id]: e.target.value }))}
         placeholder={f.type === "date" ? "" : (f.label || (f.type === "email" ? "Email" : "Text"))}
-        className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1.5 text-[13px] text-zinc-800 outline-none" style={base} />
+        className="rounded border-2 border-dashed border-[#0073EA]/50 bg-[#E6F1FB] px-1.5 text-sm text-zinc-800 outline-none" style={base} />
     );
   }
 
@@ -125,16 +125,16 @@ export default function SignPage() {
     <div className="min-h-screen bg-zinc-50">
       <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold text-zinc-900">{data.title}</div>
-          <div className="truncate text-[13px] text-zinc-500">Signing as {data.party.name} · {remaining === 0 ? "all fields complete" : `${remaining} field${remaining === 1 ? "" : "s"} left`}</div>
+          <div className="truncate text-base font-semibold text-zinc-900">{data.title}</div>
+          <div className="truncate text-sm text-zinc-500">Signing as {data.party.name} · {remaining === 0 ? "all fields complete" : `${remaining} field${remaining === 1 ? "" : "s"} left`}</div>
         </div>
         <button type="button" onClick={finish} disabled={submitting || remaining > 0}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-[14px] font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
+          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
           {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Finish &amp; sign
         </button>
       </header>
 
-      {err ? <div className="mx-auto mt-3 max-w-[800px] rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[14px] text-amber-700">{err}</div> : null}
+      {err ? <div className="mx-auto mt-3 max-w-[800px] rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-base text-amber-700">{err}</div> : null}
 
       <div className="px-4 py-6">
         {data.sourceType === "pdf" && data.pdfUrl ? (
@@ -207,30 +207,30 @@ function SignaturePad({ onDone, onCancel }: { onDone: (dataUrl: string) => void;
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3">
-          <div className="text-sm font-semibold text-zinc-900">Add your signature</div>
+          <div className="text-base font-semibold text-zinc-900">Add your signature</div>
           <button type="button" onClick={onCancel} className="rounded p-1 text-zinc-400 hover:bg-zinc-100"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex gap-1 px-4 pt-3">
-          <button type="button" onClick={() => setTab("draw")} className={`rounded px-3 py-1 text-[14px] ${tab === "draw" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}>Draw</button>
-          <button type="button" onClick={() => setTab("type")} className={`rounded px-3 py-1 text-[14px] ${tab === "type" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}>Type</button>
+          <button type="button" onClick={() => setTab("draw")} className={`rounded px-3 py-1 text-base ${tab === "draw" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}>Draw</button>
+          <button type="button" onClick={() => setTab("type")} className={`rounded px-3 py-1 text-base ${tab === "type" ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-50"}`}>Type</button>
         </div>
         <div className="p-4">
           {tab === "draw" ? (
             <>
               <canvas ref={canvasRef} width={600} height={200} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerLeave={up}
                 className="h-[160px] w-full cursor-crosshair touch-none rounded-md border border-zinc-200 bg-zinc-50" />
-              <button type="button" onClick={clear} className="mt-2 text-[13px] text-zinc-500 hover:text-zinc-800 underline">Clear</button>
+              <button type="button" onClick={clear} className="mt-2 text-sm text-zinc-500 hover:text-zinc-800 underline">Clear</button>
             </>
           ) : (
             <>
-              <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type your name" className="h-9 w-full rounded-md border border-zinc-200 px-3 text-sm outline-none focus:border-zinc-300" />
+              <input type="text" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Type your name" className="h-9 w-full rounded-md border border-zinc-200 px-3 text-base outline-none focus:border-zinc-300" />
               <div className="mt-3 flex h-[120px] items-center justify-center rounded-md border border-zinc-200 bg-zinc-50 text-3xl text-zinc-800" style={{ fontFamily: "'Brush Script MT', cursive" }}>{typed || "Preview"}</div>
             </>
           )}
         </div>
         <div className="flex justify-end gap-2 border-t border-zinc-100 px-4 py-3">
-          <button type="button" onClick={onCancel} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-[14px] text-zinc-700 hover:bg-zinc-50">Cancel</button>
-          <button type="button" onClick={done} className="inline-flex h-8 items-center rounded-md bg-[#0073EA] px-3 text-[14px] font-medium text-white hover:bg-[#0060B9]">Apply</button>
+          <button type="button" onClick={onCancel} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-base text-zinc-700 hover:bg-zinc-50">Cancel</button>
+          <button type="button" onClick={done} className="inline-flex h-8 items-center rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9]">Apply</button>
         </div>
       </div>
     </div>

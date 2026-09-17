@@ -100,7 +100,7 @@ export function ByokManager() {
 
   if (loading) {
     return (
-      <Card><CardContent className="p-8 text-center text-sm text-muted">
+      <Card><CardContent className="p-8 text-center text-xs text-muted">
         <Loader2 size={16} className="animate-spin mx-auto mb-2" /> Loading…
       </CardContent></Card>
     );
@@ -123,8 +123,8 @@ export function ByokManager() {
         <CardContent>
           <div className="rounded-lg border border-dashed border-border bg-surface-2 p-6 text-center">
             <Crown size={20} className="mx-auto text-muted mb-2" />
-            <p className="text-sm font-medium">Enterprise add-on</p>
-            <p className="text-[13px] text-muted mt-1 max-w-md mx-auto">
+            <p className="text-xs font-medium">Enterprise add-on</p>
+            <p className="text-sm text-muted mt-1 max-w-md mx-auto">
               BYOK is a custom add-on we enable per Enterprise customer. Reach out to
               your WorkwrK contact and we&rsquo;ll switch it on.
             </p>
@@ -155,8 +155,8 @@ export function ByokManager() {
               <Check size={14} className="text-green-400" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium">Anthropic key active</div>
-              <div className="text-[12px] text-muted font-mono">
+              <div className="text-xs font-medium">Anthropic key active</div>
+              <div className="text-xs text-muted font-mono">
                 {state.key?.keyHint}
                 {state.key?.lastUsedAt && ` · last used ${new Date(state.key.lastUsedAt).toLocaleString()}`}
               </div>
@@ -179,7 +179,7 @@ export function ByokManager() {
               className="font-mono"
             />
           </div>
-          <p className="text-[12px] text-muted">
+          <p className="text-xs text-muted">
             We&rsquo;ll test the key against Anthropic before saving. Stored encrypted at rest with AES-256-GCM.
           </p>
         </div>
@@ -196,7 +196,7 @@ export function ByokManager() {
               ))}
             </SelectContent>
           </Select>
-          <p className="text-[12px] text-muted">
+          <p className="text-xs text-muted">
             Override which Claude model is used for your org. Default lets each
             feature pick the right model (cheap for SOP/KRA generation, balanced
             for chat).
@@ -204,7 +204,7 @@ export function ByokManager() {
         </div>
 
         <div className="flex items-center justify-between gap-2 pt-2 border-t border-border">
-          <span className="text-[12px] text-muted">
+          <span className="text-xs text-muted">
             {hasKey ? "Save updates the stored key with the new value." : "Saving runs a free test call against Anthropic."}
           </span>
           <Button onClick={save} disabled={saving || !apiKey.trim()} className="gap-1.5">
@@ -214,7 +214,7 @@ export function ByokManager() {
         </div>
 
         {!!state.key?.preferredModel && state.key.preferredModel !== preferredModel && (
-          <Badge variant="outline" className="text-[11px]">
+          <Badge variant="outline" className="text-xs">
             Currently using {state.key.preferredModel}
           </Badge>
         )}

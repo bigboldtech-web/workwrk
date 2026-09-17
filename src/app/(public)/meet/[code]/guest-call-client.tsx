@@ -55,10 +55,10 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
     <div className="flex h-dvh flex-col bg-zinc-950">
       <header className="flex items-center justify-between px-5 py-3">
         <div className="min-w-0">
-          <h1 className="truncate text-[15px] font-semibold text-white">{title}</h1>
-          <p className="text-[12px] text-zinc-400">{orgName} · {when}</p>
+          <h1 className="truncate text-base font-semibold text-white">{title}</h1>
+          <p className="text-xs text-zinc-400">{orgName} · {when}</p>
         </div>
-        <span className="shrink-0 rounded-md bg-white/10 px-2.5 py-1 text-[11px] font-medium text-zinc-300">
+        <span className="shrink-0 rounded-md bg-white/10 px-2.5 py-1 text-xs font-medium text-zinc-300">
           Powered by WorkwrK
         </span>
       </header>
@@ -72,8 +72,8 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
         ) : (
           <div className="flex h-full items-center justify-center">
             <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-white/5 p-6 text-center">
-              <p className="text-[15px] font-medium text-white">Joining {title}</p>
-              <p className="mt-1 text-[13px] text-zinc-400">Enter your name so people know who you are.</p>
+              <p className="text-base font-medium text-white">Joining {title}</p>
+              <p className="mt-1 text-sm text-zinc-400">Enter your name so people know who you are.</p>
               <input
                 type="text"
                 value={name}
@@ -81,14 +81,14 @@ export function GuestCallClient({ code, fallbackRoom, title, orgName, scheduledA
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void join(); }}
                 placeholder="Your name"
-                className="mt-4 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-[14px] text-white placeholder:text-zinc-500 outline-none focus:border-white/30"
+                className="mt-4 w-full rounded-lg border border-white/15 bg-white/10 px-3 py-2 text-base text-white placeholder:text-zinc-500 outline-none focus:border-white/30"
               />
-              {error && <p className="mt-2 text-[13px] text-red-400">{error}</p>}
+              {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
               <button
                 type="button"
                 onClick={() => void join()}
                 disabled={!name.trim() || joining}
-                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#0073EA] px-4 py-2.5 text-[14px] font-medium text-white hover:bg-[#0060c2] disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#0073EA] px-4 py-2.5 text-base font-medium text-white hover:bg-[#0060c2] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {joining ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Join call
               </button>

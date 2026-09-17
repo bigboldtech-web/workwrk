@@ -114,7 +114,7 @@ export default function BuildAppPage() {
 
   if (loading) {
     return (
-      <div className="p-6 text-center text-sm text-zinc-500">
+      <div className="p-6 text-center text-xs text-zinc-500">
         <Loader2 size={20} className="mx-auto mb-2 animate-spin" />
         Loading app…
       </div>
@@ -133,23 +133,23 @@ export default function BuildAppPage() {
 
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-start gap-4">
-          <div className={`w-14 h-14 rounded-2xl bg-${app.hue ?? "blue"}-100 text-${app.hue ?? "blue"}-600 flex items-center justify-center font-bold text-xl flex-shrink-0`}>
+          <div className={`w-14 h-14 rounded-2xl bg-${app.hue ?? "blue"}-100 text-${app.hue ?? "blue"}-600 flex items-center justify-center font-semibold text-lg flex-shrink-0`}>
             {app.name.charAt(0).toUpperCase()}
           </div>
           <div>
-            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-[11px] font-medium mb-1">
+            <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300 text-xs font-medium mb-1">
               <Wand2 size={10} /> Built with Vibe
             </div>
             <h1 className="text-2xl font-semibold mb-0.5">{app.name}</h1>
-            {app.description && <p className="text-sm text-zinc-500">{app.description}</p>}
-            <p className="text-[11px] text-zinc-500 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
+            {app.description && <p className="text-xs text-zinc-500">{app.description}</p>}
+            <p className="text-xs text-zinc-500 font-mono mt-1">/build/{app.slug} · {rows.length} row{rows.length === 1 ? "" : "s"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setShowNewRow(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0073EA] hover:bg-[#0060B9] text-white text-sm font-medium"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0073EA] hover:bg-[#0060B9] text-white text-xs font-medium"
           >
             <Plus size={14} /> New row
           </button>
@@ -175,7 +175,7 @@ export default function BuildAppPage() {
       {rows.length === 0 ? (
         <div className="rounded-xl border border-zinc-200 bg-white text-center py-16">
           <Wand2 size={32} className="mx-auto mb-2 text-zinc-500" />
-          <p className="font-medium text-sm mb-1">No rows yet</p>
+          <p className="font-medium text-xs mb-1">No rows yet</p>
           <p className="text-xs text-zinc-500 mb-4">Add the first row to populate your app.</p>
           <button
             type="button"
@@ -256,14 +256,14 @@ function CellValue({ field, value }: { field: AppField; value: unknown }) {
       return (
         <div className="flex flex-wrap gap-1">
           {arr.map((v) => (
-            <span key={v} className="text-[11px] px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
+            <span key={v} className="text-xs px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300">{v}</span>
           ))}
         </div>
       );
     }
     case "SELECT": {
       const label = field.options?.choices?.find((c) => c.value === value)?.label ?? String(value);
-      return <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
+      return <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800">{label}</span>;
     }
     case "URL":
       return <a href={String(value)} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0073EA] hover:underline">{String(value)}</a>;
@@ -321,19 +321,19 @@ function NewRowModal({
                 value={String(values[f.key] ?? "")}
                 onChange={(e) => update(f.key, e.target.value)}
                 rows={3}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm resize-none"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs resize-none"
               />
             ) : f.fieldType === "NUMBER" ? (
-              <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm" />
+              <input type="number" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value === "" ? null : Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs" />
             ) : f.fieldType === "DATE" ? (
-              <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm" />
+              <input type="date" value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs" />
             ) : f.fieldType === "CHECKBOX" ? (
-              <label className="inline-flex items-center gap-2 text-sm">
+              <label className="inline-flex items-center gap-2 text-xs">
                 <input type="checkbox" checked={!!values[f.key]} onChange={(e) => update(f.key, e.target.checked)} />
                 {f.label}
               </label>
             ) : f.fieldType === "SELECT" ? (
-              <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm">
+              <select value={String(values[f.key] ?? "")} onChange={(e) => update(f.key, e.target.value || null)} className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs">
                 <option value="">— None —</option>
                 {(f.options?.choices ?? []).map((c) => <option key={c.value} value={c.value}>{c.label ?? c.value}</option>)}
               </select>
@@ -359,18 +359,18 @@ function NewRowModal({
                 type={f.fieldType === "EMAIL" ? "email" : f.fieldType === "URL" ? "url" : "text"}
                 value={String(values[f.key] ?? "")}
                 onChange={(e) => update(f.key, e.target.value || null)}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-sm"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 bg-white text-xs"
               />
             )}
           </div>
         ))}
         <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200">
-          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-zinc-500 hover:bg-zinc-50">Cancel</button>
+          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg text-xs text-zinc-500 hover:bg-zinc-50">Cancel</button>
           <button
             type="button"
             onClick={submit}
             disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-[#0073EA] hover:bg-[#0060B9] text-white disabled:opacity-50 inline-flex items-center gap-1.5"
+            className="px-4 py-2 rounded-lg text-xs font-medium bg-[#0073EA] hover:bg-[#0060B9] text-white disabled:opacity-50 inline-flex items-center gap-1.5"
           >
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
             {saving ? "Saving…" : "Save row"}

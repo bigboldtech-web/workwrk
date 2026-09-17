@@ -136,7 +136,7 @@ export function MultiAssigneePicker({ value, canEdit, onChange }: MultiAssigneeP
   const trigger = value.length ? (
     <span className="inline-flex items-center gap-2 min-w-0">
       <PersonAvatarStack people={value} size={24} />
-      {value.length === 1 && <span className="text-sm truncate">{personName(value[0])}</span>}
+      {value.length === 1 && <span className="text-xs truncate">{personName(value[0])}</span>}
     </span>
   ) : (
     <span className="text-xs text-zinc-500">Unassigned</span>
@@ -174,14 +174,14 @@ export function MultiAssigneePicker({ value, canEdit, onChange }: MultiAssigneeP
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Add people…"
-              className="flex-1 text-[14px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-base text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
           <div className="max-h-[280px] min-h-0 flex-1 overflow-y-auto py-1.5">
             {people === null || loading ? (
-              <div className="px-3 py-4 text-[13px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-sm text-zinc-400">Loading…</div>
             ) : people.length === 0 ? (
-              <div className="px-3 py-4 text-[13px] text-zinc-400">No people found</div>
+              <div className="px-3 py-4 text-sm text-zinc-400">No people found</div>
             ) : (
               people.map((p) => {
                 const isMe = p.id === meId;
@@ -201,7 +201,7 @@ export function MultiAssigneePicker({ value, canEdit, onChange }: MultiAssigneeP
             <button
               type="button"
               onClick={() => onChange([])}
-              className="h-8 shrink-0 border-t border-zinc-100 text-[13px] text-zinc-500 hover:bg-zinc-50 inline-flex items-center gap-1.5 px-3"
+              className="h-8 shrink-0 border-t border-zinc-100 text-sm text-zinc-500 hover:bg-zinc-50 inline-flex items-center gap-1.5 px-3"
             >
               <UserX className="w-3.5 h-3.5" /> Clear all
             </button>
@@ -271,7 +271,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
   const trigger = value ? (
     <span className="inline-flex items-center gap-2 min-w-0">
       <PersonAvatar person={value} size={compact ? 22 : 24} />
-      {!compact && <span className="text-sm truncate">{personName(value)}</span>}
+      {!compact && <span className="text-xs truncate">{personName(value)}</span>}
     </span>
   ) : (
     compact ? (
@@ -322,7 +322,7 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or enter email…"
-              className="flex-1 text-[14px] text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-base text-zinc-800 bg-transparent outline-none placeholder:text-zinc-400"
             />
           </div>
           <div className="max-h-[260px] min-h-0 flex-1 overflow-y-auto py-1.5">
@@ -337,9 +337,9 @@ export function AssigneePicker({ value, canEdit, compact = false, onChange }: As
               </>
             ) : null}
             {people === null || loading ? (
-              <div className="px-3 py-4 text-[13px] text-zinc-400">Loading…</div>
+              <div className="px-3 py-4 text-sm text-zinc-400">Loading…</div>
             ) : people.length === 0 ? (
-              <div className="px-3 py-4 text-[13px] text-zinc-400">No people found</div>
+              <div className="px-3 py-4 text-sm text-zinc-400">No people found</div>
             ) : (
               people.map((p) => {
                 const isMe = p.id === meId;

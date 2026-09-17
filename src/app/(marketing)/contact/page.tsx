@@ -86,8 +86,8 @@ export default function ContactPage() {
                     <c.icon size={20} strokeWidth={2.4} />
                   </div>
                   <H3 className="mt-5">{c.title}</H3>
-                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{c.body}</p>
-                  <p className={`mt-5 inline-flex items-center gap-1 text-sm font-semibold ${t.text} group-hover:gap-2 transition-all`}>
+                  <p className="mt-2 text-base text-slate-600 leading-relaxed">{c.body}</p>
+                  <p className={`mt-5 inline-flex items-center gap-1 text-base font-semibold ${t.text} group-hover:gap-2 transition-all`}>
                     {c.cta} <ArrowRight size={13} />
                   </p>
                 </Link>
@@ -115,10 +115,10 @@ export default function ContactPage() {
                     <span className="w-7 h-7 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center">
                       <MapPin size={14} />
                     </span>
-                    <p className="font-bold text-slate-900 text-sm">{o.city}</p>
+                    <p className="font-bold text-slate-900 text-base">{o.city}</p>
                   </div>
-                  <p className="mt-3 text-xs font-bold uppercase tracking-[0.16em] text-sky-700">{o.region}</p>
-                  <p className="mt-2 text-xs text-slate-600 leading-relaxed">{o.address}</p>
+                  <p className="mt-3 text-sm font-bold uppercase tracking-[0.16em] text-sky-700">{o.region}</p>
+                  <p className="mt-2 text-sm text-slate-600 leading-relaxed">{o.address}</p>
                 </div>
               ))}
             </div>

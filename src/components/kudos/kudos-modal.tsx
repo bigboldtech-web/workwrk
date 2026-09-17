@@ -159,9 +159,9 @@ export function KudosModal({
             </div>
             <div className="max-h-64 overflow-y-auto space-y-1">
               {loadingPeople ? (
-                <div className="py-8 text-center text-sm text-muted">Loading...</div>
+                <div className="py-8 text-center text-xs text-muted">Loading...</div>
               ) : filtered.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted">No people found</div>
+                <div className="py-8 text-center text-xs text-muted">No people found</div>
               ) : (
                 filtered.slice(0, 20).map((person) => (
                   <button
@@ -175,8 +175,8 @@ export function KudosModal({
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium">{person.firstName} {person.lastName}</p>
-                      <p className="text-[11px] text-muted">
+                      <p className="text-xs font-medium">{person.firstName} {person.lastName}</p>
+                      <p className="text-xs text-muted">
                         {person.role?.title || "No role"}{person.department?.name ? ` · ${person.department.name}` : ""}
                       </p>
                     </div>
@@ -192,12 +192,12 @@ export function KudosModal({
             {/* Selected person */}
             <div className="flex items-center gap-3 p-3 rounded-lg bg-surface-2 border border-border">
               <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-blue-50 text-[#0073EA] dark:bg-[#0073EA]/15 text-sm">
+                <AvatarFallback className="bg-blue-50 text-[#0073EA] dark:bg-[#0073EA]/15 text-xs">
                   {selectedPerson.firstName[0]}{selectedPerson.lastName[0]}
                 </AvatarFallback>
               </Avatar>
               <div className="flex-1">
-                <p className="text-sm font-medium">{selectedPerson.firstName} {selectedPerson.lastName}</p>
+                <p className="text-xs font-medium">{selectedPerson.firstName} {selectedPerson.lastName}</p>
                 <p className="text-xs text-muted">{selectedPerson.role?.title || "No role"}</p>
               </div>
               {!preselectedUserId && (

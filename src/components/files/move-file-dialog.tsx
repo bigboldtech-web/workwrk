@@ -60,7 +60,7 @@ export function MoveFileDialog({ fileId, fileName, onClose }: { fileId: string; 
     } finally { setMoving(false); }
   }
 
-  const row = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[14px] text-zinc-800 hover:bg-zinc-50 disabled:opacity-50";
+  const row = "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-base text-zinc-800 hover:bg-zinc-50 disabled:opacity-50";
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -73,9 +73,9 @@ export function MoveFileDialog({ fileId, fileName, onClose }: { fileId: string; 
             <Library className="h-4 w-4 shrink-0 text-zinc-400" /> Library only (no Space)
           </button>
           {spaces === null ? (
-            <div className="flex items-center gap-2 px-2.5 py-3 text-[13px] text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading spaces…</div>
+            <div className="flex items-center gap-2 px-2.5 py-3 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading spaces…</div>
           ) : spaces.length === 0 ? (
-            <p className="px-2.5 py-3 text-[13px] text-zinc-400">No spaces available.</p>
+            <p className="px-2.5 py-3 text-sm text-zinc-400">No spaces available.</p>
           ) : (
             spaces.map((s) => (
               <div key={s.id}>
@@ -94,9 +94,9 @@ export function MoveFileDialog({ fileId, fileName, onClose }: { fileId: string; 
                 </div>
                 {expanded === s.id ? (
                   loadingFolders === s.id ? (
-                    <div className="flex items-center gap-2 py-1.5 pl-10 text-[13px] text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                    <div className="flex items-center gap-2 py-1.5 pl-10 text-sm text-zinc-400"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…</div>
                   ) : (folders[s.id] ?? []).length === 0 ? (
-                    <p className="py-1.5 pl-10 text-[13px] text-zinc-400">No folders in this space.</p>
+                    <p className="py-1.5 pl-10 text-sm text-zinc-400">No folders in this space.</p>
                   ) : (
                     (folders[s.id] ?? []).map((f) => (
                       <button

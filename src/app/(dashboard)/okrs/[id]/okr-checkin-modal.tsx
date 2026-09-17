@@ -34,7 +34,7 @@ function KpiNotice({ children }: { children: React.ReactNode }) {
   return (
     <div
       role="status"
-      className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-[13.5px] leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+      className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3 text-base leading-relaxed text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
     >
       {children}
     </div>
@@ -95,7 +95,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
   }
 
   const segBtn = (active: boolean) =>
-    `h-7 rounded-md text-[13px] font-semibold transition-colors ${
+    `h-7 rounded-md text-sm font-semibold transition-colors ${
       active
         ? "bg-[#0073EA] text-white"
         : "bg-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200"
@@ -106,12 +106,12 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
       <DialogContent className="block max-w-[440px] gap-0 p-0">
         {/* ── Header: title + progress + Start / Current / Target ── */}
         <div className="px-6 pb-4 pt-6 text-center">
-          <DialogTitle className="px-6 text-[15px] font-semibold leading-snug">
+          <DialogTitle className="px-6 text-base font-semibold leading-snug">
             {target.title}
           </DialogTitle>
 
           <div className="mt-4" aria-hidden>
-            <div className="mb-1.5 text-[12px] font-semibold tabular-nums text-zinc-500">{pct}%</div>
+            <div className="mb-1.5 text-xs font-semibold tabular-nums text-zinc-500">{pct}%</div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
               <div
                 className="h-full rounded-full bg-[#0073EA] transition-[width] duration-300"
@@ -120,7 +120,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
             </div>
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2 text-[13px] text-zinc-500">
+          <div className="mt-3 flex items-center justify-between gap-2 text-sm text-zinc-500">
             <span>
               Start: <strong className="font-semibold text-zinc-700">{fmtNum(target.startValue)}{unit}</strong>
             </span>
@@ -146,7 +146,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
           </div>
         ) : !canEdit ? (
           <div className="border-t border-zinc-100 px-6 py-5">
-            <p className="text-center text-[13.5px] leading-relaxed text-zinc-500">
+            <p className="text-center text-base leading-relaxed text-zinc-500">
               Only the goal&apos;s owner or their manager can check in on this target.
             </p>
           </div>
@@ -178,7 +178,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
               </div>
 
               <label className="flex h-10 items-center gap-2 rounded-lg border border-zinc-200 px-3 transition-colors focus-within:border-[#0073EA] dark:border-zinc-700">
-                <span className="text-[14px] font-semibold text-zinc-400" aria-hidden>
+                <span className="text-base font-semibold text-zinc-400" aria-hidden>
                   {unit || "#"}
                 </span>
                 <input
@@ -189,12 +189,12 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0"
                   aria-label={mode === "increase" ? "Amount to increase by" : "Amount to decrease by"}
-                  className="w-full bg-transparent text-[14px] font-medium text-zinc-900 outline-none placeholder:text-zinc-300 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  className="w-full bg-transparent text-base font-medium text-zinc-900 outline-none placeholder:text-zinc-300 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                 />
               </label>
 
               {next != null && (
-                <p className="mt-2 text-center text-[12.5px] tabular-nums text-zinc-400">
+                <p className="mt-2 text-center text-xs tabular-nums text-zinc-400">
                   {fmtNum(target.currentValue)}{unit} → <strong className="font-semibold text-zinc-600">{fmtNum(next)}{unit}</strong>
                 </p>
               )}
@@ -204,7 +204,7 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
                   {error.kind === "kpi" ? (
                     <KpiNotice>{error.text}</KpiNotice>
                   ) : (
-                    <p role="alert" className="text-center text-[13px] text-[#E2445C]">{error.text}</p>
+                    <p role="alert" className="text-center text-sm text-[#E2445C]">{error.text}</p>
                   )}
                 </div>
               )}
@@ -222,11 +222,11 @@ export function OkrCheckInModal({ okrId, target, canEdit, onClose }: {
               <div className="mb-1 flex items-baseline justify-between">
                 <label
                   htmlFor="okr-ci-note"
-                  className="text-[12px] font-bold uppercase tracking-wide text-zinc-400"
+                  className="text-xs font-semibold uppercase tracking-wide text-zinc-400"
                 >
                   Note <span className="font-medium normal-case">(optional)</span>
                 </label>
-                <span className="text-[11.5px] text-zinc-300 dark:text-zinc-600">Max 2000 characters</span>
+                <span className="text-xs text-zinc-300 dark:text-zinc-600">Max 2000 characters</span>
               </div>
               <Textarea
                 id="okr-ci-note"

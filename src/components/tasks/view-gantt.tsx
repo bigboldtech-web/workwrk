@@ -59,7 +59,7 @@ export function GanttView({
 
   if (swimlanes.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-surface p-8 text-center text-sm text-muted">
+      <div className="rounded-xl border border-border bg-surface p-8 text-center text-xs text-muted">
         No tasks in this range. Gantt shows what each person is scheduled for and how long it took.
       </div>
     );
@@ -70,7 +70,7 @@ export function GanttView({
       <div className="flex">
         {/* Left column: assignees + task titles */}
         <div className="w-56 shrink-0 border-r border-border">
-          <div className="h-8 border-b border-border px-3 flex items-center text-[11px] text-muted font-medium uppercase">
+          <div className="h-8 border-b border-border px-3 flex items-center text-micro text-muted font-medium uppercase">
             Person / Task
           </div>
           {swimlanes.map((lane) => (
@@ -78,12 +78,12 @@ export function GanttView({
               <div className="h-8 px-3 flex items-center gap-2 border-b border-border bg-surface-2/40">
                 <Avatar className="h-5 w-5">
                   {lane.assignee.avatar ? <AvatarImage src={lane.assignee.avatar} alt="" /> : null}
-                  <AvatarFallback className="text-[10px]">
+                  <AvatarFallback className="text-micro">
                     {lane.assignee.name.split(" ").map((n) => n[0]).slice(0, 2).join("")}
                   </AvatarFallback>
                 </Avatar>
                 <span className="text-xs font-medium truncate">{lane.assignee.name}</span>
-                <span className="ml-auto text-[11px] text-muted">{lane.tasks.length}</span>
+                <span className="ml-auto text-xs text-muted">{lane.tasks.length}</span>
               </div>
               {lane.tasks.map((t) => (
                 <button
@@ -106,13 +106,13 @@ export function GanttView({
               {days.map((d) => (
                 <div
                   key={formatISODate(d)}
-                  className={`shrink-0 flex flex-col items-center justify-center text-[11px] border-r border-border ${
+                  className={`shrink-0 flex flex-col items-center justify-center text-xs border-r border-border ${
                     isSameDay(d, today) ? "text-[#d4ff2e] font-semibold" : "text-muted"
                   }`}
                   style={{ width: DAY_WIDTH }}
                 >
                   <span>{d.getDate()}</span>
-                  <span className="text-[10px] opacity-70">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
+                  <span className="text-micro opacity-70">{d.toLocaleDateString("en-US", { weekday: "short" })}</span>
                 </div>
               ))}
             </div>

@@ -99,7 +99,7 @@ export function EnterpriseControl() {
             <span style={{ color: "var(--brand-red)" }}>SMB simplicity.</span>
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             Every guardrail your CISO will ask for &mdash; agent activity
@@ -174,13 +174,13 @@ export function EnterpriseControl() {
           viewport={{ once: true, margin: "-40px" }}
           transition={{ duration: 0.6, delay: 0.4 }}
         >
-          <p className="text-sm" style={{ color: "var(--m-text-muted)" }}>
+          <p className="text-base" style={{ color: "var(--m-text-muted)" }}>
             Need a Pen test letter or a custom MSA?{" "}
             <span style={{ color: "var(--m-text)", fontWeight: 600 }}>We&apos;ve got you.</span>
           </p>
           <a
             href="/security"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 text-base font-semibold transition-colors"
             style={{ color: "var(--m-text)" }}
           >
             Visit our trust portal <ArrowRight size={14} />

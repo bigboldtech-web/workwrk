@@ -54,7 +54,7 @@ export function DeptWorkspaceBanner() {
           <Briefcase size={16} />
         </span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold">Jump into your {home.label}</p>
+          <p className="text-xs font-semibold">Jump into your {home.label}</p>
           <p className="text-xs text-muted-2 truncate">
             {deptName ? `Your ${deptName} workspace — ${home.blurb}` : home.blurb}
           </p>

@@ -82,7 +82,7 @@ export function InboxAiAssistPanel({ items }: Props) {
     return (
       <Card>
         <CardContent className="p-4 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2 text-sm">
+          <div className="flex items-center gap-2 text-xs">
             <Sparkles size={14} className="text-[color:var(--accent-strong)]" />
             <span>
               <strong>{items.length}</strong> items to triage —
@@ -100,7 +100,7 @@ export function InboxAiAssistPanel({ items }: Props) {
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-4 flex items-center gap-2 text-sm text-muted">
+        <CardContent className="p-4 flex items-center gap-2 text-xs text-muted">
           <Loader2 size={14} className="animate-spin" />
           Thinking through {items.length} item{items.length === 1 ? "" : "s"}…
         </CardContent>
@@ -111,7 +111,7 @@ export function InboxAiAssistPanel({ items }: Props) {
   if (error) {
     return (
       <Card>
-        <CardContent className="p-4 flex items-center justify-between gap-3 text-sm">
+        <CardContent className="p-4 flex items-center justify-between gap-3 text-xs">
           <span className="text-amber-400">AI assist: {error}</span>
           <Button size="sm" variant="outline" onClick={run}>Retry</Button>
         </CardContent>
@@ -130,11 +130,11 @@ export function InboxAiAssistPanel({ items }: Props) {
     <Card>
       <CardContent className="p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium">
+          <div className="flex items-center gap-2 text-xs font-medium">
             <Sparkles size={14} className="text-[color:var(--accent-strong)]" />
             AI triage
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+          <div className="flex items-center gap-1.5 flex-wrap text-xs">
             {(Object.entries(counts) as [SuggestedAction, number][])
               .filter(([, n]) => n > 0)
               .map(([action, n]) => (
@@ -142,7 +142,7 @@ export function InboxAiAssistPanel({ items }: Props) {
                   {n} {ACTION_LABEL[action].toLowerCase()}
                 </span>
               ))}
-            <Button size="sm" variant="outline" className="h-6 text-[11px]" onClick={run}>
+            <Button size="sm" variant="outline" className="h-6 text-xs" onClick={run}>
               Refresh
             </Button>
           </div>
@@ -152,31 +152,31 @@ export function InboxAiAssistPanel({ items }: Props) {
             <li key={`${item.type}:${item.id}`} className="py-2 flex items-start gap-3">
               {sug ? (
                 <span
-                  className={`text-[11px] uppercase tracking-wide rounded-md border px-1.5 py-0.5 shrink-0 ${ACTION_COLOR[sug.action]}`}
+                  className={`text-micro uppercase tracking-wide rounded-md border px-1.5 py-0.5 shrink-0 ${ACTION_COLOR[sug.action]}`}
                   title={`Confidence ${(sug.confidence * 100).toFixed(0)}%`}
                 >
                   {ACTION_LABEL[sug.action]}
                 </span>
               ) : (
-                <span className="text-[11px] uppercase tracking-wide rounded-md border border-white/20 px-1.5 py-0.5 text-muted shrink-0">—</span>
+                <span className="text-micro uppercase tracking-wide rounded-md border border-white/20 px-1.5 py-0.5 text-muted shrink-0">—</span>
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   {item.link ? (
-                    <a href={item.link} className="text-sm font-medium truncate hover:underline">
+                    <a href={item.link} className="text-xs font-medium truncate hover:underline">
                       {item.title}
                     </a>
                   ) : (
-                    <span className="text-sm font-medium truncate">{item.title}</span>
+                    <span className="text-xs font-medium truncate">{item.title}</span>
                   )}
-                  <span className="text-[11px] text-muted-2 uppercase">{item.type}</span>
+                  <span className="text-micro text-muted-2 uppercase">{item.type}</span>
                 </div>
                 {sug && <p className="text-xs text-muted line-clamp-2">{sug.rationale}</p>}
               </div>
             </li>
           ))}
         </ul>
-        <p className="text-[11px] text-muted-2">
+        <p className="text-xs text-muted-2">
           AI suggestions are advisory. Verify before acting on anything financial or sensitive.
         </p>
       </CardContent>

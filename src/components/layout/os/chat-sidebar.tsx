@@ -251,7 +251,7 @@ export function ChatSidebar() {
           value={localFind}
           onChange={(e) => setLocalFind(e.target.value)}
           placeholder="Find a conversation…"
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400"
+          className="min-w-0 flex-1 bg-transparent text-sm text-zinc-800 outline-none placeholder:text-zinc-400"
         />
         {localFind && (
           <button type="button" onClick={() => setLocalFind("")} aria-label="Clear" className="text-zinc-400 hover:text-zinc-700">
@@ -261,14 +261,14 @@ export function ChatSidebar() {
       </div>
       <Link
         href="/people"
-        className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-[14px] text-zinc-700 hover:bg-zinc-50"
+        className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-base text-zinc-700 hover:bg-zinc-50"
       >
         <BookUser className="h-4 w-4 text-zinc-500" /> Directory
       </Link>
       {canAccessTier("hr-admin", (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "") ? (
         <Link
           href="/announcements"
-          className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-[14px] text-zinc-700 hover:bg-zinc-50"
+          className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-base text-zinc-700 hover:bg-zinc-50"
         >
           <Megaphone className="h-4 w-4 text-zinc-500" /> Announcements
         </Link>
@@ -277,7 +277,7 @@ export function ChatSidebar() {
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          className="flex flex-1 items-center gap-2 h-8 px-2 rounded-md text-[14px] text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200"
+          className="flex flex-1 items-center gap-2 h-8 px-2 rounded-md text-base text-zinc-700 hover:bg-zinc-50 border border-dashed border-zinc-200"
         >
           <Plus className="w-4 h-4 text-zinc-500" />
           New message
@@ -295,7 +295,7 @@ export function ChatSidebar() {
       {rows !== null && !q && rows.some((r) => r.myStarred) && (
         <>
           <div className="px-1 pt-1 pb-1">
-            <span className="inline-flex items-center gap-1 px-1 text-[13px] font-semibold text-zinc-600">
+            <span className="inline-flex items-center gap-1 px-1 text-sm font-semibold text-zinc-600">
               <Star className="h-3.5 w-3.5 text-zinc-400" /> Starred
             </span>
           </div>
@@ -309,11 +309,11 @@ export function ChatSidebar() {
                   {row.type === "CHANNEL"
                     ? <Hash className="h-4 w-4 shrink-0 text-zinc-400" />
                     : <MessageCircle className="h-4 w-4 shrink-0 text-zinc-400" />}
-                  <span className={`min-w-0 flex-1 truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                  <span className={`min-w-0 flex-1 truncate text-base ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                     {row.type === "CHANNEL" ? `#${row.name ?? "channel"}` : conversationTitle(row, meId)}
                   </span>
                   {row.unreadCount > 0 && (
-                    <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[var(--os-brand)] px-1.5 text-[11px] font-semibold text-white tabular-nums">
+                    <span className="inline-flex h-5 min-w-[20px] shrink-0 items-center justify-center rounded-full bg-[var(--os-brand)] px-1.5 text-xs font-semibold text-white tabular-nums">
                       {row.unreadCount > 99 ? "99+" : row.unreadCount}
                     </span>
                   )}
@@ -330,7 +330,7 @@ export function ChatSidebar() {
             <button
               type="button"
               onClick={() => toggleSection("channels")}
-              className="inline-flex items-center gap-1 rounded px-1 text-[13px] font-semibold text-zinc-600 hover:bg-zinc-50"
+              className="inline-flex items-center gap-1 rounded px-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
               aria-expanded={!collapsed.channels}
             >
               {collapsed.channels ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
@@ -361,23 +361,23 @@ export function ChatSidebar() {
                     } ${c.isMember ? "" : "opacity-70"}`}
                   >
                     <Hash className="w-4 h-4 text-zinc-400 shrink-0" />
-                    <span className={`min-w-0 flex-1 truncate text-[14px] ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                    <span className={`min-w-0 flex-1 truncate text-base ${unread > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                       {c.name}
                     </span>
                     {channelCalls.has(c.id) && (
                       <span
-                        className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold tabular-nums"
+                        className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold tabular-nums"
                         title={`In call: ${channelCalls.get(c.id)!.participants.map((p) => p.name).join(", ")}`}
                       >
                         <Phone className="w-3 h-3" /> {channelCalls.get(c.id)!.participants.length}
                       </span>
                     )}
                     {unread > 0 ? (
-                      <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                      <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-xs font-semibold inline-flex items-center justify-center tabular-nums">
                         {unread > 99 ? "99+" : unread}
                       </span>
                     ) : !c.isMember ? (
-                      <span className="shrink-0 text-[11px] text-zinc-400">{joining === c.id ? "Joining…" : "Join"}</span>
+                      <span className="shrink-0 text-xs text-zinc-400">{joining === c.id ? "Joining…" : "Join"}</span>
                     ) : null}
                   </button>
                 </li>
@@ -388,7 +388,7 @@ export function ChatSidebar() {
             <button
               type="button"
               onClick={() => toggleSection("dms")}
-              className="inline-flex items-center gap-1 rounded px-1 text-[13px] font-semibold text-zinc-600 hover:bg-zinc-50"
+              className="inline-flex items-center gap-1 rounded px-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
               aria-expanded={!collapsed.dms}
             >
               {collapsed.dms ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
@@ -402,11 +402,11 @@ export function ChatSidebar() {
       )}
 
       {filtered === null ? (
-        <div className="px-2 py-4 text-[13px] text-zinc-400">Loading conversations…</div>
+        <div className="px-2 py-4 text-sm text-zinc-400">Loading conversations…</div>
       ) : filtered.length === 0 ? (
         <div className="px-2 py-6 text-center">
           <MessageCircle className="w-5 h-5 text-zinc-300 mx-auto mb-2" />
-          <p className="text-[13px] text-zinc-500">
+          <p className="text-sm text-zinc-500">
             {q ? "No conversations match" : "No conversations yet. Start one with New message."}
           </p>
         </div>
@@ -445,23 +445,23 @@ export function ChatSidebar() {
                     </span>
                   )}
                   <span className="flex-1 min-w-0">
-                    <span className={`block truncate text-[14px] ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
+                    <span className={`block truncate text-base ${row.unreadCount > 0 ? "font-semibold text-zinc-900" : "text-zinc-800"}`}>
                       {title}
                     </span>
-                    <span className={`block truncate text-[12px] ${row.unreadCount > 0 ? "text-zinc-600" : "text-zinc-400"}`}>
+                    <span className={`block truncate text-xs ${row.unreadCount > 0 ? "text-zinc-600" : "text-zinc-400"}`}>
                       {preview}
                     </span>
                   </span>
                   {row.activeCall && row.activeCall.participants.length > 0 && (
                     <span
-                      className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] font-semibold tabular-nums"
+                      className="shrink-0 inline-flex items-center gap-1 h-5 px-1.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold tabular-nums"
                       title={`In call: ${row.activeCall.participants.map((p) => p.name).join(", ")}`}
                     >
                       <Phone className="w-3 h-3" /> {row.activeCall.participants.length}
                     </span>
                   )}
                   {row.unreadCount > 0 && (
-                    <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-[11px] font-semibold inline-flex items-center justify-center tabular-nums">
+                    <span className="shrink-0 min-w-[20px] h-5 px-1.5 rounded-full bg-[var(--os-brand)] text-white text-xs font-semibold inline-flex items-center justify-center tabular-nums">
                       {row.unreadCount > 99 ? "99+" : row.unreadCount}
                     </span>
                   )}
@@ -486,10 +486,10 @@ export function ChatSidebar() {
       {q.length >= 2 && msgResults !== null && (
         <>
           <div className="px-2 pt-3 pb-1">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">Messages</span>
+            <span className="text-micro font-semibold uppercase tracking-wide text-zinc-400">Messages</span>
           </div>
           {msgResults.length === 0 ? (
-            <p className="px-2 py-2 text-[13px] text-zinc-400">No messages match</p>
+            <p className="px-2 py-2 text-sm text-zinc-400">No messages match</p>
           ) : (
             <ul className="flex flex-col gap-0.5">
               {msgResults.map((hit) => {
@@ -502,11 +502,11 @@ export function ChatSidebar() {
                 return (
                   <li key={hit.messageId}>
                     <Link href={`/tlk/${hit.conversationId}`} className="block px-2 py-1.5 rounded-md hover:bg-zinc-50">
-                      <span className="block truncate text-[13px] font-medium text-zinc-800">
+                      <span className="block truncate text-sm font-medium text-zinc-800">
                         {convTitle}
-                        {hit.inThread && <span className="ml-1 text-[11px] font-normal text-zinc-400">in thread</span>}
+                        {hit.inThread && <span className="ml-1 text-xs font-normal text-zinc-400">in thread</span>}
                       </span>
-                      <span className="block truncate text-[12px] text-zinc-500">
+                      <span className="block truncate text-xs text-zinc-500">
                         {hit.author.firstName}: {hit.snippet}
                       </span>
                     </Link>
@@ -525,7 +525,7 @@ export function ChatSidebar() {
             className="fixed z-50 w-56 rounded-lg border border-zinc-200 bg-white py-1 shadow-xl"
             style={{ left: Math.min(rowMenu.x, typeof window !== "undefined" ? window.innerWidth - 240 : rowMenu.x), top: Math.min(rowMenu.y, typeof window !== "undefined" ? window.innerHeight - 260 : rowMenu.y) }}
           >
-            <button type="button" onClick={() => { setRowMenu(null); router.push(`/tlk/${rowMenu.id}`); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
+            <button type="button" onClick={() => { setRowMenu(null); router.push(`/tlk/${rowMenu.id}`); }} className="flex h-8 w-full items-center gap-2 px-3 text-sm text-zinc-700 hover:bg-zinc-50">
               <ExternalLink className="h-4 w-4 text-zinc-400" /> Open
             </button>
             <button
@@ -535,7 +535,7 @@ export function ChatSidebar() {
                 if (pathname === `/tlk/${m.id}`) window.dispatchEvent(new CustomEvent("workwrk:room:start-talktok", { detail: { id: m.id } }));
                 else router.push(`/tlk/${m.id}?call=1`);
               }}
-              className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+              className="flex h-8 w-full items-center gap-2 px-3 text-sm text-zinc-700 hover:bg-zinc-50"
             >
               <Video className="h-4 w-4 text-zinc-400" /> Start call
             </button>
@@ -553,7 +553,7 @@ export function ChatSidebar() {
                   <button
                     type="button"
                     onClick={() => { const m = rowMenu; setRowMenu(null); void patchConversation(m.id, { starred: !starred }, starred ? "Removed from Starred" : "Added to Starred", "Couldn't update the star"); }}
-                    className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                    className="flex h-8 w-full items-center gap-2 px-3 text-sm text-zinc-700 hover:bg-zinc-50"
                   >
                     <Star className={`h-4 w-4 ${starred ? "fill-amber-400 text-amber-400" : "text-zinc-400"}`} />
                     {starred ? "Remove from Starred" : "Star"}
@@ -561,7 +561,7 @@ export function ChatSidebar() {
                   <button
                     type="button"
                     onClick={() => { const m = rowMenu; setRowMenu(null); void patchConversation(m.id, { notifyLevel: muted ? unmuteLevel : "mute" }, muted ? "Notifications on" : "Muted", "Couldn't update notifications"); }}
-                    className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50"
+                    className="flex h-8 w-full items-center gap-2 px-3 text-sm text-zinc-700 hover:bg-zinc-50"
                   >
                     {muted ? <Bell className="h-4 w-4 text-zinc-400" /> : <BellOff className="h-4 w-4 text-zinc-400" />}
                     {muted ? "Unmute" : "Mute"}
@@ -569,16 +569,16 @@ export function ChatSidebar() {
                   <div className="my-1 h-px bg-zinc-100" />
                   {rowMenu.type === "CHANNEL" ? (
                     !rowMenu.isGeneral && (
-                      <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-red-600 hover:bg-red-50">
+                      <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-sm text-red-600 hover:bg-red-50">
                         <LogOut className="h-4 w-4" /> Leave channel
                       </button>
                     )
                   ) : rowMenu.type === "DM" ? (
-                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); void closeConversation(m.id); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-zinc-700 hover:bg-zinc-50">
+                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); void closeConversation(m.id); }} className="flex h-8 w-full items-center gap-2 px-3 text-sm text-zinc-700 hover:bg-zinc-50">
                       <X className="h-4 w-4 text-zinc-400" /> Close conversation
                     </button>
                   ) : (
-                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-[13px] text-red-600 hover:bg-red-50">
+                    <button type="button" onClick={() => { const m = rowMenu; setRowMenu(null); setConfirmLeaveId({ id: m.id, name: m.name }); }} className="flex h-8 w-full items-center gap-2 px-3 text-sm text-red-600 hover:bg-red-50">
                       <LogOut className="h-4 w-4" /> Leave group
                     </button>
                   )}
@@ -704,7 +704,7 @@ function NewChatModal({ meId, onClose, onCreated }: {
         {picked.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {picked.map((p) => (
-              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-[13px] text-zinc-700">
+              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-sm text-zinc-700">
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={18} />
                 {p.firstName} {p.lastName}
                 <button type="button" onClick={() => toggle(p)} className="text-zinc-400 hover:text-zinc-700" aria-label={`Remove ${p.firstName}`}>
@@ -723,13 +723,13 @@ function NewChatModal({ meId, onClose, onCreated }: {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search people…"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400"
+            className="flex-1 min-w-0 bg-transparent outline-none text-base text-zinc-800 placeholder:text-zinc-400"
           />
         </div>
 
         <ul className="mt-2 max-h-56 overflow-y-auto flex flex-col gap-0.5">
           {candidates.length === 0 ? (
-            <li className="px-2 py-4 text-center text-[13px] text-zinc-400">No people found</li>
+            <li className="px-2 py-4 text-center text-sm text-zinc-400">No people found</li>
           ) : candidates.map((p) => (
             <li key={p.id}>
               <button
@@ -739,8 +739,8 @@ function NewChatModal({ meId, onClose, onCreated }: {
               >
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={28} />
                 <span className="flex-1 min-w-0">
-                  <span className="block truncate text-[14px] text-zinc-800">{p.firstName} {p.lastName}</span>
-                  {p.role?.title && <span className="block truncate text-[12px] text-zinc-400">{p.role.title}</span>}
+                  <span className="block truncate text-base text-zinc-800">{p.firstName} {p.lastName}</span>
+                  {p.role?.title && <span className="block truncate text-xs text-zinc-400">{p.role.title}</span>}
                 </span>
                 <Plus className="w-4 h-4 text-zinc-300" />
               </button>
@@ -754,21 +754,21 @@ function NewChatModal({ meId, onClose, onCreated }: {
             value={groupName}
             onChange={(e) => setGroupName(e.target.value)}
             placeholder="Group name (optional)"
-            className="mt-2 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-[14px] text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-zinc-300"
+            className="mt-2 w-full h-9 px-2.5 rounded-md border border-zinc-200 text-base text-zinc-800 placeholder:text-zinc-400 outline-none focus:border-zinc-300"
           />
         )}
 
-        {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
         <div className="mt-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => void create()}
             disabled={picked.length === 0 || creating}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {creating ? "Starting…" : picked.length > 1 ? "Start group chat" : "Start chat"}
           </button>
@@ -821,7 +821,7 @@ function NewChannelDialog({ onClose, onCreated }: {
         <DialogHeader>
           <DialogTitle>New channel</DialogTitle>
         </DialogHeader>
-        <p className="text-[13px] text-zinc-500 mb-2">
+        <p className="text-sm text-zinc-500 mb-2">
           Channels are open to everyone in the company — anyone can find and join them.
         </p>
         <div className="flex items-center gap-2 h-9 px-2.5 rounded-md border border-zinc-200 bg-white">
@@ -833,19 +833,19 @@ function NewChannelDialog({ onClose, onCreated }: {
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
             placeholder="e.g. sales, product, random"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400"
+            className="flex-1 min-w-0 bg-transparent outline-none text-base text-zinc-800 placeholder:text-zinc-400"
           />
         </div>
-        {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
         <div className="mt-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => void create()}
             disabled={!name.trim() || creating}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {creating ? "Creating…" : "Create channel"}
           </button>

@@ -168,7 +168,7 @@ export function ScrollShowcase() {
               </h2>
 
               <p
-                className="mt-5 text-base lg:text-lg leading-relaxed max-w-md"
+                className="mt-5 text-lg lg:text-lg leading-relaxed max-w-md"
                 style={{ color: "var(--m-text-muted)" }}
               >
                 Scroll. Each hub is a fully-featured product on its own.

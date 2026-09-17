@@ -29,7 +29,7 @@ export default function DoNotSellPage() {
               Do Not Sell or Share <br />
               <GradientText hue="rose">My Personal Information.</GradientText>
             </H1>
-            <p className="mt-5 text-base text-slate-600">
+            <p className="mt-5 text-lg text-slate-600">
               Last updated: <span className="font-semibold text-slate-900">May 18, 2026</span>
             </p>
             <p className="mt-5 text-lg text-slate-600 leading-relaxed max-w-2xl">
@@ -56,7 +56,7 @@ export default function DoNotSellPage() {
                 strict data processing agreements that prohibit them from using your data for
                 their own purposes. See <Link href="/privacy" className="text-emerald-700 underline underline-offset-2">our Privacy Policy</Link> for the full list.
               </p>
-              <div className="mt-7 inline-flex items-center gap-2 text-sm font-semibold text-emerald-700">
+              <div className="mt-7 inline-flex items-center gap-2 text-base font-semibold text-emerald-700">
                 <ShieldCheck size={16} /> Verified by Cure53 (annual audit)
               </div>
             </div>
@@ -64,7 +64,7 @@ export default function DoNotSellPage() {
             {/* Opt-out form */}
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 lg:p-10">
               <H3>File an opt-out request</H3>
-              <p className="mt-2 text-sm text-slate-600">
+              <p className="mt-2 text-base text-slate-600">
                 If we ever change our practice, this form ensures you&apos;re excluded. We respond
                 within 15 business days.
               </p>
@@ -72,7 +72,7 @@ export default function DoNotSellPage() {
                 <div className="mt-7 p-6 rounded-2xl bg-emerald-50 border border-emerald-200">
                   <CheckCircle2 className="text-emerald-600" size={28} />
                   <p className="mt-3 font-bold text-emerald-900">Request received.</p>
-                  <p className="mt-2 text-sm text-emerald-800">
+                  <p className="mt-2 text-base text-emerald-800">
                     We&apos;ll email you a confirmation at the address you provided within 15 business days.
                   </p>
                 </div>
@@ -124,10 +124,10 @@ function Field({
   options?: readonly string[];
   required?: boolean;
 }) {
-  const base = "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 transition";
+  const base = "w-full px-3.5 h-11 bg-white border border-slate-200 rounded-xl text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 transition";
   return (
     <label className="block">
-      <span className="block text-xs font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
+      <span className="block text-sm font-bold uppercase tracking-[0.14em] text-slate-700 mb-1.5">{label}</span>
       {as === "textarea" ? (
         <textarea name={name} rows={3} placeholder={placeholder} className={`${base} h-auto py-3`} />
       ) : as === "select" ? (

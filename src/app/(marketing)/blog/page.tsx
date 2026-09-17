@@ -55,7 +55,7 @@ export default function BlogPage() {
             {CATEGORIES.map((c) => (
               <button
                 key={c}
-                className={`inline-flex items-center text-xs font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full border transition ${
+                className={`inline-flex items-center text-sm font-bold uppercase tracking-[0.14em] px-3 h-8 rounded-full border transition ${
                   c === "All" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200 hover:border-slate-300"
                 }`}
               >
@@ -78,13 +78,13 @@ export default function BlogPage() {
                 <span className={`inline-flex items-center text-[11px] font-bold uppercase tracking-[0.16em] px-3 h-7 rounded-full ${fHue.bgTint} ${fHue.text} border ${fHue.border}`}>
                   Featured · {featured.category}
                 </span>
-                <span className="text-xs text-slate-500">{featured.date} · {featured.readMins} min</span>
+                <span className="text-sm text-slate-500">{featured.date} · {featured.readMins} min</span>
               </div>
               <h2 className="mt-5 font-extrabold tracking-[-0.025em] text-slate-900" style={{ fontSize: "clamp(1.7rem, 3.2vw, 2.4rem)", lineHeight: 1.1 }}>
                 {featured.title}
               </h2>
               <p className="mt-4 text-slate-600 text-lg leading-relaxed max-w-3xl">{featured.excerpt}</p>
-              <span className={`mt-6 inline-flex items-center gap-1.5 text-sm font-semibold ${fHue.text} group-hover:gap-2 transition-all`}>
+              <span className={`mt-6 inline-flex items-center gap-1.5 text-base font-semibold ${fHue.text} group-hover:gap-2 transition-all`}>
                 Read the essay <ArrowRight size={14} />
               </span>
             </div>
@@ -107,8 +107,8 @@ export default function BlogPage() {
                     {p.category}
                   </span>
                   <h3 className="mt-4 font-bold text-slate-900 text-xl tracking-tight leading-snug">{p.title}</h3>
-                  <p className="mt-3 text-sm text-slate-600 leading-relaxed line-clamp-3">{p.excerpt}</p>
-                  <p className="mt-5 text-xs text-slate-500">{p.date} · {p.readMins} min</p>
+                  <p className="mt-3 text-base text-slate-600 leading-relaxed line-clamp-3">{p.excerpt}</p>
+                  <p className="mt-5 text-sm text-slate-500">{p.date} · {p.readMins} min</p>
                 </Link>
               );
             })}

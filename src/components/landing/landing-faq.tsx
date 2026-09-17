@@ -68,7 +68,7 @@ export function LandingFAQ() {
               <span style={{ color: "var(--brand-blue)" }}>before sign-up.</span>
             </h2>
             <p
-              className="mt-5 text-base lg:text-lg leading-relaxed"
+              className="mt-5 text-lg lg:text-lg leading-relaxed"
               style={{ color: "var(--m-text-muted)" }}
             >
               Still curious?{" "}
@@ -122,7 +122,7 @@ function FAQRow({
     >
       <summary className="flex items-center justify-between gap-6 cursor-pointer list-none px-6 lg:px-7 py-5 lg:py-6 hover:bg-[var(--m-surface)] transition-colors">
         <span
-          className="font-semibold text-base lg:text-[17px]"
+          className="font-semibold text-lg lg:text-[17px]"
           style={{ color: "var(--m-text)" }}
         >
           {q}

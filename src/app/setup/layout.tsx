@@ -39,7 +39,7 @@ export default function SetupLayout({
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-3.5">
           <Link
             href="/dashboard"
-            className="inline-flex items-center gap-2.5 text-[18px] font-bold tracking-tight text-zinc-900 no-underline"
+            className="inline-flex items-center gap-2.5 text-lg font-semibold tracking-tight text-zinc-900 no-underline"
           >
             <span
               aria-hidden
@@ -47,7 +47,7 @@ export default function SetupLayout({
             />
             workwrk
           </Link>
-          <span className="border-l border-zinc-200 pl-4 text-[12px] uppercase tracking-wide text-zinc-400">
+          <span className="border-l border-zinc-200 pl-4 text-xs uppercase tracking-wide text-zinc-400">
             Setup your workspace
           </span>
         </div>

@@ -276,7 +276,7 @@ export function HeroBoardMock() {
           <span className="text-3xl font-extrabold tracking-tight" style={{ color: "var(--m-text)" }}>
             87
           </span>
-          <span className="text-xs" style={{ color: "var(--m-text-soft)" }}>/ 100</span>
+          <span className="text-sm" style={{ color: "var(--m-text-soft)" }}>/ 100</span>
         </div>
         {/* Animated sparkline */}
         <svg viewBox="0 0 180 36" className="mt-2 w-full">

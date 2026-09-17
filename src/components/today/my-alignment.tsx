@@ -159,7 +159,7 @@ export function MyAlignment() {
       {mandatoryPending.length > 0 ? (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 flex items-center gap-3">
           <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-          <div className="flex-1 text-sm">
+          <div className="flex-1 text-xs">
             <span className="font-medium">{mandatoryPending.length} mandatory SOP{mandatoryPending.length === 1 ? "" : "s"}</span>{" "}
             <span className="text-zinc-500">awaiting your acknowledgement.</span>
           </div>
@@ -173,7 +173,7 @@ export function MyAlignment() {
         <div className="rounded-md border border-zinc-200 bg-white">
           <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
             <ShieldCheck className="w-4 h-4 text-[var(--os-brand)]" />
-            <span className="text-sm font-medium">Policies to acknowledge</span>
+            <span className="text-xs font-medium">Policies to acknowledge</span>
             <span className="text-xs text-zinc-400">{policies.length}</span>
           </div>
           <ul className="divide-y divide-zinc-100">
@@ -181,7 +181,7 @@ export function MyAlignment() {
               <li key={p.assignmentId}>
                 <Link href={`/policies/${p.policyId}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{p.title}</div>
+                    <div className="truncate text-xs font-medium">{p.title}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-400">
                       {p.mandatory ? <span className="font-medium text-amber-600">Mandatory</span> : <span>Optional</span>}
                       {p.dueDate ? <span>· Due {new Date(p.dueDate).toLocaleDateString()}</span> : null}
@@ -199,7 +199,7 @@ export function MyAlignment() {
         <div className="rounded-md border border-zinc-200 bg-white">
           <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2.5">
             <ListChecks className="w-4 h-4 text-[var(--os-brand)]" />
-            <span className="text-sm font-medium">Checklists to run</span>
+            <span className="text-xs font-medium">Checklists to run</span>
             <span className="text-xs text-zinc-400">{runs.length}</span>
           </div>
           <ul className="divide-y divide-zinc-100">
@@ -210,7 +210,7 @@ export function MyAlignment() {
                   className="flex items-center gap-3 px-4 py-2.5 hover:bg-zinc-50"
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{r.title || r.sopTitle || "Checklist"}</div>
+                    <div className="truncate text-xs font-medium">{r.title || r.sopTitle || "Checklist"}</div>
                     <div className="mt-1 flex items-center gap-2">
                       <div className="h-1.5 w-24 overflow-hidden rounded-full bg-zinc-100">
                         <div className="h-full rounded-full bg-[var(--os-brand)]" style={{ width: `${r.progress}%` }} />
@@ -265,7 +265,7 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
         }`}
       >
         <ClipboardCheck className={`w-4 h-4 ${isFridayOrAfter ? "text-amber-600" : "text-zinc-500"}`} />
-        <div className="flex-1 text-sm">
+        <div className="flex-1 text-xs">
           <div className="font-medium">Weekly review — draft</div>
           <div className="text-xs text-zinc-500">
             {isFridayOrAfter ? "Friday. Submit your week before EOD." : "Fill it in as the week unfolds; submit by Friday."}
@@ -282,7 +282,7 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
         className="rounded-md border border-zinc-200 bg-white px-4 py-3 flex items-center gap-3 hover:bg-zinc-50"
       >
         <Clock className="w-4 h-4 text-zinc-500" />
-        <div className="flex-1 text-sm">
+        <div className="flex-1 text-xs">
           <div className="font-medium">Weekly review — submitted</div>
           <div className="text-xs text-zinc-500">Awaiting manager acknowledgement.</div>
         </div>
@@ -299,7 +299,7 @@ function WeeklyReviewCallout({ w }: { w: WeeklyReviewLite }) {
       }`}
     >
       {approved ? <CheckCircle2 className="w-4 h-4 text-emerald-700" /> : <AlertCircle className="w-4 h-4 text-red-700" />}
-      <div className="flex-1 text-sm">
+      <div className="flex-1 text-xs">
         <div className="font-medium">
           {approved ? "Weekly review — approved" : "Weekly review — changes requested"}
         </div>
@@ -323,14 +323,14 @@ function KraColumn({ kras, loading }: { kras: KraRow[]; loading: boolean }) {
         <ul className="px-2 py-1.5 max-h-[260px] overflow-y-auto">
           {kras.slice(0, 8).map((row) => (
             <li key={row.assignmentId} className="px-2 py-1.5 rounded-md hover:bg-zinc-50">
-              <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-2 text-xs">
                 <span className="truncate flex-1">{row.kra.name}</span>
                 {row.weightage > 0 ? (
-                  <span className="text-[11px] uppercase tracking-wide text-zinc-500">{Math.round(row.weightage)}%</span>
+                  <span className="text-micro uppercase tracking-wide text-zinc-500">{Math.round(row.weightage)}%</span>
                 ) : null}
               </div>
               {row.kra.category || row.kra.kpis.length > 0 ? (
-                <div className="text-[12px] text-zinc-500 truncate">
+                <div className="text-xs text-zinc-500 truncate">
                   {row.kra.category ? <span>{row.kra.category}</span> : null}
                   {row.kra.category && row.kra.kpis.length > 0 ? <span> · </span> : null}
                   {row.kra.kpis.length > 0 ? <span>{row.kra.kpis.length} KPI{row.kra.kpis.length === 1 ? "" : "s"}</span> : null}
@@ -369,10 +369,10 @@ function KpiColumn({
                 onClick={() => onPick(p)}
                 className="w-full text-left px-2 py-1.5 rounded-md hover:bg-zinc-50"
               >
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-xs">
                   <span className="truncate flex-1">{p.kpi.name}</span>
                   <span
-                    className={`text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded ${
+                    className={`text-micro uppercase tracking-wide px-1.5 py-0.5 rounded ${
                       p.status === "REJECTED"
                         ? "bg-red-500/15 text-red-600"
                         : "bg-amber-500/15 text-amber-700"
@@ -381,7 +381,7 @@ function KpiColumn({
                     {p.status === "REJECTED" ? "Rework" : "Score"}
                   </span>
                 </div>
-                <div className="text-[12px] text-zinc-500 truncate">
+                <div className="text-xs text-zinc-500 truncate">
                   {p.period} · target {p.targetValue ?? "—"}{p.kpi.unit ? ` ${p.kpi.unit}` : ""} · {p.kpi.frequency.toLowerCase()}
                 </div>
               </button>
@@ -418,15 +418,15 @@ function SopColumn({
                 onClick={() => onPick(row)}
                 className="w-full text-left px-2 py-1.5 rounded-md hover:bg-zinc-50"
               >
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-2 text-xs">
                   <span className="truncate flex-1">{row.sop.title}</span>
                   {row.mandatory ? (
-                    <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-600">
+                    <span className="text-micro uppercase tracking-wide px-1.5 py-0.5 rounded bg-red-500/15 text-red-600">
                       Mandatory
                     </span>
                   ) : null}
                 </div>
-                <div className="text-[12px] text-zinc-500 truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
+                <div className="text-xs text-zinc-500 truncate">{row.status.toLowerCase().replace(/_/g, " ")}</div>
               </button>
             </li>
           ))}

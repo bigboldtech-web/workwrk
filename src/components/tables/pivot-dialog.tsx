@@ -82,10 +82,10 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
     <div className="flex max-h-[80vh] min-h-[420px]">
       {/* Config panel */}
       <div className="w-[300px] shrink-0 border-r border-zinc-100 p-5 overflow-y-auto">
-        <DialogTitle className="text-[15px] font-semibold inline-flex items-center gap-2">
+        <DialogTitle className="text-base font-semibold inline-flex items-center gap-2">
           <Table2 className="h-4 w-4 text-zinc-500" /> Pivot table
         </DialogTitle>
-        <DialogDescription className="mt-1 mb-4 text-[12.5px]">
+        <DialogDescription className="mt-1 mb-4 text-xs">
           Summarise the sheet by grouping and aggregating.
         </DialogDescription>
 
@@ -115,7 +115,7 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
           <select
             value={colField}
             onChange={(e) => setColField(e.target.value)}
-            className="w-full h-8 rounded-md border border-zinc-200 px-2 text-[13px] bg-white focus:outline-none focus:border-zinc-400"
+            className="w-full h-8 rounded-md border border-zinc-200 px-2 text-sm bg-white focus:outline-none focus:border-zinc-400"
           >
             <option value="">None</option>
             {columns.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -128,7 +128,7 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
             <select
               value={agg}
               onChange={(e) => setAgg(e.target.value as PivotAgg)}
-              className="w-full h-8 rounded-md border border-zinc-200 px-2 text-[13px] bg-white focus:outline-none focus:border-zinc-400"
+              className="w-full h-8 rounded-md border border-zinc-200 px-2 text-sm bg-white focus:outline-none focus:border-zinc-400"
             >
               {AGGS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
             </select>
@@ -136,12 +136,12 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
               <select
                 value={valueField}
                 onChange={(e) => setValueField(e.target.value)}
-                className="w-full h-8 rounded-md border border-zinc-200 px-2 text-[13px] bg-white focus:outline-none focus:border-zinc-400"
+                className="w-full h-8 rounded-md border border-zinc-200 px-2 text-sm bg-white focus:outline-none focus:border-zinc-400"
               >
                 {columns.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             ) : (
-              <span className="text-[12px] text-zinc-400 px-0.5">Counts rows in each group.</span>
+              <span className="text-xs text-zinc-400 px-0.5">Counts rows in each group.</span>
             )}
           </div>
         </Section>
@@ -163,13 +163,13 @@ function PivotBody({ columns, buildRecords }: { columns: Col[]; buildRecords: ()
           </div>
         ) : null}
         {result.empty ? (
-          <div className="h-full flex items-center justify-center text-[13px] text-zinc-400">
+          <div className="h-full flex items-center justify-center text-sm text-zinc-400">
             Pick a Row field {agg === "count" ? "" : "and a Value"} to build the pivot.
           </div>
         ) : view === "chart" ? (
           <PivotChart result={result} type={chartType} />
         ) : (
-          <table className="text-[13px] border-collapse">
+          <table className="text-sm border-collapse">
             <thead>
               <tr>
                 <th className="sticky left-0 bg-white text-left font-semibold text-zinc-500 px-3 py-1.5 border-b border-zinc-200">
@@ -210,7 +210,7 @@ function Section({ title, children, onAdd, canAdd }: { title: string; children: 
   return (
     <div className="mb-4">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[11px] uppercase tracking-wide text-zinc-500 font-semibold">{title}</span>
+        <span className="text-micro uppercase tracking-wide text-zinc-500 font-semibold">{title}</span>
         {onAdd ? (
           <button type="button" onClick={onAdd} disabled={!canAdd} className="text-zinc-400 hover:text-zinc-700 disabled:opacity-40" aria-label={`Add ${title} field`}>
             <Plus className="h-3.5 w-3.5" />
@@ -223,7 +223,7 @@ function Section({ title, children, onAdd, canAdd }: { title: string; children: 
 }
 
 function Empty() {
-  return <div className="text-[12.5px] text-zinc-400 px-0.5">None</div>;
+  return <div className="text-xs text-zinc-400 px-0.5">None</div>;
 }
 
 function ViewBtn({ active, onClick, icon: Icon, label, iconOnly }: {
@@ -239,7 +239,7 @@ function ViewBtn({ active, onClick, icon: Icon, label, iconOnly }: {
       onClick={onClick}
       title={label}
       aria-label={label}
-      className={`h-8 inline-flex items-center gap-1.5 rounded-md text-[13px] ${iconOnly ? "w-8 justify-center" : "px-2.5"} ${active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}
+      className={`h-8 inline-flex items-center gap-1.5 rounded-md text-sm ${iconOnly ? "w-8 justify-center" : "px-2.5"} ${active ? "bg-zinc-900 text-white" : "text-zinc-600 hover:bg-zinc-100"}`}
     >
       <Icon className="h-3.5 w-3.5" />
       {iconOnly ? null : label}
@@ -259,7 +259,7 @@ function FieldRow({ value, columns, currentLabel, onChange, onRemove }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 h-8 rounded-md border border-zinc-200 px-2 text-[13px] bg-white focus:outline-none focus:border-zinc-400"
+        className="flex-1 min-w-0 h-8 rounded-md border border-zinc-200 px-2 text-sm bg-white focus:outline-none focus:border-zinc-400"
       >
         {/* keep the current field selectable even though it's excluded from `columns` */}
         <option value={value}>{currentLabel ?? value}</option>

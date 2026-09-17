@@ -134,7 +134,7 @@ function FieldRowEditor({
         {field.required && <span className="text-red-500 ml-0.5">*</span>}
       </label>
       {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
-      {justSaved && <span className="text-[11px] text-emerald-600 inline-flex items-center gap-0.5"><Save size={9} /> Saved</span>}
+      {justSaved && <span className="text-xs text-emerald-600 inline-flex items-center gap-0.5"><Save size={9} /> Saved</span>}
     </div>
   );
 
@@ -147,7 +147,7 @@ function FieldRowEditor({
             defaultValue={(field.value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             rows={3}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm resize-none"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs resize-none"
           />
         </div>
       );
@@ -159,7 +159,7 @@ function FieldRowEditor({
             type="number"
             defaultValue={(field.value as number) ?? ""}
             onBlur={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           />
         </div>
       );
@@ -171,7 +171,7 @@ function FieldRowEditor({
             type="date"
             defaultValue={field.value ? String(field.value).slice(0, 10) : ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           />
         </div>
       );
@@ -189,7 +189,7 @@ function FieldRowEditor({
             {field.required && <span className="text-red-500 ml-0.5">*</span>}
           </label>
           {saving && <Loader2 size={10} className="animate-spin text-muted-2" />}
-          {justSaved && <span className="text-[11px] text-emerald-600">Saved</span>}
+          {justSaved && <span className="text-xs text-emerald-600">Saved</span>}
         </div>
       );
     case "SELECT": {
@@ -200,7 +200,7 @@ function FieldRowEditor({
           <select
             defaultValue={(field.value as string) ?? ""}
             onChange={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           >
             <option value="">— None —</option>
             {choices.map((c) => (
@@ -253,7 +253,7 @@ function FieldRowEditor({
             defaultValue={(field.value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
             placeholder="https://"
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           />
         </div>
       );
@@ -265,7 +265,7 @@ function FieldRowEditor({
             type="email"
             defaultValue={(field.value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           />
         </div>
       );
@@ -278,7 +278,7 @@ function FieldRowEditor({
             type="text"
             defaultValue={(field.value as string) ?? ""}
             onBlur={(e) => onChange(e.target.value || null)}
-            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-sm"
+            className="w-full px-3 py-2 rounded-lg border border-border bg-surface text-xs"
           />
         </div>
       );

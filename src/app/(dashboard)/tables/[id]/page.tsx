@@ -551,7 +551,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
     { key: "icon_set", label: "Icon set" },
   ];
   const swatch = (val: string, set: (v: string) => void, label: string) => (
-    <label className="flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+    <label className="flex items-center gap-1.5 text-xs text-zinc-600">
       <input type="color" value={val} onChange={(e) => set(e.target.value)} className="h-7 w-8 rounded border border-zinc-200 bg-white p-0.5" aria-label={label} />
       {label}
     </label>
@@ -564,7 +564,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
           <DialogTitle>Conditional formatting — {column.label}</DialogTitle>
         </DialogHeader>
 
-        <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-[13px] mb-3">
+        <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-sm mb-3">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -579,16 +579,16 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "single" ? (
           <>
-            <p className="text-[13px] text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
+            <p className="text-sm text-zinc-500 mb-2">Cells matching a rule take its colour. Rules apply top to bottom; the first match wins.</p>
             <div className="flex flex-col gap-2 max-h-[42vh] overflow-y-auto">
               {rules.length === 0 ? (
-                <p className="py-4 text-center text-[13px] text-zinc-400">No rules yet.</p>
+                <p className="py-4 text-center text-sm text-zinc-400">No rules yet.</p>
               ) : rules.map((r, i) => (
                 <div key={i} className="flex items-center gap-2 rounded-lg border border-zinc-200 p-2">
                   <select
                     value={r.when}
                     onChange={(e) => update(i, { when: e.target.value as ConditionalRule["when"] })}
-                    className="h-8 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                    className="h-8 rounded-md border border-zinc-200 px-2 text-sm text-zinc-800 outline-none focus:border-[var(--os-brand)]"
                   >
                     {RULE_ORDER.map((w) => <option key={w} value={w}>{RULE_LABELS[w]}</option>)}
                   </select>
@@ -598,7 +598,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
                       value={r.value == null ? "" : String(r.value)}
                       onChange={(e) => update(i, { value: e.target.value })}
                       placeholder="value"
-                      className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-[13px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+                      className="h-8 w-24 rounded-md border border-zinc-200 px-2 text-sm text-zinc-800 outline-none focus:border-[var(--os-brand)]"
                     />
                   )}
                   <div className="flex items-center gap-1">
@@ -619,7 +619,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
                 </div>
               ))}
             </div>
-            <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-[13px] text-zinc-600 hover:bg-zinc-50">
+            <button type="button" onClick={addRule} className="mt-2 inline-flex h-8 items-center gap-1.5 self-start rounded-md border border-dashed border-zinc-300 px-3 text-sm text-zinc-600 hover:bg-zinc-50">
               <Plus className="h-3.5 w-3.5" /> Add rule
             </button>
           </>
@@ -627,10 +627,10 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "color_scale" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-[13px] text-zinc-500">A heat-map across this column&rsquo;s numbers — lowest gets the min colour, highest the max.</p>
+            <p className="text-sm text-zinc-500">A heat-map across this column&rsquo;s numbers — lowest gets the min colour, highest the max.</p>
             <div className="flex items-center gap-4">
               {swatch(scaleMin, setScaleMin, "Min")}
-              <label className="flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+              <label className="flex items-center gap-1.5 text-xs text-zinc-600">
                 <input type="checkbox" checked={useMid} onChange={(e) => setUseMid(e.target.checked)} /> Midpoint
               </label>
               {useMid ? swatch(scaleMid, setScaleMid, "Mid") : null}
@@ -646,7 +646,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "data_bar" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-[13px] text-zinc-500">Each cell shows a bar sized by its value relative to the column.</p>
+            <p className="text-sm text-zinc-500">Each cell shows a bar sized by its value relative to the column.</p>
             {swatch(barColor, setBarColor, "Bar colour")}
             <div className="flex flex-col gap-1 rounded-md border border-zinc-200 p-2" aria-label="Data bar preview">
               {[0.9, 0.55, 0.3].map((w, i) => (
@@ -658,8 +658,8 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
 
         {mode === "icon_set" ? (
           <div className="flex flex-col gap-3">
-            <p className="text-[13px] text-zinc-500">Each cell gets an icon by where its value sits in the column — top third, middle, bottom.</p>
-            <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-[13px]">
+            <p className="text-sm text-zinc-500">Each cell gets an icon by where its value sits in the column — top third, middle, bottom.</p>
+            <div className="inline-flex self-start overflow-hidden rounded-md border border-zinc-200 text-sm">
               {(["arrows", "traffic"] as const).map((s) => (
                 <button
                   key={s}
@@ -673,7 +673,7 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
             </div>
             <div className="flex items-center gap-4 rounded-md border border-zinc-200 p-3">
               {[{ t: "High", c: "#22c55e", a: "▲" }, { t: "Mid", c: "#f59e0b", a: "▬" }, { t: "Low", c: "#ef4444", a: "▼" }].map((x) => (
-                <span key={x.t} className="inline-flex items-center gap-1.5 text-[12.5px] text-zinc-600">
+                <span key={x.t} className="inline-flex items-center gap-1.5 text-xs text-zinc-600">
                   <span style={{ color: x.c, fontSize: 11 }}>{iconSet === "arrows" ? x.a : "●"}</span> {x.t}
                 </span>
               ))}
@@ -682,11 +682,11 @@ function ConditionalRulesDialog({ column, onClose, onSave }: {
         ) : null}
 
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
           <button
             type="button"
             onClick={save}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"
+            className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]"
           >
             Save
           </button>
@@ -732,12 +732,12 @@ function DataValidationDialog({ column, onClose, onSave }: {
         <DialogHeader>
           <DialogTitle>Data validation — {column.label}</DialogTitle>
         </DialogHeader>
-        <p className="text-[13px] text-zinc-500 mb-3">Restrict what this column accepts. Invalid entries are refused.</p>
-        <label className="mb-1 block text-[13px] font-medium text-zinc-600">Criteria</label>
+        <p className="text-sm text-zinc-500 mb-3">Restrict what this column accepts. Invalid entries are refused.</p>
+        <label className="mb-1 block text-sm font-medium text-zinc-600">Criteria</label>
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as typeof kind)}
-          className="mb-3 h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+          className="mb-3 h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]"
         >
           <option value="none">No validation</option>
           <option value="list">List of items (dropdown)</option>
@@ -746,30 +746,30 @@ function DataValidationDialog({ column, onClose, onSave }: {
         </select>
         {kind === "list" && (
           <div>
-            <label className="mb-1 block text-[13px] font-medium text-zinc-600">Allowed values (one per line)</label>
+            <label className="mb-1 block text-sm font-medium text-zinc-600">Allowed values (one per line)</label>
             <textarea
               value={listText}
               onChange={(e) => setListText(e.target.value)}
               rows={5}
               placeholder={"Todo\nIn progress\nDone"}
-              className="w-full rounded-lg border border-zinc-200 px-2.5 py-2 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]"
+              className="w-full rounded-lg border border-zinc-200 px-2.5 py-2 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]"
             />
           </div>
         )}
         {(kind === "number" || kind === "textLength") && (
           <div className="flex items-center gap-2">
-            <input type="number" value={min} onChange={(e) => setMin(e.target.value)} placeholder="min" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
-            <span className="text-[13px] text-zinc-400">to</span>
-            <input type="number" value={max} onChange={(e) => setMax(e.target.value)} placeholder="max" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-[14px] text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
+            <input type="number" value={min} onChange={(e) => setMin(e.target.value)} placeholder="min" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
+            <span className="text-sm text-zinc-400">to</span>
+            <input type="number" value={max} onChange={(e) => setMax(e.target.value)} placeholder="max" className="h-9 w-full rounded-lg border border-zinc-200 px-2.5 text-base text-zinc-800 outline-none focus:border-[var(--os-brand)]" />
           </div>
         )}
         <div className="mt-4 flex justify-between">
           {initial ? (
-            <button type="button" onClick={() => onSave(undefined)} className="h-8 px-3 rounded-md text-[14px] text-red-600 hover:bg-red-50">Remove</button>
+            <button type="button" onClick={() => onSave(undefined)} className="h-8 px-3 rounded-md text-base text-red-600 hover:bg-red-50">Remove</button>
           ) : <span />}
           <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
-            <button type="button" onClick={() => onSave(kind === "none" ? undefined : build())} className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]">Save</button>
+            <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">Cancel</button>
+            <button type="button" onClick={() => onSave(kind === "none" ? undefined : build())} className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)]">Save</button>
           </div>
         </div>
       </DialogContent>

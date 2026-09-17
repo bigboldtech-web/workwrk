@@ -55,7 +55,7 @@ export function ShortcutsOverlay() {
           className="workwrk-os fixed left-1/2 top-1/2 z-[151] max-h-[85vh] w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
         >
           <div className="flex items-center justify-between">
-            <DialogPrimitive.Title className="text-[16px] font-semibold leading-tight">Keyboard shortcuts</DialogPrimitive.Title>
+            <DialogPrimitive.Title className="text-lg font-semibold leading-tight">Keyboard shortcuts</DialogPrimitive.Title>
             <DialogPrimitive.Close
               aria-label="Close"
               className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800"
@@ -66,12 +66,12 @@ export function ShortcutsOverlay() {
           <div className="mt-4 space-y-5">
             {groups.map((g) => (
               <section key={g.name}>
-                <h3 className="mb-1.5 text-[12px] font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h3>
+                <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h3>
                 <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {g.items.map((d) => (
-                    <li key={d.id} className="flex items-center justify-between gap-4 py-1.5 text-[14px]">
+                    <li key={d.id} className="flex items-center justify-between gap-4 py-1.5 text-base">
                       <span className="min-w-0 truncate">{d.label}</span>
-                      <kbd className="shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-sans text-[12px] text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                      <kbd className="shrink-0 rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 font-sans text-xs text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
                         {formatKeys(d.keys, platform)}
                       </kbd>
                     </li>
@@ -79,7 +79,7 @@ export function ShortcutsOverlay() {
                 </ul>
               </section>
             ))}
-            {groups.length === 0 ? <p className="text-[14px] text-zinc-500">No shortcuts are registered right now.</p> : null}
+            {groups.length === 0 ? <p className="text-base text-zinc-500">No shortcuts are registered right now.</p> : null}
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>

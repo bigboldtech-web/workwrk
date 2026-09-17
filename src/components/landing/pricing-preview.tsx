@@ -112,7 +112,7 @@ export function PricingPreview() {
             <span style={{ color: "var(--brand-red)" }}>makes the math work.</span>
           </h2>
           <p
-            className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl"
+            className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
             Free forever under five people. $8/user thereafter. No per-module
@@ -137,7 +137,7 @@ export function PricingPreview() {
         >
           <Link
             href="/pricing"
-            className="inline-flex items-center gap-1 text-sm font-semibold transition-colors"
+            className="inline-flex items-center gap-1 text-base font-semibold transition-colors"
             style={{ color: "var(--m-text)" }}
           >
             See the full pricing matrix <ChevronRight size={14} />
@@ -193,7 +193,7 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
 
       {/* Name */}
       <p
-        className="text-xs font-bold uppercase tracking-[0.18em]"
+        className="text-sm font-bold uppercase tracking-[0.18em]"
         style={{ color: tier.hue }}
       >
         {tier.name}
@@ -238,7 +238,7 @@ function TierCard({ tier, delay }: { tier: Tier; delay: number }) {
       {/* CTA */}
       <Link
         href={tier.cta.href}
-        className="mt-6 inline-flex items-center justify-center gap-1.5 w-full h-12 rounded-full font-semibold text-sm transition-all"
+        className="mt-6 inline-flex items-center justify-center gap-1.5 w-full h-12 rounded-full font-semibold text-base transition-all"
         style={{
           backgroundColor: tier.featured ? tier.hue : "var(--m-text)",
           color: "white",

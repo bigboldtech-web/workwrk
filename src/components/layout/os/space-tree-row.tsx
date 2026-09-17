@@ -376,7 +376,7 @@ export function SpaceTreeRow({
         </button>
         <Link
           href={`/spaces/${space.slug}`}
-          className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 ${
+          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 ${
             isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
           }`}
         >
@@ -405,14 +405,14 @@ export function SpaceTreeRow({
       {expanded ? (
         <ul className="mt-0.5 mb-1 pl-[19px]">
           {loading && data === null ? (
-            <li className="px-2 py-1 inline-flex items-center gap-1.5 text-[12.5px] text-zinc-400">
+            <li className="px-2 py-1 inline-flex items-center gap-1.5 text-xs text-zinc-400">
               <Loader2 className="h-3 w-3 animate-spin" />
               Loading…
             </li>
           ) : data === null ? (
-            <li className="px-2 py-1 text-[12.5px] text-zinc-400">Couldn&rsquo;t load</li>
+            <li className="px-2 py-1 text-xs text-zinc-400">Couldn&rsquo;t load</li>
           ) : data.folders.length === 0 && data.boards.length === 0 && data.tables.length === 0 && data.docs.length === 0 && data.whiteboards.length === 0 ? (
-            <li className="px-2 py-1 text-[12.5px] text-zinc-400">Empty</li>
+            <li className="px-2 py-1 text-xs text-zinc-400">Empty</li>
           ) : (
             <>
               {data.folders.map((f) => (
@@ -560,7 +560,7 @@ function FolderTreeRow({
             inline tree expansion. */}
         <Link
           href={`/folders/${folder.id}`}
-          className={`min-w-0 flex-1 truncate text-[13px] text-left hover:text-zinc-900 ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`min-w-0 flex-1 truncate text-sm text-left hover:text-zinc-900 ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           {folder.name}
         </Link>
@@ -632,7 +632,7 @@ function BoardTreeRow({
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           {sprint ? (
             <IterationCw className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
@@ -677,7 +677,7 @@ function TableTreeRow({
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
-          className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           <TableIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
@@ -707,7 +707,7 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
-          className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
@@ -751,7 +751,7 @@ function WhiteboardTreeRow({ whiteboard, onChanged }: { whiteboard: WhiteboardCh
         <button
           type="button"
           onClick={() => router.push(`/canvas/${whiteboard.id}`)}
-          className={`flex items-center gap-1.5 text-[13px] flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
         >
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>

@@ -62,7 +62,7 @@ export default function CompanyDetailPage() {
 
   if (loading || !company) {
     return (
-      <div className="flex items-center justify-center py-16 text-muted text-sm">
+      <div className="flex items-center justify-center py-16 text-muted text-base">
         <Loader2 size={16} className="animate-spin mr-2" /> Loading company…
       </div>
     );
@@ -82,7 +82,7 @@ export default function CompanyDetailPage() {
               <Building2 size={18} className="text-muted" />
               {company.name}
             </h1>
-            <p className="text-xs text-muted font-mono mt-0.5">{company.slug}{company.domain ? ` · ${company.domain}` : ""}</p>
+            <p className="text-sm text-muted font-mono mt-0.5">{company.slug}{company.domain ? ` · ${company.domain}` : ""}</p>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline">{company.plan}</Badge>
@@ -105,12 +105,12 @@ export default function CompanyDetailPage() {
       {/* Plan + status */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Plan &amp; status</CardTitle>
+          <CardTitle className="text-lg">Plan &amp; status</CardTitle>
           <CardDescription>Plan dictates which Enterprise features are eligible. Status controls whether the org can sign in.</CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted">Plan</label>
+            <label className="text-sm text-muted">Plan</label>
             <Select value={company.plan} onValueChange={(v) => patch({ plan: v }, "Plan")} disabled={saving !== null}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -122,7 +122,7 @@ export default function CompanyDetailPage() {
             </Select>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted">Status</label>
+            <label className="text-sm text-muted">Status</label>
             <Select
               value={company.status}
               onValueChange={(v) => {
@@ -155,7 +155,7 @@ export default function CompanyDetailPage() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-base flex items-center gap-2">
+              <CardTitle className="text-lg flex items-center gap-2">
                 <Crown size={14} className="text-[#d4ff2e]" /> Enterprise add-ons
               </CardTitle>
               <CardDescription>
@@ -190,7 +190,7 @@ export default function CompanyDetailPage() {
             onChange={(v) => patch({ feature: "customDomain", enabled: v }, "Custom domain")}
           />
           {!isEnterprise && (
-            <p className="text-[12px] text-muted pt-2 border-t border-border">
+            <p className="text-xs text-muted pt-2 border-t border-border">
               Lift their plan to Enterprise above for these flags to activate.
             </p>
           )}
@@ -204,8 +204,8 @@ function Stat({ label, value }: { label: string; value: number }) {
   return (
     <Card>
       <CardContent className="p-3 text-center">
-        <p className="text-xl font-bold tabular-nums">{value}</p>
-        <p className="text-[11px] text-muted">{label}</p>
+        <p className="text-xl font-semibold tabular-nums">{value}</p>
+        <p className="text-xs text-muted">{label}</p>
       </CardContent>
     </Card>
   );
@@ -228,8 +228,8 @@ function FeatureRow({
           <Icon size={14} className="text-[#d4ff2e]" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-medium">{title}</div>
-          <p className="text-[12px] text-muted leading-relaxed mt-0.5">{blurb}</p>
+          <div className="text-base font-medium">{title}</div>
+          <p className="text-xs text-muted leading-relaxed mt-0.5">{blurb}</p>
         </div>
       </div>
       <button

@@ -76,12 +76,12 @@ function StepHtml({ html }: { html?: string }) {
   if (looksLikeHtml) {
     return (
       <div
-        className="prose prose-sm max-w-none text-[14px] text-zinc-600 mt-1 [&_p]:my-1"
+        className="prose prose-sm max-w-none text-base text-zinc-600 mt-1 [&_p]:my-1"
         dangerouslySetInnerHTML={{ __html: safeHtml(html) }}
       />
     );
   }
-  return <p className="text-[14px] text-zinc-600 mt-1 whitespace-pre-wrap">{html}</p>;
+  return <p className="text-base text-zinc-600 mt-1 whitespace-pre-wrap">{html}</p>;
 }
 
 export function PublicSopView({ sop }: { sop: PublicSop }) {
@@ -92,15 +92,15 @@ export function PublicSopView({ sop }: { sop: PublicSop }) {
     <div className="min-h-screen bg-white">
       <div className="mx-auto w-full max-w-[860px] px-6 py-10">
         {/* Header */}
-        <div className="flex items-center gap-2 text-[13px] font-medium text-zinc-400">
+        <div className="flex items-center gap-2 text-sm font-medium text-zinc-400">
           <BookCopy className="h-4 w-4" />
           Standard Operating Procedure · Shared read-only
         </div>
-        <h1 className="mt-3 text-[26px] font-bold leading-tight text-zinc-900">{sop.title || "Untitled SOP"}</h1>
+        <h1 className="mt-3 text-xl font-semibold leading-tight text-zinc-900">{sop.title || "Untitled SOP"}</h1>
         {sop.description && (
-          <p className="mt-2 text-[14px] leading-relaxed text-zinc-500">{sop.description}</p>
+          <p className="mt-2 text-base leading-relaxed text-zinc-500">{sop.description}</p>
         )}
-        <div className="mt-3 flex items-center gap-2 text-[13px] text-zinc-400">
+        <div className="mt-3 flex items-center gap-2 text-sm text-zinc-400">
           <span className="rounded-full bg-zinc-100 px-2 py-0.5">v{sop.version}</span>
           <span>Updated {new Date(sop.updatedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</span>
         </div>
@@ -109,7 +109,7 @@ export function PublicSopView({ sop }: { sop: PublicSop }) {
           {/* Rich-text (legacy html) SOPs */}
           {type === "richtext" ? (
             <article
-              className="prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-[24px] prose-h2:text-[20px] prose-h3:text-[16px] prose-p:text-zinc-700 prose-li:text-zinc-700 prose-strong:text-zinc-900 prose-a:text-blue-600"
+              className="prose prose-zinc max-w-none prose-headings:font-semibold prose-headings:text-zinc-900 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-p:text-zinc-700 prose-li:text-zinc-700 prose-strong:text-zinc-900 prose-a:text-blue-600"
               dangerouslySetInnerHTML={{ __html: safeHtml(content.html || "") }}
             />
           ) : type === "blocks" ? (
@@ -130,7 +130,7 @@ export function PublicSopView({ sop }: { sop: PublicSop }) {
           )}
         </div>
 
-        <div className="mt-14 border-t border-zinc-100 pt-6 text-center text-[13px] text-zinc-400">
+        <div className="mt-14 border-t border-zinc-100 pt-6 text-center text-sm text-zinc-400">
           Shared securely from WorkwrK. This is a read-only copy.
         </div>
       </div>
@@ -146,19 +146,19 @@ function ChecklistView({ sections }: { sections: ChecklistSection[] }) {
     <div className="space-y-6">
       {sections.map((sec) => (
         <section key={sec.id}>
-          {sec.title && <h2 className="mb-2 text-[15px] font-semibold text-zinc-900">{sec.title}</h2>}
+          {sec.title && <h2 className="mb-2 text-base font-semibold text-zinc-900">{sec.title}</h2>}
           <div className="space-y-1.5">
             {(sec.steps ?? []).map((st) => (
               <div key={st.id} className="flex items-start gap-2.5 rounded-lg border border-zinc-200 bg-white px-3 py-2.5">
                 <CheckSquare className="mt-0.5 h-4 w-4 shrink-0 text-zinc-300" />
                 <div className="min-w-0">
-                  <p className="text-[14px] font-medium text-zinc-800">{st.title || "Untitled step"}</p>
+                  <p className="text-base font-medium text-zinc-800">{st.title || "Untitled step"}</p>
                   <StepHtml html={st.description} />
                 </div>
               </div>
             ))}
             {(sec.steps ?? []).length === 0 && (
-              <p className="text-[14px] text-zinc-400 italic">No steps in this section.</p>
+              <p className="text-base text-zinc-400 italic">No steps in this section.</p>
             )}
           </div>
         </section>
@@ -173,11 +173,11 @@ function StepsView({ steps }: { steps: SimpleStep[] }) {
     <ol className="space-y-3">
       {steps.map((step, i) => (
         <li key={step.id ?? i} className="flex items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--os-brand-soft,#E6F1FB)] text-[14px] font-bold text-[color:var(--os-brand,#0073EA)]">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--os-brand-soft,#E6F1FB)] text-base font-semibold text-[color:var(--os-brand,#0073EA)]">
             {i + 1}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-[14px] font-medium text-zinc-900">{step.title || `Step ${i + 1}`}</p>
+            <p className="text-base font-medium text-zinc-900">{step.title || `Step ${i + 1}`}</p>
             <StepHtml html={step.description} />
             {step.image && (
               // eslint-disable-next-line @next/next/no-img-element
@@ -197,12 +197,12 @@ function RecordedView({ steps }: { steps: RecordedStep[] }) {
       {steps.map((step, i) => (
         <li key={i} className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
           <div className="flex items-start gap-3 p-4">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--os-brand-soft,#E6F1FB)] text-[14px] font-bold text-[color:var(--os-brand,#0073EA)]">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--os-brand-soft,#E6F1FB)] text-base font-semibold text-[color:var(--os-brand,#0073EA)]">
               {i + 1}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-medium text-zinc-900">{step.description || `Step ${i + 1}`}</p>
-              {step.url && <p className="mt-0.5 truncate text-[13px] text-zinc-400">{step.url}</p>}
+              <p className="text-base font-medium text-zinc-900">{step.description || `Step ${i + 1}`}</p>
+              {step.url && <p className="mt-0.5 truncate text-sm text-zinc-400">{step.url}</p>}
             </div>
           </div>
           {step.screenshot && (
@@ -219,7 +219,7 @@ function RecordedView({ steps }: { steps: RecordedStep[] }) {
 
 function EmptyBody() {
   return (
-    <div className="rounded-lg border border-dashed border-zinc-200 py-12 text-center text-[14px] text-zinc-400">
+    <div className="rounded-lg border border-dashed border-zinc-200 py-12 text-center text-base text-zinc-400">
       This SOP has no content to display.
     </div>
   );

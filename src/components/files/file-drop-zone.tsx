@@ -106,7 +106,7 @@ export function FileDropZone({ spaceFolderId, spaceId, disabled, label }: FileDr
     <div ref={anchorRef} className="contents">
       {over && !disabled ? (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-[#0073EA] bg-[#0073EA]/5">
-          <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-[14px] font-medium text-[#0073EA] shadow-lg">
+          <div className="flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-base font-medium text-[#0073EA] shadow-lg">
             <UploadCloud className="h-4 w-4" /> Drop to upload to {label}
           </div>
         </div>

@@ -46,6 +46,46 @@ The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.
 
+## Access parity job (NOT INSTALLED: the founder adds this row)
+
+`scripts/access-parity-job.mjs` is the step-2 job from
+`docs/plans/ui-refresh/access-model-spec.md` section 10: it samples real
+(viewer, object) pairs, fills the parity harness through the same Prisma
+reads the legacy helpers make, and exits 1 on any mismatch that is not
+named in `EXPECTED_MISMATCHES`. It is a node script, not an endpoint, so
+it runs from the app directory with the app's `.env`. It is read-only
+three ways (the Postgres session is opened with
+`default_transaction_read_only=on`, the Prisma client refuses every
+non-read operation, and it only calls the loaders), and it needs the
+repo's devDependencies present (`esbuild`, pulled in by vitest, compiles
+the TypeScript it imports). Run it by hand first (`--dry-run` still opens
+the read-only session and runs the sampling reads; it evaluates nothing):
+
+```
+cd /www/wwwroot/workwrk.com && node scripts/access-parity-job.mjs --limit 50 --dry-run
+```
+
+The row to add to the WorkwrK block in root's crontab (02:15 nightly,
+after the 02:xx backups and before the 03:00 cleanups; keep it out of the
+aaPanel Cron UI like every other row here). `--rotate` shifts the object
+window by the day of the year so the seven nightly runs walk different
+rows of each tenant instead of re-checking the same sample; sampling is
+otherwise deterministic (most-populated orgs first, one object per
+visibility/membership bucket before the rest). `--allow-remote` is only
+needed if `DATABASE_URL` does not point at localhost:
+
+```
+15 2 * * * cd /www/wwwroot/workwrk.com && /usr/bin/env node scripts/access-parity-job.mjs --limit 500 --rotate --out /var/log/workwrk-parity-latest.json >> /var/log/workwrk-cron.log 2>&1
+```
+
+Read the log the next morning: a line `UNEXPECTED: 0` is the pass. The
+flip in step 4 of the access spec waits for seven consecutive passes;
+any `UNEXPECTED: n` above zero lists the cases, and each one is either a
+new entry for `EXPECTED_MISMATCHES` (with its source) or an engine bug.
+The local development database is thin evidence (one populated org, no
+folders, no task-anchored docs, so most fixtures go unexercised); the
+seven-day criterion is judged on production data only.
+
 **Why the reminders row matters.** A user's personal/task reminders fire
 in the browser via `ReminderTicker` only while the app is open. This
 `/api/cron/reminders` job (every 5 min) is what fires them for people

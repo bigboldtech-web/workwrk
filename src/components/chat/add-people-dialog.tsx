@@ -82,7 +82,7 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
         {picked.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {picked.map((p) => (
-              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-[13px] text-zinc-700">
+              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-sm text-zinc-700">
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={18} />
                 {p.firstName} {p.lastName}
                 <button type="button" onClick={() => toggle(p)} className="text-zinc-400 hover:text-zinc-700" aria-label={`Remove ${p.firstName}`}>
@@ -101,13 +101,13 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search people…"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-zinc-800 placeholder:text-zinc-400"
+            className="flex-1 min-w-0 bg-transparent outline-none text-base text-zinc-800 placeholder:text-zinc-400"
           />
         </div>
 
         <ul className="mt-2 max-h-56 overflow-y-auto flex flex-col gap-0.5">
           {candidates.length === 0 ? (
-            <li className="px-2 py-4 text-center text-[13px] text-zinc-400">Everyone matching is already here</li>
+            <li className="px-2 py-4 text-center text-sm text-zinc-400">Everyone matching is already here</li>
           ) : candidates.map((p) => (
             <li key={p.id}>
               <button
@@ -117,8 +117,8 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
               >
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={28} />
                 <span className="flex-1 min-w-0">
-                  <span className="block truncate text-[14px] text-zinc-800">{p.firstName} {p.lastName}</span>
-                  {p.role?.title && <span className="block truncate text-[12px] text-zinc-400">{p.role.title}</span>}
+                  <span className="block truncate text-base text-zinc-800">{p.firstName} {p.lastName}</span>
+                  {p.role?.title && <span className="block truncate text-xs text-zinc-400">{p.role.title}</span>}
                 </span>
                 <Plus className="w-4 h-4 text-zinc-300" />
               </button>
@@ -126,17 +126,17 @@ export function AddPeopleDialog({ conversationId, existingMemberIds, onClose, on
           ))}
         </ul>
 
-        {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
+        {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
         <div className="mt-3 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-[14px] text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
+          <button type="button" onClick={onClose} className="h-8 px-3 rounded-md text-base text-zinc-600 hover:bg-zinc-50 border border-zinc-200">
             Cancel
           </button>
           <button
             type="button"
             onClick={() => void add()}
             disabled={picked.length === 0 || saving}
-            className="h-8 px-3 rounded-md text-[14px] font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+            className="h-8 px-3 rounded-md text-base font-medium text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
           >
             {saving ? "Adding…" : `Add ${picked.length || ""}`.trim()}
           </button>

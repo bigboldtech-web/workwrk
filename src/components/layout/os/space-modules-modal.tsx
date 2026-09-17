@@ -58,7 +58,7 @@ export function SpaceModulesModal({ spaceId, onClose }: { spaceId: string; onClo
     >
       <div className="w-full max-w-md rounded-xl border border-border bg-surface shadow-2xl overflow-hidden">
         {modules === null ? (
-          <div className="p-8 text-center text-sm text-muted">Loading modules…</div>
+          <div className="p-8 text-center text-xs text-muted">Loading modules…</div>
         ) : (
           <ModulesSubScreen accent={accent} modules={modules} onChange={save} onClose={onClose} />
         )}

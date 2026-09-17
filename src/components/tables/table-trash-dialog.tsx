@@ -61,7 +61,7 @@ export function TableTrashDialog({ open, onOpenChange, tableId, columns, onChang
         {open && tableId ? (
           <TrashBody tableId={tableId} columns={columns} onChanged={onChanged} />
         ) : (
-          <div className="px-6 py-8 text-[13px] text-zinc-400">Loading…</div>
+          <div className="px-6 py-8 text-sm text-zinc-400">Loading…</div>
         )}
       </DialogContent>
     </Dialog>
@@ -128,7 +128,7 @@ function TrashBody({ tableId, columns, onChanged }: {
     <>
         <div className="px-6 pt-6 pb-3 flex items-start justify-between gap-3">
           <div>
-            <DialogTitle className="text-[16px] font-semibold inline-flex items-center gap-2">
+            <DialogTitle className="text-lg font-semibold inline-flex items-center gap-2">
               <Trash2 className="h-4 w-4 text-zinc-500" /> Trash
             </DialogTitle>
             <DialogDescription className="mt-1">
@@ -140,7 +140,7 @@ function TrashBody({ tableId, columns, onChanged }: {
               type="button"
               onClick={empty}
               disabled={busyBulk}
-              className="mt-0.5 h-8 px-2.5 rounded-md text-[12.5px] font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
+              className="mt-0.5 h-8 px-2.5 rounded-md text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 inline-flex items-center gap-1.5 shrink-0"
             >
               {busyBulk ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
               Empty trash
@@ -150,11 +150,11 @@ function TrashBody({ tableId, columns, onChanged }: {
 
         <div className="px-6 pb-5 border-t border-zinc-100 pt-4">
           {rows === null ? (
-            <div className="text-[13px] text-zinc-400 py-4 text-center inline-flex items-center gap-2 justify-center w-full">
+            <div className="text-sm text-zinc-400 py-4 text-center inline-flex items-center gap-2 justify-center w-full">
               <Loader2 className="h-4 w-4 animate-spin" /> Loading…
             </div>
           ) : rows.length === 0 ? (
-            <div className="text-[13px] text-zinc-400 py-8 text-center">Trash is empty.</div>
+            <div className="text-sm text-zinc-400 py-8 text-center">Trash is empty.</div>
           ) : (
             <ul className="rounded-lg border border-zinc-200 divide-y divide-zinc-100 max-h-[360px] overflow-y-auto">
               {rows.map((row) => {
@@ -162,8 +162,8 @@ function TrashBody({ tableId, columns, onChanged }: {
                 return (
                   <li key={row.id} className="flex items-center gap-2.5 px-3 py-2">
                     <span className="flex-1 min-w-0">
-                      <span className="block text-[13.5px] text-zinc-800 truncate">{preview(row.values, columns)}</span>
-                      <span className="block text-[11.5px] text-zinc-400 inline-flex items-center gap-1">
+                      <span className="block text-base text-zinc-800 truncate">{preview(row.values, columns)}</span>
+                      <span className="block text-xs text-zinc-400 inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" /> deleted {relTime(row.deletedAt)}
                       </span>
                     </span>
@@ -171,7 +171,7 @@ function TrashBody({ tableId, columns, onChanged }: {
                       type="button"
                       onClick={() => restore(row)}
                       disabled={busy}
-                      className="h-7 px-2 rounded-md text-[12.5px] font-medium text-[#0073EA] hover:bg-blue-50 disabled:opacity-50 inline-flex items-center gap-1"
+                      className="h-7 px-2 rounded-md text-xs font-medium text-[#0073EA] hover:bg-blue-50 disabled:opacity-50 inline-flex items-center gap-1"
                       title="Restore this row"
                     >
                       {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Undo2 className="h-3.5 w-3.5" />}

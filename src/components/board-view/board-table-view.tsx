@@ -1270,13 +1270,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             onClick={onOpenFields}
             title="Columns"
             aria-label="Columns / Fields"
-            className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
+            className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
           >
             <Columns3 className="w-3.5 h-3.5" />
             <span className="font-medium">Columns</span>
           </button>
         ) : null}
-        <span className="ml-1 text-[12px] text-zinc-400">
+        <span className="ml-1 text-xs text-zinc-400">
           {topLevel.length} item{topLevel.length === 1 ? "" : "s"}
         </span>
         <div className="flex-1" />
@@ -1316,7 +1316,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); setSearchOpen(false); } }}
               placeholder="Search tasks…"
-              className="w-[150px] bg-transparent outline-none text-[13.5px] text-zinc-900 placeholder:text-zinc-400"
+              className="w-[150px] bg-transparent outline-none text-base text-zinc-900 placeholder:text-zinc-400"
             />
             <button type="button" onClick={() => { setQuery(""); setSearchOpen(false); }} className="text-zinc-400 hover:text-zinc-700 shrink-0" aria-label="Close search">
               <X className="w-3.5 h-3.5" />
@@ -1339,7 +1339,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       {/* Monday's wide grid scrolls horizontally; the lean List doesn't clip so
           inline cell editors (assignee/date/dropdown popovers) aren't cut off. */}
       <div ref={tableWrapRef} className={monday || overflowing ? "overflow-x-auto" : "overflow-visible"}>
-        <table className="text-[14px]" style={{ tableLayout: "fixed", width: tableW }}>
+        <table className="text-base" style={{ tableLayout: "fixed", width: tableW }}>
           {/* Fixed layout reads column widths from the first row; with the
               global thead gone on grouped Lists, pin them via colgroup. */}
           <colgroup>
@@ -1353,7 +1353,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               Grouped Lists repeat the labels inside each group (ClickUp). */}
           {monday || !buckets ? (
             <thead>
-              <tr className={`text-left text-[12px] font-medium text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 ${monday ? "uppercase tracking-wide" : ""}`}>
+              <tr className={`text-left text-xs font-medium text-zinc-400 border-b border-zinc-100 dark:border-zinc-800 ${monday ? "uppercase tracking-wide" : ""}`}>
                 <th className="pl-1 pr-0 py-1.5" style={{ width: LEADING_W }}>
                   {canEdit ? (
                     <div className="flex items-center gap-1">
@@ -1382,30 +1382,30 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                           <button
                             type="button"
                             onClick={() => toggleGroup(b.key)}
-                            className="inline-flex items-center gap-2 text-[13px] font-semibold text-zinc-800 hover:text-zinc-900"
+                            className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-800 hover:text-zinc-900"
                           >
                             <svg viewBox="0 0 8 8" className={`w-2 h-2 fill-current text-zinc-500 transition-transform ${collapsed ? "" : "rotate-90"}`} aria-hidden>
                               <path d="M2 1 L6 4 L2 7 Z" />
                             </svg>
                             {b.color ? (
                               monday ? (
-                                <span className="inline-flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: b.color }}>
+                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold" style={{ color: b.color }}>
                                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: b.color }} aria-hidden />
-                                  <span className={groupBy === "status" ? "uppercase tracking-wide text-[12px]" : ""}>{b.label}</span>
+                                  <span className={groupBy === "status" ? "uppercase tracking-wide text-xs" : ""}>{b.label}</span>
                                 </span>
                               ) : (
                                 // ClickUp-style solid status pill: label on its color.
                                 <span
-                                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-[11.5px] font-bold uppercase tracking-wider text-white"
+                                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-micro font-semibold uppercase tracking-wider text-white"
                                   style={{ backgroundColor: b.color }}
                                 >
                                   {b.label}
                                 </span>
                               )
                             ) : (
-                              <span className="text-[13px] font-semibold text-zinc-700">{b.label}</span>
+                              <span className="text-sm font-semibold text-zinc-700">{b.label}</span>
                             )}
-                            <span className="text-[12px] font-medium text-zinc-400 tabular-nums">{b.rows.length}</span>
+                            <span className="text-xs font-medium text-zinc-400 tabular-nums">{b.rows.length}</span>
                           </button>
                           <GroupStatusBreakdown rows={b.rows} statuses={statuses} />
                           {canEdit ? (
@@ -1426,7 +1426,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                             group; the clean List follows suit (Monday keeps the
                             single global header). */}
                         {!monday ? (
-                          <tr className="text-left text-[12px] font-medium text-zinc-400 border-b border-zinc-50 dark:border-zinc-800">
+                          <tr className="text-left text-xs font-medium text-zinc-400 border-b border-zinc-50 dark:border-zinc-800">
                             <th className="pl-1 pr-0 py-1" style={{ width: LEADING_W }} aria-hidden />
                             {headerCells}
                           </tr>
@@ -1478,7 +1478,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
               </tr>
             ) : null}
             {items.length === 0 && !canEdit ? (
-              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-sm text-zinc-500">No items yet.</td></tr>
+              <tr><td colSpan={colCount} className="px-4 py-8 text-center text-xs text-zinc-500">No items yet.</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -1748,7 +1748,7 @@ function Row({
         </td>
       ) : null}
       {showTaskId ? (
-        <td className="px-3 py-1.5 text-[12px] font-mono text-zinc-400">
+        <td className="px-3 py-1.5 text-xs font-mono text-zinc-400">
           {row.id.slice(-6)}
         </td>
       ) : null}
@@ -1872,14 +1872,14 @@ function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => 
         onClick={() => setOpen((v) => !v)}
         title="Subtasks"
         aria-label="Subtasks display"
-        className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[12.5px] text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
+        className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
       >
         <Network className="w-3.5 h-3.5" />
         <span className="font-medium">Subtasks</span>
       </button>
       {open ? (
         <div className="absolute z-20 mt-1 left-0 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1.5">
-          <div className="px-3 pb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Show subtasks</div>
+          <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Show subtasks</div>
           {opts.map((o) => (
             <button
               key={o.k}
@@ -1888,9 +1888,9 @@ function SubtaskModeMenu({ onCollapseAll, onExpandAll }: { onCollapseAll: () => 
               className="flex items-start gap-2 w-full px-3 py-1.5 text-left hover:bg-zinc-50"
             >
               <span className="flex-1 min-w-0">
-                <span className={mode === o.k ? "text-[14px] font-semibold text-zinc-900" : "text-[14px] text-zinc-700"}>{o.label}</span>
-                {o.note ? <span className="ml-1 text-[12px] text-zinc-400">{o.note}</span> : null}
-                {o.hint ? <span className="block text-[12px] text-zinc-400">{o.hint}</span> : null}
+                <span className={mode === o.k ? "text-base font-semibold text-zinc-900" : "text-base text-zinc-700"}>{o.label}</span>
+                {o.note ? <span className="ml-1 text-xs text-zinc-400">{o.note}</span> : null}
+                {o.hint ? <span className="block text-xs text-zinc-400">{o.hint}</span> : null}
               </span>
               {mode === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0 mt-0.5" /> : null}
             </button>
@@ -1934,7 +1934,7 @@ function SortMenu({ sortKey, onChange }: { sortKey: SortKey; onChange: (k: SortK
       </button>
       {open ? (
         <div className="absolute z-20 mt-1 right-0 w-[180px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1.5">
-          <div className="px-3 pb-1 text-[12px] font-semibold uppercase tracking-wide text-zinc-400">Sort by</div>
+          <div className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">Sort by</div>
           {opts.map((o) => (
             <button
               key={o.k}
@@ -1942,7 +1942,7 @@ function SortMenu({ sortKey, onChange }: { sortKey: SortKey; onChange: (k: SortK
               onClick={() => { onChange(o.k); setOpen(false); }}
               className="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-zinc-50"
             >
-              <span className={sortKey === o.k ? "flex-1 text-[14px] font-semibold text-zinc-900" : "flex-1 text-[14px] text-zinc-700"}>{o.label}</span>
+              <span className={sortKey === o.k ? "flex-1 text-base font-semibold text-zinc-900" : "flex-1 text-base text-zinc-700"}>{o.label}</span>
               {sortKey === o.k ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
             </button>
           ))}
@@ -2223,16 +2223,16 @@ function AddSubtaskRow({
               }}
               onBlur={() => { if (!title.trim() && !busy) closeRow(); }}
               placeholder="Type a subtask and press Enter…"
-              className="flex-1 text-[13.5px] bg-transparent outline-none placeholder:text-zinc-400"
+              className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400"
             />
             {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0" /> : null}
-            {failed ? <span className="text-[12px] text-red-500 shrink-0">{failed}</span> : null}
+            {failed ? <span className="text-xs text-red-500 shrink-0">{failed}</span> : null}
           </div>
         ) : (
           <button
             type="button"
             onClick={() => setOpenSelf(true)}
-            className="inline-flex items-center gap-1.5 text-[13px] text-zinc-400 hover:text-zinc-700"
+            className="inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-700"
             style={{ paddingLeft: pad }}
           >
             <Plus className="w-3 h-3" />
@@ -2310,7 +2310,7 @@ function AddTaskInline({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex items-center gap-1.5 text-[14px] text-zinc-400 hover:text-zinc-700 transition-colors"
+          className="inline-flex items-center gap-1.5 text-base text-zinc-400 hover:text-zinc-700 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />
           Add Task
@@ -2328,13 +2328,13 @@ function AddTaskInline({
         ) : null}
         {typeMenu ? (
           <div className="absolute left-14 top-7 z-30 w-[200px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
-            <div className="px-3 pt-1 pb-0.5 text-[11.5px] font-semibold uppercase tracking-wide text-zinc-400">Create</div>
+            <div className="px-3 pt-1 pb-0.5 text-micro font-semibold uppercase tracking-wide text-zinc-400">Create</div>
             {itemTypes.map((t) => (
               <button
                 key={t.id}
                 type="button"
                 onClick={() => { setTypeMenu(false); openWithType(t.id); }}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50"
+                className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50"
               >
                 {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
                 {t.singular}
@@ -2366,7 +2366,7 @@ function AddTaskInline({
           else if (e.key === "Escape") { close(); }
         }}
         placeholder="Task name, or type to search…"
-        className="flex-1 min-w-0 bg-transparent outline-none text-sm text-zinc-900 placeholder:text-zinc-400"
+        className="flex-1 min-w-0 bg-transparent outline-none text-xs text-zinc-900 placeholder:text-zinc-400"
       />
       <span className="inline-flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
         {itemTypes.length > 0 ? (
@@ -2374,7 +2374,7 @@ function AddTaskInline({
             <button
               type="button"
               onClick={() => setTypeMenu((v) => !v)}
-              className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 text-[13px] text-zinc-700"
+              className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 bg-white hover:bg-zinc-50 text-sm text-zinc-700"
               title="Task type"
             >
               {React.createElement(itemTypeIcon(activeType?.icon), { className: "w-3.5 h-3.5 text-zinc-500" })}
@@ -2388,7 +2388,7 @@ function AddTaskInline({
                     key={t.id}
                     type="button"
                     onClick={() => { setTypeId(t.id); setTypeMenu(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[14px] text-zinc-700 hover:bg-zinc-50"
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50"
                   >
                     {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
                     <span className="flex-1 truncate">{t.singular}</span>
@@ -2405,7 +2405,7 @@ function AddTaskInline({
           <button
             type="button"
             onClick={() => setDueEditing((v) => !v)}
-            className="inline-flex items-center justify-center gap-1 w-full h-full text-[13px]"
+            className="inline-flex items-center justify-center gap-1 w-full h-full text-sm"
           >
             {dueDate ? <span className="px-0.5">{dueDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span> : <CalendarPlus className="w-[17px] h-[17px]" />}
           </button>
@@ -2416,28 +2416,28 @@ function AddTaskInline({
               value={dueInput}
               onChange={(e) => { setDueAt(e.target.value ? `${e.target.value}T00:00:00.000Z` : null); setDueEditing(false); }}
               onBlur={() => setDueEditing(false)}
-              className="absolute left-0 top-8 z-20 h-7 px-1 text-[13px] border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
+              className="absolute left-0 top-8 z-20 h-7 px-1 text-sm border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
             />
           ) : null}
         </span>
         <span className={box} title="Priority"><PriorityPicker value={priority} canEdit compact onChange={setPriority} /></span>
         <span className={`${box} ${tags.length ? "w-auto" : ""}`} title="Tags"><TagPicker value={tags} canEdit compact onChange={setTags} /></span>
         <span aria-hidden className="w-px h-5 bg-zinc-200 mx-0.5" />
-        <button type="button" onClick={close} className="h-7 px-2.5 rounded-md text-[13px] text-zinc-600 hover:bg-zinc-100">Cancel</button>
+        <button type="button" onClick={close} className="h-7 px-2.5 rounded-md text-sm text-zinc-600 hover:bg-zinc-100">Cancel</button>
         <button
           type="button"
           onClick={() => void save()}
           disabled={busy || !title.trim()}
-          className="h-7 px-3 rounded-md text-[13px] font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
+          className="h-7 px-3 rounded-md text-sm font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
           style={{ background: "var(--os-brand)" }}
         >
           {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-          Save <span className="opacity-80 text-[14px] leading-none">↵</span>
+          Save <span className="opacity-80 text-base leading-none">↵</span>
         </button>
       </span>
     </div>
     {failed ? (
-      <div className="pl-9 pt-0.5 pb-1 text-[12.5px] text-red-500">
+      <div className="pl-9 pt-0.5 pb-1 text-xs text-red-500">
         {failed} — your text was kept; fix it or try again.
       </div>
     ) : null}
@@ -2463,7 +2463,7 @@ interface BarSeg { color: string; count: number; label: string }
 
 function StackedBar({ segments }: { segments: BarSeg[] }) {
   const total = segments.reduce((n, s) => n + s.count, 0);
-  if (total === 0) return <span className="text-[12px] text-zinc-300">—</span>;
+  if (total === 0) return <span className="text-xs text-zinc-300">—</span>;
   return (
     <div
       className="flex h-3.5 w-full max-w-[160px] rounded-sm overflow-hidden ring-1 ring-black/5"
@@ -2523,28 +2523,28 @@ function fmtNumber(field: FieldDef, value: number): string {
 }
 
 function CustomFieldSummary({ field, rows }: { field: FieldDef; rows: BoardItemRow[] }) {
-  const dash = <span className="text-[12px] text-zinc-300">—</span>;
+  const dash = <span className="text-xs text-zinc-300">—</span>;
   const nums = rows.map((r) => r.metadata?.[field.key]).filter((v): v is number => typeof v === "number");
   switch (field.type) {
     case "NUMBER":
     case "MONEY": {
       if (!nums.length) return dash;
       const sum = nums.reduce((a, b) => a + b, 0);
-      return <span className="text-[13px] font-medium tabular-nums text-zinc-700" title="Sum">{fmtNumber(field, sum)}</span>;
+      return <span className="text-sm font-medium tabular-nums text-zinc-700" title="Sum">{fmtNumber(field, sum)}</span>;
     }
     case "PERCENT": {
       if (!nums.length) return dash;
       const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-      return <span className="text-[13px] font-medium tabular-nums text-zinc-700" title="Average">{fmtNumber(field, avg)}</span>;
+      return <span className="text-sm font-medium tabular-nums text-zinc-700" title="Average">{fmtNumber(field, avg)}</span>;
     }
     case "RATING": {
       if (!nums.length) return dash;
       const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-      return <span className="text-[13px] font-medium tabular-nums text-zinc-700" title="Average">{avg.toFixed(1)}★</span>;
+      return <span className="text-sm font-medium tabular-nums text-zinc-700" title="Average">{avg.toFixed(1)}★</span>;
     }
     case "CHECKBOX": {
       const checked = rows.filter((r) => !!r.metadata?.[field.key]).length;
-      return <span className="text-[13px] tabular-nums text-zinc-700" title="Checked">{checked}/{rows.length}</span>;
+      return <span className="text-sm tabular-nums text-zinc-700" title="Checked">{checked}/{rows.length}</span>;
     }
     case "DROPDOWN":
     case "TSHIRT_SIZE":
@@ -2635,7 +2635,7 @@ function GroupSummaryRow({
   }, [rows]);
 
   return (
-    <tr className="bg-zinc-50/60 border-b border-zinc-200 text-[12px]">
+    <tr className="bg-zinc-50/60 border-b border-zinc-200 text-xs">
       {/* checkbox spacer — carries the group color rail */}
       <td className="px-2 py-1.5" style={railColor ? { boxShadow: `inset 3px 0 0 ${railColor}` } : undefined} />
       {/* Name → count */}
@@ -2646,7 +2646,7 @@ function GroupSummaryRow({
       {showOwner ? (
         <td className="px-4 py-1.5">
           {owners.length === 0 ? (
-            <span className="text-[12px] text-zinc-300">—</span>
+            <span className="text-xs text-zinc-300">—</span>
           ) : (
             <span className="inline-flex items-center -space-x-1.5" title={owners.map((o) => `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim()).join(", ")}>
               {owners.slice(0, 5).map((o) => (
@@ -2654,7 +2654,7 @@ function GroupSummaryRow({
                   <PersonAvatar person={{ ...o, email: null }} size={20} />
                 </span>
               ))}
-              {owners.length > 5 ? <span className="pl-2.5 text-[11.5px] text-zinc-500">+{owners.length - 5}</span> : null}
+              {owners.length > 5 ? <span className="pl-2.5 text-xs text-zinc-500">+{owners.length - 5}</span> : null}
             </span>
           )}
         </td>
@@ -2662,7 +2662,7 @@ function GroupSummaryRow({
       {/* Priority */}
       {showPriority ? (
         <td className="px-4 py-1.5">
-          {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-[12px] text-zinc-300">—</span>}
+          {prioritySegs.length ? <StackedBar segments={prioritySegs} /> : <span className="text-xs text-zinc-300">—</span>}
         </td>
       ) : null}
       {/* Type spacer */}
@@ -2671,18 +2671,18 @@ function GroupSummaryRow({
       {showTags ? (
         <td className="px-4 py-1.5">
           {tags.length === 0 ? (
-            <span className="text-[12px] text-zinc-300">—</span>
+            <span className="text-xs text-zinc-300">—</span>
           ) : (
             <span className="inline-flex items-center gap-1 flex-wrap">
               {tags.slice(0, 3).map((t) => {
                 const c = t.color || "#71717A";
                 return (
-                  <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium" style={{ background: `${c}22`, color: c }}>
+                  <span key={t.id} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" style={{ background: `${c}22`, color: c }}>
                     {t.name}
                   </span>
                 );
               })}
-              {tags.length > 3 ? <span className="text-[11px] text-zinc-500">+{tags.length - 3}</span> : null}
+              {tags.length > 3 ? <span className="text-xs text-zinc-500">+{tags.length - 3}</span> : null}
             </span>
           )}
         </td>
@@ -2722,7 +2722,7 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
   return (
     <details className="relative inline-block">
       <summary
-        className="list-none cursor-pointer inline-flex items-center text-[11px] text-zinc-400 hover:text-zinc-700 w-4 h-4 rounded hover:bg-zinc-200/70 justify-center select-none opacity-0 group-hover/ghdr:opacity-100 focus-within:opacity-100 transition-opacity"
+        className="list-none cursor-pointer inline-flex items-center text-xs text-zinc-400 hover:text-zinc-700 w-4 h-4 rounded hover:bg-zinc-200/70 justify-center select-none opacity-0 group-hover/ghdr:opacity-100 focus-within:opacity-100 transition-opacity"
         title="Status breakdown"
       >
         …
@@ -2732,7 +2732,7 @@ function GroupStatusBreakdown({ rows, statuses }: { rows: BoardItemRow[]; status
           const dotColor = bucket === "ACTIVE" ? "#71717A" : bucket === "DONE" ? "#00C875" : "#71717A";
           const label = bucket === "ACTIVE" ? "OPEN" : bucket;
           return (
-            <div key={bucket} className="flex items-center gap-2 px-3 py-1 text-[12.5px]">
+            <div key={bucket} className="flex items-center gap-2 px-3 py-1 text-xs">
               <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ backgroundColor: dotColor }} aria-hidden />
               <span className="tabular-nums text-zinc-700 w-4">{counts[bucket]}</span>
               <span className="text-zinc-500">{label}</span>
@@ -2860,7 +2860,7 @@ function TitleCell({
         ) : null}
         {(row.commentCount ?? 0) > 0 ? (
           <span
-            className="inline-flex items-center gap-0.5 text-[11.5px] text-zinc-400 tabular-nums shrink-0"
+            className="inline-flex items-center gap-0.5 text-xs text-zinc-400 tabular-nums shrink-0"
             title={`${row.commentCount} comment${row.commentCount === 1 ? "" : "s"}`}
           >
             <MessageSquare className="w-3 h-3" />
@@ -2869,7 +2869,7 @@ function TitleCell({
         ) : null}
         {(row.attachmentCount ?? 0) > 0 ? (
           <span
-            className="inline-flex items-center gap-0.5 text-[11.5px] text-zinc-400 tabular-nums shrink-0"
+            className="inline-flex items-center gap-0.5 text-xs text-zinc-400 tabular-nums shrink-0"
             title={`${row.attachmentCount} attachment${row.attachmentCount === 1 ? "" : "s"}`}
           >
             <Paperclip className="w-3 h-3" />
@@ -2927,7 +2927,7 @@ function GroupHeaderMenu({
         <MoreHorizontal className="w-3.5 h-3.5" />
       </button>
       {open && menuPos ? (
-        <div style={{ position: "fixed", left: menuPos.left, minWidth: 190, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-[14px]">
+        <div style={{ position: "fixed", left: menuPos.left, minWidth: 190, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-base">
           <GHItem label="Rename" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="New status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <GHItem label="Edit statuses" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
@@ -2958,7 +2958,7 @@ function TypeCell({ itemTypeId, itemTypeMap }: { itemTypeId: string | null; item
   const t = itemTypeId ? itemTypeMap.get(itemTypeId) : null;
   if (!t) return <span className="text-xs text-zinc-300">—</span>;
   return (
-    <span className="inline-flex items-center gap-1.5 text-[13.5px] text-zinc-600">
+    <span className="inline-flex items-center gap-1.5 text-base text-zinc-600">
       {React.createElement(itemTypeIcon(t.icon), { className: "w-3.5 h-3.5 text-zinc-400" })}
       <span className="truncate">{t.singular}</span>
     </span>
@@ -3020,8 +3020,8 @@ function StatusCell({
           <div style={{ position: "fixed", left: menuPos.left, width: 224, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }} className="z-[200] rounded-lg border border-zinc-200 bg-white shadow-xl p-1.5">
             {/* Status / Task Type tab switch (ClickUp). */}
             <div className="flex items-center gap-1 p-0.5 mb-1.5 bg-zinc-100 rounded-md">
-              <button type="button" onClick={() => setTab("status")} className={`flex-1 h-7 rounded-[5px] text-[13.5px] font-medium transition-colors ${tab === "status" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Status</button>
-              <button type="button" onClick={() => setTab("type")} className={`flex-1 h-7 rounded-[5px] text-[13.5px] font-medium transition-colors ${tab === "type" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Task Type</button>
+              <button type="button" onClick={() => setTab("status")} className={`flex-1 h-7 rounded-[5px] text-base font-medium transition-colors ${tab === "status" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Status</button>
+              <button type="button" onClick={() => setTab("type")} className={`flex-1 h-7 rounded-[5px] text-base font-medium transition-colors ${tab === "type" ? "bg-white shadow-sm text-zinc-900" : "text-zinc-500 hover:text-zinc-700"}`}>Task Type</button>
             </div>
             {tab === "status" ? (
               <div className="max-h-[240px] overflow-y-auto">
@@ -3032,7 +3032,7 @@ function StatusCell({
                       key={opt.value}
                       type="button"
                       onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
-                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-sm hover:bg-zinc-50"
+                      className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-xs hover:bg-zinc-50"
                     >
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium" style={{ background: `${opt.color}22`, color: opt.color }}>
                         {opt.label}
@@ -3045,7 +3045,7 @@ function StatusCell({
             ) : (
               <div className="max-h-[240px] overflow-y-auto">
                 {itemTypes.list.length === 0 ? (
-                  <div className="px-2 py-2 text-[13px] text-zinc-400">No task types yet.</div>
+                  <div className="px-2 py-2 text-sm text-zinc-400">No task types yet.</div>
                 ) : (
                   itemTypes.list.map((t) => {
                     const active = activeTypeId === t.id;
@@ -3054,7 +3054,7 @@ function StatusCell({
                         key={t.id}
                         type="button"
                         onClick={() => { onUpdate(row.id, { itemTypeId: t.id }); setOpen(false); }}
-                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-[14px] hover:bg-zinc-50"
+                        className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-left text-base hover:bg-zinc-50"
                       >
                         {React.createElement(itemTypeIcon(t.icon), { className: "w-4 h-4 text-zinc-500 shrink-0" })}
                         <span className="flex-1 min-w-0 truncate text-zinc-800">
@@ -3077,13 +3077,13 @@ function StatusCell({
   if (monday) {
     const fill = current ? (
       <span
-        className="flex items-center justify-center w-full h-full px-2 text-[13px] font-medium text-white"
+        className="flex items-center justify-center w-full h-full px-2 text-sm font-medium text-white"
         style={{ background: current.color }}
       >
         {current.label}
       </span>
     ) : (
-      <span className="flex items-center justify-center w-full h-full bg-zinc-100 text-[12px] text-zinc-400">—</span>
+      <span className="flex items-center justify-center w-full h-full bg-zinc-100 text-xs text-zinc-400">—</span>
     );
     if (!canEdit) return fill;
     return (
@@ -3100,7 +3100,7 @@ function StatusCell({
                   key={opt.value}
                   type="button"
                   onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
-                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+                  className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50"
                 >
                   <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium text-white" style={{ background: opt.color }}>
                     {opt.label}
@@ -3147,7 +3147,7 @@ function StatusCell({
                 key={opt.value}
                 type="button"
                 onClick={() => { onUpdate(row.id, { status: opt.value }); setOpen(false); }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm hover:bg-zinc-50"
+                className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs hover:bg-zinc-50"
               >
                 <span
                   className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium"
@@ -3239,7 +3239,7 @@ function GroupByPill({
                   key={o.key}
                   type="button"
                   onClick={() => { onGroupBy(o.key); setOpen(false); }}
-                  className="flex items-center w-full text-left px-3 py-1.5 text-[13.5px] text-zinc-700 hover:bg-zinc-50"
+                  className="flex items-center w-full text-left px-3 py-1.5 text-base text-zinc-700 hover:bg-zinc-50"
                 >
                   {o.label}
                 </button>
@@ -3256,7 +3256,7 @@ function GroupByPill({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-100 text-[12.5px] text-zinc-800 hover:bg-zinc-200"
+        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md bg-zinc-100 text-xs text-zinc-800 hover:bg-zinc-200"
       >
         <Layers className="w-3 h-3" />
         <span className="font-medium">
@@ -3268,14 +3268,14 @@ function GroupByPill({
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
           <div className="absolute left-0 top-full mt-1 z-40 w-[340px] rounded-lg border border-zinc-200 bg-white shadow-lg p-3">
-            <p className="text-[12.5px] text-zinc-500 mb-2">Group by</p>
+            <p className="text-xs text-zinc-500 mb-2">Group by</p>
             <div className="flex items-center gap-2">
               {/* Field picker */}
               <div className="relative flex-1">
                 <button
                   type="button"
                   onClick={() => { setFieldOpen((v) => !v); setDirOpen(false); }}
-                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-[13px] text-zinc-800 hover:bg-zinc-50"
+                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-sm text-zinc-800 hover:bg-zinc-50"
                 >
                   <span className="inline-flex items-center gap-1.5 min-w-0">
                     <Layers className="w-3 h-3 text-zinc-500 shrink-0" />
@@ -3290,7 +3290,7 @@ function GroupByPill({
                         key={o.key}
                         type="button"
                         onClick={() => { onGroupBy(o.key); setFieldOpen(false); }}
-                        className={`flex items-center w-full text-left px-3 py-1.5 text-[13.5px] ${
+                        className={`flex items-center w-full text-left px-3 py-1.5 text-base ${
                           o.key === groupBy ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                         }`}
                       >
@@ -3305,7 +3305,7 @@ function GroupByPill({
                 <button
                   type="button"
                   onClick={() => { setDirOpen((v) => !v); setFieldOpen(false); }}
-                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-[13px] text-zinc-800 hover:bg-zinc-50"
+                  className="w-full inline-flex items-center justify-between gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 bg-white text-sm text-zinc-800 hover:bg-zinc-50"
                 >
                   <span className="truncate">{groupDirection === "asc" ? "Ascending" : "Descending"}</span>
                   <ChevronDown className="w-3 h-3 text-zinc-400 shrink-0" />
@@ -3315,7 +3315,7 @@ function GroupByPill({
                     <button
                       type="button"
                       onClick={() => { onDirection("asc"); setDirOpen(false); }}
-                      className={`flex items-center w-full text-left px-3 py-1.5 text-[13.5px] ${
+                      className={`flex items-center w-full text-left px-3 py-1.5 text-base ${
                         groupDirection === "asc" ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >
@@ -3324,7 +3324,7 @@ function GroupByPill({
                     <button
                       type="button"
                       onClick={() => { onDirection("desc"); setDirOpen(false); }}
-                      className={`flex items-center w-full text-left px-3 py-1.5 text-[13.5px] ${
+                      className={`flex items-center w-full text-left px-3 py-1.5 text-base ${
                         groupDirection === "desc" ? "bg-zinc-50 font-medium text-zinc-900" : "text-zinc-700 hover:bg-zinc-50"
                       }`}
                     >

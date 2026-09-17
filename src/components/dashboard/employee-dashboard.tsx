@@ -56,7 +56,7 @@ export function EmployeeDashboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <Zap size={20} className="mx-auto text-[color:var(--accent-strong)] mb-1" />
-            <p className={`text-2xl font-bold font-mono ${stats.compositeScore != null ? getScoreColor(stats.compositeScore) : "text-muted"}`}>
+            <p className={`text-2xl font-semibold font-mono ${stats.compositeScore != null ? getScoreColor(stats.compositeScore) : "text-muted"}`}>
               {stats.compositeScore ?? "N/A"}
             </p>
             <p className="text-xs text-muted">Performance Score</p>
@@ -65,21 +65,21 @@ export function EmployeeDashboard() {
         <Card>
           <CardContent className="p-4 text-center">
             <BarChart3 size={20} className="mx-auto text-blue-400 mb-1" />
-            <p className="text-2xl font-bold font-mono">{stats.completedKpis}/{stats.totalKpis}</p>
+            <p className="text-2xl font-semibold font-mono">{stats.completedKpis}/{stats.totalKpis}</p>
             <p className="text-xs text-muted">KPIs Completed</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <BookOpen size={20} className="mx-auto text-amber-400 mb-1" />
-            <p className="text-2xl font-bold">{stats.pendingSops}</p>
+            <p className="text-2xl font-semibold">{stats.pendingSops}</p>
             <p className="text-xs text-muted">Pending SOPs</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4 text-center">
             <Star size={20} className="mx-auto text-green-400 mb-1" />
-            <p className="text-2xl font-bold">{stats.pendingReviews}</p>
+            <p className="text-2xl font-semibold">{stats.pendingReviews}</p>
             <p className="text-xs text-muted">Pending Reviews</p>
           </CardContent>
         </Card>
@@ -116,23 +116,23 @@ export function EmployeeDashboard() {
       <Card>
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-sm flex items-center gap-2">
+            <CardTitle className="text-xs flex items-center gap-2">
               <Target size={14} className="text-[color:var(--accent-strong)]" /> My KRAs & KPIs
             </CardTitle>
-            <Badge variant="outline" className="text-[11px]">{stats.completionRate}% complete this month</Badge>
+            <Badge variant="outline" className="text-xs">{stats.completionRate}% complete this month</Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {(!kraAssignments || kraAssignments.length === 0) ? (
-            <p className="text-sm text-muted text-center py-4">No KRAs assigned yet.</p>
+            <p className="text-xs text-muted text-center py-4">No KRAs assigned yet.</p>
           ) : (
             kraAssignments.map((a: any) => (
               <div key={a.id} className="rounded-lg border border-border bg-surface p-3">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Target size={12} className="text-[color:var(--accent-strong)]" />
-                    <span className="text-sm font-medium">{a.kra.name}</span>
-                    <Badge variant="outline" className="text-[10px]">{a.weightage}%</Badge>
+                    <span className="text-xs font-medium">{a.kra.name}</span>
+                    <Badge variant="outline" className="text-micro">{a.weightage}%</Badge>
                   </div>
                 </div>
                 {a.kra.kpis.length === 0 ? (
@@ -159,7 +159,7 @@ export function EmployeeDashboard() {
                             {actual != null ? actual : "—"} / {target ?? "—"} {kpi.unit}
                           </span>
                           {score != null && (
-                            <span className={`font-mono font-bold ${getScoreColor(score)}`}>{score}%</span>
+                            <span className={`font-mono font-semibold ${getScoreColor(score)}`}>{score}%</span>
                           )}
                         </div>
                       );
@@ -176,7 +176,7 @@ export function EmployeeDashboard() {
       {data.myOkrs && data.myOkrs.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
+            <CardTitle className="text-xs flex items-center gap-2">
               <Target size={14} className="text-[color:var(--accent-strong)]" /> My Goals (OKRs)
             </CardTitle>
           </CardHeader>
@@ -184,12 +184,12 @@ export function EmployeeDashboard() {
             {data.myOkrs.map((okr: any) => (
               <div key={okr.id} className="flex items-center gap-3 p-2 rounded-lg border border-border">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{okr.title}</p>
-                  <p className="text-[11px] text-muted">{okr.quarter}</p>
+                  <p className="text-xs font-medium truncate">{okr.title}</p>
+                  <p className="text-xs text-muted">{okr.quarter}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Progress value={okr.progress} className="w-16 h-1.5" />
-                  <span className={`text-xs font-mono font-bold ${
+                  <span className={`text-xs font-mono font-semibold ${
                     okr.progress >= 70 ? "text-green-400" : okr.progress >= 40 ? "text-orange-400" : "text-red-400"
                   }`}>{okr.progress}%</span>
                 </div>
@@ -203,7 +203,7 @@ export function EmployeeDashboard() {
       {sopAssignments && sopAssignments.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
+            <CardTitle className="text-xs flex items-center gap-2">
               <BookOpen size={14} className="text-amber-400" /> Pending SOPs
             </CardTitle>
           </CardHeader>
@@ -212,11 +212,11 @@ export function EmployeeDashboard() {
               <Link key={a.id} href={`/sops/${a.sop.id}`}>
                 <div className="flex items-center justify-between p-2 rounded-lg hover:bg-surface-2 transition-colors">
                   <div>
-                    <p className="text-sm">{a.sop.title}</p>
-                    <p className="text-[11px] text-muted">{a.sop.category}</p>
+                    <p className="text-xs">{a.sop.title}</p>
+                    <p className="text-xs text-muted">{a.sop.category}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="warning" className="text-[11px]">{a.status}</Badge>
+                    <Badge variant="warning" className="text-xs">{a.status}</Badge>
                     <ArrowRight size={12} className="text-muted" />
                   </div>
                 </div>
@@ -230,7 +230,7 @@ export function EmployeeDashboard() {
       {reviews && reviews.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
+            <CardTitle className="text-xs flex items-center gap-2">
               <Star size={14} className="text-green-400" /> Upcoming Reviews
             </CardTitle>
           </CardHeader>
@@ -238,10 +238,10 @@ export function EmployeeDashboard() {
             {reviews.map((r: any) => (
               <div key={r.id} className="flex items-center justify-between p-2 rounded-lg border border-border">
                 <div>
-                  <p className="text-sm">{r.cycle?.name}</p>
-                  <p className="text-[11px] text-muted">{r.cycle?.type?.replace(/_/g, " ")}</p>
+                  <p className="text-xs">{r.cycle?.name}</p>
+                  <p className="text-xs text-muted">{r.cycle?.type?.replace(/_/g, " ")}</p>
                 </div>
-                <Badge variant="secondary" className="text-[11px]">{r.status.replace(/_/g, " ")}</Badge>
+                <Badge variant="secondary" className="text-xs">{r.status.replace(/_/g, " ")}</Badge>
               </div>
             ))}
           </CardContent>

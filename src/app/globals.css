@@ -3,37 +3,45 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /* ── Type scale utilities (design-system 2.2, 8.3) ──────────────────
-   The four NEW named sizes land now: text-row 15/22, text-micro 11/14
-   (600, +0.06em), text-rail 10/12 (500), text-prose 15/24.
+   The nine sizes, bound exactly and in px: text-xs 12/16, text-sm 13/18,
+   text-base 14/20, text-lg 16/22, text-xl 22/28, text-row 15/22,
+   text-micro 11/14 (600, +0.06em), text-rail 10/12 (500), text-prose
+   15/24 (the doc-editor reading exception).
 
-   The five standard names are NOT re-bound yet. The spec maps text-xs to
-   12/16, text-sm 13/18, text-base 14/20, text-lg 16/22 and text-xl 22/28,
-   but ~1,600 existing call sites use those names at today's meaning (an
-   existing `text-xs` is the 13px of the 2026-08-20 readability lift and
-   maps to the new `text-sm`, not to a shrunken `text-xs`). The type
-   codemod (design-system 8.2, refresh step 2) renames those call sites
-   and flips these five values in the same change:
-     --text-xs: 0.75rem;    --text-xs--line-height: 1rem;
-     --text-sm: 0.8125rem;  --text-sm--line-height: 1.125rem;
-     --text-base: 0.875rem; --text-base--line-height: 1.25rem;
-     --text-lg: 1rem;       --text-lg--line-height: 1.375rem;
-     --text-xl: 1.375rem;   --text-xl--line-height: 1.75rem;
-   Until then text-xs keeps the readability-lift value below. */
+   px, not rem, on purpose: the OS shell sets `:root, .workwrk-os
+   { font-size: 14px }` (tokens.css), so inside the product a rem size
+   renders at 14/16 of its nominal value (0.875rem was 12.25px, and the
+   "13px" readability-lift text-xs of 0.8125rem was 11.375px). The type
+   codemod (scripts/codemod-type-scale.mjs, refresh step 2) bound these
+   in the same change that renamed every call site to the name of its
+   RENDERED size, per route tree (see RENAMES_14PX_ROOT / _16PX_ROOT in
+   src/lib/type-scale-codemod.mjs). The codemod gates its rename phase on
+   the OLD binding `--text-xs: 0.8125rem`; restoring that line would make
+   a re-run rename everything again: do not. text-2xl and up keep
+   Tailwind's rem defaults; the product has no display size (2.4). */
 @theme {
-  --text-xs: 0.8125rem;
-  --text-xs--line-height: 1.25rem;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 22px;
+  --text-xl: 22px;
+  --text-xl--line-height: 28px;
 
-  --text-row: 0.9375rem;
-  --text-row--line-height: 1.375rem;
-  --text-micro: 0.6875rem;
-  --text-micro--line-height: 0.875rem;
+  --text-row: 15px;
+  --text-row--line-height: 22px;
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
   --text-micro--font-weight: 600;
   --text-micro--letter-spacing: 0.06em;
-  --text-rail: 0.625rem;
-  --text-rail--line-height: 0.75rem;
+  --text-rail: 10px;
+  --text-rail--line-height: 12px;
   --text-rail--font-weight: 500;
-  --text-prose: 0.9375rem;
-  --text-prose--line-height: 1.5rem;
+  --text-prose: 15px;
+  --text-prose--line-height: 24px;
 }
 
 /* ── Token aliases for Tailwind (design-system 8.3) ─────────────────

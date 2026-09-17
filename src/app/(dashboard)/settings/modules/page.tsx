@@ -77,15 +77,15 @@ export default function ModulesSettingsPage() {
     <div className="px-6 pt-6">
       <header className="mb-1 flex items-center gap-2">
         <Boxes className="h-5 w-5 text-zinc-700" />
-        <h1 className="text-[20px] font-semibold tracking-[-0.01em] text-zinc-900">Modules</h1>
+        <h1 className="text-xl font-semibold tracking-[-0.01em] text-zinc-900">Modules</h1>
       </header>
-      <p className="mb-5 max-w-2xl text-[14px] text-zinc-500">
+      <p className="mb-5 max-w-2xl text-base text-zinc-500">
         Premium modules extend your workspace. Turn one on to add it to every member&apos;s rail.
         {canEdit ? "" : " You need admin access to change these."}
       </p>
 
       {active === null ? (
-        <div className="flex items-center gap-2 text-[14px] text-zinc-400">
+        <div className="flex items-center gap-2 text-base text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading modules…
         </div>
       ) : (
@@ -101,12 +101,12 @@ export default function ModulesSettingsPage() {
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-[14.5px] font-medium text-zinc-900">{m.label}</span>
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+                    <span className="text-base font-medium text-zinc-900">{m.label}</span>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
                       {m.competesWith}
                     </span>
                   </div>
-                  <div className="mt-0.5 text-[13px] leading-5 text-zinc-500">{m.blurb}</div>
+                  <div className="mt-0.5 text-sm leading-5 text-zinc-500">{m.blurb}</div>
                 </div>
                 {busy === m.productSlug ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-400" />

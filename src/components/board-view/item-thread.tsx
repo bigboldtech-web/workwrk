@@ -393,7 +393,7 @@ function CommentsTab({
                         }}
                         rows={2}
                         autoFocus
-                        className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+                        className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
                       />
                       <div className="flex items-center gap-1.5 mt-1">
                         <button
@@ -414,7 +414,7 @@ function CommentsTab({
                       </div>
                     </div>
                   ) : (
-                    <div className="text-sm whitespace-pre-wrap break-words mt-0.5">{renderBody(u.body)}</div>
+                    <div className="text-xs whitespace-pre-wrap break-words mt-0.5">{renderBody(u.body)}</div>
                   )}
                 </div>
               </li>
@@ -485,14 +485,14 @@ function CommentsTab({
                 }}
                 placeholder="Add a comment… @ to mention (⌘+Enter to send)"
                 rows={2}
-                className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-sm resize-y focus:outline-none focus:border-[var(--os-brand)]"
+                className="w-full px-3 py-2 rounded-md border border-zinc-200 bg-white text-xs resize-y focus:outline-none focus:border-[var(--os-brand)]"
               />
             </div>
             <button
               type="button"
               onClick={onSubmit}
               disabled={posting || !draft.trim()}
-              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-md text-sm text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
+              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-md text-xs text-white bg-[var(--os-brand)] hover:bg-[var(--os-brand-hover)] disabled:opacity-50"
             >
               <Send className="w-3.5 h-3.5" />
               {posting ? "Posting…" : "Send"}

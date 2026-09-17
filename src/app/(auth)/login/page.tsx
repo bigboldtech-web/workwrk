@@ -86,10 +86,10 @@ export default function LoginPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">
+        <h1 className="text-3xl font-semibold tracking-tight">
           {mfaRequired ? "Two-step verification" : "Welcome back"}
         </h1>
-        <p className="text-sm text-slate-500 mt-1.5">
+        <p className="text-base text-slate-500 mt-1.5">
           {mfaRequired
             ? "Enter the code from your authenticator app to finish signing in."
             : "Sign in to your WorkwrK workspace."}
@@ -98,7 +98,7 @@ export default function LoginPage() {
 
       <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && (
-          <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-sm px-3 py-2">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 text-rose-700 text-base px-3 py-2">
             {error}
           </div>
         )}
@@ -106,7 +106,7 @@ export default function LoginPage() {
         {!mfaRequired ? (
           <>
             <div className="space-y-1.5">
-              <label htmlFor="email" className="text-xs font-medium text-slate-700">
+              <label htmlFor="email" className="text-sm font-medium text-slate-700">
                 Work email
               </label>
               <input
@@ -117,16 +117,16 @@ export default function LoginPage() {
                 placeholder="you@company.com"
                 autoComplete="email"
                 required
-                className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+                className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
               />
             </div>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label htmlFor="password" className="text-xs font-medium text-slate-700">
+                <label htmlFor="password" className="text-sm font-medium text-slate-700">
                   Password
                 </label>
-                <Link href="/forgot-password" className="text-xs text-[#0073EA] hover:text-[#0056B0]">
+                <Link href="/forgot-password" className="text-sm text-[#0073EA] hover:text-[#0056B0]">
                   Forgot password?
                 </Link>
               </div>
@@ -138,17 +138,17 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 autoComplete="current-password"
                 required
-                className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+                className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-base text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
               />
             </div>
           </>
         ) : (
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+            <div className="flex items-center gap-2 text-sm text-slate-500 mb-1">
               <ShieldCheck size={14} className="text-emerald-600" />
               Signing in as <span className="font-medium text-slate-700">{email}</span>
             </div>
-            <label htmlFor="mfaCode" className="text-xs font-medium text-slate-700">
+            <label htmlFor="mfaCode" className="text-sm font-medium text-slate-700">
               Authentication code
             </label>
             <input
@@ -161,9 +161,9 @@ export default function LoginPage() {
               autoComplete="one-time-code"
               autoFocus
               maxLength={9}
-              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-lg tracking-[0.3em] text-slate-900 placeholder:tracking-normal placeholder:text-base placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
+              className="w-full h-11 px-3.5 rounded-lg border border-slate-200 bg-white text-lg tracking-[0.3em] text-slate-900 placeholder:tracking-normal placeholder:text-lg placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0073EA]/20 focus:border-[#0073EA] transition"
             />
-            <p className="text-xs text-slate-400 pt-0.5">
+            <p className="text-sm text-slate-400 pt-0.5">
               Lost your device? Enter one of your backup codes instead.
             </p>
           </div>
@@ -172,7 +172,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full h-11 rounded-lg bg-slate-900 text-white text-sm font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 hover:shadow-[0_2px_12px_-2px_rgba(0,0,0,0.18)] active:translate-y-px transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>
@@ -190,12 +190,12 @@ export default function LoginPage() {
         <button
           type="button"
           onClick={resetToStart}
-          className="text-sm text-slate-500 hover:text-slate-700 mx-auto block"
+          className="text-base text-slate-500 hover:text-slate-700 mx-auto block"
         >
           Use a different account
         </button>
       ) : (
-        <p className="text-sm text-slate-600 text-center">
+        <p className="text-base text-slate-600 text-center">
           New to WorkwrK?{" "}
           <Link href="/register" className="text-[#0073EA] hover:text-[#0056B0] font-medium">
             Start your free trial

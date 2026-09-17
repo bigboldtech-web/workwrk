@@ -260,11 +260,11 @@ export default function SetupPage() {
       {/* Progress Bar */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">
+          <h1 className="text-2xl font-semibold tracking-tight">
             {currentStep < STEPS.length - 1 ? "Set up your workspace" : ""}
           </h1>
           {currentStep < STEPS.length - 1 && (
-            <span className="text-sm text-muted">
+            <span className="text-base text-muted">
               Step {currentStep + 1} of {STEPS.length - 1}
             </span>
           )}
@@ -293,7 +293,7 @@ export default function SetupPage() {
                   key={step.id}
                   onClick={() => i < currentStep && setCurrentStep(i)}
                   disabled={i > currentStep}
-                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all ${
+                  className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-all ${
                     i === currentStep
                       ? "bg-blue-50 text-[#0073EA] border border-blue-200"
                       : i < currentStep
@@ -321,7 +321,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">What type of business are you?</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 This helps us tailor the experience for your organization
               </p>
             </div>
@@ -337,14 +337,14 @@ export default function SetupPage() {
                   }`}
                 >
                   <div className="flex w-full items-center justify-between">
-                    <span className="text-base font-semibold">{type.label}</span>
+                    <span className="text-lg font-semibold">{type.label}</span>
                     {setupData.businessType === type.value && (
                       <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[#0073EA]">
                         <Check size={12} className="text-white" />
                       </div>
                     )}
                   </div>
-                  <span className="mt-1 text-sm text-muted">{type.desc}</span>
+                  <span className="mt-1 text-base text-muted">{type.desc}</span>
                 </button>
               ))}
             </div>
@@ -356,7 +356,7 @@ export default function SetupPage() {
           <div className="space-y-8">
             <div>
               <h2 className="text-xl font-semibold">What industry are you in?</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 We&apos;ll set up templates and best practices for your industry
               </p>
             </div>
@@ -365,7 +365,7 @@ export default function SetupPage() {
                 <button
                   key={industry}
                   onClick={() => updateField("industry", industry)}
-                  className={`rounded-full border px-4 py-2 text-sm font-medium transition-all ${
+                  className={`rounded-full border px-4 py-2 text-base font-medium transition-all ${
                     setupData.industry === industry
                       ? "border-[#0073EA] bg-blue-50 text-[#0073EA]"
                       : "border-border bg-surface text-muted hover:border-muted-2 hover:text-foreground"
@@ -378,7 +378,7 @@ export default function SetupPage() {
 
             <div>
               <h2 className="text-xl font-semibold">How will you primarily use workwrk?</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 Select the area that matters most to you right now
               </p>
             </div>
@@ -393,8 +393,8 @@ export default function SetupPage() {
                       : "border-border bg-surface hover:border-muted-2"
                   }`}
                 >
-                  <span className="text-sm font-semibold">{uc.label}</span>
-                  <span className="mt-1 text-xs text-muted">{uc.desc}</span>
+                  <span className="text-base font-semibold">{uc.label}</span>
+                  <span className="mt-1 text-sm text-muted">{uc.desc}</span>
                 </button>
               ))}
             </div>
@@ -406,7 +406,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Choose your modules</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 Enable the modules you need. You can always change this later in Settings.
               </p>
             </div>
@@ -430,12 +430,12 @@ export default function SetupPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">{mod.name}</span>
+                        <span className="text-base font-semibold">{mod.name}</span>
                         {mod.default && (
-                          <Badge variant="secondary" className="text-[11px]">Required</Badge>
+                          <Badge variant="secondary" className="text-xs">Required</Badge>
                         )}
                       </div>
-                      <span className="text-xs text-muted mt-0.5 block">{mod.desc}</span>
+                      <span className="text-sm text-muted mt-0.5 block">{mod.desc}</span>
                     </div>
                     <div className={`mt-1 h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
                       enabled ? "border-[#0073EA] bg-[#0073EA]" : "border-muted-2"
@@ -454,7 +454,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">How large is your team?</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 This helps us optimize the workspace for your team&apos;s needs
               </p>
             </div>
@@ -470,8 +470,8 @@ export default function SetupPage() {
                   }`}
                 >
                   <Users size={24} className={setupData.teamSize === size.value ? "text-[#0073EA]" : "text-muted"} />
-                  <span className="mt-3 text-lg font-bold">{size.label}</span>
-                  <span className="mt-1 text-xs text-muted">{size.desc}</span>
+                  <span className="mt-3 text-lg font-semibold">{size.label}</span>
+                  <span className="mt-1 text-sm text-muted">{size.desc}</span>
                 </button>
               ))}
             </div>
@@ -483,13 +483,13 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Set up your departments</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 Toggle the departments that apply to your organization, or add your own
               </p>
             </div>
 
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-muted uppercase tracking-wider">Default Departments</h3>
+              <h3 className="text-base font-medium text-muted uppercase tracking-wider">Default Departments</h3>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {setupData.departments.map((dept, i) => (
                   <button
@@ -503,9 +503,9 @@ export default function SetupPage() {
                   >
                     <div className="h-3 w-3 rounded-full flex-shrink-0" style={{ backgroundColor: dept.color }} />
                     <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium">{dept.name}</span>
+                      <span className="text-base font-medium">{dept.name}</span>
                       {dept.description && (
-                        <span className="text-xs text-muted block mt-0.5 truncate">{dept.description}</span>
+                        <span className="text-sm text-muted block mt-0.5 truncate">{dept.description}</span>
                       )}
                     </div>
                     <div className={`h-4 w-4 rounded border flex items-center justify-center flex-shrink-0 ${
@@ -520,7 +520,7 @@ export default function SetupPage() {
 
             {/* Custom departments */}
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-muted uppercase tracking-wider">Custom Departments</h3>
+              <h3 className="text-base font-medium text-muted uppercase tracking-wider">Custom Departments</h3>
               {setupData.customDepartments.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {setupData.customDepartments.map((dept, i) => (
@@ -529,7 +529,7 @@ export default function SetupPage() {
                       className="flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 py-2"
                     >
                       <div className="h-2 w-2 rounded-full" style={{ backgroundColor: dept.color }} />
-                      <span className="text-sm font-medium">{dept.name}</span>
+                      <span className="text-base font-medium">{dept.name}</span>
                       <button onClick={() => removeCustomDepartment(i)} className="text-muted hover:text-red-400">
                         <X size={14} />
                       </button>
@@ -558,7 +558,7 @@ export default function SetupPage() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold">Invite your team</h2>
-              <p className="mt-1 text-sm text-muted">
+              <p className="mt-1 text-base text-muted">
                 Add team members to get started. You can always invite more later.
               </p>
             </div>
@@ -577,7 +577,7 @@ export default function SetupPage() {
                     <select
                       value={invite.role}
                       onChange={(e) => updateInvite(i, "role", e.target.value)}
-                      className="h-10 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-sm text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#0073EA]/25"
+                      className="h-10 appearance-none rounded-lg border border-border bg-surface pl-3 pr-8 text-base text-foreground bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2216%22%20height%3D%2216%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236B6B80%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:16px] bg-[right_8px_center] bg-no-repeat focus:outline-none focus:ring-2 focus:ring-[#0073EA]/25"
                     >
                       <option value="EMPLOYEE">Employee</option>
                       <option value="TEAM_LEAD">Team Lead</option>
@@ -601,7 +601,7 @@ export default function SetupPage() {
               </CardContent>
             </Card>
 
-            <p className="text-xs text-muted">
+            <p className="text-sm text-muted">
               Invitations will be sent via email. You can skip this step and invite people later from the People page.
             </p>
           </div>
@@ -613,7 +613,7 @@ export default function SetupPage() {
             <div className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-blue-50 border border-blue-100">
               <Sparkles size={40} className="text-[#0073EA]" />
             </div>
-            <h2 className="text-3xl font-bold">You&apos;re all set!</h2>
+            <h2 className="text-3xl font-semibold">You&apos;re all set!</h2>
             <p className="mt-2 max-w-md text-muted">
               Your workspace is ready. Start managing your team, tracking performance, and running your business like a pro.
             </p>
@@ -626,13 +626,13 @@ export default function SetupPage() {
                 return (
                   <div key={modId} className="flex items-center gap-2 rounded-full border border-border bg-surface px-4 py-2">
                     <Icon size={14} className="text-[#0073EA]" />
-                    <span className="text-sm">{mod.name}</span>
+                    <span className="text-base">{mod.name}</span>
                   </div>
                 );
               })}
               {setupData.enabledModules.length > 5 && (
                 <div className="flex items-center rounded-full border border-border bg-surface px-4 py-2">
-                  <span className="text-sm text-muted">+{setupData.enabledModules.length - 5} more</span>
+                  <span className="text-base text-muted">+{setupData.enabledModules.length - 5} more</span>
                 </div>
               )}
             </div>

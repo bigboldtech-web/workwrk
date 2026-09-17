@@ -70,8 +70,8 @@ export function DashboardOkrs() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Trophy size={16} className="text-[#0073EA]" />
-            <h3 className="text-sm font-bold text-foreground">Your Goals — {quarter}</h3>
-            <Badge variant="outline" className="text-[11px] px-1.5 py-0">{okrs.length}</Badge>
+            <h3 className="text-xs font-semibold text-foreground">Your Goals — {quarter}</h3>
+            <Badge variant="outline" className="text-xs px-1.5 py-0">{okrs.length}</Badge>
           </div>
           <Link href="/okrs?mine=1" className="text-xs text-[#0073EA] hover:underline flex items-center gap-1">
             View all <ChevronRight size={12} />
@@ -88,24 +88,24 @@ export function DashboardOkrs() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <Badge variant="outline" className="text-[11px] px-1.5 py-0 gap-1 border-border text-muted">
+                        <Badge variant="outline" className="text-xs px-1.5 py-0 gap-1 border-border text-muted">
                           {levelIcon(okr.level)} {levelLabel(okr.level)}
                         </Badge>
                         {okr.department && (
-                          <span className="text-[11px] text-muted">{okr.department.name}</span>
+                          <span className="text-xs text-muted">{okr.department.name}</span>
                         )}
                         {okr.owner && okr.level === "INDIVIDUAL" && (
-                          <span className="text-[11px] text-muted">· {okr.owner.firstName} {okr.owner.lastName}</span>
+                          <span className="text-xs text-muted">· {okr.owner.firstName} {okr.owner.lastName}</span>
                         )}
                       </div>
-                      <p className="text-sm font-medium truncate">{okr.title}</p>
-                      <p className="text-[11px] text-muted mt-0.5">{okr.keyResults.length} Target{okr.keyResults.length !== 1 ? "s" : ""}</p>
+                      <p className="text-xs font-medium truncate">{okr.title}</p>
+                      <p className="text-xs text-muted mt-0.5">{okr.keyResults.length} Target{okr.keyResults.length !== 1 ? "s" : ""}</p>
                     </div>
                     <div className="shrink-0 text-right">
                       {unmeasured ? (
-                        <p className="text-lg font-bold font-mono text-muted" title="No targets yet">—</p>
+                        <p className="text-lg font-semibold font-mono text-muted" title="No targets yet">—</p>
                       ) : (
-                        <p className="text-lg font-bold font-mono" style={{ color: BRAND }}>
+                        <p className="text-lg font-semibold font-mono" style={{ color: BRAND }}>
                           {pct}%
                         </p>
                       )}

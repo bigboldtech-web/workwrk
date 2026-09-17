@@ -138,11 +138,11 @@ export default async function TeamWorkloadPage() {
     <div className="flex flex-col h-full bg-white">
       {/* Header — board-page style: title + people count */}
       <div className="px-4 pt-1.5 pb-1 flex items-center gap-2">
-        <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900">
+        <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900">
           <GaugeCircle className="w-4 h-4 text-zinc-500" />
           <span>Workload</span>
         </h1>
-        <span className="text-[13px] text-zinc-500 tabular-nums">
+        <span className="text-sm text-zinc-500 tabular-nums">
           {people.length} people
         </span>
       </div>

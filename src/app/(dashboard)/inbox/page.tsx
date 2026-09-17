@@ -228,7 +228,7 @@ export default function InboxPage() {
               onClick={() => setFilterOpen((v) => !v)}
               aria-expanded={filterOpen}
               aria-haspopup="menu"
-              className={`inline-flex items-center gap-1.5 h-6 !px-2 rounded-md text-[13px] border hover:bg-zinc-50 transition-colors ${
+              className={`inline-flex items-center gap-1.5 h-6 !px-2 rounded-md text-sm border hover:bg-zinc-50 transition-colors ${
                 filterOpen || filterType
                   ? "bg-zinc-100 border-[var(--os-brand-rail)] text-[var(--os-brand-ink)] dark:border-zinc-500 font-medium"
                   : "bg-white border-zinc-200 text-zinc-600"
@@ -249,7 +249,7 @@ export default function InboxPage() {
             <button
               type="button"
               onClick={() => setFilterType(null)}
-              className="text-[13px] text-zinc-500 hover:text-zinc-700 ml-2 hover:underline"
+              className="text-sm text-zinc-500 hover:text-zinc-700 ml-2 hover:underline"
             >
               Clear filter
             </button>
@@ -268,7 +268,7 @@ export default function InboxPage() {
             type="button"
             onClick={clearAll}
             disabled={rows === null || rows.every((n) => n.read)}
-            className="inline-flex items-center gap-1.5 h-8 !px-2.5 rounded-md text-[14px] text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 h-8 !px-2.5 rounded-md text-base text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Check className="w-3.5 h-3.5" />
             Clear all
@@ -277,7 +277,7 @@ export default function InboxPage() {
 
         <div className="flex-1 overflow-y-auto px-7 pb-6">
           {filteredRows === null ? (
-            <div className="text-sm text-zinc-500 py-8 text-center">Loading inbox…</div>
+            <div className="text-xs text-zinc-500 py-8 text-center">Loading inbox…</div>
           ) : filteredRows.length === 0 ? (
             <InboxEmpty tab={tab} />
           ) : (
@@ -309,7 +309,7 @@ export default function InboxPage() {
                     if (items.length === 0) return null;
                     return (
                       <div key={label} className="mb-6">
-                        <h3 className="text-[13px] font-medium text-zinc-500 sticky top-0 bg-white z-10 py-2 px-1">{label}</h3>
+                        <h3 className="text-sm font-medium text-zinc-500 sticky top-0 bg-white z-10 py-2 px-1">{label}</h3>
                         <ul className="divide-y divide-zinc-100">
                           {items.map(n => (
                             <NotifEntry key={n.id} n={n} onMarkRead={markRead} onSnooze={snooze} cleared={tab === "cleared"} mode={prefs.mode} />
@@ -372,13 +372,13 @@ function InboxFilterMenu({
               setFilterType(label === filterType ? null : label);
               onClose();
             }}
-            className={`flex w-full items-center gap-3 !px-4 py-2 text-left text-[14px] hover:bg-zinc-50 ${
+            className={`flex w-full items-center gap-3 !px-4 py-2 text-left text-base hover:bg-zinc-50 ${
               label === filterType ? "text-[var(--os-brand-ink)] font-medium bg-zinc-50" : "text-zinc-800"
             }`}
           >
             <Icon className={`h-4 w-4 ${label === filterType ? "text-[var(--os-brand-ink)]" : "text-zinc-500"}`} />
             <span className="flex-1">{label}</span>
-            <span className="text-[12px] text-zinc-400">⇧{shortcut}</span>
+            <span className="text-xs text-zinc-400">⇧{shortcut}</span>
           </button>
         ))}
       </div>
@@ -398,7 +398,7 @@ function InboxSettingsPanel({
   return (
     <aside className="w-[370px] shrink-0 border-l border-zinc-200 bg-white shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-20">
       <div className="flex h-12 items-center gap-3 border-b border-zinc-100 !px-5">
-        <h2 className="flex-1 text-[15px] font-semibold text-zinc-900">Customize Inbox</h2>
+        <h2 className="flex-1 text-base font-semibold text-zinc-900">Customize Inbox</h2>
         <button
           type="button"
           onClick={onClose}
@@ -416,7 +416,7 @@ function InboxSettingsPanel({
       </div>
 
       <div className="border-b border-zinc-100 py-4">
-        <p className="!px-5 text-[13px] font-medium text-zinc-500">Display mode</p>
+        <p className="!px-5 text-sm font-medium text-zinc-500">Display mode</p>
         <div className="mt-4 grid grid-cols-2 gap-4 !px-5">
           <DisplayModeCard
             active={prefs.mode === "fullscreen"}
@@ -449,7 +449,7 @@ function SettingsRow({
   control?: React.ReactNode;
 }) {
   return (
-    <div className={`flex items-center gap-3 !px-5 py-2 text-[14px] ${active ? "bg-zinc-100" : ""}`}>
+    <div className={`flex items-center gap-3 !px-5 py-2 text-base ${active ? "bg-zinc-100" : ""}`}>
       <Icon className="h-4 w-4 text-zinc-500" />
       <span className="flex-1 text-zinc-800">{label}</span>
       {control}
@@ -518,7 +518,7 @@ function DisplayModeCard({
           {active ? <Check className="h-2.5 w-2.5 text-white" strokeWidth={3} /> : null}
         </span>
       </span>
-      <span className="mt-3 block text-[14px] font-medium">{label}</span>
+      <span className="mt-3 block text-base font-medium">{label}</span>
     </button>
   );
 }
@@ -553,8 +553,8 @@ function InboxTab({
     >
       <Icon className="w-3.5 h-3.5 shrink-0" />
       <span className="flex flex-col items-start leading-tight">
-        <span className="text-[14px]">{label}</span>
-        {count ? <span className="text-[12px] font-normal text-zinc-400">{count} unread</span> : null}
+        <span className="text-base">{label}</span>
+        {count ? <span className="text-xs font-normal text-zinc-400">{count} unread</span> : null}
       </span>
     </button>
   );
@@ -586,17 +586,17 @@ function InboxEmpty({ tab }: { tab: Tab }) {
         <span className="inline-flex items-center justify-center w-[84px] h-[62px] rounded-xl bg-blue-50 shadow-[0_12px_30px_rgba(0,115,234,0.12)] mb-7">
           <InboxIcon className="w-9 h-9 text-blue-200" />
         </span>
-        <p className="text-[20px] font-semibold text-zinc-900 mb-2">Inbox Zero</p>
-        <p className="text-[15px] text-zinc-500">
+        <p className="text-lg font-semibold text-zinc-900 mb-2">Inbox Zero</p>
+        <p className="text-base text-zinc-500">
           Congratulations! You cleared your important notifications <span aria-hidden>🎉</span>
         </p>
       </div>
       <div className="w-full max-w-none pb-12">
         <div className="relative mx-auto max-w-[760px] border-t border-zinc-100 pt-20">
-          <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 inline-flex h-7 items-center rounded-full border border-zinc-200 bg-white px-4 text-[14px] text-zinc-500">
+          <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 inline-flex h-7 items-center rounded-full border border-zinc-200 bg-white px-4 text-base text-zinc-500">
             Tip
           </span>
-          <p className="mx-auto max-w-[520px] text-[20px] font-semibold leading-snug text-zinc-900">
+          <p className="mx-auto max-w-[520px] text-lg font-semibold leading-snug text-zinc-900">
             Pin your Favorites bar to the top of your screen to interact with them faster than ever!
           </p>
         </div>
@@ -611,8 +611,8 @@ function EmptyState({ Icon, title, sub }: { Icon: LucideIcon; title: string; sub
       <span className="inline-flex items-center justify-center w-12 h-12 rounded-xl border border-zinc-200 mb-3">
         <Icon className="w-5 h-5 text-zinc-400" />
       </span>
-      <p className="text-sm font-medium text-zinc-800 mb-1">{title}</p>
-      <p className="text-[13px] text-zinc-500 max-w-[320px]">{sub}</p>
+      <p className="text-xs font-medium text-zinc-800 mb-1">{title}</p>
+      <p className="text-sm text-zinc-500 max-w-[320px]">{sub}</p>
     </div>
   );
 }
@@ -644,7 +644,7 @@ function NotifEntry({
     <div className="ml-auto flex items-center gap-2 shrink-0">
       <div className={`flex items-center gap-2 ${cleared ? "" : "group-hover:hidden"}`}>
         {!n.read && !cleared ? <span className="w-1.5 h-1.5 rounded-full bg-[#0073EA] shrink-0" aria-hidden /> : null}
-        <time className="text-[13px] text-zinc-400 shrink-0" dateTime={n.createdAt}>{shortDate(n.createdAt)}</time>
+        <time className="text-sm text-zinc-400 shrink-0" dateTime={n.createdAt}>{shortDate(n.createdAt)}</time>
       </div>
       {!cleared ? (
         <div className="hidden group-hover:flex items-center gap-1">
@@ -669,7 +669,7 @@ function NotifEntry({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkRead(n.id); }}
-            className="inline-flex items-center gap-1 h-6 rounded-md bg-zinc-900 !px-2 text-[13px] font-medium text-white hover:bg-zinc-800"
+            className="inline-flex items-center gap-1 h-6 rounded-md bg-zinc-900 !px-2 text-sm font-medium text-white hover:bg-zinc-800"
           >
             <Check className="w-3 h-3" strokeWidth={2.5} />
             Clear
@@ -681,10 +681,10 @@ function NotifEntry({
 
   const FullscreenBody = (
     <>
-      <span className="text-[14px] font-medium text-zinc-800 truncate shrink-0 max-w-[38%]">{n.title}</span>
+      <span className="text-base font-medium text-zinc-800 truncate shrink-0 max-w-[38%]">{n.title}</span>
       <v.Icon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
       {n.message ? (
-        <p className={`flex-1 min-w-0 truncate text-[14px] ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-ink)]" : "text-zinc-500"}`}>
+        <p className={`flex-1 min-w-0 truncate text-base ${!n.read && v.bucket === "primary" ? "text-[var(--os-brand-ink)]" : "text-zinc-500"}`}>
           {n.message}
         </p>
       ) : (
@@ -696,9 +696,9 @@ function NotifEntry({
 
   const InlineBody = (
     <>
-      <span className="text-[14px] text-zinc-900 truncate font-medium max-w-[200px] shrink-0">{n.title}</span>
+      <span className="text-base text-zinc-900 truncate font-medium max-w-[200px] shrink-0">{n.title}</span>
       {n.message ? (
-        <p className="text-[14px] text-zinc-500 truncate min-w-0 flex-1">{n.message}</p>
+        <p className="text-base text-zinc-500 truncate min-w-0 flex-1">{n.message}</p>
       ) : (
         <span className="flex-1" />
       )}

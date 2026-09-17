@@ -39,14 +39,14 @@ export default function PublicDocPage() {
   if (err) {
     return (
       <Centered>
-        <p className="text-sm text-zinc-500">This link is invalid or has been turned off.</p>
+        <p className="text-base text-zinc-500">This link is invalid or has been turned off.</p>
       </Centered>
     );
   }
   if (!data) {
     return (
       <Centered>
-        <div className="flex items-center gap-2 text-sm text-zinc-500">
+        <div className="flex items-center gap-2 text-base text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading…
         </div>
       </Centered>
@@ -58,8 +58,8 @@ export default function PublicDocPage() {
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto w-full max-w-[820px] px-6 py-10">
-        <h1 className="text-[22px] font-bold text-zinc-900">{data.title || "Untitled note"}</h1>
-        <p className="mt-1 text-[13.5px] text-zinc-500">Shared read-only</p>
+        <h1 className="text-xl font-semibold text-zinc-900">{data.title || "Untitled note"}</h1>
+        <p className="mt-1 text-base text-zinc-500">Shared read-only</p>
         <div className="mt-6">
           <BlockNoteCanvas
             initialBnDoc={content.bnDoc ?? null}

@@ -74,7 +74,7 @@ export function PrivacyControls() {
           <div className="flex items-start gap-3">
             <Cookie size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-semibold">Cookie preferences</p>
+              <p className="text-xs font-semibold">Cookie preferences</p>
               <p className="text-xs text-muted mt-0.5">
                 Current:{" "}
                 {[
@@ -93,7 +93,7 @@ export function PrivacyControls() {
           <div className="flex items-start gap-3">
             <ShieldCheck size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-semibold">Withdraw all consent</p>
+              <p className="text-xs font-semibold">Withdraw all consent</p>
               <p className="text-xs text-muted mt-0.5">
                 Revokes all optional cookies and logs the withdrawal.
               </p>
@@ -110,7 +110,7 @@ export function PrivacyControls() {
           <div className="flex items-start gap-3">
             <Download size={18} className="mt-1 text-[#d4ff2e] shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-semibold">Download my data</p>
+              <p className="text-xs font-semibold">Download my data</p>
               <p className="text-xs text-muted mt-0.5">
                 Machine-readable JSON covering your profile, activity, and
                 consent records (GDPR Art. 15 / CCPA Right to Know).
@@ -128,7 +128,7 @@ export function PrivacyControls() {
           <div className="flex items-start gap-3">
             <Trash2 size={18} className="mt-1 text-red-400 shrink-0" />
             <div className="flex-1">
-              <p className="text-sm font-semibold">Delete my account</p>
+              <p className="text-xs font-semibold">Delete my account</p>
               <p className="text-xs text-muted mt-0.5 leading-relaxed">
                 Permanently anonymizes your personal data. Organizational
                 records you contributed to (reviews, kudos, KPI history) are
@@ -154,7 +154,7 @@ export function PrivacyControls() {
             <DialogTitle>Delete your account?</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-3">
-            <p className="text-sm text-muted">
+            <p className="text-xs text-muted">
               Type your email address (<span className="font-mono text-foreground">{user?.email}</span>) to confirm. This action is irreversible.
             </p>
             <div className="space-y-1">

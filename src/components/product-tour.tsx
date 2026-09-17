@@ -85,7 +85,7 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
 
         {/* Header */}
         <div className="px-6 pt-7 pb-3">
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-[#0073EA] mb-1.5">
+          <div className="flex items-center gap-2 text-micro uppercase tracking-wider text-[#0073EA] mb-1.5">
             <Sparkles size={11} />
             <span>{title}</span>
             <span className="text-muted">·</span>
@@ -105,8 +105,8 @@ export function ProductTour({ open, steps, title, subtitle, onClose, onComplete 
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-bold text-foreground mb-1.5 leading-tight">{step.title}</h2>
-              <p className="text-sm text-muted leading-relaxed whitespace-pre-line">{step.description}</p>
+              <h2 className="text-lg font-semibold text-foreground mb-1.5 leading-tight">{step.title}</h2>
+              <p className="text-xs text-muted leading-relaxed whitespace-pre-line">{step.description}</p>
               {step.highlight && (
                 <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 dark:border-[#0073EA]/25 dark:bg-[#0073EA]/10 px-3 py-2">
                   <p className="text-xs text-zinc-600 dark:text-zinc-300">

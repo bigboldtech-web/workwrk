@@ -323,7 +323,7 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
       {statuses.length === 0 ? (
         <div className="rounded-lg border border-zinc-200 bg-white px-8 py-14 text-center">
           <Columns3 className="w-8 h-8 mx-auto text-zinc-300 mb-3" />
-          <p className="text-[13.5px] text-zinc-500">This board has no statuses yet. Add a status to group your cards into columns.</p>
+          <p className="text-base text-zinc-500">This board has no statuses yet. Add a status to group your cards into columns.</p>
         </div>
       ) : (
       <div className="flex gap-3 overflow-x-auto pb-2">
@@ -356,12 +356,12 @@ export function BoardKanbanView({ boardId, initialItems, initialFields, statuses
             >
               <div className="flex items-center gap-2 px-1 pt-0.5 pb-2.5">
                 <span
-                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-[11.5px] font-bold uppercase tracking-wider text-white"
+                  className="inline-flex items-center h-5 rounded-[5px] px-2 text-micro font-semibold uppercase tracking-wider text-white"
                   style={{ background: meta.color }}
                 >
                   {meta.label}
                 </span>
-                <span className="text-[12px] font-medium text-zinc-400 tabular-nums">{cards.length}</span>
+                <span className="text-xs font-medium text-zinc-400 tabular-nums">{cards.length}</span>
                 {canEdit ? (
                   <button
                     type="button"
@@ -523,7 +523,7 @@ function KanbanCard({
       onDragEnd={onDragEnd}
       onClick={() => { if (!editing) onOpen?.(); }}
       onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-      className={`group relative rounded-lg border bg-white px-3 py-2 text-sm shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
+      className={`group relative rounded-lg border bg-white px-3 py-2 text-xs shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${
         selected ? "border-[var(--os-brand)] ring-1 ring-[var(--os-brand)]" : "border-zinc-200 hover:border-zinc-300"
       } ${
         canEdit && !editing ? "cursor-grab active:cursor-grabbing" : onOpen ? "cursor-pointer" : ""
@@ -554,10 +554,10 @@ function KanbanCard({
               onFocus={(e) => e.currentTarget.select()}
               onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); else if (e.key === "Escape") { setTitle(card.title); setEditing(false); } }}
               onBlur={saveTitle}
-              className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-[14px] font-medium text-zinc-900 focus:outline-none"
+              className="w-full bg-white border border-[var(--os-brand)] rounded-md px-1.5 py-0.5 text-base font-medium text-zinc-900 focus:outline-none"
             />
           ) : (
-            <div className="break-words text-[14px] font-medium leading-snug text-zinc-800">
+            <div className="break-words text-base font-medium leading-snug text-zinc-800">
               {card.title}
               {card.recurRule ? (
                 <span
@@ -660,7 +660,7 @@ function KanbanCard({
 
       {/* Footer — subtask count only (ClickUp cards carry no created date). */}
       {subtaskCount > 0 ? (
-        <div className="mt-2 flex items-center text-[12px] text-zinc-400">
+        <div className="mt-2 flex items-center text-xs text-zinc-400">
           <span className="inline-flex items-center gap-1">
             <Network className="w-3 h-3" />
             {subtaskCount} subtask{subtaskCount === 1 ? "" : "s"}

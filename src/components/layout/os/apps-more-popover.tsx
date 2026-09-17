@@ -120,7 +120,7 @@ export function AppsMorePopover() {
         title={app.label.replace(/\.\.$/, "")}
       >
         <app.Icon className="w-[18px] h-[18px] text-zinc-700" />
-        <span className="text-[12px] text-zinc-700 truncate max-w-full leading-tight">
+        <span className="text-xs text-zinc-700 truncate max-w-full leading-tight">
           {app.label.replace(/\.\.$/, "")}
         </span>
       </button>
@@ -138,8 +138,8 @@ export function AppsMorePopover() {
       aria-label="All apps"
     >
       <div className="px-4 pt-3 pb-2">
-        <h2 className="text-[14px] font-semibold text-zinc-900">Apps</h2>
-        <p className="text-[12px] text-zinc-500 mt-0.5">
+        <h2 className="text-base font-semibold text-zinc-900">Apps</h2>
+        <p className="text-xs text-zinc-500 mt-0.5">
           Everything you have access to. Admins manage visibility and order in
           Settings &rsaquo; Apps.
         </p>
@@ -153,7 +153,7 @@ export function AppsMorePopover() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search apps…"
-            className="w-full h-8 pl-7 pr-2 rounded-md bg-zinc-50 border border-zinc-200 text-[13px] focus:outline-none focus:border-[var(--os-brand)]"
+            className="w-full h-8 pl-7 pr-2 rounded-md bg-zinc-50 border border-zinc-200 text-sm focus:outline-none focus:border-[var(--os-brand)]"
             autoFocus
           />
         </div>
@@ -162,7 +162,7 @@ export function AppsMorePopover() {
       <div className="flex-1 overflow-y-auto px-3 pb-3">
         {showRecents ? (
           <section className="mb-3">
-            <div className="px-0.5 pt-1 pb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+            <div className="px-0.5 pt-1 pb-1.5 flex items-center gap-1.5 text-micro font-semibold uppercase tracking-wide text-zinc-500">
               <ClockIcon className="w-3 h-3" />
               <span>Recent</span>
             </div>
@@ -175,11 +175,11 @@ export function AppsMorePopover() {
         ) : null}
 
         {grouped.length === 0 ? (
-          <div className="text-center text-[13px] text-zinc-500 py-6">No matches.</div>
+          <div className="text-center text-sm text-zinc-500 py-6">No matches.</div>
         ) : (
           grouped.map((group) => (
             <section key={group.category} className="mb-3 last:mb-0">
-              <div className="px-0.5 pt-1 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+              <div className="px-0.5 pt-1 pb-1.5 text-micro font-semibold uppercase tracking-wide text-zinc-500">
                 {group.category}
               </div>
               <div className="grid grid-cols-4 gap-1.5">
@@ -196,7 +196,7 @@ export function AppsMorePopover() {
         <button
           type="button"
           onClick={onCustomize}
-          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-[13px] text-zinc-700 hover:bg-zinc-50"
+          className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-md text-sm text-zinc-700 hover:bg-zinc-50"
         >
           <Settings className="w-3.5 h-3.5 text-zinc-500" />
           <span>Customize navigation</span>

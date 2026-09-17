@@ -67,7 +67,17 @@ const eslintConfig = defineConfig([
   // Severity schedule: every rule that fails on today's code starts as a
   // warning and flips to "error" with the step that clears it:
   //   no-grey-utilities       -> error at refresh step 5 (colour sweep)
-  //   no-arbitrary-text-size  -> error at refresh step 2 (type codemod)
+  //   no-arbitrary-text-size  -> error at refresh step 2 (type codemod).
+  //                              Step 2 ran (scripts/codemod-type-scale.mjs):
+  //                              3,350 hits -> 4 inside this rule's scope.
+  //                              The codemod refused 9 sizes above the scale
+  //                              rather than guess: 28 / 40 / 42 in
+  //                              conference-surface, task-dialog,
+  //                              block-doc-editor, board-chart-view (the 4
+  //                              this rule sees) plus 32 / 40 / 52 in
+  //                              src/app/onboard/page.tsx, which is outside
+  //                              the `files` list below. Kept at "warn" until
+  //                              the founder rules on a display size, then flip.
   //   no-banned-radius-shadow -> error at refresh step 4 (primitives)
   //   no-brand-dots           -> error now (zero hits at the token step)
   {

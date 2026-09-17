@@ -63,7 +63,7 @@ export function ProductMosaic() {
             Run <span style={{ color: "var(--brand-red)" }}>every workflow</span>{" "}
             your team has &mdash; <br className="hidden md:block" />on one canvas.
           </h2>
-          <p className="mt-5 text-base lg:text-lg leading-relaxed max-w-2xl" style={{ color: "var(--m-text-muted)" }}>
+          <p className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl" style={{ color: "var(--m-text-muted)" }}>
             Tasks, KPIs, OKRs, SOPs, expenses, kudos, pipeline, reviews,
             campaigns, recruiting, dashboards, calendars. 100+ surfaces on
             one platform &mdash; all wired to the same data model.

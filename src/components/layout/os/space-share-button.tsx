@@ -24,7 +24,7 @@ export function SpaceShareButton({ spaceId, spaceName, initialVisibility }: Prop
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-sm text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
+        className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
       >
         <Share2 className="w-3.5 h-3.5" />
         Share

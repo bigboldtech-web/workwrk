@@ -80,7 +80,7 @@ export function FirstRunWelcome() {
     <Dialog open={open} onOpenChange={(o) => { if (!o) dismiss(); }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-xl tracking-tight">
+          <DialogTitle className="text-lg tracking-tight">
             {step === 0 && "Welcome to WorkwrK."}
             {step === 1 && "Everything's one keystroke away."}
             {step === 2 && "Make it yours."}
@@ -89,7 +89,7 @@ export function FirstRunWelcome() {
 
         {step === 0 && (
           <div className="space-y-5 pt-2">
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-xs text-muted leading-relaxed">
               Seven hubs in the sidebar, organized around how teams actually work.
               Most people use three of them daily — the rest stay quietly out of the way.
             </p>
@@ -108,8 +108,8 @@ export function FirstRunWelcome() {
                       <Icon size={13} />
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[13.5px] font-semibold leading-tight">{hub.name}</p>
-                      <p className="text-[12px] text-muted leading-snug mt-0.5">{hub.blurb}</p>
+                      <p className="text-base font-semibold leading-tight">{hub.name}</p>
+                      <p className="text-xs text-muted leading-snug mt-0.5">{hub.blurb}</p>
                     </div>
                   </div>
                 );
@@ -120,9 +120,9 @@ export function FirstRunWelcome() {
 
         {step === 1 && (
           <div className="space-y-5 pt-2">
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-xs text-muted leading-relaxed">
               Press{" "}
-              <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-surface font-mono text-[12px]">
+              <kbd className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-surface font-mono text-xs">
                 <Command size={10} /> K
               </kbd>{" "}
               from anywhere to open the command palette. Search people, tasks,
@@ -133,8 +133,8 @@ export function FirstRunWelcome() {
               <div className="flex items-start gap-3">
                 <Sparkles size={16} className="text-[color:var(--accent-strong)] flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[14px] font-semibold mb-1">Try it now</p>
-                  <p className="text-[13px] text-muted leading-relaxed">
+                  <p className="text-base font-semibold mb-1">Try it now</p>
+                  <p className="text-sm text-muted leading-relaxed">
                     Type a teammate's name, an SOP keyword, or just <em>"who's overdue?"</em> —
                     the AI synthesizes the answer from your live data.
                   </p>
@@ -146,22 +146,22 @@ export function FirstRunWelcome() {
 
         {step === 2 && (
           <div className="space-y-5 pt-2">
-            <p className="text-sm text-muted leading-relaxed">
+            <p className="text-xs text-muted leading-relaxed">
               Click the{" "}
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-surface text-[12px]">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-border bg-surface text-xs">
                 <Pin size={10} />
               </span>{" "}
               next to any sidebar item to pin it to the top. Your pinned set
               persists across sessions, and frequently-visited items show up
               in the Recent rail automatically.
             </p>
-            <div className="rounded-lg border border-border bg-surface p-4 text-sm">
-              <p className="font-semibold mb-2 text-[14px]">A typical day</p>
-              <ol className="space-y-2 text-[13.5px] text-muted">
-                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-bold tabular-nums">1.</span>Open Home → check Inbox + Tasks.</li>
-                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-bold tabular-nums">2.</span>Decide / dismiss / snooze pending approvals.</li>
-                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-bold tabular-nums">3.</span>Drag tasks into today, complete as you go.</li>
-                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-bold tabular-nums">4.</span>Give a kudos. Seriously — try it.</li>
+            <div className="rounded-lg border border-border bg-surface p-4 text-xs">
+              <p className="font-semibold mb-2 text-base">A typical day</p>
+              <ol className="space-y-2 text-base text-muted">
+                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-semibold tabular-nums">1.</span>Open Home → check Inbox + Tasks.</li>
+                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-semibold tabular-nums">2.</span>Decide / dismiss / snooze pending approvals.</li>
+                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-semibold tabular-nums">3.</span>Drag tasks into today, complete as you go.</li>
+                <li className="flex gap-2"><span className="text-[color:var(--accent-strong)] font-semibold tabular-nums">4.</span>Give a kudos. Seriously — try it.</li>
               </ol>
             </div>
           </div>

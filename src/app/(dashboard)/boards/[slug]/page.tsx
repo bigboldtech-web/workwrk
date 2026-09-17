@@ -91,7 +91,7 @@ export default async function BoardPage(props: {
         {/* Space tile + name */}
         <Link
           href={`/spaces/${board.space.slug}`}
-          className="inline-flex items-center gap-1.5 text-[14px] text-zinc-700 hover:text-zinc-900 min-w-0 hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors"
+          className="inline-flex items-center gap-1.5 text-base text-zinc-700 hover:text-zinc-900 min-w-0 hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors"
         >
           <EntityTile
             size="sm"
@@ -105,8 +105,8 @@ export default async function BoardPage(props: {
         {/* Folder breadcrumb segment (when board lives in a folder) */}
         {board.folder ? (
           <>
-            <span className="text-zinc-300 text-[14px] px-0.5">/</span>
-            <span className="inline-flex items-center gap-1.5 text-[14px] text-zinc-700 min-w-0 hover:bg-zinc-100 rounded px-1 py-0.5 transition-colors cursor-pointer">
+            <span className="text-zinc-300 text-base px-0.5">/</span>
+            <span className="inline-flex items-center gap-1.5 text-base text-zinc-700 min-w-0 hover:bg-zinc-100 rounded px-1 py-0.5 transition-colors cursor-pointer">
               <EntityTile
                 size="sm"
                 icon={board.folder.icon}
@@ -120,8 +120,8 @@ export default async function BoardPage(props: {
         ) : null}
 
         {/* Board (current) — bold + star + filter */}
-        <span className="text-zinc-300 text-[14px] px-0.5">/</span>
-        <h1 className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-zinc-900 min-w-0 group cursor-pointer hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors">
+        <span className="text-zinc-300 text-base px-0.5">/</span>
+        <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900 min-w-0 group cursor-pointer hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors">
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-4 h-4 text-zinc-500" />
           ) : sprint ? (
@@ -141,7 +141,7 @@ export default async function BoardPage(props: {
 
         <Link
           href="/automation/workflows"
-          className="text-[13.5px] text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
+          className="text-base text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
           title="Automations"
         >
           <Zap className="w-3.5 h-3.5 text-amber-500" />
@@ -149,7 +149,7 @@ export default async function BoardPage(props: {
         </Link>
         <AskSidekickButton
           prompt="Help me with this board."
-          className="text-[13.5px] text-zinc-600 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100 hover:text-zinc-900"
+          className="text-base text-zinc-600 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100 hover:text-zinc-900"
         />
         <BoardShareButton
           boardId={board.id}

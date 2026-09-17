@@ -1868,7 +1868,7 @@ export function SheetGrid({
         * reorders. Right-click bubbles to the row's context
         * menu above, like the rest of the row. */}
       <div
-        className={`sticky left-0 z-10 flex items-center justify-end border-r border-zinc-200 pr-2 text-[11px] tabular-nums select-none ${
+        className={`sticky left-0 z-10 flex items-center justify-end border-r border-zinc-200 pr-2 text-xs tabular-nums select-none ${
           range && r >= range.r1 && r <= range.r2 ? "bg-zinc-100 text-zinc-600" : "bg-white text-zinc-400"
         }`}
         style={{ width: GUTTER_W, minWidth: GUTTER_W, touchAction: "none" }}
@@ -2001,7 +2001,7 @@ export function SheetGrid({
             role="gridcell"
             aria-colindex={c + 1}
             aria-selected={selected || isActive}
-            className={`flex border-r border-zinc-200 px-2 text-[13px] leading-tight ${
+            className={`flex border-r border-zinc-200 px-2 text-sm leading-tight ${
               // Editing: the cell un-clips and rises above frozen cells
               // (z-15/16) so a multi-line editor can grow past the row
               // height, Sheets' expanding-editor look. Display cells keep
@@ -2188,7 +2188,7 @@ export function SheetGrid({
             * (r - fr) * ROW_H, exactly the pre-variable-heights layout). */}
           <div style={{ height: geom.totalHeight - bandH, position: "relative" }}>
             {rowCount === 0 ? (
-              <div className="flex h-24 items-center justify-center text-[13px] text-zinc-400">No rows yet. Add one below.</div>
+              <div className="flex h-24 items-center justify-center text-sm text-zinc-400">No rows yet. Add one below.</div>
             ) : (
               mounted.map(({ rowId, r }) => renderRow(rowId, r, geom.rowTop(r) - bandH))
             )}
