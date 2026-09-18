@@ -9,15 +9,29 @@
  *   PATCH/DELETE /api/agreements/[id]
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
 import {
-  FileSignature, Plus, Loader2, Users, CheckCircle2, PenLine, Upload, LayoutTemplate,
-  X, Folder, Trash2, FolderInput, MoreHorizontal, Pencil,
+  FileSignature,
+  Plus,
+  Users,
+  CheckCircle2,
+  PenLine,
+  Upload,
+  LayoutTemplate,
+  X,
+  Folder,
+  Trash2,
+  FolderInput,
+  MoreHorizontal,
+  Pencil,
+  ChevronLeft,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { ViewTab } from "@/components/ui/view-tabs";
+
 import { useOsToast } from "@/components/layout/os/toast";
 
 type Row = { id: string; title: string; status: string; category: string | null; isTemplate: boolean; archivedAt: string | null; updatedAt: string; partyCount: number; signedCount: number };
@@ -135,37 +149,29 @@ export default function AgreementsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title={view === "templates" ? "Contract templates" : "Contracts"}
-        Icon={view === "templates" ? Folder : FileSignature}
-        iconGradient={GRAD.indigoBlue}
-        showStandardActions={false}
-        description={rows === null ? "Loading…" : `${rows.length} ${noun}${rows.length === 1 ? "" : "s"}`}
-        actions={
-          <div className="flex items-center gap-2">
-            <Link href="/agreements" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-base hover:bg-zinc-50 ${view === "live" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><FileSignature className="h-3.5 w-3.5" /> Contracts</Link>
-            <Link href="/agreements?view=templates" className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-base hover:bg-zinc-50 ${view === "templates" ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}><Folder className="h-3.5 w-3.5" /> Templates</Link>
-            {view === "templates" ? (
-              <button type="button" onClick={newTemplate} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-base font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-50">
-                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} New template
-              </button>
-            ) : (
-              <button type="button" onClick={openNew} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-base font-medium text-white hover:bg-[var(--os-brand-hover)]"><Plus className="h-3.5 w-3.5" /> New contract</button>
-            )}
-          </div>
+        views={
+          <>
+            <ViewTab label="Contracts" href="/agreements" active={view === "live"} />
+            <ViewTab label="Contract templates" href="/agreements?view=templates" active={view === "templates"} />
+          </>
         }
+        primary={view === "templates"
+          ? { label: "New template", onClick: newTemplate, busy }
+          : { label: "New contract", onClick: openNew }}
       />
       <input ref={fileRef} type="file" accept="application/pdf,.pdf" className="hidden" onChange={onPickPdf} />
 
       <div className="mx-auto max-w-5xl px-6 py-8">
         {rows === null ? (
-          <div className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+          <SkeletonRows />
         ) : rows.length === 0 ? (
           <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
             <FileSignature className="mx-auto h-8 w-8 text-zinc-300" />
             <div className="mt-3 text-xs font-medium text-zinc-700">{view === "templates" ? "No templates yet" : "No contracts yet"}</div>
             <div className="mt-1 text-base text-zinc-500">{view === "templates" ? "Create a template, or open a contract and choose “Save as template”." : "Write or upload a document, add signers, place fields, and send it."}</div>
-            <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-4 text-base font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-50"><Plus className="h-4 w-4" /> {view === "templates" ? "New template" : "New contract"}</button>
+            <button type="button" onClick={view === "templates" ? newTemplate : openNew} disabled={busy} className="mt-4 inline-flex items-center gap-1.5 text-base font-medium text-brand-deep hover:underline disabled:opacity-50">{view === "templates" ? "New template" : "New contract"}</button>
           </div>
         ) : (
           <div className="space-y-7">
@@ -285,9 +291,9 @@ export default function AgreementsPage() {
               </>
             ) : (
               <>
-                <button type="button" onClick={() => setStep("choose")} className="mb-3 text-sm text-zinc-500 hover:text-zinc-800">← Back</button>
+                <button type="button" onClick={() => setStep("choose")} className="mb-3 inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink"><ChevronLeft className="h-3.5 w-3.5" aria-hidden /> Back</button>
                 {templates === null ? (
-                  <div className="flex items-center gap-2 py-6 text-base text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading templates…</div>
+                  <SkeletonRows rows={3} />
                 ) : templates.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-zinc-200 p-6 text-center text-base text-zinc-500">No templates yet. Open a contract and choose “Save as template”.</div>
                 ) : (
@@ -306,7 +312,7 @@ export default function AgreementsPage() {
                 )}
               </>
             )}
-            {busy ? <div className="mt-4 flex items-center gap-2 text-base text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Working…</div> : null}
+            {busy ? <div className="mt-4 flex items-center gap-2 text-base text-zinc-500"><Dots variant="pending" /> Working…</div> : null}
           </div>
         </div>
       ) : null}

@@ -16,16 +16,19 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { FileText, Send, Save, ArrowLeft, Loader2 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { Send, Save } from "lucide-react";
+import { OsPageHeader, OsPageHeaderSkeleton, HeaderAction } from "@/components/layout/os/page-header";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import { SkeletonRows } from "@/components/ui/skeleton";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { type Block } from "@/components/docs/block-editor";
 import { BlockNoteCanvas, type BnDocJSON } from "@/components/docs/blocknote-canvas";
 import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "@/components/docs/legacy-embed-preserve";
 import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
 import { SopTagInput } from "@/components/sops/sop-tag-input";
+import { ErrorState } from "@/components/ui/error-state";
+import { LockedPage } from "@/components/access";
 
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
@@ -83,6 +86,7 @@ export default function WrittenSopEditor() {
   const [saving, setSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const descRef = useRef<HTMLTextAreaElement | null>(null);
@@ -93,6 +97,12 @@ export default function WrittenSopEditor() {
   const descValRef = useRef("");
   const initialLoad = useRef(true);
   const creatingRef = useRef(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Bumped by the error state's Try again to run the self-create once more.
+  const [createAttempt, setCreateAttempt] = useState(0);
+  // A 403 from the create is a denial, not an error: it renders the
+  // LockedPage at this URL (spec-shell 1.6), never a red sentence.
+  const [createDenied, setCreateDenied] = useState(false);
 
   // Self-create: visiting /sops/new/text with no ?id mints a fresh WRITTEN SOP
   // and redirects to it, so the editor always has a row to load/save.
@@ -110,13 +120,15 @@ export default function WrittenSopEditor() {
             content: { type: "WRITTEN", body: "" },
           }),
         });
+        if (res.status === 403) { setCreateDenied(true); return; }
         if (!res.ok) throw new Error(`POST ${res.status}`);
         const data = await res.json();
         const sop = data.data ?? data;
         router.replace(`/sops/new/text?id=${encodeURIComponent(sop.id)}`);
-      } catch { toast("Couldn't create SOP"); }
+      } catch { setCreateError("create"); toast("Couldn't create SOP"); }
+      finally { creatingRef.current = false; }
     })();
-  }, [id, router, toast]);
+  }, [id, router, toast, createAttempt]);
 
   // Size the description field to its loaded content (it arrives async, after
   // the textarea has already rendered one row tall). Re-runs on editor changes
@@ -164,7 +176,7 @@ export default function WrittenSopEditor() {
         setLoadError(e instanceof Error ? e.message : "Load failed");
       }
     })();
-  }, [id]);
+  }, [id, reloadKey]);
 
   const persist = useCallback(async (nextBnDoc: BnDocJSON | null, nextBlocks: Block[], nextMeta: DocMeta, opts: { publish?: boolean } = {}) => {
     if (!id) return;
@@ -234,59 +246,62 @@ export default function WrittenSopEditor() {
     }, 700);
   }
 
-  if (!id) return (<>
-    <OsTitleBar title="New written SOP" Icon={FileText} iconGradient={GRAD.tealGreen} showStandardActions={false} />
-    <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Creating SOP…</div>
-  </>);
+  // No id yet: the SOP is being minted. The pending state is the skeleton
+  // header (spec-shell 2.2); a failed create is an error state with the
+  // BackButton as the way out, never a spinner that spins forever.
+  if (!id) {
+    if (createDenied) {
+      return (
+        <LockedPage
+          name="New SOP"
+          sentence="Creating SOPs is limited to people who can manage SOPs."
+          back={{ fallbackHref: "/sops", label: "SOPs" }}
+        />
+      );
+    }
+    if (createError) {
+      // The one error primitive with Try again wired to the same create
+      // (spec-shell 1.7); the BackButton in the header is the way out.
+      return (<>
+        <OsPageHeader title="New written SOP" back={{ fallbackHref: "/sops", label: "SOPs" }} />
+        <ErrorState what="this SOP" title="Couldn't create the SOP" onRetry={() => { setCreateError(null); setCreateAttempt((n) => n + 1); }} />
+      </>);
+    }
+    return <OsPageHeaderSkeleton />;
+  }
 
   if (loadError) {
     return (<>
-      <OsTitleBar title="Written SOP" Icon={FileText} iconGradient={GRAD.tealGreen} showInvite={false} />
-      <div className="sop-edit__error">Couldn&apos;t load this SOP: {loadError}. <Link href="/sops">Back to SOPs</Link></div>
+      <OsPageHeader title="Written SOP" back={{ fallbackHref: "/sops", label: "SOPs" }} />
+      <ErrorState what="this SOP" hint={loadError} onRetry={() => { setLoadError(null); setReloadKey((k) => k + 1); }} />
     </>);
   }
 
   return (<>
-    <OsTitleBar
-      title="Written SOP"
-      Icon={FileText}
-      iconGradient={GRAD.tealGreen}
-      showStandardActions={false}
-      description={saving ? "Saving…" : lastSaved ? `Saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Auto-saves as you type"}
-      actions={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => blocks && persist(bnDoc, blocks, meta)}
-            disabled={saving || !blocks}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            <Save className="h-3.5 w-3.5" /> Save
-          </button>
-          {status !== "PUBLISHED" ? (
-            <button
-              type="button"
-              onClick={() => blocks && persist(bnDoc, blocks, meta, { publish: true })}
-              disabled={saving || !blocks}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
-            >
-              <Send className="h-3.5 w-3.5" /> Publish
-            </button>
-          ) : (
-            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-base font-medium text-emerald-700">Published</span>
-          )}
-        </div>
+    <OsPageHeader
+      title={title || "Written SOP"}
+      back={{ fallbackHref: "/sops", label: "SOPs" }}
+      autosave={
+        <AutosaveIndicator
+          status={saving ? "saving" : lastSaved ? "saved" : "idle"}
+          lastSavedAt={lastSaved}
+          labels={{ idle: "Auto-saves as you type" }}
+        />
       }
+      actions={
+        <>
+          <HeaderAction icon={Save} label="Save" disabled={saving || !blocks} onClick={() => { if (blocks) void persist(bnDoc, blocks, meta); }} />
+          {status === "PUBLISHED" ? (
+            <span className="inline-flex h-7 items-center gap-1.5 rounded-md bg-success-bg px-2 text-sm font-medium text-success-text">Published</span>
+          ) : null}
+        </>
+      }
+      primary={status !== "PUBLISHED"
+        ? { label: "Publish", icon: Send, disabled: saving || !blocks, onClick: () => { if (blocks) void persist(bnDoc, blocks, meta, { publish: true }); } }
+        : undefined}
     />
 
     <div className="sop-edit">
-      <button
-        type="button"
-        onClick={() => router.push("/sops")}
-        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-base text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> All SOPs
-      </button>
 
       <input
         type="text"
@@ -317,7 +332,7 @@ export default function WrittenSopEditor() {
       </div>
 
       {blocks === null ? (
-        <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Loading…</div>
+        <SkeletonRows rows={4} />
       ) : (
         <BlockNoteCanvas
           key={id}

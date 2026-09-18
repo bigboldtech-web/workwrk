@@ -18,19 +18,40 @@
  *  the CandorResponse row has no user column, so a reply can't be traced back.
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
-  MessageCircleHeart, ArrowLeft, Lock, ShieldCheck, Send, Plus, Trash2,
-  ChevronUp, ChevronDown, Activity, CheckCircle2, Building,
-  Globe, Loader2, Type, Star, Repeat, Edit3, BarChart3, Rocket,
+  MessageCircleHeart,
+  ArrowLeft,
+  Lock,
+  ShieldCheck,
+  Send,
+  Plus,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  Activity,
+  CheckCircle2,
+  Building,
+  Globe,
+  Type,
+  Star,
+  Repeat,
+  Edit3,
+  BarChart3,
+  Rocket,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader, OsPageHeaderSkeleton } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { BackButton } from "@/components/ui/back-button";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { ErrorState } from "@/components/ui/error-state";
+import { NotFoundView } from "@/components/access/not-found-view";
 
 type CandorStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 type PromptType = "text" | "rating" | "start_stop_continue";
@@ -126,30 +147,28 @@ export default function CandorDetailPage() {
   }, [bumpRowVersion, load]);
 
   const header = (
-    <OsTitleBar
-      title={session ? session.title : "Candor session"}
-      Icon={MessageCircleHeart}
-      iconGradient={GRAD.pinkPurple}
-      showStandardActions={false}
-      description={session ? STATUS_META[session.status].label : undefined}
-      actions={
-        <Link href="/candor" className="cnd-d__back"><ArrowLeft /> All sessions</Link>
-      }
-    />
+    <>
+      <Breadcrumb items={[{ label: "Candor", href: "/candor" }, ...(session ? [{ label: session.title }] : [])]} />
+      {session === undefined && !loadError ? (
+        <OsPageHeaderSkeleton />
+      ) : (
+        <OsPageHeader
+          title={session ? session.title : "Candor session"}
+          back={{ fallbackHref: "/candor", label: "Candor" }}
+        />
+      )}
+    </>
   );
+
+  // A session the API will not return (closed, another team's, or none) is
+  // the in-shell 404, identical for a miss and a denial (spec-shell 2.4).
+  if (session === null && !loadError) return <NotFoundView />;
 
   let body: React.ReactNode;
   if (loadError) {
-    body = <NotAvailable title="Couldn't load this session" subtitle={loadError} />;
-  } else if (session === undefined) {
-    body = <div className="cnd-d__loading"><ValueLoader size={32} /></div>;
-  } else if (session === null) {
-    body = (
-      <NotAvailable
-        title="This session isn't available to you"
-        subtitle="It may be closed, scoped to another team, or you may not have access. Only active sessions for your team or the whole org appear here."
-      />
-    );
+    body = <ErrorState what="this session" hint={loadError} onRetry={() => { void load(); }} />;
+  } else if (!session) {
+    body = <SkeletonRows />;
   } else if (session.isOwner) {
     body = session.status === "DRAFT"
       ? <EditorView session={session} onMutate={afterMutate} toast={toast} />
@@ -174,7 +193,7 @@ function NotAvailable({ title, subtitle }: { title: string; subtitle: string }) 
       <div className="cnd-d__blank-art"><MessageCircleHeart /></div>
       <h2>{title}</h2>
       <p>{subtitle}</p>
-      <Link href="/candor" className="cnd-d__blank-cta"><ArrowLeft /> Back to Candor</Link>
+      <BackButton fallbackHref="/candor" label="Candor" />
     </div>
   );
 }
@@ -315,7 +334,7 @@ function RespondView({ session, onMutate, toast }: { session: ApiCandor; onMutat
 
       <div className="cnd-d__actions">
         <button type="button" className="cnd-d__btn cnd-d__btn--primary" disabled={submitting || prompts.length === 0} onClick={submit}>
-          {submitting ? <Loader2 className="cnd-d__spin" /> : <Send />} Submit anonymously
+          {submitting ? <Dots variant="pending" /> : <Send />} Submit anonymously
         </button>
       </div>
     </div>
@@ -379,7 +398,7 @@ function ResultsView({ session, onMutate, toast }: { session: ApiCandor; onMutat
         <div className="cnd-d__result-actions">
           {session.status === "ACTIVE" ? (
             <button type="button" className="cnd-d__btn cnd-d__btn--close" disabled={busy} onClick={close}>
-              {busy ? <Loader2 className="cnd-d__spin" /> : <CheckCircle2 />} Close session
+              {busy ? <Dots variant="pending" /> : <CheckCircle2 />} Close session
             </button>
           ) : null}
         </div>
@@ -388,7 +407,7 @@ function ResultsView({ session, onMutate, toast }: { session: ApiCandor; onMutat
       {error ? (
         <NotAvailable title="Couldn't load results" subtitle={error} />
       ) : data === undefined ? (
-        <div className="cnd-d__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : total === 0 ? (
         <div className="cnd-d__blank cnd-d__blank--inline">
           <div className="cnd-d__blank-art"><BarChart3 /></div>
@@ -578,10 +597,10 @@ function EditorView({ session, onMutate, toast }: { session: ApiCandor; onMutate
 
       <div className="cnd-d__actions">
         <button type="button" className="cnd-d__btn cnd-d__btn--ghost" disabled={saving !== null} onClick={() => persist(false)}>
-          {saving === "save" ? <Loader2 className="cnd-d__spin" /> : <Edit3 />} Save draft
+          {saving === "save" ? <Dots variant="pending" /> : <Edit3 />} Save draft
         </button>
         <button type="button" className="cnd-d__btn cnd-d__btn--primary" disabled={saving !== null} onClick={() => persist(true)}>
-          {saving === "launch" ? <Loader2 className="cnd-d__spin" /> : <Rocket />} Launch session
+          {saving === "launch" ? <Dots variant="pending" /> : <Rocket />} Launch session
         </button>
       </div>
     </div>

@@ -61,9 +61,108 @@ function makeRule(description, checks) {
   };
 }
 
+// spec-shell 1.5: the one back control. `router.back()` / `history.back()`
+// may be called in ui/back-button.tsx (the BackButton) and in the bar's own
+// history control (top-bar/nav-history.tsx); everywhere else a page renders
+// <BackButton fallbackHref label/>.
+const BACK_ALLOWED_FILES = /(?:^|[\/])(?:src[\/]components[\/]ui[\/]back-button\.tsx|src[\/]components[\/]layout[\/]os[\/]top-bar[\/]nav-history\.tsx)$/;
+
+// spec-shell 2.1 rule 2: a page.tsx under a dynamic segment ([id], [slug])
+// renders `<Breadcrumb items/>`, because no static table can know the
+// object's name. The check is the import, as the spec words it.
+const DYNAMIC_PAGE_RE = /src[\/]app[\/]\(dashboard\)[\/].*\[[^\]]+\].*[\/]page\.tsx$/;
+const BREADCRUMB_MODULE = "@/components/layout/os/top-bar/breadcrumb";
+
+// spec-shell 1.6 / 1.7: one loader vocabulary. A spinner (lucide Loader2)
+// and the string "Loading..." are lint errors under the shell and the app:
+// panels and drawers render Skeleton bars, buttons in flight render
+// <Dots variant="pending" />, route transitions pulse the rail logo.
+const LOADING_TEXT_RE = /(^|[^A-Za-z])Loading(\u2026|\.\.\.)/;
+
+// spec-shell 1.14 / design-system 4: the shell uses logical properties only,
+// so the frame mirrors under dir="rtl". A physical Tailwind direction
+// utility (left-2, -right-1, ml-auto, pl-3, text-left, rounded-l-lg,
+// border-r) is an error under src/components/layout/os/**; the logical
+// twin (start-2, -end-1, ms-auto, ps-3, text-start, rounded-s-lg,
+// border-e) says the same thing in both directions. Centring is
+// `inset-x-0 mx-auto` on a sized element, never `left-1/2 -translate-x-1/2`.
+const PHYSICAL_VALUE = "(?:\\d+(?:\\.\\d+)?(?:/\\d+)?|auto|px|full|\\[[^\\]]+\\]|\\([^)]+\\))";
+const PHYSICAL_RE = new RegExp(
+  "(?:^|[\\s\"'`(])(?:[^\\s\"'`]*:)?(?:-?(?:left|right|ml|mr|pl|pr|scroll-ml|scroll-mr)-" + PHYSICAL_VALUE +
+    "|text-(?:left|right)|(?:rounded|border)-[lr](?:-[^\\s\"'`)]+)?)(?=$|[\\s\"'`)])",
+);
+
 export const designSystemPlugin = {
   meta: { name: "workwrk-design-system", version: "1.0.0" },
   rules: {
+    "no-spinner-loader": {
+      meta: { type: "suggestion", docs: { description: "Loader2 spinners are retired: Skeleton bars in panels, <Dots variant=\"pending\" /> in buttons (spec-shell 1.6)." }, schema: [] },
+      create(context) {
+        return {
+          ImportDeclaration(node) {
+            if (node.source.value !== "lucide-react") return;
+            for (const spec of node.specifiers) {
+              if (spec.type === "ImportSpecifier" && spec.imported && spec.imported.name === "Loader2") {
+                context.report({ node: spec, message: "Loader2 is retired (spec-shell 1.6). Use <SkeletonRows /> / <SkeletonLines /> from @/components/ui/skeleton for a loading body and <Dots variant=\"pending\" /> from @/components/ui/dots for a button in flight." });
+              }
+            }
+          },
+        };
+      },
+    },
+    "no-loading-text": {
+      meta: { type: "suggestion", docs: { description: "The string \"Loading...\" is retired: a loading state is a skeleton, never a sentence (spec-shell 1.6)." }, schema: [] },
+      create(context) {
+        const check = (node, text) => {
+          if (LOADING_TEXT_RE.test(text)) {
+            context.report({ node, message: "\"Loading...\" text is retired (spec-shell 1.6). Render <SkeletonRows /> / <SkeletonLines /> at the row height instead; a page header in flight is <OsPageHeaderSkeleton />." });
+          }
+        };
+        return {
+          Literal(node) { if (typeof node.value === "string") check(node, node.value); },
+          TemplateElement(node) { check(node, node.value.raw); },
+          JSXText(node) { check(node, node.value); },
+        };
+      },
+    },
+    "no-bare-router-back": {
+      meta: { type: "problem", docs: { description: "router.back() and history.back() live in ui/back-button.tsx only (spec-shell 1.5)." }, schema: [] },
+      create(context) {
+        const file = context.filename ?? context.getFilename();
+        if (BACK_ALLOWED_FILES.test(file)) return {};
+        return {
+          CallExpression(node) {
+            const callee = node.callee;
+            if (callee.type !== "MemberExpression" || callee.property.type !== "Identifier" || callee.property.name !== "back") return;
+            const obj = callee.object;
+            const isHistory = obj.type === "Identifier" && obj.name === "history";
+            const isWindowHistory = obj.type === "MemberExpression" && obj.property.type === "Identifier" && obj.property.name === "history";
+            const isRouter = obj.type === "Identifier" && /router$/i.test(obj.name);
+            if (isHistory || isWindowHistory || isRouter) {
+              context.report({ node, message: "Bare back navigation. Render <BackButton fallbackHref label/> from @/components/ui/back-button; router.back() lives there and nowhere else (spec-shell 1.5)." });
+            }
+          },
+        };
+      },
+    },
+    "dynamic-page-declares-breadcrumb": {
+      meta: { type: "problem", docs: { description: "A page.tsx under a dynamic segment declares <Breadcrumb items/> (spec-shell 2.1 rule 2)." }, schema: [] },
+      create(context) {
+        const file = context.filename ?? context.getFilename();
+        if (!DYNAMIC_PAGE_RE.test(file)) return {};
+        let declared = false;
+        return {
+          ImportDeclaration(node) {
+            if (node.source.value === BREADCRUMB_MODULE) declared = true;
+          },
+          "Program:exit"(node) {
+            if (!declared) {
+              context.report({ node, loc: { line: 1, column: 0 }, message: "A dynamic route renders <Breadcrumb items/> from @/components/layout/os/top-bar/breadcrumb so the bar can name the object; without it the location row ends at the container (spec-shell 2.1 rule 2)." });
+            }
+          },
+        };
+      },
+    },
     "no-grey-utilities": makeRule(
       "Grey / purple-family Tailwind palette utilities and raw hex utilities are banned inside the product; use the token aliases.",
       [
@@ -104,6 +203,12 @@ export const designSystemPlugin = {
         ],
       ],
     ),
+    "no-physical-direction": makeRule("The shell uses logical direction utilities only (spec-shell 1.14): start/end, ms/me, ps/pe, text-start/text-end, rounded-s/e, border-s/e.", [
+      [
+        PHYSICAL_RE,
+        "Physical direction utility in the shell. Use the logical twin so the frame mirrors in RTL: left-N -> start-N, right-N -> end-N, ml/mr -> ms/me, pl/pr -> ps/pe, text-left/right -> text-start/end, rounded-l/r -> rounded-s/e, border-l/r -> border-s/e; centre with inset-x-0 mx-auto (spec-shell 1.14).",
+      ],
+    ]),
     "no-brand-dots": makeRule("The --os-dot-* tokens are quarantined to src/components/brand and src/app/(marketing).", [
       [
         DOT_RE,

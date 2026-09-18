@@ -8,16 +8,21 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Tag, Plus, Search, Hash, Trash2, Layers, Archive,
+  Tag,
+  Search,
+  Hash,
+  Trash2,
+  Layers,
+  Archive,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiTag = { id: string; name: string; category: string; color?: string | null; archived?: boolean; usageCount?: number };
 
@@ -124,19 +129,14 @@ export default function TagManagerPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Tags"
-        Icon={Tag}
-        iconGradient={GRAD.pinkPurple}
-        description={`${stats.total} tag${stats.total === 1 ? "" : "s"} · ${stats.categories} categor${stats.categories === 1 ? "y" : "ies"} · ${stats.usage} usage${stats.usage === 1 ? "" : "s"}`}
         actions={
           <div className="tgm__head-actions">
-            <Link href="/settings" className="tgm__nav-link"><Hash /> Settings</Link>
-            <button type="button" className="tgm__btn-primary" onClick={quickAdd}>
-              <Plus /> New tag
-            </button>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
           </div>
         }
+        primary={{ label: "New tag", onClick: quickAdd }}
       />
 
       <div className="tgm">
@@ -178,9 +178,9 @@ export default function TagManagerPage() {
         )}
 
         {tags === null ? (
-          <div className="tgm__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
-          <OsEmptyView Icon={Tag} iconGradient={GRAD.pinkPurple} title="No tags yet" subtitle="Tags label items across modules (cost center, project, department, region)." chips={["Department", "Project", "Cost Center"]} cta="New tag" />
+          <OsEmptyView context="list" title="No tags yet" hint="Tags label items across modules (cost center, project, department, region)." />
         ) : grouped.length === 0 ? (
           <div className="tgm__no-match"><Search /> No tags match.</div>
         ) : (

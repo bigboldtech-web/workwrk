@@ -16,7 +16,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Trash2, X, ExternalLink, MessageSquare, Link2, ChevronsLeft, ChevronsRight } from "lucide-react";
 import Link from "next/link";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
 import type { FieldDef } from "@/lib/field-catalog";
 import { BoardItemDetail, type DetailPatch, type ItemModuleGating } from "./board-item-detail";
@@ -24,6 +23,7 @@ import { ItemThread } from "./item-thread";
 import { LinkedAttachments } from "./linked-attachments";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface BoardItemDrawerProps {
   itemId: string | null;
@@ -223,7 +223,7 @@ export function BoardItemDrawer({
             ) : null}
 
             {loading || !item ? (
-              <div className="flex-1 flex items-center justify-center px-5 py-6"><ValueLoader size={34} /></div>
+              <div className="flex-1 px-5 py-4"><SkeletonRows rows={5} rowHeight="36px" /></div>
             ) : (
               <div className="flex-1 flex min-h-0">
                 {/* Main column */}

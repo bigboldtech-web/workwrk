@@ -29,10 +29,12 @@
 // item producers real, so the Inbox rows (incl. task_assigned + status_changes,
 // via src/lib/notify-item.ts) are all live and NOT marked Soon.
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import {  } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 // ── Store 1: UserPreference.home.notifications (/api/preferences) ──────
 // Keys match NotifyType in src/lib/notify-prefs.ts — keep in sync.
@@ -93,12 +95,6 @@ const EMAIL_CATEGORY_ROWS: Array<{ key: EmailCatKey; label: string; sub: string;
   { key: "dailyDigest", label: "Daily digest", sub: "One summary email each morning", live: false },
 ];
 
-function SoonChip() {
-  return (
-    <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-400">Soon</span>
-  );
-}
-
 function PrefRow({
   label,
   sub,
@@ -114,18 +110,22 @@ function PrefRow({
   disabled?: boolean;
   onChange: (next: boolean) => void;
 }) {
-  const dimmed = !live || disabled;
+  // A row the platform cannot produce yet is absent, or a ComingSoonRow
+  // behind Show upcoming features (spec-shell 1.15); never a dead switch.
+  if (!live) {
+    return (
+      <UpcomingOnly>
+        <ComingSoonRow label={label} className="border-b border-line-soft last:border-0" />
+      </UpcomingOnly>
+    );
+  }
   return (
     <div className="flex items-center justify-between gap-4 border-b border-zinc-100 px-4 py-3 last:border-0">
-      <div className={`min-w-0 ${dimmed ? "opacity-60" : ""}`}>
+      <div className={`min-w-0 ${disabled ? "opacity-60" : ""}`}>
         <div className="text-base font-medium text-zinc-900">{label}</div>
         <div className="text-sm text-zinc-500">{sub}</div>
       </div>
-      {live ? (
-        <Switch checked={checked} disabled={disabled} onChange={onChange} aria-label={label} />
-      ) : (
-        <SoonChip />
-      )}
+      <Switch checked={checked} disabled={disabled} onChange={onChange} aria-label={label} />
     </div>
   );
 }
@@ -244,9 +244,7 @@ export default function NotificationSettingsPage() {
       </p>
 
       {loading ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-        </div>
+        <SkeletonRows rows={6} />
       ) : (
         <div className="max-w-2xl">
           {/* ── Inbox (in-app) ─────────────────────────────────────── */}

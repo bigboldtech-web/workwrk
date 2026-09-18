@@ -19,6 +19,7 @@
  * /api/users/[id]/avatar, and the recorder's self-report / batch routes.
  */
 
+import { NotFoundView } from "@/components/access/not-found-view";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { BackButton } from "@/components/ui/back-button";
 import { useRouter } from "next/navigation";
@@ -62,6 +63,7 @@ import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { StatusChip } from "@/components/ui/chip";
 import { TeamStatTile, TeamAvatar, pctColor } from "@/components/team/ui";
 import { TAUPE } from "@/components/ui/accent";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 
 type Mode = "self" | "manage" | "peer";
 
@@ -918,16 +920,8 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
     );
   }
 
-  if (!user || user.error) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-zinc-500">Person not found</p>
-        <Button variant="ghost" className="mt-2" onClick={() => router.push(mode === "peer" || mode === "self" ? "/today" : "/people")}>
-          Go back
-        </Button>
-      </div>
-    );
-  }
+  // The in-shell 404 (spec-shell 2.4): the same view as any unknown object.
+  if (!user || user.error) return <NotFoundView />;
 
   const my = mode === "self";
   const fullName = `${user.firstName ?? ""} ${user.lastName ?? ""}`.trim() || user.email || "?";
@@ -990,7 +984,7 @@ export default function ProfileClient({ id, mode }: { id: string; mode: Mode }) 
             <span>My Profile</span>
           ) : (
             <>
-              <BackButton fallbackHref="/people" className="inline-flex items-center rounded-md p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800" />
+              <BackButton fallbackHref="/people" label="Directory" />
               <Link href="/team" className="hover:text-zinc-900">Teams</Link>
               <span className="text-zinc-300">/</span>
               <Link href="/people" className="hover:text-zinc-900">Directory</Link>

@@ -9,8 +9,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, ListChecks, FolderPlus, FileText, BarChart3, Brush, ClipboardCheck,
-  Download, LayoutTemplate, ChevronRight, Database, IterationCw,
+  Plus, ListChecks, FolderPlus, FileText, Brush,
+  LayoutTemplate, Database, IterationCw,
 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useOsShell } from "./shell-context";
@@ -112,8 +112,6 @@ function SpaceCreateMenu({
   const { toast } = useOsToast();
   const { openTemplateCenter, openCreateList, openCreateSprint } = useOsShell();
   const [busyKind, setBusyKind] = useState<string | null>(null);
-
-  const stub = (label: string) => () => toast(`${label} creation coming soon`);
 
   const createDoc = async () => {
     setBusyKind("doc");
@@ -223,13 +221,8 @@ function SpaceCreateMenu({
         busy={busyKind === "doc"}
         onClick={createDoc}
       />
-      <MenuItem
-        variant="inset"
-        icon={BarChart3}
-        iconClassName="text-sky-500"
-        label="Dashboard"
-        onClick={stub("Dashboard")}
-      />
+      {/* Only things that exist (spec-shell 1.15): no Dashboard, Form or
+          Imports rows until each has a backend. */}
       <MenuItem
         variant="inset"
         icon={Brush}
@@ -246,24 +239,9 @@ function SpaceCreateMenu({
         busy={busyKind === "database"}
         onClick={createDatabase}
       />
-      <MenuItem
-        variant="inset"
-        icon={ClipboardCheck}
-        iconClassName="text-teal-500"
-        label="Form"
-        onClick={stub("Form")}
-      />
 
       <MenuSeparator />
 
-      <MenuItem
-        variant="inset"
-        icon={Download}
-        iconClassName="text-zinc-500 dark:text-zinc-400"
-        label="Imports"
-        trailing={<ChevronRight className="h-3.5 w-3.5 text-zinc-400" />}
-        onClick={stub("Imports")}
-      />
       <MenuItem
         variant="inset"
         icon={LayoutTemplate}

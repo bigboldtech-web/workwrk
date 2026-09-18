@@ -14,11 +14,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Database, FileText, FolderPlus, LayoutGrid, Loader2,
+  Database, FileText, FolderPlus, LayoutGrid,
 } from "lucide-react";
 import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { useOsToast } from "./toast";
+import { Dots } from "@/components/ui/dots";
 
 interface Props {
   spaceId: string;
@@ -156,12 +157,12 @@ function Tile({
       type="button"
       onClick={onClick}
       disabled={busy}
-      className="text-left p-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors disabled:opacity-60"
+      className="text-start p-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 transition-colors disabled:opacity-60"
       style={{ borderLeft: `3px solid ${accent}` }}
     >
       <div className="flex items-center justify-between mb-1.5">
         <Icon className="w-4 h-4" style={{ color: accent }} />
-        {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : null}
+        {busy ? <Dots variant="pending" /> : null}
       </div>
       <div className="text-base font-semibold text-zinc-900">{label}</div>
       <div className="text-xs text-zinc-500 mt-0.5">{blurb}</div>

@@ -19,13 +19,24 @@
  * protected admin tiers by layout.tsx (requireOrgAdminOrRedirect).
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import {
-  ShieldCheck, Database, Users, Clock, ShoppingCart, Receipt, ScrollText,
-  Upload, Trash2, Download, Loader2, ChevronRight, type LucideIcon,
+  Database,
+  Users,
+  Clock,
+  ShoppingCart,
+  Receipt,
+  ScrollText,
+  Upload,
+  Trash2,
+  Download,
+  ChevronRight,
+  type LucideIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { useOsToast } from "@/components/layout/os/toast";
 
 type ExportRow = {
@@ -170,13 +181,7 @@ export default function DataCompliancePage() {
 
   return (
     <div className="flex h-full flex-col">
-      <OsTitleBar
-        title="Data & compliance"
-        Icon={ShieldCheck}
-        iconGradient=""
-        description="Export tenant data and manage retention"
-        showInvite={false}
-      />
+      <OsPageHeader title={SETTINGS_PAGES.data.label} />
 
       <div className="flex-1 overflow-y-auto px-6 pt-4 pb-10">
         <p className="mb-6 max-w-2xl text-base text-zinc-500">
@@ -255,7 +260,7 @@ function ExportButton({
         <div className="text-base text-zinc-500">{row.desc}</div>
       </div>
       {isBusy ? (
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[color:var(--os-brand)]" />
+        <Dots variant="pending" />
       ) : (
         <Download className="h-4 w-4 shrink-0 text-zinc-400" />
       )}

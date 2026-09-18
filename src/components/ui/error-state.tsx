@@ -1,66 +1,43 @@
-import { AlertCircle, WifiOff, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
+// ErrorState (spec-shell 1.7): the one error primitive, OsEmptyView in its
+// error shape. Four dots in a row, "Couldn't load {what}", the text link
+// "Try again" (always wired: the handler is required), a 12px reference id
+// when there is one. Used by error.tsx, drawers, panels, popovers and any
+// page body whose read failed. A failed read renders this in place; it never
+// toasts and never renders an empty list.
 
-interface ErrorStateProps {
-  status?: number;
-  message?: string;
-  onRetry?: () => void;
+import type { ReactNode } from "react";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+
+export interface ErrorStateProps {
+  /** What failed to load, in the sentence "Couldn't load {what}". */
+  what: string;
+  /** Wired to the same fetch that failed. */
+  onRetry: () => void;
+  /** An error digest or request id. */
+  reference?: string;
+  /** Override the sentence (an offline read, a boundary). */
+  title?: string;
+  /** A second 13px line (the raw error in development, a hint). */
+  hint?: string;
+  /** A BackButton or anything else under the block. */
+  children?: ReactNode;
+  /** In-card and in-panel uses: no illustration, tighter padding. */
+  compact?: boolean;
+  className?: string;
 }
 
-export function ErrorState({ status, message, onRetry }: ErrorStateProps) {
-  const isOffline =
-    message?.toLowerCase().includes("fetch") || message?.toLowerCase().includes("network");
-
-  let icon = AlertCircle;
-  let title = "Something went wrong";
-  let desc = message || "An unexpected error occurred. Please try again.";
-
-  if (isOffline) {
-    icon = WifiOff;
-    title = "You're offline";
-    desc = "Check your connection and try again.";
-  } else if (status === 404) {
-    title = "Not found";
-    desc = "The resource you're looking for doesn't exist or has been removed.";
-  } else if (status === 403) {
-    title = "Access denied";
-    desc = "You don't have permission to view this.";
-  }
-
-  const Icon = icon;
-
+export function ErrorState({ what, onRetry, reference, title, hint, children, compact, className }: ErrorStateProps) {
   return (
-    <div
-      className="flex flex-col items-center justify-center py-16 px-6 rounded-2xl bg-surface"
-      style={{ border: "1px dashed rgba(255, 61, 138, 0.25)" }}
+    <OsEmptyView
+      variant="error"
+      title={title ?? `Couldn't load ${what}`}
+      hint={hint}
+      reference={reference}
+      action={{ label: "Try again", onClick: onRetry }}
+      compact={compact}
+      className={className}
     >
-      <div
-        className="h-14 w-14 rounded-2xl flex items-center justify-center mb-4"
-        style={{
-          background: "rgba(255, 61, 138, 0.08)",
-          border: "1px solid rgba(255, 61, 138, 0.25)",
-          color: "#ff3d8a",
-        }}
-      >
-        <Icon size={26} />
-      </div>
-      <h3
-        className="mb-1.5 text-center text-foreground"
-        style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}
-      >
-        {title}
-      </h3>
-      <p
-        className="text-center max-w-md mb-6 text-muted"
-        style={{ fontSize: 14, lineHeight: 1.55 }}
-      >
-        {desc}
-      </p>
-      {onRetry && (
-        <Button onClick={onRetry} variant="outline" className="gap-2">
-          <RefreshCw size={14} /> Try again
-        </Button>
-      )}
-    </div>
+      {children}
+    </OsEmptyView>
   );
 }

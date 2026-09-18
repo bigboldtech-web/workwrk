@@ -24,7 +24,7 @@ export function PlannerModal({ onClose }: { onClose: () => void }) {
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-2.5 right-2.5 z-[60] w-8 h-8 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500"
+          className="absolute top-2.5 end-2.5 z-[60] w-8 h-8 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500"
           aria-label="Close Planner"
         >
           <X className="w-4 h-4" />

@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Store, Plus, Check } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE, getAllModules } from "@/components/layout/os/catalog";
+import { Plus, Check } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { GRAD, getAllModules } from "@/components/layout/os/catalog";
 
 type Tier = "core" | "plus" | "suite" | "free";
 type StoreCategory = "core" | "people" | "sales" | "ops" | "it" | "marketing" | "engineering" | "finance" | "legal" | "support" | "ai" | "integrations";
@@ -131,14 +131,7 @@ export default function StorePage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Marketplace"
-        Icon={Store}
-        iconGradient={GRAD.orangePink}
-        description="Apps, agents, and integrations. Install on-demand. Workspace-scoped."
-        people={[PEOPLE.bb, PEOPLE.mk]}
-        morePeople={3}
-      />
+      <OsPageHeader title="Marketplace" />
 
       <div className="os-mkt">
         <div className="os-mkt__hero">

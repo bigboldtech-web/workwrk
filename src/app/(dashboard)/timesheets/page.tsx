@@ -8,16 +8,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import {
-  Clock, Plus, Calendar as CalendarIcon, CheckCircle2, XCircle,
-  Send, RotateCcw, ChevronRight, Loader2, Play,
+  Clock,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  XCircle,
+  Send,
+  RotateCcw,
+  ChevronRight,
+  Play,
+  Activity,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type TsStatus = "DRAFT" | "SUBMITTED" | "APPROVED" | "REJECTED";
 type Scope = "mine" | "approve" | "team" | "all";
@@ -132,24 +139,12 @@ export default function TimesheetsPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Timesheets"
-        Icon={Clock}
-        iconGradient={GRAD.indigoBlue}
-        description={sheets === null ? "Loading…" : `${filtered.length} timesheet${filtered.length === 1 ? "" : "s"} · ${stats.submitted} submitted · ${stats.totalHours}h logged`}
-        actions={
-          <div className="tsh__head-actions">
-            <button type="button" className="tsh__btn-primary" onClick={startCurrentWeek}>
-              <Plus /> Start this week
-            </button>
-          </div>
-        }
-      />
+      <OsPageHeader title="Timesheets" primary={{ label: "Start this week", onClick: startCurrentWeek }} />
 
       <div className="tsh">
         <div className="tsh__kpis">
           <KpiTile accent="var(--os-c-blue)" Icon={Play}         label="Drafts"    value={`${stats.draft}`}     sub="in progress" />
-          <KpiTile accent="var(--os-c-yellow)" Icon={Loader2}      label="Submitted" value={`${stats.submitted}`} sub="awaiting approval" />
+          <KpiTile accent="var(--os-c-yellow)" Icon={Activity}      label="Submitted" value={`${stats.submitted}`} sub="awaiting approval" />
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Approved"  value={`${stats.approved}`}  sub="finalised" />
           <KpiTile accent="var(--os-c-blue)"   Icon={Clock}        label="Hours logged" value={`${stats.totalHours}`} sub="across all sheets" />
         </div>
@@ -163,11 +158,11 @@ export default function TimesheetsPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load timesheets" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load timesheets" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
         ) : sheets === null ? (
-          <div className="tsh__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : filtered.length === 0 ? (
-          <OsEmptyView Icon={Clock} iconGradient={GRAD.indigoBlue} title="No timesheets in this view" subtitle="Start a new week's timesheet to begin logging time entries." cta="Start this week" onCta={() => void startCurrentWeek()} />
+          <OsEmptyView context="board" title="No timesheets in this view" hint="Start a new week's timesheet to begin logging time entries." action={{ label: "Start this week", onClick: () => void startCurrentWeek() }} />
         ) : (
           <div className="tsh__list">
             {filtered.map((t) => {

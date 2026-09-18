@@ -7,7 +7,7 @@
  *  PATCH /api/marketing/campaigns      { id, status?, ... }
  *
  * Layout:
- *   OsTitleBar with back-to-Marketing + view nav + New campaign in actions.
+ *   OsPageHeader with back-to-Marketing + view nav + New campaign in actions.
  *   Status pipeline: horizontal bar showing each status segment (Planning →
  *     Approved → Active → Paused → Completed) with count + value width.
  *   Search + sort toolbar.
@@ -16,17 +16,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Megaphone, Plus, Play, Pause, CheckCircle2, Target, DollarSign, CalendarRange,
-  ArrowLeft, Search, Loader2,
+  Play,
+  Pause,
+  CheckCircle2,
+  Target,
+  DollarSign,
+  CalendarRange,
+  Search,
+  Activity,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Status = "PLANNING" | "APPROVED" | "ACTIVE" | "PAUSED" | "COMPLETED" | "CANCELLED";
 
@@ -191,27 +197,16 @@ export default function CampaignsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Campaigns"
-        Icon={Megaphone}
-        iconGradient={GRAD.orangePink}
-        description={items === null
-          ? "Loading…"
-          : `${counts.all} campaign${counts.all === 1 ? "" : "s"} · ${counts.ACTIVE} active · ${fmtMoney(totalSpent)} spent`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.an]}
-        morePeople={3}
+        back={{ fallbackHref: "/marketing", label: "Marketing" }}
         actions={
           <div className="cmps__head-actions">
-            <button type="button" className="cmps__back" onClick={() => history.back()}>
-              <ArrowLeft /> Marketing
-            </button>
-            <Link href="/marketing/content" className="cmps__nav-link">Content</Link>
-            <Link href="/marketing/events" className="cmps__nav-link">Events</Link>
-            <button type="button" className="cmps__btn-primary" onClick={createCampaign}>
-              <Plus /> New campaign
-            </button>
+            <Link href="/marketing/content" className="os-head__link">Content</Link>
+            <Link href="/marketing/events" className="os-head__link">Events</Link>
           </div>
         }
+        primary={{ label: "New campaign", onClick: createCampaign }}
       />
 
       <div className="cmps">
@@ -285,17 +280,14 @@ export default function CampaignsPage() {
 
         {/* List */}
         {loadError ? (
-          <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="Couldn't load campaigns" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load campaigns" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : items === null ? (
-          <div className="cmps__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : counts.all === 0 ? (
           <OsEmptyView
-            Icon={Megaphone}
-            iconGradient={GRAD.orangePink}
+            context="list"
             title="No campaigns yet"
-            subtitle="Plan your first campaign — track budget vs spend, goal vs actual, and pipeline impact."
-            chips={["Email", "Paid search", "Social", "Outbound", "Event", "Content"]}
-            cta="New campaign"
+            hint="Plan your first campaign and track budget, goal and pipeline impact."
           />
         ) : filtered.length === 0 ? (
           <div className="cmps__empty">
@@ -323,7 +315,7 @@ function CampaignRow({ campaign: c, onAdvance }: { campaign: ApiCampaign; onAdva
   const actual = c.goalActual ?? 0;
   const goalPct = target > 0 ? Math.min(100, Math.round((actual / target) * 100)) : 0;
   const left = daysLeft(c.endDate);
-  const StatusIcon = c.status === "ACTIVE" ? Play : c.status === "PAUSED" ? Pause : c.status === "COMPLETED" ? CheckCircle2 : Loader2;
+  const StatusIcon = c.status === "ACTIVE" ? Play : c.status === "PAUSED" ? Pause : c.status === "COMPLETED" ? CheckCircle2 : Activity;
 
   return (
     <article className="cmps__row" style={{ ["--row-c" as unknown as string]: accent }}>

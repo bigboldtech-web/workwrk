@@ -7,17 +7,27 @@
  *  POST  /api/policies            { title, content, status? }
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  ShieldCheck, Plus, Search, ChevronRight, ChevronDown, FileText, CheckCircle2,
-  Archive, Edit3, AlertTriangle, Activity, Loader2, LayoutGrid, List as ListIcon,
-  Calendar as CalendarIcon, Users,
+  Search,
+  ChevronRight,
+  ChevronDown,
+  FileText,
+  CheckCircle2,
+  Archive,
+  Edit3,
+  AlertTriangle,
+  Activity,
+  LayoutGrid,
+  List as ListIcon,
+  Calendar as CalendarIcon,
+  Users,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -140,21 +150,15 @@ export default function PoliciesPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Policies"
-        showStandardActions={false}
-        Icon={ShieldCheck}
-        iconGradient={GRAD.indigoBlue}
-        description={rows === null ? "Loading…" : `${stats.total} polic${stats.total === 1 ? "y" : "ies"} · ${stats.counts.PUBLISHED} published${stats.pendingMyAck > 0 ? ` · ${stats.pendingMyAck} need your ack` : ""}`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><FileText className="h-3.5 w-3.5" /> SOPs</Link>
-            <Link href="/policies/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
-            <button type="button" onClick={quickAdd} className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-base font-medium text-white hover:opacity-90" style={{ background: "var(--os-brand)" }}>
-              <Plus className="h-3.5 w-3.5" /> New policy
-            </button>
+          <div className="flex items-center gap-1">
+            <Link href="/sops" className="os-head__link"><FileText /> SOPs</Link>
+            <Link href="/policies/compliance" className="os-head__link"><Activity /> Compliance</Link>
           </div>
         }
+        primary={{ label: "New policy", onClick: quickAdd }}
       />
 
       <div className="px-6 py-5">
@@ -214,12 +218,12 @@ export default function PoliciesPage() {
                 style={{
                   display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px",
                   borderRadius: "9999px", fontSize: "13px", fontWeight: active ? 600 : 400,
-                  border: active ? "1px solid var(--os-brand)" : "1px solid #e4e4e7",
-                  background: active ? "var(--os-brand)" : "#fff",
-                  color: active ? "#fff" : "#52525b", cursor: "pointer", transition: "all .12s",
+                  border: active ? "1px solid var(--os-line-strong)" : "1px solid var(--os-line)",
+                  background: active ? "var(--os-surface-2)" : "var(--os-surface)",
+                  color: active ? "var(--os-ink)" : "var(--os-ink-2)", cursor: "pointer", transition: "all .12s",
                 }}>
                 {s === "ALL" ? "All" : STATUS_LABEL[s as PolStatus]}
-                <span style={{ color: active ? "rgba(255,255,255,0.75)" : "#a1a1aa", fontVariantNumeric: "tabular-nums" }}>{count}</span>
+                <span style={{ color: "var(--os-ink-3)", fontVariantNumeric: "tabular-nums" }}>{count}</span>
               </button>
             );
           })}
@@ -228,18 +232,15 @@ export default function PoliciesPage() {
         {/* Body */}
         <div className="mt-5">
           {loadError ? (
-            <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load policies" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+            <OsEmptyView variant="error" title="Couldn't load policies" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
           ) : rows === null ? (
-            <div className="flex items-center gap-2 py-16 text-xs text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading policies…</div>
+            <SkeletonRows />
           ) : stats.total === 0 ? (
             <OsEmptyView
-              Icon={ShieldCheck}
-              iconGradient={GRAD.indigoBlue}
+              context="docs"
               title="No policies yet"
-              subtitle="Document the rules. Policies require employee acknowledgment by default and version automatically as you edit."
-              chips={["HR", "Security", "Compliance", "Code of Conduct"]}
-              cta="New policy"
-              onCta={quickAdd}
+              hint="Policies ask for acknowledgement and version automatically as you edit."
+              action={{ label: "New policy", onClick: quickAdd }}
             />
           ) : grouped.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs text-zinc-400">

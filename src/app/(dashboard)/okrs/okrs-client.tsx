@@ -21,7 +21,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -30,7 +29,8 @@ import {
   ChevronRight, ChevronDown,
   type LucideIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { ViewTab } from "@/components/ui/view-tabs";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -39,6 +39,7 @@ import { MemberAvatarStack, type AudienceMember } from "@/components/okrs/goal-a
 import { GoalRowMoreMenu } from "@/components/okrs/goal-row-more-menu";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import type { ContextMenuHandle } from "@/components/layout/os/more-portal";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type OkrStatus = "ON_TRACK" | "AT_RISK" | "BEHIND" | "COMPLETED";
 type OkrLevel = "COMPANY" | "DEPARTMENT" | "INDIVIDUAL";
@@ -302,27 +303,26 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
 
   return (
     <>
-      <OsTitleBar
-        title={team ? "Team Goals" : level === "company" || level === "COMPANY" ? "Company Goals" : mine ? "My Goals" : "Goals"}
-        Icon={Target}
-        iconGradient=""
-        description={okrs === null ? "Loading…" : `${stats.total} goal${stats.total === 1 ? "" : "s"} · ${stats.active} active · ${stats.completed} completed`}
-        actions={
-          <button type="button" className="okrs__new" onClick={() => newGoal("INDIVIDUAL")} disabled={creating !== null}>
-            <Plus /> New goal
-          </button>
-        }
+      <OsPageHeader
+        title={team ? "Team goals" : level === "company" || level === "COMPANY" ? "Company goals" : mine ? "My goals" : "Goals"}
+        views={team ? (
+          <>
+            <ViewTab label="By person" icon={Users} active={teamView === "person"} onClick={() => setTeamView("person")} />
+            <ViewTab label="By level" icon={Target} active={teamView === "level"} onClick={() => setTeamView("level")} />
+          </>
+        ) : undefined}
+        primary={{ label: "New goal", onClick: () => newGoal("INDIVIDUAL"), disabled: creating !== null }}
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load goals" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => { setLoadError(null); void load(); }} />
+        <OsEmptyView variant="error" title="Couldn't load goals" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { setLoadError(null); void load(); } }} />
       ) : okrs === null ? (
-        <div className="okrs__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : stats.total === 0 ? (
         mine ? (
-          <OsEmptyView Icon={Trophy} iconGradient={BRAND} title="No goals assigned to you" subtitle="Goals you own or contribute to show up here. Create one, or clear the filter to browse the whole org." cta="New goal" onCta={() => newGoal("INDIVIDUAL")} />
+          <OsEmptyView context="goals" title="No goals assigned to you" hint="Goals you own or contribute to show up here." action={{ label: "New goal", onClick: () => newGoal("INDIVIDUAL") }} />
         ) : (
-          <OsEmptyView Icon={Target} iconGradient={BRAND} title="No goals yet" subtitle="Set your first goal. Pick Company / Department / Individual to anchor it on the cascade." chips={["Company", "Department", "Individual"]} cta="New goal" onCta={() => newGoal("INDIVIDUAL")} />
+          <OsEmptyView context="goals" title="No goals yet" hint="Set a goal at the company, department or individual level." action={{ label: "New goal", onClick: () => newGoal("INDIVIDUAL") }} />
         )
       ) : (
         <div className="okrs">
@@ -369,17 +369,6 @@ export default function OkrsClient({ initialNew = false, mine = false, team = fa
               hint="wins this cycle"
             />
           </section>
-
-          {team && (
-            <div className="okrs__teamtoggle" role="tablist" aria-label="Team goals view">
-              <button type="button" role="tab" aria-selected={teamView === "person"} className={teamView === "person" ? "is-on" : ""} onClick={() => setTeamView("person")}>
-                <Users /> By person
-              </button>
-              <button type="button" role="tab" aria-selected={teamView === "level"} className={teamView === "level" ? "is-on" : ""} onClick={() => setTeamView("level")}>
-                <Target /> By level
-              </button>
-            </div>
-          )}
 
           {team && teamView === "person" ? (
             byPerson.length === 0 ? (

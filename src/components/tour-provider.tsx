@@ -33,20 +33,11 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
 
   const storageKey = userId ? `${STORAGE_KEY_PREFIX}-${userId}` : null;
 
-  // Auto-launch tour on first login (per user, persisted to localStorage)
+  // The shell never auto-launches the tour (spec-shell 0, 2.13): the steps
+  // point at chrome the refresh removed, and the one door is "Take the tour"
+  // once the onboarding unit registers rewritten steps. `startTour` stays.
   useEffect(() => {
-    if (status !== "authenticated" || !storageKey) return;
-    try {
-      const completed = localStorage.getItem(storageKey);
-      if (!completed) {
-        // Small delay so the page has settled
-        const timer = setTimeout(() => {
-          setTourType(isAdmin ? "admin" : "employee");
-          setOpen(true);
-        }, 800);
-        return () => clearTimeout(timer);
-      }
-    } catch {}
+    void status; void storageKey; void isAdmin;
   }, [status, storageKey, isAdmin]);
 
   const startTour = useCallback((type?: TourType) => {

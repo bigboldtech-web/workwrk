@@ -5,18 +5,27 @@
  * GET /api/sop-assignments?userId=me
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  BookCopy, Clock, AlertCircle, CheckCircle2, FileText, ListChecks, Video,
-  BadgeAlert, Hash, Activity, ClipboardCheck, Layers, Loader2,
+  BookCopy,
+  Clock,
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  ListChecks,
+  Video,
+  BadgeAlert,
+  Hash,
+  Activity,
+  Layers,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Status = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
 type SopType = "WRITTEN" | "RECORDED" | "CHECKLIST";
@@ -108,16 +117,12 @@ export default function MySopsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="My SOPs"
-        Icon={ClipboardCheck}
-        iconGradient={GRAD.tealGreen}
-        showStandardActions={false}
-        description={items === null ? "Loading…" : `${active.length} active · ${overdue.length} overdue · ${done.length} completed · ${overallPct}% steps done`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
-            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> Compliance</Link>
+          <div className="flex items-center gap-1">
+            <Link href="/sops" className="os-head__link"><Hash /> SOPs</Link>
+            <Link href="/sops/compliance" className="os-head__link"><Activity /> Compliance</Link>
           </div>
         }
       />
@@ -131,16 +136,14 @@ export default function MySopsPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : items === null ? (
-          <div className="mys__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : (items ?? []).length === 0 ? (
           <OsEmptyView
-            Icon={BookCopy}
-            iconGradient={GRAD.tealGreen}
+            context="docs"
             title="No SOPs assigned to you yet"
-            subtitle="When a manager assigns a procedure to you, it shows up here with a checklist of steps and a due date."
-            chips={["Written", "Checklist", "Recording"]}
+            hint="When a manager assigns a procedure to you, it shows up here with a checklist of steps and a due date."
           />
         ) : (
           <>
@@ -232,7 +235,7 @@ function SopRow({ a, onAck, acking }: { a: ApiAssignment; onAck: (assignmentId: 
             className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-200 px-2 text-xs text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50"
             title="Mark this SOP as read"
           >
-            {acking ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+            {acking ? <Dots variant="pending" /> : <CheckCircle2 className="h-3 w-3" />}
             Acknowledge
           </button>
         )}

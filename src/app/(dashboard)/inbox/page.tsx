@@ -20,6 +20,7 @@ import {
   GitBranch,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 
 type ApiNotification = {
   id: string;
@@ -579,30 +580,12 @@ function InboxEmpty({ tab }: { tab: Tab }) {
       />
     );
   }
-  // Primary + Other share the Inbox Zero celebration.
-  return (
-    <div className="flex min-h-[calc(100vh-245px)] flex-col items-center text-center">
-      <div className="flex flex-1 flex-col items-center justify-center pt-10">
-        <span className="inline-flex items-center justify-center w-[84px] h-[62px] rounded-xl bg-blue-50 shadow-[0_12px_30px_rgba(0,115,234,0.12)] mb-7">
-          <InboxIcon className="w-9 h-9 text-blue-200" />
-        </span>
-        <p className="text-lg font-semibold text-zinc-900 mb-2">Inbox Zero</p>
-        <p className="text-base text-zinc-500">
-          Congratulations! You cleared your important notifications <span aria-hidden>🎉</span>
-        </p>
-      </div>
-      <div className="w-full max-w-none pb-12">
-        <div className="relative mx-auto max-w-[760px] border-t border-zinc-100 pt-20">
-          <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 inline-flex h-7 items-center rounded-full border border-zinc-200 bg-white px-4 text-base text-zinc-500">
-            Tip
-          </span>
-          <p className="mx-auto max-w-[520px] text-lg font-semibold leading-snug text-zinc-900">
-            Pin your Favorites bar to the top of your screen to interact with them faster than ever!
-          </p>
-        </div>
-      </div>
-    </div>
-  );
+  // Primary + Other. Quiet, not a celebration: the shared empty primitive
+  // (grey four-dot row, one sentence, no second blue), the same one the
+  // in-shell 404 renders. The old block was a blue tile with a blue icon and
+  // a blue glow, an 18/600 heading, a party emoji, and a "Tip" that told the
+  // reader to pin a Favorites bar this refresh deleted.
+  return <OsEmptyView title="Nothing needs your attention" hint="New mentions, assignments and replies land here." />;
 }
 
 function EmptyState({ Icon, title, sub }: { Icon: LucideIcon; title: string; sub: string }) {
@@ -669,7 +652,7 @@ function NotifEntry({
           <button
             type="button"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onMarkRead(n.id); }}
-            className="inline-flex items-center gap-1 h-6 rounded-md bg-zinc-900 !px-2 text-sm font-medium text-white hover:bg-zinc-800"
+            className="inline-flex items-center gap-1 h-6 rounded-md border border-zinc-300 bg-white !px-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
           >
             <Check className="w-3 h-3" strokeWidth={2.5} />
             Clear

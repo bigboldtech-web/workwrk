@@ -17,6 +17,7 @@ import type {
   ViewKey,
   WorkflowConfig,
 } from "./space-wizard-types";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 export type Step2SubScreen = null | "owner" | "views" | "statuses" | "modules";
 
@@ -158,7 +159,7 @@ function Step2Main({
                 key={p.id}
                 type="button"
                 onClick={() => setPreset(p.id)}
-                className="text-left rounded-lg border bg-surface p-3 transition hover:bg-surface-2"
+                className="text-start rounded-lg border bg-surface p-3 transition hover:bg-surface-2"
                 style={{
                   borderColor: isSelected ? accent : "var(--border, #e4e4e7)",
                   boxShadow: isSelected ? `0 0 0 2px ${accent}20` : undefined,
@@ -258,7 +259,7 @@ function CustomizeRow({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`w-full text-left rounded-lg border border-border bg-surface px-3 py-2.5 flex items-center gap-3 transition ${
+      className={`w-full text-start rounded-lg border border-border bg-surface px-3 py-2.5 flex items-center gap-3 transition ${
         disabled ? "cursor-default opacity-60" : "hover:bg-surface-2"
       }`}
     >
@@ -269,7 +270,7 @@ function CustomizeRow({
         <span className="block text-base font-medium">{label}</span>
         <span className="block text-xs text-muted truncate mt-0.5">{value}</span>
       </span>
-      {!disabled ? <ChevronRight className="h-4 w-4 text-muted shrink-0" /> : null}
+      {!disabled ? <ChevronRight className="h-4 w-4 text-muted shrink-0 rtl:rotate-180" /> : null}
     </button>
   );
 }
@@ -317,13 +318,13 @@ function OwnerSubScreen({
 
       <div className="px-6 pb-2 max-h-[60vh] overflow-y-auto">
         <div className="relative mb-3">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
+          <Search className="absolute start-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
           <input
             type="text"
             placeholder="Search people…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full h-9 pl-8 pr-2 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
+            className="w-full h-9 ps-8 pe-2 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
             autoFocus
           />
         </div>
@@ -331,7 +332,7 @@ function OwnerSubScreen({
         <button
           type="button"
           onClick={() => onChange(null)}
-          className={`w-full text-left rounded-lg px-3 py-2 flex items-center gap-3 transition mb-2 ${
+          className={`w-full text-start rounded-lg px-3 py-2 flex items-center gap-3 transition mb-2 ${
             ownerId === null ? "bg-surface-2" : "hover:bg-surface-2"
           }`}
         >
@@ -357,7 +358,7 @@ function OwnerSubScreen({
                   key={u.id}
                   type="button"
                   onClick={() => onChange(u.id)}
-                  className={`w-full text-left px-3 py-2 flex items-center gap-3 transition ${
+                  className={`w-full text-start px-3 py-2 flex items-center gap-3 transition ${
                     selected ? "bg-surface-2" : "hover:bg-surface-2"
                   }`}
                 >
@@ -424,7 +425,7 @@ function ViewsSubScreen({
 
       <div className="px-6 pb-2 max-h-[60vh] overflow-y-auto">
         <div className="rounded-lg border border-border divide-y divide-border">
-          {VIEW_CATALOG.map((v) => {
+          {VIEW_CATALOG.filter((v) => v.shipped).map((v) => {
             const enabled = defaultViews.includes(v.key);
             const isDefault = defaultViewKey === v.key;
             return (
@@ -438,8 +439,7 @@ function ViewsSubScreen({
                 <div className="flex-1 min-w-0">
                   <div className="text-base font-medium">
                     {v.label}
-                    {v.required ? <span className="text-muted ml-1">– Required</span> : null}
-                    {!v.shipped ? <span className="text-micro uppercase tracking-wide text-muted-2 ml-2">Coming soon</span> : null}
+                    {v.required ? <span className="text-muted ms-1">– Required</span> : null}
                   </div>
                 </div>
                 {enabled && !isDefault ? (
@@ -456,12 +456,19 @@ function ViewsSubScreen({
                   value={enabled}
                   onChange={() => toggle(v.key)}
                   accent={accent}
-                  disabled={v.required || !v.shipped}
+                  disabled={v.required}
                 />
               </div>
             );
           })}
         </div>
+        {VIEW_CATALOG.some((v) => !v.shipped) ? (
+          <UpcomingOnly>
+            <div className="mt-2">
+              {VIEW_CATALOG.filter((v) => !v.shipped).map((v) => <ComingSoonRow key={v.key} label={v.label} />)}
+            </div>
+          </UpcomingOnly>
+        ) : null}
       </div>
 
       <SubFooter accent={accent} onDone={onClose} />
@@ -590,7 +597,7 @@ function ColorSwatch({ color, onChange }: { color: string; onChange: (c: string)
       />
       {open ? (
         <div
-          className="absolute left-0 top-6 z-10 rounded-lg border border-border bg-surface p-2 shadow-xl grid grid-cols-6 gap-1"
+          className="absolute start-0 top-6 z-10 rounded-lg border border-border bg-surface p-2 shadow-xl grid grid-cols-6 gap-1"
           onMouseLeave={() => setOpen(false)}
         >
           {STATUS_PALETTE.map((c) => (
@@ -682,15 +689,14 @@ function ModuleGroup({
     <div>
       <div className="text-xs uppercase tracking-wide text-muted-2 mb-2">{title}</div>
       <div className="grid grid-cols-2 gap-2">
-        {entries.map((m) => {
-          const enabled = modules.includes(m.key) && !m.soon;
+        {entries.filter((m) => !m.soon).map((m) => {
+          const enabled = modules.includes(m.key);
           return (
             <button
               key={m.key}
               type="button"
-              disabled={m.soon}
               onClick={() => onToggle(m.key)}
-              className={`text-left rounded-lg border bg-surface p-3 transition ${m.soon ? "opacity-60 cursor-not-allowed" : "hover:bg-surface-2"}`}
+              className="text-start rounded-lg border bg-surface p-3 transition hover:bg-surface-2"
               style={{
                 borderColor: enabled ? accent : "var(--border, #e4e4e7)",
                 boxShadow: enabled ? `0 0 0 2px ${accent}20` : undefined,
@@ -701,9 +707,6 @@ function ModuleGroup({
                 <div className="min-w-0">
                   <div className="text-base font-semibold flex items-center gap-1.5">
                     {m.label}
-                    {m.soon ? (
-                      <span className="text-micro uppercase tracking-wide text-muted-2 border border-border rounded px-1 leading-4">Soon</span>
-                    ) : null}
                   </div>
                   <div className="text-xs text-muted mt-0.5 leading-snug">{m.blurb}</div>
                 </div>
@@ -712,6 +715,13 @@ function ModuleGroup({
           );
         })}
       </div>
+      {entries.some((m) => m.soon) ? (
+        <UpcomingOnly>
+          <div className="mt-2">
+            {entries.filter((m) => m.soon).map((m) => <ComingSoonRow key={m.key} label={m.label} />)}
+          </div>
+        </UpcomingOnly>
+      ) : null}
     </div>
   );
 }
@@ -729,7 +739,7 @@ function SubHeader({ title, subtitle, onClose }: { title: string; subtitle: stri
         className="h-7 w-7 rounded-md hover:bg-surface-2 flex items-center justify-center shrink-0 mt-0.5"
         aria-label="Back"
       >
-        <ArrowLeft className="h-4 w-4 text-muted" />
+        <ArrowLeft className="h-4 w-4 text-muted rtl:rotate-180" />
       </button>
       <div className="flex-1">
         <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>

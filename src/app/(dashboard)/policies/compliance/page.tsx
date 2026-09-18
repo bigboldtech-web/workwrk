@@ -8,15 +8,14 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   ShieldCheck, AlertCircle, TrendingDown, Users as UsersIcon, Building,
   Activity, CheckCircle2, FileText, RefreshCw,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Overview = { totalPolicies: number; totalUsers: number; totalRequired: number; totalAcked: number; orgRate: number; pending: number; overdue: number; outOfDate: number };
 type DeptRow = { departmentId: string; name: string; total: number; acked: number; rate: number };
@@ -63,29 +62,21 @@ export default function PolicyComplianceDashboard() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Policy compliance"
-        Icon={ShieldCheck}
-        iconGradient={GRAD.indigoBlue}
-        showStandardActions={false}
-        description={data === null ? "Loading…" : `${data.overview.totalAcked} / ${data.overview.totalRequired} acks · ${data.overview.orgRate}% org rate · ${data.overview.overdue} overdue`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              <ShieldCheck className="h-3.5 w-3.5" /> All policies
-            </Link>
-            <Link href="/sops/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              SOP compliance
-            </Link>
+          <div className="flex items-center gap-1">
+            <Link href="/policies" className="os-head__link"><ShieldCheck /> Policies</Link>
+            <Link href="/sops/compliance" className="os-head__link">SOP compliance</Link>
           </div>
         }
       />
 
       <div className="cmpl">
         {loadError ? (
-          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.indigoBlue} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load compliance" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : data === null ? (
-          <div className="cmpl__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : (
           <>
             <div className="cmpl__kpis">

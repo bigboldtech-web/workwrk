@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import "./logo.css";
 
 // workwrk logo. The brand palette is "Workwrk YBRG": four Monday dots
 // sequenced yellow, blue, red, green, sitting just above the wordmark
@@ -77,6 +78,41 @@ export function LogoMark({
         <circle key={cx} cx={cx} cy="24" r="5.2" fill={DOT_SEQUENCE[i]} />
       ))}
     </svg>
+  );
+}
+
+// Logo: the rail mark and the boot mark (design-system 4.1, 5.15). Four
+// brand dots in a row, `width` wide (28 on the rail, dots 5px), and the
+// route loader: while `pulsing`, each dot lifts to full brightness and back
+// on a 900ms loop with a 120ms stagger. At rest the dots are static and full
+// colour. The only saturated object in the chrome, so it is also the only
+// place outside the splash the four dots animate.
+export function Logo({
+  width = 28,
+  pulsing = false,
+  className,
+  title,
+}: {
+  width?: number;
+  pulsing?: boolean;
+  className?: string;
+  title?: string;
+}) {
+  const dot = width / 5.6;
+  const gap = (width - dot * 4) / 3;
+  return (
+    <span
+      className={`wwk-logo${pulsing ? " is-pulsing" : ""}${className ? ` ${className}` : ""}`}
+      style={{ width, height: dot, gap }}
+      role={title ? "img" : undefined}
+      aria-label={title}
+      aria-hidden={title ? undefined : true}
+      data-pulsing={pulsing ? "true" : undefined}
+    >
+      {DOT_SEQUENCE.map((c, i) => (
+        <span key={i} className="wwk-logo__dot" style={{ width: dot, height: dot, backgroundColor: c, animationDelay: `${i * 120}ms` }} />
+      ))}
+    </span>
   );
 }
 

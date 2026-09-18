@@ -10,11 +10,13 @@
  *  DELETE /api/item-types/[id]     → remove custom type
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Shapes, Plus, Search, Settings as SettingsIcon, Trash2, Star, Check, X, Loader2 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { Plus, Search, Settings as SettingsIcon, Trash2, Star, Check, X } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { itemTypeIcon, ITEM_TYPE_ICON_NAMES } from "@/lib/item-type-icons";
@@ -94,17 +96,10 @@ export default function TaskTypesPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Task Types"
-        Icon={Shapes}
-        iconGradient={GRAD.bluePurple}
-        description={`${usage.used} of ${usage.limit} custom types used`}
-        actions={
-          <div className="flex items-center gap-2">
-            <Link href="/settings" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-zinc-200 text-base text-zinc-600 hover:bg-zinc-50"><SettingsIcon className="w-3.5 h-3.5" /> Settings</Link>
-            <button type="button" onClick={() => setCreateOpen(true)} disabled={usage.used >= usage.limit} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[var(--os-brand)] text-white text-base disabled:opacity-50"><Plus className="w-3.5 h-3.5" /> New type</button>
-          </div>
-        }
+      <OsPageHeader
+        title="Task types"
+        actions={<Link href="/settings" className="os-head__link"><SettingsIcon /> Settings</Link>}
+        primary={{ label: "New type", onClick: () => setCreateOpen(true), disabled: usage.used >= usage.limit }}
       />
 
       <div className="max-w-[860px] mx-auto px-5 py-6 space-y-8">
@@ -112,7 +107,7 @@ export default function TaskTypesPage() {
         <section>
           <h2 className="text-base font-semibold text-zinc-900 mb-3">Active types</h2>
           {types === null ? (
-            <div className="flex items-center gap-2 text-xs text-zinc-400 py-8"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
+            <SkeletonRows rows={4} />
           ) : (
             <div className="grid sm:grid-cols-2 gap-2.5">
               {types.map((t) => {
@@ -170,7 +165,7 @@ export default function TaskTypesPage() {
                       <div className="text-sm text-zinc-500 truncate">{r.description}</div>
                     </div>
                     <button type="button" onClick={() => addRecommended(r)} disabled={adding === r.singular || usage.used >= usage.limit} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
-                      {adding === r.singular ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />} Add
+                      {adding === r.singular ? <Dots variant="pending" /> : <Plus className="w-3 h-3" />} Add
                     </button>
                   </div>
                 );
@@ -264,7 +259,7 @@ function CreateTypeModal({ onClose, onCreated, existingNames }: { onClose: () =>
         <div className="flex items-center justify-end gap-2 px-5 py-3.5 border-t border-zinc-100">
           <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-base text-zinc-600 hover:bg-zinc-100">Cancel</button>
           <button type="button" onClick={submit} disabled={!canSave} className="h-9 px-4 rounded-lg text-base text-white bg-[var(--os-brand)] inline-flex items-center gap-1.5 disabled:opacity-50">
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} Create
+            {busy ? <Dots variant="pending" /> : <Check className="w-3.5 h-3.5" />} Create
           </button>
         </div>
       </div>

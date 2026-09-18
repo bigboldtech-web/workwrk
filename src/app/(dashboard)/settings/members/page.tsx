@@ -7,8 +7,10 @@
 // already exist; access-level changes are Company-Admin gated server-side
 // (with last-admin protection), so non-admins see this read-only.
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search, Users, ShieldCheck, UserPlus, MailX } from "lucide-react";
+import { Search, Users, ShieldCheck, UserPlus, MailX } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { useRole } from "@/hooks/use-role";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
 import { InviteModal } from "@/components/layout/os/invite-modal";
@@ -66,6 +68,12 @@ export default function MembersPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [inviteOpen, setInviteOpen] = useState(false);
+  // `?invite=1` (the workspace menu's "Invite people", spec-shell 2.14) opens
+  // the invite modal on arrival. Read from window so the page needs no
+  // Suspense boundary for useSearchParams.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("invite") === "1") setInviteOpen(true);
+  }, []);
   const [invites, setInvites] = useState<PendingInvite[]>([]);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
@@ -165,10 +173,15 @@ export default function MembersPage() {
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700">
-          <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" /> {managerCount} managers &amp; admins
+          {/* Grey, not green: green means success, and a head-count is not
+              one (principle 7). The label is one string so the space before
+              "managers" cannot be lost to JSX whitespace trimming. */}
+          <ShieldCheck className="h-3.5 w-3.5 text-zinc-400" />
+          <span>{`${managerCount} managers & admins`}</span>
         </span>
         <span className="inline-flex items-center gap-1.5 rounded-full border border-zinc-200 bg-white px-3 py-1 text-sm text-zinc-700">
-          <Users className="h-3.5 w-3.5 text-zinc-400" /> {memberCount} members
+          <Users className="h-3.5 w-3.5 text-zinc-400" />
+          <span>{`${memberCount} members`}</span>
         </span>
         <div className="ml-auto inline-flex h-8 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5">
           <Search className="h-3.5 w-3.5 text-zinc-400" />
@@ -186,12 +199,10 @@ export default function MembersPage() {
       ) : null}
 
       {members === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading members…
-        </div>
+        <SkeletonRows />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-          <table className="w-full text-base">
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+          <table className="w-full min-w-[720px] text-base">
             <thead>
               <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-400">
                 <th className="px-3 py-2 font-semibold">Person</th>
@@ -268,8 +279,8 @@ export default function MembersPage() {
           <h2 className="mb-2 text-base font-semibold text-zinc-900">
             Pending invites <span className="font-normal text-zinc-400">({invites.length})</span>
           </h2>
-          <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            <table className="w-full text-base">
+          <div className="overflow-x-auto rounded-xl border border-zinc-200 bg-white">
+            <table className="w-full min-w-[720px] text-base">
               <thead>
                 <tr className="border-b border-zinc-200 text-left text-xs uppercase tracking-wide text-zinc-400">
                   <th className="px-3 py-2 font-semibold">Email</th>
@@ -309,7 +320,7 @@ export default function MembersPage() {
                             className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-sm font-medium text-zinc-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-500/15 dark:hover:text-red-400"
                           >
                             {revokingId === inv.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              <Dots variant="pending" />
                             ) : (
                               <MailX className="h-3.5 w-3.5" />
                             )}

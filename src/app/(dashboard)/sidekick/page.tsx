@@ -6,8 +6,8 @@ import {
   Sparkles, Plus, Search, Trash2, Paperclip, ArrowUp,
   Wrench, Pin, MessageSquare,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { OsMarkdown } from "@/components/layout/os/markdown";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -288,15 +288,7 @@ export default function SidekickPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Sidekick"
-        Icon={Sparkles}
-        iconGradient={GRAD.pinkPurple}
-        description={active?.title ? `Chat · ${active.title}` : "Your AI working partner · ⌘J to toggle the side panel"}
-        people={[PEOPLE.bb, PEOPLE.sc]}
-        morePeople={2}
-        showInvite={false}
-      />
+      <OsPageHeader title="Ask AI" />
 
       <div className="os-chat">
         {/* ── Left: session list ── */}

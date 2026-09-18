@@ -150,7 +150,7 @@ export default async function RolePage(props: {
       {/* Breadcrumb + title row */}
       <div className="px-6 pt-4 pb-3">
         <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <BackButton fallbackHref="/people/roles" className="inline-flex items-center rounded-md p-0.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-800" />
+          <BackButton fallbackHref="/people/roles" label="Job titles" />
           <Link href="/people/roles" className="hover:text-zinc-900">Roles</Link>
           {role.department ? (
             <>

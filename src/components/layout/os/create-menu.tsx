@@ -1,419 +1,127 @@
 "use client";
 
-// CreateMenu — the sidebar "+" popover, the OS-wide "create anything"
-// control. Extracted from click-sidebar.tsx so the menu can grow real
-// inline create flows without bloating the sidebar shell.
+// CreateMenu (spec-shell 2.10): make something new from anywhere. One
+// 280px MenuList under the bar's "+" (and the Work sidebar's header "+"),
+// rows 36 with a 16px icon, a label and the registry's chord:
 //
-// Layout per docs/plans/plus-create-menu-plan.md §3:
-//   AI input (describe → create)
-//   Create:  Task (⌥T) · List · Space
-//   AI:      Create with AI · Super Agent (Hot)
-//   Build:   Doc · Form · Dashboard · Whiteboard · Database
-//   Footer:  Customize sidebar · Import · Templates
+//   Task · Doc · List · Reminder · Notepad · Voice note
+//   From template… · Space
+//   Ask AI
 //
-// Build rows open an inline "New X" step (name + optional Space
-// location) that POSTs the entity's real API and navigates to it —
-// no more dead ?new=1 links.
+// Rows are absent, never disabled: Voice note needs the Web Speech API, From
+// template and Space are for Members (never Guests or Agents), Ask AI only
+// when the AI hub is visible. No AI free-text input, no Sprint, no Import,
+// no Customize row (each has its own door). The menu closes before the next
+// layer opens, so the LayerStack never holds a menu under a modal.
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft,
-  Bot,
-  Boxes,
-  Brush,
-  CheckCircle2,
-  ClipboardCheck,
-  Database,
-  FileText,
-  Import,
-  IterationCw,
-  LayoutDashboard,
-  ListChecks,
-  Loader2,
-  Rocket,
-  SlidersHorizontal,
-  Sparkles,
-  type LucideIcon,
+  AlarmClock, Building2, CheckSquare, FileText, LayoutTemplate, ListTodo, Mic, NotebookPen, Sparkles,
 } from "lucide-react";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { apiFetch } from "@/lib/api-fetch";
+import { shortcutHint } from "@/lib/shortcuts";
+import { SHELL_LABELS } from "@/lib/nav/labels";
+import { ChromePopover } from "./chrome-popover";
 import { useOsShell } from "./shell-context";
+import { useViewerRole } from "./boot-context";
 import { useOsToast } from "./toast";
-import { MorePortal } from "./more-portal";
-import { TAUPE, taupeButton } from "@/components/ui/accent";
-import { MenuItem, MenuSectionLabel } from "@/components/ui/menu";
+import { NewSpaceDialog } from "./new-space-dialog";
+import { refreshSidebar } from "./sidebar-refresh";
 
-const MENU_WIDTH = 312;
-
-type BuildKind = "doc" | "form" | "whiteboard" | "database";
-
-// Default Database columns — same id scheme as /api/tables' defaultId.
-// Gives a new database an immediately useful grid instead of a single
-// bare "Name" column.
-function defaultDatabaseColumns() {
-  const id = () => Math.random().toString(36).slice(2, 10);
-  return [
-    { id: id(), type: "short_text", label: "Name" },
-    { id: id(), type: "select", label: "Status", options: ["To do", "In progress", "Done"] },
-    { id: id(), type: "date", label: "Due date" },
-    { id: id(), type: "long_text", label: "Notes" },
-  ];
+function hasSpeechRecognition(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as unknown as { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
 }
 
-// Per-entity create config: which API to call, how to shape the body,
-// where the created id lives in the response, and where to land.
-const BUILD_META: Record<BuildKind, {
-  label: string;
-  Icon: LucideIcon;
-  iconClassName: string;
-  placeholder: string;
-  /** Forms are org-level (they target a board, not a Space). */
-  hasLocation: boolean;
-  endpoint: string;
-  body: (name: string, spaceId: string | null) => Record<string, unknown>;
-  idFrom: (data: unknown) => string | undefined;
-  href: (id: string) => string;
-}> = {
-  doc: {
-    label: "Doc",
-    Icon: FileText,
-    iconClassName: "text-blue-500",
-    placeholder: "Doc title",
-    hasLocation: true,
-    endpoint: "/api/docs",
-    body: (name, spaceId) => ({
-      title: name,
-      ...(spaceId ? { entityType: "SPACE", entityId: spaceId } : {}),
-    }),
-    idFrom: (data) => (data as { doc?: { id?: string } })?.doc?.id,
-    href: (id) => `/docs/${id}`,
-  },
-  form: {
-    label: "Form",
-    Icon: ClipboardCheck,
-    iconClassName: "text-sky-500",
-    placeholder: "Form name",
-    hasLocation: false,
-    endpoint: "/api/forms",
-    body: (name) => ({ name }),
-    // /api/forms returns the form row directly (jsonSuccess).
-    idFrom: (data) => (data as { id?: string })?.id,
-    href: (id) => `/forms/${id}`,
-  },
-  whiteboard: {
-    label: "Canvas",
-    Icon: Brush,
-    iconClassName: "text-amber-500",
-    placeholder: "Canvas name",
-    hasLocation: true,
-    endpoint: "/api/whiteboards",
-    body: (name, spaceId) => ({ name, ...(spaceId ? { spaceId } : {}) }),
-    idFrom: (data) => (data as { whiteboard?: { id?: string } })?.whiteboard?.id,
-    href: (id) => `/canvas/${id}`,
-  },
-  database: {
-    label: "Database",
-    Icon: Database,
-    iconClassName: "text-emerald-600",
-    placeholder: "Database name",
-    hasLocation: true,
-    endpoint: "/api/tables",
-    body: (name, spaceId) => ({
-      name,
-      columns: defaultDatabaseColumns(),
-      ...(spaceId ? { spaceId } : {}),
-    }),
-    // /api/tables returns the table row directly (jsonSuccess).
-    idFrom: (data) => (data as { id?: string })?.id,
-    href: (id) => `/tables/${id}`,
-  },
-};
-
-interface CreateMenuProps {
-  anchorRef: RefObject<HTMLButtonElement | null>;
+export function CreateMenu({
+  open,
+  onOpenChange,
+  trigger,
+  align = "end",
+  layerId = "create-menu",
+}: {
   open: boolean;
-  onClose: () => void;
-  /** Space row action. Today this proxies the active app's new-action
-   *  (same as the old menu); a global Space wizard hook is a
-   *  lists-spaces-spec follow-up. */
-  onCreateSpace: () => void;
-}
-
-export function CreateMenu({ anchorRef, open, onClose, onCreateSpace }: CreateMenuProps) {
-  const { openCreateTask, openCreateList, openCreateSprint, openCustomize, openTemplateCenter } = useOsShell();
-  const { toast } = useOsToast();
+  onOpenChange: (open: boolean) => void;
+  trigger: ReactNode;
+  align?: "start" | "center" | "end";
+  layerId?: string;
+}) {
   const router = useRouter();
-  const panelRef = useRef<HTMLDivElement>(null);
-  const nameRef = useRef<HTMLInputElement>(null);
+  const { toast } = useOsToast();
+  const { openCreateTask, openCreateList, openTemplateCenter, openSidekick, railApps, canCreateSpace } = useOsShell();
+  const { isGuest } = useViewerRole();
+  // The popover content only mounts when open, so this runs on the client.
+  const [voice] = useState(() => hasSpeechRecognition());
+  const [spaceOpen, setSpaceOpen] = useState(false);
 
-  const [buildKind, setBuildKind] = useState<BuildKind | null>(null);
-  const [name, setName] = useState("");
-  const [spaceId, setSpaceId] = useState("");
-  const [spaces, setSpaces] = useState<{ id: string; name: string }[] | null>(null);
-  const [busy, setBusy] = useState(false);
+  const close = () => onOpenChange(false);
+  const aiVisible = railApps.some((a) => a.key === "ai");
+  const isMember = !isGuest;
+  // POST /api/spaces refuses below the manager tier, so the Space row is
+  // absent (never disabled) for everyone else: a row that appears always
+  // works (spec-shell 2.10). `canCreateSpace` is the shell's one answer
+  // (Agents and Guests are false there too).
 
-  // Lazy-load the Space list the first time a location-aware step opens.
-  useEffect(() => {
-    if (!buildKind || !BUILD_META[buildKind].hasLocation || spaces !== null) return;
-    let cancelled = false;
-    void fetch("/api/spaces")
-      .then((res) => (res.ok ? res.json() : { spaces: [] }))
-      .then((data) => {
-        if (cancelled) return;
-        const rows = Array.isArray(data?.spaces) ? data.spaces : [];
-        setSpaces(rows.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name })));
-      })
-      .catch(() => { if (!cancelled) setSpaces([]); });
-    return () => { cancelled = true; };
-  }, [buildKind, spaces]);
-
-  useEffect(() => {
-    if (buildKind) setTimeout(() => nameRef.current?.focus(), 0);
-  }, [buildKind]);
-
-  if (!open) return null;
-
-  const resetStep = () => {
-    setBuildKind(null);
-    setName("");
-    setSpaceId("");
-    setBusy(false);
-  };
-
-  const close = () => {
-    resetStep();
-    onClose();
-  };
-
-  const run = (action: () => void) => {
+  const createDoc = async () => {
     close();
-    action();
-  };
-
-  const submit = async () => {
-    if (!buildKind) return;
-    const meta = BUILD_META[buildKind];
-    const trimmed = name.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    try {
-      const res = await fetch(meta.endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(meta.body(trimmed, meta.hasLocation && spaceId ? spaceId : null)),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast((data as { error?: string })?.error ?? `Couldn't create ${meta.label.toLowerCase()}`);
-        return;
-      }
-      const id = meta.idFrom(data);
-      if (!id) {
-        toast(`Couldn't create ${meta.label.toLowerCase()}`);
-        return;
-      }
-      const href = meta.href(id);
-      close();
-      router.push(href);
-    } catch {
-      toast(`Couldn't create ${meta.label.toLowerCase()}`);
-    } finally {
-      setBusy(false);
+    const r = await apiFetch<{ doc?: { id?: string } }>("/api/docs", {
+      method: "POST",
+      json: { title: "Untitled doc", content: { type: "doc", content: [{ type: "paragraph" }] } },
+    });
+    const id = r.ok ? r.data?.doc?.id : undefined;
+    if (!id) {
+      toast("Couldn't create doc. Try again");
+      return;
     }
+    router.push(`/docs/${id}`);
   };
 
-  const step = buildKind ? BUILD_META[buildKind] : null;
+  const tool = (detail: "reminder" | "notepad" | "voice") => {
+    close();
+    // The three personal-capture overlays listen for this until their
+    // rewrite (spec-shell 2.19 to 2.21) replaces the event with the LayerStack.
+    window.setTimeout(() => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail })), 0);
+  };
 
   return (
     <>
-      <div className="fixed inset-0 z-30" onClick={close} aria-hidden />
-      <MorePortal anchorRef={anchorRef} panelRef={panelRef} width={MENU_WIDTH} open={open} placement="below">
-        <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
-          {step ? (
-            <div className="p-2">
-              <div className="mb-1 flex items-center gap-1.5 px-0.5">
-                <button
-                  type="button"
-                  onClick={resetStep}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-                  aria-label="Back"
-                >
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                </button>
-                <step.Icon className={`h-4 w-4 ${step.iconClassName}`} />
-                <span className="text-base font-semibold text-zinc-900">New {step.label}</span>
-              </div>
-              <input
-                ref={nameRef}
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void submit();
-                  if (e.key === "Escape") resetStep();
-                }}
-                placeholder={step.placeholder}
-                className="h-8 w-full rounded-lg border bg-white px-2.5 text-base outline-none"
-                style={{ borderColor: TAUPE.ring }}
-              />
-              {step.hasLocation ? (
-                <select
-                  value={spaceId}
-                  onChange={(e) => setSpaceId(e.target.value)}
-                  className="mt-2 h-8 w-full rounded-lg border border-zinc-200 bg-white px-2 text-base text-zinc-700 outline-none focus:border-zinc-400"
-                >
-                  <option value="">No location · org-wide</option>
-                  {(spaces ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              ) : null}
-              <button
-                type="button"
-                onClick={() => void submit()}
-                disabled={!name.trim() || busy}
-                className={`mt-2 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-lg text-base text-white ${taupeButton}`}
-              >
-                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                Create {step.label}
-              </button>
-            </div>
-          ) : (
+      <ChromePopover open={open} onOpenChange={onOpenChange} trigger={trigger} width={280} align={align} layerId={layerId} ariaLabel={SHELL_LABELS.create}>
+        <div className="py-1">
+          {isMember ? (
+            <MenuItem icon={CheckSquare} label="Task" shortcut={shortcutHint("create-task")} onClick={() => { close(); openCreateTask(); }} />
+          ) : null}
+          <MenuItem icon={FileText} label="Doc" onClick={() => { void createDoc(); }} />
+          {isMember ? (
+            <MenuItem icon={ListTodo} label="List" onClick={() => { close(); openCreateList(); }} />
+          ) : null}
+          <MenuItem icon={AlarmClock} label="Reminder" onClick={() => tool("reminder")} />
+          <MenuItem icon={NotebookPen} label="Notepad" onClick={() => tool("notepad")} />
+          {voice ? <MenuItem icon={Mic} label="Voice note" onClick={() => tool("voice")} /> : null}
+          {isMember ? (
             <>
-              <div className="p-2">
-                <input
-                  type="text"
-                  className="h-8 w-full rounded-lg border bg-white px-2.5 text-base outline-none"
-                  style={{ borderColor: TAUPE.ring }}
-                  placeholder="Describe anything to create"
-                  onKeyDown={(event) => {
-                    // v1: any description creates a Task. NLP intent routing
-                    // (task vs doc vs list) is a fast-follow — plan §3.
-                    if (event.key === "Enter") run(openCreateTask);
-                    if (event.key === "Escape") close();
-                  }}
-                  autoFocus
-                />
-              </div>
-              <div className="px-2 pb-2">
-                <MenuSectionLabel className="px-2">Create</MenuSectionLabel>
-                <MenuItem
-                  variant="inset"
-                  icon={CheckCircle2}
-                  label="Task"
-                  shortcut="⌥T"
-                  active
-                  onClick={() => run(openCreateTask)}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={ListChecks}
-                  label="List"
-                  description="Track tasks, projects, people & more"
-                  onClick={() => run(openCreateList)}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={IterationCw}
-                  label="Sprint"
-                  description="Time-boxed List with Sprint Points"
-                  onClick={() => run(openCreateSprint)}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={Boxes}
-                  label="Space"
-                  description="Organize work by team or department"
-                  onClick={() => run(onCreateSpace)}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 pb-2 pt-1">
-                <MenuSectionLabel className="px-2">AI</MenuSectionLabel>
-                <MenuItem
-                  variant="inset"
-                  icon={Sparkles}
-                  label="Create with AI"
-                  iconClassName="text-orange-500"
-                  onClick={() => run(() => router.push("/sidekick"))}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={Bot}
-                  label="Super Agent"
-                  badge={
-                    <span className="rounded-md bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-600">
-                      Hot
-                    </span>
-                  }
-                  iconClassName="text-blue-500"
-                  onClick={() => run(() => router.push("/agents"))}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 pb-2 pt-1">
-                <MenuSectionLabel className="px-2">Build</MenuSectionLabel>
-                <MenuItem
-                  variant="inset"
-                  icon={FileText}
-                  label="Doc"
-                  iconClassName="text-blue-500"
-                  submenu
-                  onClick={() => setBuildKind("doc")}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={ClipboardCheck}
-                  label="Form"
-                  iconClassName="text-sky-500"
-                  submenu
-                  onClick={() => setBuildKind("form")}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={Brush}
-                  label="Canvas"
-                  iconClassName="text-amber-500"
-                  submenu
-                  onClick={() => setBuildKind("whiteboard")}
-                />
-                <MenuItem
-                  variant="inset"
-                  icon={Database}
-                  label="Database"
-                  description="Spreadsheet-style rows & columns"
-                  iconClassName="text-emerald-600"
-                  submenu
-                  onClick={() => setBuildKind("database")}
-                />
-              </div>
-              <div className="border-t border-zinc-100 px-2 py-2">
-                <MenuItem
-                  variant="inset"
-                  icon={SlidersHorizontal}
-                  label="Customize your sidebar"
-                  onClick={() => run(openCustomize)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 p-2">
-                <button
-                  type="button"
-                  onClick={() => run(() => router.push("/imports"))}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-                >
-                  <Import className="h-4 w-4 text-zinc-500" />
-                  Import
-                </button>
-                <button
-                  type="button"
-                  onClick={() => run(() => openTemplateCenter())}
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-zinc-200 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-                >
-                  <Rocket className="h-4 w-4 text-zinc-500" />
-                  Templates
-                </button>
-              </div>
+              <MenuSeparator />
+              <MenuItem icon={LayoutTemplate} label="From template…" onClick={() => { close(); openTemplateCenter(); }} />
+              {canCreateSpace ? (
+                <MenuItem icon={Building2} label="Space" onClick={() => { close(); setSpaceOpen(true); }} />
+              ) : null}
             </>
-          )}
+          ) : null}
+          {aiVisible && isMember ? (
+            <>
+              <MenuSeparator />
+              <MenuItem icon={Sparkles} label={SHELL_LABELS.askAi} shortcut={shortcutHint("ask-ai")} onClick={() => { close(); openSidekick(); }} />
+            </>
+          ) : null}
         </div>
-      </MorePortal>
+      </ChromePopover>
+      <NewSpaceDialog
+        open={spaceOpen}
+        onOpenChange={setSpaceOpen}
+        onCreated={() => { refreshSidebar(); router.refresh(); }}
+      />
     </>
   );
 }

@@ -8,7 +8,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
-import { ArrowLeft, Trash2, Loader2, SearchX } from "lucide-react";
+import { Trash2 } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { BoardItemDetail, type DetailPatch } from "@/components/board-view/board-item-detail";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -31,13 +35,21 @@ export default function ItemDetailPage() {
   const [canEdit, setCanEdit] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // A 404 (deleted, or not discoverable) is the in-shell 404, identical for
+  // both (spec-shell 2.4); any other failure is the error primitive.
+  const [missing, setMissing] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
     try {
       const res = await fetch(`/api/items/${id}`, { cache: "no-store" });
-      if (!res.ok) { setError(res.status === 404 ? "Task not found" : "Could not load task"); return; }
+      if (!res.ok) {
+        if (res.status === 404) setMissing(true);
+        else setError("Couldn't load this task");
+        return;
+      }
+      setMissing(false);
       const data = await res.json();
       setItem(data.item);
       setBoard(data.board ?? null);
@@ -72,27 +84,22 @@ export default function ItemDetailPage() {
   const archive = useCallback(async () => {
     if (!item || !(await confirm({ title: "Archive task", description: "Archive this task? You can restore from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     const res = await fetch(`/api/items/${item.id}`, { method: "DELETE" });
-    if (res.ok) router.push(board ? `/boards/${board.slug}` : "/home");
+    // After an archive: the List, else Everything (spec-shell 1.5). /home is
+    // not a route until the work and home unit ships it.
+    if (res.ok) router.push(board ? `/boards/${board.slug}` : "/everything");
   }, [item, board, router, confirm]);
 
   const statuses = board?.statuses?.length ? board.statuses : [...DEFAULT_STATUS_OPTIONS];
+
+  // The 404 renders alone: no page header, the same view as any other
+  // unknown object, with the hub's BackButton (spec-shell 2.4).
+  if (missing) return <NotFoundView />;
 
   return (
     <div className="h-full overflow-y-auto bg-white">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b border-zinc-100 px-6 py-3 flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            // Direct links / new tabs have no history — go UP to the item's
-            // board (or Everything) instead of dead-ending on a no-op.
-            if (window.history.length > 1) router.back();
-            else router.push(board ? `/boards/${board.slug}` : "/everything");
-          }}
-          className="inline-flex items-center gap-1.5 text-base text-zinc-600 hover:text-zinc-900"
-        >
-          <ArrowLeft className="w-4 h-4" /> Back
-        </button>
+        <BackButton fallbackHref={board ? `/boards/${board.slug}` : "/everything"} label={board ? board.name : "Everything"} />
         {board ? (
           <Link href={`/boards/${board.slug}`} className="text-base text-zinc-400 hover:text-zinc-700 truncate">{board.name}</Link>
         ) : null}
@@ -105,25 +112,9 @@ export default function ItemDetailPage() {
 
       <div className="px-6 py-6">
         {loading && !item ? (
-          <div className="flex items-center gap-2 text-xs text-zinc-400 py-10"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>
+          <SkeletonRows />
         ) : error ? (
-          <div className="flex flex-col items-center text-center py-16 max-w-sm mx-auto">
-            <span className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-white/5 flex items-center justify-center mb-4">
-              <SearchX className="w-6 h-6 text-zinc-400" />
-            </span>
-            <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{error}</div>
-            <p className="text-base text-zinc-500 dark:text-zinc-400 mt-1.5">
-              This task may have been deleted or moved to Trash. The link that brought you here is no longer available.
-            </p>
-            <div className="flex items-center gap-2 mt-5">
-              <button type="button" onClick={() => { if (window.history.length > 1) router.back(); else router.push("/everything"); }} className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-base text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/5">
-                <ArrowLeft className="w-4 h-4" /> Go back
-              </button>
-              <Link href="/today" className="inline-flex items-center h-9 px-3.5 rounded-lg text-base font-medium text-white bg-[#0073EA] hover:bg-[#0060B9]">
-                Go to Today
-              </Link>
-            </div>
-          </div>
+          <ErrorState what="this task" onRetry={() => { setError(null); void load(); }} />
         ) : item ? (
           <BoardItemDetail
             item={item}

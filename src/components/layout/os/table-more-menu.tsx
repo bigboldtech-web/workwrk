@@ -10,11 +10,12 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Edit2, Trash2, Loader2 } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash2 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Dots } from "@/components/ui/dots";
 
 interface TableRowLike {
   id: string;
@@ -190,7 +191,7 @@ function TableMoreMenu({
             disabled={Boolean(busy) || !draft.trim()}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "rename" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>

@@ -8,14 +8,20 @@
 // Files: placeholder for v1 — most modules already have their own
 //        attachment surface; we'll unify in a later phase.
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
 import {
-  X, MessageCircle, FileText, Activity as ActivityIcon, Loader2,
-  Trash2, Paperclip,
+  X,
+  MessageCircle,
+  FileText,
+  Activity as ActivityIcon,
+  Trash2,
 } from "lucide-react";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 interface UpdateRow {
   id: string;
@@ -155,7 +161,7 @@ export function ItemActivityDrawer(props: Props) {
 
         <ViewTabStrip className="flex-shrink-0 px-5">
           <ViewTab active={tab === "updates"} onClick={() => setTab("updates")} icon={MessageCircle} label="Updates" trailing={<CountBadge count={updates.length} />} />
-          <ViewTab active={tab === "files"} onClick={() => setTab("files")} icon={FileText} label="Files" />
+          <UpcomingOnly><ViewTab active={tab === "files"} onClick={() => setTab("files")} icon={FileText} label="Files" /></UpcomingOnly>
           <ViewTab active={tab === "activity"} onClick={() => setTab("activity")} icon={ActivityIcon} label="Activity Log" trailing={<CountBadge count={activity.length} />} />
         </ViewTabStrip>
 
@@ -171,7 +177,7 @@ export function ItemActivityDrawer(props: Props) {
               onDelete={deleteUpdate}
             />
           )}
-          {tab === "files" && <FilesPlaceholder />}
+          {tab === "files" && <ComingSoonRow label="Files" className="m-3" />}
           {tab === "activity" && <ActivityTab activity={activity} loading={loadingActivity} />}
         </div>
       </aside>
@@ -221,7 +227,7 @@ function UpdatesTab({
             disabled={posting || !composer.trim()}
             className="px-3 py-1.5 rounded-md text-xs font-medium bg-violet-600 hover:bg-violet-700 text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"
           >
-            {posting ? <Loader2 size={12} className="animate-spin" /> : null}
+            {posting ? <Dots variant="pending" /> : null}
             Update
           </button>
         </div>
@@ -229,7 +235,7 @@ function UpdatesTab({
 
       {loading ? (
         <p className="text-xs text-zinc-500 text-center py-8 inline-flex items-center gap-2 w-full justify-center">
-          <Loader2 size={12} className="animate-spin" /> Loading updates…
+          <Dots variant="pending" /> Loading updates…
         </p>
       ) : updates.length === 0 ? (
         <div className="text-center py-12">
@@ -266,24 +272,13 @@ function UpdatesTab({
   );
 }
 
-function FilesPlaceholder() {
-  return (
-    <div className="p-8 text-center">
-      <Paperclip size={32} className="mx-auto text-zinc-500 mb-3" />
-      <p className="text-xs font-medium mb-1">Files coming soon</p>
-      <p className="text-xs text-zinc-500">
-        Most modules already have their own attachment surface — we&apos;re unifying them into this tab in a later polish phase.
-      </p>
-    </div>
-  );
-}
 
 function ActivityTab({ activity, loading }: { activity: ActivityRow[]; loading: boolean }) {
   if (loading) {
     return (
-      <p className="text-xs text-zinc-500 text-center py-12 inline-flex items-center gap-2 w-full justify-center">
-        <Loader2 size={12} className="animate-spin" /> Loading…
-      </p>
+      <div className="py-4">
+        <SkeletonLines lines={4} />
+      </div>
     );
   }
   if (activity.length === 0) {

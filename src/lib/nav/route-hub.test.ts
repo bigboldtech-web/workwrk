@@ -8,6 +8,7 @@ import {
   HUB_KEYS,
   REDIRECT_ROUTES,
   ROUTE_HUB,
+  ROUTE_TITLES,
   SETTINGS_ROUTES,
   WORK_HOME_HREF,
   hubDefaultHref,
@@ -15,6 +16,8 @@ import {
   isRedirectRoute,
   isSettingsRoute,
   resolveActiveRow,
+  resolveCrumbFallback,
+  resolveCrumbTrail,
   resolveHub,
   resolveHubPrefix,
 } from "./route-hub";
@@ -43,6 +46,9 @@ function dashboardRoutes(): string[] {
     }
     for (const entry of entries) {
       if (entry.startsWith(".") || entry.startsWith("_")) continue;
+      // The catch-all `[...rest]` is the no-match fallback itself (rule 3
+      // renders it as Work's in-shell 404); it owns no URL and needs no row.
+      if (entry.startsWith("[...")) continue;
       const full = path.join(dir, entry);
       if (!statSync(full).isDirectory()) continue;
       // A route group contributes no URL segment.
@@ -143,11 +149,62 @@ describe("ROUTE_HUB completeness", () => {
     expect(missing).toEqual([]);
   });
 
-  it("declares exactly the two rule-1 settings prefixes", () => {
-    // /imports renders in the takeover too, but as a ROUTE_HUB row rather than
-    // a rule-1 member, so removing it later is a one-row deletion.
-    expect([...SETTINGS_ROUTES]).toEqual(["/settings", "/account"]);
+  it("declares exactly the three takeover prefixes (spec-shell 2.8)", () => {
+    // /imports is the one member outside the two door prefixes; it leaves
+    // together with its ROUTE_HUB row when it 308s into /settings/data.
+    expect([...SETTINGS_ROUTES]).toEqual(["/settings", "/account", "/imports"]);
     expect(ROUTE_HUB["/imports"]).toBe("settings");
+  });
+
+  it("has a breadcrumb title for every ROUTE_HUB row, and nested rows only under one", () => {
+    // ROUTE_TITLES is the breadcrumb fallback every unit's pages depend on
+    // (spec-shell 2.1), so a hub row without a title is a bug and so is a
+    // title for a prefix no hub row owns. Nested static directories may add
+    // rows under a hub row so the trail prints the hierarchy.
+    const hubKeys = Object.keys(ROUTE_HUB);
+    const titleKeys = Object.keys(ROUTE_TITLES);
+    for (const key of hubKeys) expect(titleKeys).toContain(key);
+    for (const key of titleKeys) {
+      expect(resolveHubPrefix(key)).not.toBeNull();
+      // A nested row names a real page directory, never a dynamic segment.
+      expect(key).not.toContain("[");
+    }
+    for (const title of Object.values(ROUTE_TITLES)) {
+      expect(title.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("names a real route directory with every nested title row", () => {
+    const routes = new Set(dashboardRoutes());
+    for (const key of Object.keys(ROUTE_TITLES)) {
+      if (key in ROUTE_HUB) continue;
+      expect(routes.has(key), `${key} has a ROUTE_TITLES row but no page directory`).toBe(true);
+    }
+  });
+
+  it("resolves the crumb fallback by the same longest-prefix rule", () => {
+    expect(resolveCrumbFallback("/docs")).toBe("Docs");
+    expect(resolveCrumbFallback("/docs/abc123")).toBe("Docs");
+    expect(resolveCrumbFallback("/me/weekly-review")).toBe("Weekly review");
+    expect(resolveCrumbFallback("/settings/members")).toBe("Workspace settings");
+    expect(resolveCrumbFallback("/people/departments")).toBe("Departments");
+    expect(resolveCrumbFallback("/sops/new/text")).toBe("New SOP");
+    expect(resolveCrumbFallback("/no-such-route")).toBeNull();
+  });
+
+  it("builds the crumb trail as the hierarchy of owning rows", () => {
+    expect(resolveCrumbTrail("/people/departments")).toEqual([
+      { label: "Directory", href: "/people" },
+      { label: "Departments" },
+    ]);
+    expect(resolveCrumbTrail("/sops/new/text")).toEqual([
+      { label: "SOPs", href: "/sops" },
+      { label: "New SOP" },
+    ]);
+    // A dynamic route gets its container only; the page declares the rest.
+    expect(resolveCrumbTrail("/policies/abc123")).toEqual([{ label: "Policies" }]);
+    expect(resolveCrumbTrail("/docs")).toEqual([{ label: "Docs" }]);
+    expect(resolveCrumbTrail("/no-such-route")).toEqual([]);
   });
 
   it("exempts only genuine redirects from the completeness gate", () => {

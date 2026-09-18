@@ -6,16 +6,24 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  ShieldCheck, AlertCircle, TrendingUp, TrendingDown, Users as UsersIcon, Building,
-  Activity, Hash, ClipboardCheck, BookCopy, CheckCircle2, Clock,
+  AlertCircle,
+  TrendingUp,
+  TrendingDown,
+  Users as UsersIcon,
+  Building,
+  Activity,
+  Hash,
+  ClipboardCheck,
+  BookCopy,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Overview = { total: number; completed: number; inProgress: number; overdue: number; overallRate: number };
 type DeptRow = { departmentId: string; name: string; total: number; completed: number; rate: number };
@@ -76,25 +84,21 @@ export default function SopComplianceDashboard() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="SOP compliance"
-        Icon={ShieldCheck}
-        iconGradient={GRAD.redPink}
-        showStandardActions={false}
-        description={data === null ? "Loading…" : `${data.overview.completed} / ${data.overview.total} complete · ${data.overview.overallRate}% org rate · ${data.overview.overdue} overdue`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Hash className="h-3.5 w-3.5" /> All SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><ClipboardCheck className="h-3.5 w-3.5" /> My SOPs</Link>
+          <div className="flex items-center gap-1">
+            <Link href="/sops" className="os-head__link"><Hash /> SOPs</Link>
+            <Link href="/sops/my-sops" className="os-head__link"><ClipboardCheck /> My SOPs</Link>
           </div>
         }
       />
 
       <div className="cmpl">
         {loadError ? (
-          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.redPink} title="Couldn't load compliance" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load compliance" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : data === null ? (
-          <div className="cmpl__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : (
           <>
             <div className="cmpl__kpis">

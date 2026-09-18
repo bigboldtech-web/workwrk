@@ -1,58 +1,60 @@
 "use client";
 
-// OverviewCustomizeBanner + OverviewToolbar — Overview-tab chrome that
-// matches the ClickUp screenshot exactly. Banner is dismissible
-// (sessionStorage so it doesn't pop back every reload). Toolbar is
-// visual-only for v1 — the Refresh / Filter / Settings / + Card
-// affordances land when we wire customize-cards persistence.
+// OverviewCustomizeBanner + OverviewToolbar — Overview-tab chrome. The
+// banner is dismissible (sessionStorage so it doesn't pop back every
+// reload). The toolbar carries the one control that works: "+ Card", the
+// page's single blue primary. The Refresh readout, the auto-refresh pill and
+// the Filter / Settings icon buttons were inert placeholders and are gone
+// rather than left on screen (no control without a handler); they come back
+// with customize-cards persistence, wired.
 
-import { useEffect, useState } from "react";
-import { Lightbulb, X, RefreshCcw, ListFilter, Settings, Plus, ChevronDown } from "lucide-react";
+import { useSyncExternalStore } from "react";
+import { Lightbulb, X, Plus } from "lucide-react";
 
 const DISMISS_KEY = "workwrk:overview:customize-dismissed";
 
-export function OverviewCustomizeBanner() {
-  const [hidden, setHidden] = useState(true);
+// sessionStorage read as an external store rather than through a mount effect:
+// the server snapshot is "dismissed", so the markup matches on hydration and
+// the banner never flashes, and dismissing it is a store write plus a
+// notification instead of setState inside an effect.
+const listeners = new Set<() => void>();
+function subscribeDismissed(cb: () => void) {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+// Set when storage is unavailable (a private window, blocked site data), so
+// Dismiss still dismisses for the rest of the session.
+let dismissedInMemory = false;
+function readDismissed(): boolean {
+  if (dismissedInMemory) return true;
+  try { return window.sessionStorage.getItem(DISMISS_KEY) === "1"; } catch { return false; }
+}
+function dismissBanner() {
+  dismissedInMemory = true;
+  try { window.sessionStorage.setItem(DISMISS_KEY, "1"); } catch {}
+  for (const cb of listeners) cb();
+}
 
-  useEffect(() => {
-    try {
-      const dismissed = window.sessionStorage.getItem(DISMISS_KEY) === "1";
-      setHidden(dismissed);
-    } catch {
-      setHidden(false);
-    }
-  }, []);
+export function OverviewCustomizeBanner() {
+  const hidden = useSyncExternalStore(subscribeDismissed, readDismissed, () => true);
 
   if (hidden) return null;
 
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-2 rounded-md text-base border"
-      style={{
-        background: "color-mix(in srgb, var(--os-brand) 8%, transparent)",
-        borderColor: "color-mix(in srgb, var(--os-brand) 24%, transparent)",
-        color: "var(--os-ink, #18181b)",
-      }}
-    >
-      <Lightbulb className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--os-brand)" }} />
+    // Neutral, not a brand wash: blue never lands on the frame, a banner or
+    // an icon at rest, and the page's "+ Card" button is its one primary.
+    // The "Get Started" link is gone rather than inert - it had no handler
+    // and no destination, and the sentence says what to do without it.
+    <div className="flex items-center gap-3 rounded-md border border-line bg-subtle px-3 py-2 text-base text-ink">
+      <Lightbulb className="w-3.5 h-3.5 shrink-0 text-ink-3" />
       <span className="flex-1">
-        Get the most out of your Overview! Add, reorder, and resize cards to customize this page.{" "}
-        <button
-          type="button"
-          className="underline font-medium hover:opacity-80"
-          style={{ color: "var(--os-brand)" }}
-        >
-          Get Started
-        </button>
+        Get the most out of your Overview: add, reorder, and resize cards to customize this page.
       </span>
       <button
         type="button"
         aria-label="Dismiss"
-        onClick={() => {
-          try { window.sessionStorage.setItem(DISMISS_KEY, "1"); } catch {}
-          setHidden(true);
-        }}
-        className="p-0.5 rounded hover:bg-black/5 shrink-0 text-zinc-500"
+        onClick={dismissBanner}
+        className="p-0.5 rounded hover:bg-hover shrink-0 text-ink-3"
       >
         <X className="w-3.5 h-3.5" />
       </button>
@@ -61,48 +63,9 @@ export function OverviewCustomizeBanner() {
 }
 
 export function OverviewToolbar() {
-  const [refreshedAt, setRefreshedAt] = useState<Date | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-
-  useEffect(() => {
-    setRefreshedAt(new Date());
-  }, []);
-
   return (
     <div className="flex items-center gap-2 text-sm">
-      <div className="flex items-center gap-1.5 text-zinc-500">
-        <RefreshCcw className="w-3 h-3" />
-        <span>Refreshed: {refreshedAt ? relTime(refreshedAt) : "just now"}</span>
-      </div>
-      <button
-        type="button"
-        onClick={() => setAutoRefresh((v) => !v)}
-        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-zinc-700 hover:bg-zinc-50 border border-zinc-200"
-        title="Toggle auto-refresh"
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? "bg-emerald-500" : "bg-zinc-300"}`}
-        />
-        Auto refresh: {autoRefresh ? "On" : "Off"}
-        <ChevronDown className="w-3 h-3 text-zinc-400" />
-      </button>
       <div className="flex-1" />
-      <button
-        type="button"
-        aria-label="Filter"
-        title="Filter"
-        className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
-      >
-        <ListFilter className="w-3.5 h-3.5" />
-      </button>
-      <button
-        type="button"
-        aria-label="Settings"
-        title="Settings"
-        className="p-1.5 rounded hover:bg-zinc-100 text-zinc-500"
-      >
-        <Settings className="w-3.5 h-3.5" />
-      </button>
       <button
         type="button"
         onClick={() => {
@@ -110,8 +73,7 @@ export function OverviewToolbar() {
             window.dispatchEvent(new CustomEvent("workwrk:overview-add-card"));
           }
         }}
-        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-sm text-white"
-        style={{ background: "var(--os-brand)" }}
+        className="inline-flex items-center gap-1 rounded bg-brand px-2.5 py-1 text-sm text-white hover:bg-brand-hover"
         title="Add a card"
       >
         <Plus className="w-3.5 h-3.5" />
@@ -121,12 +83,3 @@ export function OverviewToolbar() {
   );
 }
 
-function relTime(d: Date): string {
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return d.toLocaleString();
-}

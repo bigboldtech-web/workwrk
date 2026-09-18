@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, MoreHorizontal, MessageCircle, ArrowRight, Plus } from "lucide-react";
-import type { Person } from "./title-bar";
+type Person = { initials: string; color: string };
 import { useOsShell } from "./shell-context";
 import { OsPickerPopover, type PickerOption } from "./picker-popover";
 import { useOsToast } from "./toast";
@@ -462,7 +462,7 @@ export function OsMainTable({
                             className="os-row-open"
                             onClick={() => openItemDrawer({ moduleId, itemId: r.id, name: r.name, groupColor: g.color, payload: r.cells })}
                           >
-                            Open <ArrowRight />
+                            Open <ArrowRight className="rtl:rotate-180" />
                           </button>
                         </div>
                       </td>

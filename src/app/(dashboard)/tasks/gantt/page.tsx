@@ -14,10 +14,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  GanttChart, ChevronLeft, ChevronRight, BarChart3, Users, Activity,
+  ChevronLeft,
+  ChevronRight,
+  BarChart3,
+  Users,
+  Activity,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -157,14 +161,9 @@ export default function GanttPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Gantt"
-        Icon={GanttChart}
-        iconGradient={GRAD.bluePurple}
-        description={tasks === null ? "Loading…" : `${sorted.length} task${sorted.length === 1 ? "" : "s"} in window · ${windowDays}-day view`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={5}
-        actions={
+        toolbar={{ left: (
           <div className="gantt__head-actions">
             <div className="gantt__group">
               <button type="button" className={groupBy === "status" ? "is-active" : ""} onClick={() => setGroupBy("status")}>
@@ -180,7 +179,7 @@ export default function GanttPage() {
               <button type="button" onClick={() => setWindowStart(new Date(windowStart.getTime() + 14 * MS_DAY))} aria-label="+14 days"><ChevronRight /></button>
             </div>
           </div>
-        }
+        ) }}
       />
 
       {loadError ? (

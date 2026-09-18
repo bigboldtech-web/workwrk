@@ -13,7 +13,8 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Frame, Loader2, CheckCircle2, Cloud, MoreHorizontal, Pencil, Link2, Share2, Trash2 } from "lucide-react";
+import { Frame, CheckCircle2, Cloud, MoreHorizontal, Pencil, Link2, Share2, Trash2 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { WhiteboardFavoriteButton } from "@/components/board-view/whiteboard-favorite-button";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { MorePortal } from "@/components/layout/os/more-portal";
@@ -26,6 +27,9 @@ import { isCanvasScene, emptyScene, type CanvasScene } from "@/lib/canvas/scene"
 import { isExcalidrawScene, importExcalidraw } from "@/lib/canvas/import-excalidraw";
 import { STATUS_LOOKUP } from "@/lib/board-items-shared";
 import "@excalidraw/excalidraw/index.css";
+import { BackButton } from "@/components/ui/back-button";
+import { ErrorState } from "@/components/ui/error-state";
+import { NotFoundView } from "@/components/access/not-found-view";
 
 // Load droppable work-graph items for the canvas card picker → tasks AND docs.
 // Tasks: cross-board "my items" (status/color from the shared lookup, meta =
@@ -130,6 +134,7 @@ type Whiteboard = {
   description: string | null;
   scene: SceneShape | null;
   updatedAt: string;
+  spaceId?: string | null;
 };
 
 // Minimal slice of the Excalidraw imperative API we use (kept local so we don't
@@ -147,6 +152,15 @@ export default function WhiteboardCanvasPage() {
   const router = useRouter();
   const [board, setBoard] = useState<Whiteboard | null>(null);
   const [loading, setLoading] = useState(true);
+  // A 404 (deleted, or not discoverable) is the in-shell 404; any other
+  // failed read is the error primitive with Try again (spec-shell 1.7, 2.4).
+  // Neither redirects.
+  const [missing, setMissing] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  // The BackButton target (back-map 6): the anchor Space when `spaceId` is
+  // set, else /canvas labelled Canvases.
+  const [spaceBack, setSpaceBack] = useState<{ fallbackHref: string; label: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -199,19 +213,42 @@ export default function WhiteboardCanvasPage() {
     (async () => {
       // no-store: never let the browser HTTP cache serve a stale scene on
       // re-open (that alone would show the "old design" after an edit).
-      const res = await fetch(`/api/whiteboards/${params.id}`, { cache: "no-store" });
+      let res: Response;
+      try {
+        res = await fetch(`/api/whiteboards/${params.id}`, { cache: "no-store" });
+      } catch {
+        if (!cancelled) { setLoadError(true); setLoading(false); }
+        return;
+      }
       if (cancelled) return;
       if (res.ok) {
         const data = await res.json();
-        setBoard(data.whiteboard);
-        setRenameValue(data.whiteboard.name);
+        const wb = data.whiteboard as Whiteboard;
+        setBoard(wb);
+        setRenameValue(wb.name);
+        setMissing(false);
+        setLoadError(false);
+        if (wb.spaceId) {
+          try {
+            const sr = await fetch(`/api/spaces/${wb.spaceId}`);
+            const sd = sr.ok ? await sr.json() : null;
+            const s = sd?.space as { slug?: string; name?: string } | undefined;
+            if (!cancelled) setSpaceBack(s?.slug ? { fallbackHref: `/spaces/${s.slug}`, label: s.name || "Space" } : null);
+          } catch {
+            if (!cancelled) setSpaceBack(null);
+          }
+        } else {
+          setSpaceBack(null);
+        }
+      } else if (res.status === 404) {
+        setMissing(true);
       } else {
-        router.push("/canvas");
+        setLoadError(true);
       }
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [params?.id, router]);
+  }, [params?.id, reloadKey]);
 
   // opts.keepalive: only the real page-unload path (pagehide/beforeunload) asks
   // for it. The browser rejects a keepalive body over ~64KB, so a whiteboard
@@ -343,6 +380,15 @@ export default function WhiteboardCanvasPage() {
     }
   }
 
+  if (missing) return <NotFoundView />;
+  if (loadError) {
+    return (
+      <ErrorState
+        what="this canvas"
+        onRetry={() => { setLoadError(false); setLoading(true); setReloadKey((k) => k + 1); }}
+      />
+    );
+  }
   if (loading || !board) return <CanvasLoader />;
 
   // Engine choice (see FORCE_CANVAS note above). New/empty boards and boards
@@ -367,9 +413,7 @@ export default function WhiteboardCanvasPage() {
     <div className="wbc">
       {/* Toolbar */}
       <header className="wbc__bar">
-        <button type="button" className="wbc__back" onClick={() => router.push("/canvas")} aria-label="Back to canvases">
-          <ArrowLeft />
-        </button>
+        <BackButton fallbackHref={spaceBack?.fallbackHref ?? "/canvas"} label={spaceBack?.label ?? "Canvases"} />
 
         {/* ClickUp shows a small brand-tinted whiteboard glyph before the name. */}
         <span className="grid h-5 w-5 shrink-0 place-items-center rounded-[5px] bg-[#0073EA]/10">
@@ -391,7 +435,7 @@ export default function WhiteboardCanvasPage() {
         <div className="wbc__status">
           {saving ? (
             <span className="wbc__status-saving">
-              <Loader2 className="wbc__spin" /> Saving…
+              <Dots variant="pending" /> Saving…
             </span>
           ) : saveError ? (
             <span className="wbc__status-error" title="We'll keep retrying. Don't close until it saves.">
@@ -481,7 +525,7 @@ export default function WhiteboardCanvasPage() {
 function CanvasLoader() {
   return (
     <div className="wbc__loading">
-      <Loader2 className="wbc__spin" />
+      <Dots variant="pending" />
       <p>Loading canvas…</p>
     </div>
   );

@@ -333,7 +333,7 @@ function PermissionSelect({
     <select
       value={value}
       onChange={(e) => onChange(e.target.value as Permission)}
-      className="h-8 px-2.5 pr-7 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
+      className="h-8 px-2.5 pe-7 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
     >
       {(Object.keys(PERMISSION_LABELS) as Permission[]).map((k) => (
         <option key={k} value={k}>

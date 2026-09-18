@@ -8,18 +8,29 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  MessageCircleHeart, Plus, Search, Hash, ChevronRight, Activity, CheckCircle2,
-  Edit3, Lock, Eye, Users, MessageCircle, Building, Globe, Sparkles,
+  MessageCircleHeart,
+  Search,
+  Hash,
+  ChevronRight,
+  Activity,
+  CheckCircle2,
+  Edit3,
+  Lock,
+  Eye,
+  Users,
+  MessageCircle,
+  Building,
+  Globe,
+  Sparkles,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type CandorStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 
@@ -135,19 +146,14 @@ export default function CandorPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Candor"
-        Icon={MessageCircleHeart}
-        iconGradient={GRAD.pinkPurple}
-        description={rows === null ? "Loading…" : `${stats.total} session${stats.total === 1 ? "" : "s"} · ${stats.counts.ACTIVE} active · ${stats.responses} anonymous response${stats.responses === 1 ? "" : "s"}`}
         actions={
           <div className="cnd__head-actions">
-            <Link href="/people" className="cnd__nav-link"><Users /> People</Link>
-            <button type="button" className="cnd__btn-primary" onClick={quickAdd}>
-              <Plus /> New Candor
-            </button>
+            <Link href="/people" className="os-head__link"><Users /> People</Link>
           </div>
         }
+        primary={{ label: "New session", onClick: quickAdd }}
       />
 
       <div className="cnd">
@@ -190,17 +196,14 @@ export default function CandorPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={MessageCircleHeart} iconGradient={GRAD.redPink} title="Couldn't load sessions" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load sessions" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="cnd__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={MessageCircleHeart}
-            iconGradient={GRAD.pinkPurple}
+            context="list"
             title="No Candor sessions yet"
-            subtitle="Run anonymous feedback rounds. Pick a scope (team or org), write 3-5 prompts, launch. Responses are 100% anonymous."
-            chips={["Anonymous", "Department", "Org-wide"]}
-            cta="New Candor"
+            hint="Run an anonymous feedback round for a team or the whole org."
           />
         ) : grouped.length === 0 ? (
           <div className="cnd__no-match"><Search /> No sessions match.</div>

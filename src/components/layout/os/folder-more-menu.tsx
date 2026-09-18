@@ -13,10 +13,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Palette, Archive, Loader2, Star, PanelLeft, PanelTop,
-  Link as LinkIcon, Zap, Plus, ListChecks, FileText, Brush,
-  SlidersHorizontal, CircleDot, Boxes,
-  Download, Files, ArrowRightLeft, Copy, Trash2, Share2,
+  MoreHorizontal, Edit2, Palette, Archive, Star,
+  Link as LinkIcon, Plus, ListChecks, FileText, Brush,
+  Files, Trash2, Share2,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { ShareFolderDialog } from "./share-folder-dialog";
@@ -26,6 +25,7 @@ import { refreshSidebar } from "./sidebar-refresh";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Dots } from "@/components/ui/dots";
 
 interface FolderRowLike {
   id: string;
@@ -139,9 +139,9 @@ function FolderMoreMenu({
   const [iconName, setIconName] = useState(folder.icon);
   const [color, setColor] = useState(folder.color ?? "#71717A");
   const [starred, setStarred] = useState<boolean | null>(null);
-  const [pinnedTop, setPinnedTop] = useState<boolean | null>(null);
 
-  // Load current favorite state once when the menu opens.
+  // Load current favorite state once when the menu opens. Favorites only:
+  // the "pin to top" action went with the pins strip (spec-shell 0).
   useEffect(() => {
     let alive = true;
     fetch("/api/preferences", { cache: "no-store" })
@@ -150,28 +150,10 @@ function FolderMoreMenu({
         if (!alive) return;
         const ids: string[] = d?.effective?.home?.favoriteFolderIds ?? [];
         setStarred(ids.includes(folder.id));
-        const pins: { kind: string; id: string }[] = d?.effective?.home?.topPins ?? [];
-        setPinnedTop(pins.some((p) => p.kind === "folder" && p.id === folder.id));
       })
-      .catch(() => { if (alive) { setStarred(false); setPinnedTop(false); } });
+      .catch(() => { if (alive) setStarred(false); });
     return () => { alive = false; };
   }, [folder.id]);
-
-  const togglePinTop = useCallback(async () => {
-    if (pinnedTop === null) return;
-    const next = !pinnedTop;
-    setPinnedTop(next);
-    try {
-      await fetch("/api/me/pins", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "folder", id: folder.id, on: next }),
-      });
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("workwrk:pins-changed"));
-    } catch {
-      setPinnedTop(pinnedTop);
-    }
-  }, [folder.id, pinnedTop]);
 
   const toggleFavorite = useCallback(async () => {
     if (starred === null) return;
@@ -200,8 +182,6 @@ function FolderMoreMenu({
       toast("Couldn't copy");
     }
   }, [folder.id, toast]);
-
-  const soon = (label: string) => { toast(`${label} — coming soon`); onClose(); };
 
   // Create new — drops a List / Doc / Whiteboard inside this folder. Lists +
   // Docs anchor to the folder; whiteboards have no folderId so they land in the
@@ -361,7 +341,7 @@ function FolderMoreMenu({
             disabled={Boolean(busy) || !draft.trim()}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "rename" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>
@@ -405,7 +385,7 @@ function FolderMoreMenu({
             disabled={Boolean(busy)}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "icon" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "icon" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>
@@ -415,20 +395,12 @@ function FolderMoreMenu({
 
   return (
     <MenuList>
-      <MenuSubmenu icon={Star} label="Favorite">
-        <MenuItem
-          icon={PanelLeft}
-          label={starred ? "Remove from Sidebar" : "Sidebar"}
-          onClick={toggleFavorite}
-          iconFilled={!!starred}
-        />
-        <MenuItem
-          icon={PanelTop}
-          label={pinnedTop ? "Remove from Top" : "Top"}
-          onClick={togglePinTop}
-          iconFilled={!!pinnedTop}
-        />
-      </MenuSubmenu>
+      <MenuItem
+        icon={Star}
+        label={starred ? "Remove from favorites" : "Add to favorites"}
+        onClick={toggleFavorite}
+        iconFilled={!!starred}
+      />
       <MenuItem icon={Edit2} label="Rename" onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link" onClick={copyLink} />
 
@@ -440,22 +412,15 @@ function FolderMoreMenu({
         <MenuItem icon={Brush}      label="Canvas" onClick={createWhiteboard} />
       </MenuSubmenu>
       <MenuItem icon={Palette} label="Folder color" onClick={() => setMode("icon")} submenu />
-      <MenuItem icon={Zap} label="Automations" onClick={() => soon("Automations")} />
-      <MenuItem icon={SlidersHorizontal} label="Custom Fields" onClick={() => soon("Custom Fields")} />
-      <MenuItem icon={CircleDot} label="Task statuses" onClick={() => soon("Task statuses")} />
-      <MenuSubmenu icon={MoreHorizontal} label="More">
-        <MenuItem icon={Boxes} label="Convert to Space" onClick={() => soon("Convert to Space")} />
-      </MenuSubmenu>
+      {/* Automations, Custom Fields, Task statuses, Convert to Space, Imports,
+          Move and Duplicate are absent until each exists (spec-shell 1.15). */}
 
       <MenuSeparator />
 
-      <MenuItem icon={Download} label="Imports" onClick={() => soon("Imports")} />
       <MenuItem icon={Files} label="Templates" onClick={() => { onClose(); openTemplateCenter({ kind: "FOLDER" }); }} />
 
       <MenuSeparator />
 
-      <MenuItem icon={ArrowRightLeft} label="Move" onClick={() => soon("Move")} />
-      <MenuItem icon={Copy} label="Duplicate" onClick={() => soon("Duplicate")} />
       <MenuItem icon={Archive} label="Archive" busy={busy === "archive"} onClick={archive} />
       <MenuItem icon={Trash2} label="Delete" destructive busy={busy === "delete"} onClick={del} />
 

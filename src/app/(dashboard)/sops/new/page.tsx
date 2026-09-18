@@ -7,10 +7,10 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { FileText, ListChecks, ListOrdered, MousePointerClick, BookCopy, Sparkles, ArrowRight, ClipboardCheck, Loader2 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { FileText, ListChecks, ListOrdered, MousePointerClick, Sparkles, ArrowRight } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsToast } from "@/components/layout/os/toast";
 
 type SOPKind = "WRITTEN" | "STEPS" | "CHECKLIST" | "RECORDED";
@@ -113,20 +113,9 @@ export default function NewSopPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="New SOP"
-        showStandardActions={false}
-        Icon={BookCopy}
-        iconGradient={GRAD.tealGreen}
-        description="Pick how you want to document this process"
-        actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">All SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              <ClipboardCheck className="h-3.5 w-3.5" /> My SOPs
-            </Link>
-          </div>
-        }
+        back={{ fallbackHref: "/sops", label: "SOPs" }}
       />
 
       <div className="mx-auto max-w-6xl px-6 py-10">
@@ -176,7 +165,7 @@ export default function NewSopPage() {
                   ))}
                 </ul>
                 <span className="mt-auto pt-4 inline-flex items-center gap-1 text-base font-medium text-zinc-900">
-                  {busy ? (<><Loader2 className="h-3.5 w-3.5 animate-spin" /> Creating…</>) : (<>Start <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></>)}
+                  {busy ? (<><Dots variant="pending" /> Creating…</>) : (<>Start <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" /></>)}
                 </span>
               </button>
             );

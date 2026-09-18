@@ -12,8 +12,8 @@ import {
   ChartPie, TrendingUp, Users, ShoppingCart, BookCopy, Briefcase, Clock,
   ChevronRight, Activity, Coins, Target,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 
 type Counts = {
@@ -122,16 +122,11 @@ export default function AnalyticsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Analytics"
-        Icon={ChartPie}
-        iconGradient={GRAD.pinkPurple}
-        description={loading ? "Computing your pulse…" : `${counts!.tasksOpen} open tasks · ${counts!.posOpen} POs open · ${counts!.timesheetsPending} timesheets pending`}
         actions={
           <div className="ana__head-actions">
-            <Link href="/financials/reports" className="ana__nav-link"><ChartPie /> Reports</Link>
-            <Link href="/planning/variance" className="ana__nav-link"><TrendingUp /> Variance</Link>
-            <Link href="/sops/compliance" className="ana__nav-link"><Activity /> Compliance</Link>
+            <Link href="/sops/compliance" className="os-head__link"><Activity /> Compliance</Link>
           </div>
         }
       />

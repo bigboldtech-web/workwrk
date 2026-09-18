@@ -1,180 +1,112 @@
 "use client";
 
-// WorkspaceMenu — popover that drops out of the top-left workspace
-// switcher. Now data-driven: the org header, member count, plan, and the
-// "Switch Workspaces" list all come from real APIs instead of hardcoded
-// rows.
+// WorkspaceMenu (spec-shell 2.14): the company account, opened from the
+// sidebar header's workspace switcher. A 300px MenuList: a header with the
+// org tile, name and "{plan} · N members"; Invite people, Manage members,
+// Workspace settings and Upgrade for the people who may (rows are absent,
+// never greyed); SWITCH WORKSPACE with one row per other org; Create
+// workspace. No "Apps" or "Automations" coming-soon toasts, no Templates
+// (Template Center lives in Create).
 //
-//   GET  /api/me/orgs        → memberships the user can switch into
-//   GET  /api/settings       → current org plan + member count (usage.users)
-//   POST /api/me/switch-org  → flip the active org (then session.update())
-//   POST /api/organizations/delete → schedule the current org for deletion
+// DELIBERATE DEVIATION from 2.14, tracked for the settings unit: "Delete
+// workspace" stays reachable here for Owners and Admins until Identity ›
+// Danger zone exists (no destination is removed before its next door
+// exists); it is the last row, destructive, and opens the typed-confirmation
+// dialog. Delete this row and the dialog in the same PR as that card.
 //
-// Click outside or press Escape to close.
+// Upgrade renders for Owners and Admins (the boot payload carries no admin
+// scopes yet; every Admin can open Plan & billing through Workspace
+// settings today, so the row matches the door rather than narrowing it).
+//
+//   GET  /api/me/orgs               memberships the viewer can switch into
+//   GET  /api/settings              usage.users for the member count
+//   POST /api/me/switch-org         flip the active org (then session.update())
+//   POST /api/organizations/create  a new workspace
+//   POST /api/organizations/delete  schedule the current org for deletion
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import Link from "next/link";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { signOut, useSession } from "next-auth/react";
-import {
-  Settings as SettingsIcon, Users as UsersIcon, Sparkles, LayoutGrid, Zap,
-  Plus, Loader2, Trash2, AlertTriangle,
-} from "lucide-react";
-import { MenuItem } from "@/components/ui/menu";
-import { useToast } from "@/components/ui/toast";
+import { ArrowUpCircle, Plus, Settings, Trash2, UserPlus, Users } from "lucide-react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { MenuItem, MenuSectionLabel, MenuSeparator } from "@/components/ui/menu";
+import { EntityTile } from "@/components/ui/entity-tile";
 import { usePrompt } from "@/components/ui/dialog-provider";
-import { useRole } from "@/hooks/use-role";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { apiFetch } from "@/lib/api-fetch";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import { SHELL_LABELS } from "@/lib/nav/labels";
+import { ChromePopover } from "./chrome-popover";
+import { useBoot, useViewerRole } from "./boot-context";
+import { useLayer } from "./shell-context";
+import { useOsToast } from "./toast";
 
-interface WorkspaceMenuProps {
-  open: boolean;
-  onClose: () => void;
-  anchorRef: React.RefObject<HTMLElement | null>;
-}
+interface OrgLite { id: string; name: string; slug: string | null; logo: string | null }
+interface Membership { id: string; role: string; isPrimary: boolean; isCurrent: boolean; organization: OrgLite }
 
-type Tab = "settings" | "people";
-
-interface OrgLite {
-  id: string;
-  name: string;
-  slug: string | null;
-  logo: string | null;
-}
-interface Membership {
-  id: string;
-  role: string;
-  isPrimary: boolean;
-  isCurrent: boolean;
-  organization: OrgLite;
-}
-
-// STARTER is the free tier — keep the "Free Forever" copy from the mockup
-// for it; paid tiers show their plan name.
 const PLAN_LABEL: Record<string, string> = {
-  STARTER: "Free Forever",
+  STARTER: "Free plan",
   GROWTH: "Growth plan",
   SCALE: "Scale plan",
   ENTERPRISE: "Enterprise",
 };
 
-function orgInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2);
-  const out = parts.map((p) => p[0]?.toUpperCase() ?? "").join("");
-  return out || "?";
+function OrgTile({ org, size = "sm" }: { org: { name: string; logo: string | null }; size?: "sm" | "md" }) {
+  if (org.logo) {
+    const px = size === "md" ? 24 : 20;
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={org.logo} alt="" className="shrink-0 rounded-md object-cover" style={{ width: px, height: px }} />;
+  }
+  return <EntityTile size={size} name={org.name} />;
 }
 
-export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) {
-  const [tab, setTab] = useState<Tab>("settings");
-  const popoverRef = useRef<HTMLDivElement>(null);
+export function WorkspaceMenu({ trigger }: { trigger: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const { boot } = useBoot();
+  const { isAdmin, isGuest } = useViewerRole();
   const { update } = useSession();
-  const toast = useToast();
-  const { accessLevel } = useRole();
-  const canDelete = accessLevel === "COMPANY_ADMIN" || accessLevel === "SUPER_ADMIN";
-
-  const [memberships, setMemberships] = useState<Membership[] | null>(null);
-  const [plan, setPlan] = useState<string | null>(null);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
-  const [switchingId, setSwitchingId] = useState<string | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const { openSettings } = useSettingsNav();
+  const { toast } = useOsToast();
   const promptDialog = usePrompt();
 
-  // Pull real data each time the menu opens (cheap, and keeps the member
-  // count / plan fresh after edits elsewhere).
+  const [memberships, setMemberships] = useState<Membership[] | null>(null);
+  const [membersError, setMembersError] = useState(false);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    const [orgs, settings] = await Promise.all([
+      apiFetch<{ memberships?: Membership[] }>("/api/me/orgs", { cache: "no-store" }),
+      apiFetch<{ usage?: { users?: number } }>("/api/settings", { cache: "no-store" }),
+    ]);
+    if (orgs.ok) {
+      setMembersError(false);
+      setMemberships(Array.isArray(orgs.data?.memberships) ? orgs.data.memberships : []);
+    } else if (orgs.status !== 401) setMembersError(true);
+    if (settings.ok && typeof settings.data?.usage?.users === "number") setMemberCount(settings.data.usage.users);
+  }, []);
   useEffect(() => {
     if (!open) return;
-    let alive = true;
-    (async () => {
-      try {
-        const [orgsR, setR] = await Promise.all([
-          fetch("/api/me/orgs"),
-          fetch("/api/settings"),
-        ]);
-        if (alive && orgsR.ok) {
-          const d = await orgsR.json();
-          setMemberships(Array.isArray(d?.memberships) ? d.memberships : []);
-        } else if (alive) {
-          setMemberships([]);
-        }
-        if (alive && setR.ok) {
-          const s = await setR.json();
-          setPlan(typeof s?.organization?.plan === "string" ? s.organization.plan : null);
-          setMemberCount(typeof s?.usage?.users === "number" ? s.usage.users : null);
-        }
-      } catch {
-        if (alive) setMemberships([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [open]);
+    const t = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(t);
+  }, [open, load]);
 
-  // Click outside closes — but not while the delete confirm modal (portaled
-  // outside this popover) is up.
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (deleteOpen) return;
-      const target = e.target as Node;
-      if (popoverRef.current?.contains(target)) return;
-      if (anchorRef.current?.contains(target)) return;
-      onClose();
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose, anchorRef, deleteOpen]);
-
-  // Escape closes (modal handles its own Escape when it's the topmost layer).
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !deleteOpen) onClose();
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose, deleteOpen]);
-
-  const current = memberships?.find((m) => m.isCurrent)?.organization ?? null;
-  // A workspace to fall into after deleting the current one, so the user isn't
-  // logged out (deleting one of several workspaces should leave the rest).
-  const otherOrg = memberships?.find((m) => !m.isCurrent)?.organization ?? null;
-
-  const switchTo = useCallback(
-    async (orgId: string, isCurrent: boolean) => {
-      if (isCurrent || switchingId) return;
-      setSwitchingId(orgId);
-      try {
-        const res = await fetch("/api/me/switch-org", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ organizationId: orgId }),
-        });
-        const body = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          toast.error("Couldn't switch workspace", body?.error ?? "Please try again.");
-          setSwitchingId(null);
-          return;
-        }
-        // Refresh the JWT so the new org is live, then hard-navigate so every
-        // server component re-renders under the new tenant.
-        await update?.();
-        window.location.href = "/today";
-      } catch {
-        toast.error("Couldn't switch workspace", "Network error. Please try again.");
-        setSwitchingId(null);
-      }
-    },
-    [switchingId, toast, update],
-  );
-
-  const comingSoon = useCallback(
-    (what: string) =>
-      toast.info(what, "This part of the workspace menu isn't available yet — coming soon."),
-    [toast],
-  );
+  const switchTo = useCallback(async (orgId: string) => {
+    if (switchingId) return;
+    setSwitchingId(orgId);
+    const r = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: orgId } });
+    if (!r.ok) {
+      toast("Couldn't switch workspace. Try again");
+      setSwitchingId(null);
+      return;
+    }
+    await update?.();
+    window.location.href = WORK_HOME_HREF;
+  }, [switchingId, toast, update]);
 
   const createWorkspace = useCallback(async () => {
-    if (creating) return;
+    setOpen(false);
     const name = (await promptDialog({
       title: "Create workspace",
       description: "Give your new workspace a name.",
@@ -182,390 +114,205 @@ export function WorkspaceMenu({ open, onClose, anchorRef }: WorkspaceMenuProps) 
       submitLabel: "Create workspace",
       required: true,
     }))?.trim();
-    if (!name) return;
+    if (!name || creating) return;
     setCreating(true);
-    try {
-      const res = await fetch("/api/organizations/create", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error("Couldn't create workspace", body?.error ?? "Please try again.");
-        setCreating(false);
-        return;
-      }
-      const newId = body?.data?.organization?.id ?? body?.organization?.id;
-      if (newId) {
-        // Switch into the new workspace, refresh the JWT, then hard-navigate.
-        const sw = await fetch("/api/me/switch-org", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ organizationId: newId }),
-        });
-        if (sw.ok) { await update?.(); window.location.href = "/today"; return; }
-      }
-      window.location.reload();
-    } catch {
-      toast.error("Couldn't create workspace", "Network error. Please try again.");
+    const r = await apiFetch<{ data?: { organization?: { id?: string } }; organization?: { id?: string } }>("/api/organizations/create", { method: "POST", json: { name } });
+    if (!r.ok) {
+      toast("Couldn't create workspace. Try again");
       setCreating(false);
+      return;
     }
-  }, [creating, toast, update, promptDialog]);
+    const newId = r.data?.data?.organization?.id ?? r.data?.organization?.id;
+    if (newId) {
+      const sw = await apiFetch("/api/me/switch-org", { method: "POST", json: { organizationId: newId } });
+      if (sw.ok) { await update?.(); window.location.href = WORK_HOME_HREF; return; }
+    }
+    window.location.reload();
+  }, [creating, promptDialog, toast, update]);
 
-  if (!open) return null;
-
-  const showUpgrade = plan !== "ENTERPRISE";
+  const others = (memberships ?? []).filter((m) => !m.isCurrent);
+  const plan = PLAN_LABEL[boot.org.plan] ?? boot.org.plan;
+  const showUpgrade = isAdmin && boot.org.plan !== "ENTERPRISE";
+  const otherOrg = others[0]?.organization ?? null;
 
   return (
     <>
-      <div
-        ref={popoverRef}
-        className="absolute left-3 top-[52px] w-[360px] bg-white dark:bg-[#1B1F26] rounded-lg shadow-xl border border-zinc-200 dark:border-[#2A2F38] z-50"
-        role="menu"
+      <ChromePopover
+        open={open}
+        onOpenChange={setOpen}
+        width={300}
+        align="start"
+        layerId="workspace-menu"
+        ariaLabel={SHELL_LABELS.switchWorkspace}
+        trigger={trigger}
       >
-        {/* Header */}
-        <div className="px-4 pt-4 pb-3">
-          <div className="flex items-center gap-3">
-            {current?.logo ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={current.logo} alt="" className="w-10 h-10 rounded-md object-cover shrink-0" />
-            ) : (
-              <span className="w-10 h-10 rounded-md bg-zinc-900 text-white flex items-center justify-center text-base font-semibold shrink-0">
-                {current ? orgInitials(current.name) : "·"}
-              </span>
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-                {current?.name ?? "Workspace"}
+        <div className="flex h-16 items-center gap-3 px-4">
+          <OrgTile org={boot.org} size="md" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-medium text-ink">{boot.org.name}</div>
+            {!isGuest ? (
+              <div className="truncate text-sm text-ink-2">
+                {plan}
+                {memberCount !== null ? ` · ${memberCount} member${memberCount === 1 ? "" : "s"}` : ""}
               </div>
-              <div className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                {memberCount != null ? `${memberCount} member${memberCount === 1 ? "" : "s"}` : null}
-                {memberCount != null && plan ? " · " : null}
-                {plan ? (PLAN_LABEL[plan] ?? plan) : null}
-                {showUpgrade ? (
-                  <>
-                    {memberCount != null || plan ? " · " : null}
-                    <Link
-                      href="/settings/billing"
-                      onClick={onClose}
-                      className="hover:underline"
-                      style={{ color: "var(--os-brand)" }}
-                    >
-                      Upgrade
-                    </Link>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </div>
-
-          {/* Tabs */}
-          <div className="grid grid-cols-2 gap-2 mt-4">
-            <button
-              type="button"
-              onClick={() => setTab("settings")}
-              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-xs transition-colors ${
-                tab === "settings"
-                  ? "bg-zinc-100 dark:bg-white/5 text-zinc-900 dark:text-zinc-100 font-medium"
-                  : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
-              }`}
-            >
-              <SettingsIcon className="w-3.5 h-3.5" />
-              Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("people")}
-              className={`flex items-center justify-center gap-1.5 h-8 rounded-md text-xs transition-colors ${
-                tab === "people"
-                  ? "bg-zinc-100 dark:bg-white/5 text-zinc-900 dark:text-zinc-100 font-medium"
-                  : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
-              }`}
-            >
-              <UsersIcon className="w-3.5 h-3.5" />
-              People
-            </button>
+            ) : null}
           </div>
         </div>
-
-        {tab === "settings" ? (
-          <>
-            {/* Manage section */}
-            <div className="px-4 pb-2 pt-1">
-              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Manage</div>
-              <ul className="space-y-0.5">
-                <li><MenuItem variant="inset" icon={Sparkles}   label="Apps"        onClick={() => comingSoon("Apps")} /></li>
-                <li><MenuItem variant="inset" icon={LayoutGrid} label="Templates"   href="/templates" onClick={onClose} /></li>
-                <li><MenuItem variant="inset" icon={Zap}        label="Automations" onClick={() => comingSoon("Automations")} /></li>
-              </ul>
-            </div>
-
-            {/* Divider */}
-            <div className="border-t border-zinc-100 dark:border-[#2A2F38] mx-4" />
-
-            {/* Switch Workspaces */}
-            <div className="px-4 py-2">
-              <div className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400 font-medium mb-1.5">Switch Workspaces</div>
-              <ul className="space-y-0.5">
-                {memberships == null ? (
-                  <li className="px-2 py-2 text-base text-zinc-400 dark:text-zinc-400 flex items-center gap-2">
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…
-                  </li>
-                ) : memberships.length === 0 ? (
-                  <li className="px-2 py-2 text-base text-zinc-400 dark:text-zinc-400">No workspaces found.</li>
-                ) : (
-                  memberships.map((m) => (
-                    <li key={m.id}>
-                      <MenuItem
-                        variant="inset"
-                        leading={
-                          m.organization.logo ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img src={m.organization.logo} alt="" className="w-6 h-6 rounded-md object-cover shrink-0" />
-                          ) : (
-                            <span className="w-6 h-6 rounded-md bg-zinc-900 text-white flex items-center justify-center text-xs font-semibold shrink-0">
-                              {orgInitials(m.organization.name)}
-                            </span>
-                          )
-                        }
-                        label={m.organization.name}
-                        selected={m.isCurrent}
-                        busy={switchingId === m.organization.id}
-                        onClick={() => switchTo(m.organization.id, m.isCurrent)}
-                      />
-                    </li>
-                  ))
-                )}
-              </ul>
-            </div>
-
-            {/* Create Workspace */}
-            <div className="px-3 pb-3 pt-1">
-              <button
-                type="button"
-                onClick={createWorkspace}
-                disabled={creating}
-                className="w-full flex items-center justify-center gap-1.5 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/10 text-xs text-zinc-700 dark:text-zinc-200 disabled:opacity-60"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {creating ? "Creating…" : "Create Workspace"}
-              </button>
-            </div>
-
-            {/* Danger zone — schedule the current workspace for deletion. */}
-            {canDelete && current ? (
+        {!isGuest ? (
+          <div className="py-1">
+            {isAdmin ? (
               <>
-                <div className="border-t border-zinc-100 dark:border-[#2A2F38] mx-4" />
-                <div className="px-4 py-2">
-                  <MenuItem
-                    variant="inset"
-                    icon={Trash2}
-                    label="Delete workspace"
-                    destructive
-                    onClick={() => setDeleteOpen(true)}
-                  />
-                </div>
+                <MenuItem icon={UserPlus} label="Invite people" onClick={() => { setOpen(false); openSettings("/settings/members?invite=1"); }} />
+                <MenuItem icon={Users} label="Manage members" onClick={() => { setOpen(false); openSettings("/settings/members"); }} />
+                <MenuItem icon={Settings} label={SHELL_LABELS.workspaceSettings} onClick={() => { setOpen(false); openSettings("/settings"); }} />
               </>
             ) : null}
-          </>
-        ) : (
-          <div className="px-4 pb-4 pt-2">
-            <ul className="space-y-0.5">
-              <li>
-                <MenuItem
-                  variant="inset"
-                  icon={UsersIcon}
-                  label="Manage members"
-                  description="Roles, reporting line & access"
-                  href="/settings/members"
-                  onClick={onClose}
-                />
-              </li>
-              <li>
-                <MenuItem
-                  variant="inset"
-                  icon={Plus}
-                  label="Invite people"
-                  description="Add teammates by email"
-                  href="/settings/members"
-                  onClick={onClose}
-                />
-              </li>
-            </ul>
+            {showUpgrade ? (
+              <MenuItem icon={ArrowUpCircle} label="Upgrade" onClick={() => { setOpen(false); openSettings("/settings/billing"); }} />
+            ) : null}
+            {(isAdmin || showUpgrade) ? <MenuSeparator /> : null}
+            {memberships === null && !membersError ? (
+              <ul className="px-2 py-1" aria-hidden>
+                {["60%", "40%", "80%"].map((w, i) => (
+                  <li key={i} className="flex h-9 items-center gap-3 px-2">
+                    <span className="h-5 w-5 shrink-0 rounded-md bg-skeleton os-skeleton-pulse" />
+                    <span className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />
+                  </li>
+                ))}
+              </ul>
+            ) : membersError ? (
+              <div className="flex h-9 items-center gap-1 px-3 text-sm text-ink-2">
+                Couldn&apos;t load workspaces ·
+                <button type="button" onClick={() => { void load(); }} className="font-medium text-brand-deep hover:underline">Try again</button>
+              </div>
+            ) : others.length > 0 ? (
+              <>
+                <MenuSectionLabel>Switch workspace</MenuSectionLabel>
+                {others.map((m) => (
+                  <MenuItem
+                    key={m.id}
+                    leading={<OrgTile org={m.organization} />}
+                    label={m.organization.name}
+                    busy={switchingId === m.organization.id}
+                    onClick={() => { void switchTo(m.organization.id); }}
+                  />
+                ))}
+              </>
+            ) : null}
+            <MenuItem icon={Plus} label="Create workspace" busy={creating} onClick={() => { void createWorkspace(); }} />
+            {isAdmin ? (
+              <>
+                <MenuSeparator />
+                <MenuItem icon={Trash2} label="Delete workspace" destructive onClick={() => { setOpen(false); setDeleteOpen(true); }} />
+              </>
+            ) : null}
           </div>
-        )}
-      </div>
-
-      {deleteOpen && current && typeof document !== "undefined"
-        ? createPortal(
-            <DeleteWorkspaceModal
-              org={current}
-              switchToOrg={otherOrg}
-              onSwitchAway={(id) => switchTo(id, false)}
-              toast={toast}
-              onClose={() => setDeleteOpen(false)}
-            />,
-            document.body,
-          )
-        : null}
+        ) : null}
+      </ChromePopover>
+      {deleteOpen ? (
+        <DeleteWorkspaceDialog
+          org={boot.org}
+          switchToOrg={otherOrg}
+          onSwitchAway={(id) => { void switchTo(id); }}
+          onClose={() => setDeleteOpen(false)}
+        />
+      ) : null}
     </>
   );
 }
 
-/* ───────────────────────── delete confirm modal ────────────────────────── */
-// Portaled to document.body so it renders OUTSIDE `.workwrk-os` — that keeps
-// the global input/button reset from stripping its styling. Two-key confirm
-// (exact org name + the word DELETE) mirrors POST /api/organizations/delete.
+/* ───────────────────────── delete confirm dialog ───────────────────────── */
+// A 400 Radix modal on the design-system anatomy (5.5): header 56 with a
+// title, body 24, footer with Cancel left of the one destructive primary.
+// Two-key confirm (exact org name + the word DELETE) mirrors the API.
 
-function DeleteWorkspaceModal({
-  org,
-  switchToOrg,
-  onSwitchAway,
-  toast,
-  onClose,
+function DeleteWorkspaceDialog({
+  org, switchToOrg, onSwitchAway, onClose,
 }: {
-  org: OrgLite;
-  /** Another workspace to land in after deletion (so the user isn't logged out). */
-  switchToOrg?: OrgLite | null;
-  onSwitchAway?: (orgId: string) => void;
-  toast: ReturnType<typeof useToast>;
+  org: { id: string; name: string };
+  switchToOrg: OrgLite | null;
+  onSwitchAway: (orgId: string) => void;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
   const [phrase, setPhrase] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [doneMessage, setDoneMessage] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(null);
+  const { toast } = useOsToast();
+  useLayer(true, { id: "delete-workspace", kind: "modal", close: onClose });
 
   const canSubmit = name === org.name && phrase === "DELETE" && !submitting;
 
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [onClose]);
-
-  async function submit() {
+  const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
-    try {
-      const res = await fetch("/api/organizations/delete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirmName: name, confirmPhrase: phrase }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error("Couldn't delete workspace", body?.error ?? "Please try again.");
-        setSubmitting(false);
-        return;
-      }
-      // If the user has another workspace, drop them straight into it rather
-      // than logging them out — deleting one of several should leave the rest.
-      if (switchToOrg && onSwitchAway) {
-        toast.success("Workspace scheduled for deletion", `Switched you to ${switchToOrg.name}.`);
-        onSwitchAway(switchToOrg.id);
-        return;
-      }
-      setDoneMessage(body?.message ?? "Workspace scheduled for deletion.");
-      toast.success("Workspace scheduled for deletion", body?.message);
-    } catch {
-      toast.error("Couldn't delete workspace", "Network error. Please try again.");
+    const r = await apiFetch<{ message?: string }>("/api/organizations/delete", { method: "POST", json: { confirmName: name, confirmPhrase: phrase } });
+    if (!r.ok) {
+      toast("Couldn't delete workspace. Try again");
       setSubmitting(false);
+      return;
     }
-  }
+    if (switchToOrg) {
+      toast(`Workspace scheduled for deletion. Switching you to ${switchToOrg.name}`);
+      onSwitchAway(switchToOrg.id);
+      return;
+    }
+    setDone(r.data?.message ?? "Workspace scheduled for deletion.");
+  };
+
+  const input = "h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-full max-w-md rounded-xl border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] shadow-2xl">
-        {doneMessage ? (
-          <div className="p-5">
-            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Deletion scheduled</h2>
-            <p className="mt-2 text-base text-zinc-600 dark:text-zinc-300">{doneMessage}</p>
-            <p className="mt-2 text-base text-zinc-500 dark:text-zinc-400">
-              You can undo this during the grace period — contact support or restore from the
-              admin tools before the window closes.
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={onClose}
-                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-base text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-              >
-                Close
-              </button>
-              <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
-                className="h-8 rounded-md bg-zinc-900 px-3 text-base font-medium text-white hover:bg-zinc-800"
-              >
-                Sign out
-              </button>
-            </div>
+    <DialogPrimitive.Root open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-[var(--os-scrim)]" />
+        <DialogPrimitive.Content className="workwrk-os os-chrome fixed inset-x-0 mx-auto top-1/2 z-[61] w-[400px] max-w-[calc(100vw-24px)] -translate-y-1/2 rounded-xl border border-line bg-raised text-ink shadow-[var(--os-shadow-modal)] outline-none">
+          <div className="flex h-14 items-center px-6">
+            <DialogPrimitive.Title className="text-lg font-semibold text-danger-text">
+              {done ? "Deletion scheduled" : "Delete this workspace?"}
+            </DialogPrimitive.Title>
           </div>
-        ) : (
-          <div className="p-5">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Delete this workspace?</h2>
-            </div>
-            <p className="mt-2 text-base text-zinc-600 dark:text-zinc-300">
-              This schedules the entire{" "}
-              <span className="font-semibold text-zinc-900 dark:text-zinc-100">{org.name}</span> workspace —
-              and all of its data — for deletion. It stays recoverable for a 30-day grace period, then is
-              permanently removed. {switchToOrg
-                ? `You'll be moved to your ${switchToOrg.name} workspace.`
-                : "You'll be signed out."}
-            </p>
-
-            <label className="mt-4 block text-base font-medium text-zinc-700 dark:text-zinc-200">
-              Type the workspace name to confirm
-            </label>
-            <div className="mt-1 rounded-md border border-zinc-300 dark:border-[#2A2F38] dark:bg-[#14171D] px-2.5 focus-within:border-zinc-900 dark:focus-within:border-zinc-100">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={org.name}
-                className="h-9 w-full bg-transparent text-base text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-
-            <label className="mt-3 block text-base font-medium text-zinc-700 dark:text-zinc-200">
-              Type <span className="font-semibold">DELETE</span> to confirm
-            </label>
-            <div className="mt-1 rounded-md border border-zinc-300 dark:border-[#2A2F38] dark:bg-[#14171D] px-2.5 focus-within:border-zinc-900 dark:focus-within:border-zinc-100">
-              <input
-                value={phrase}
-                onChange={(e) => setPhrase(e.target.value)}
-                placeholder="DELETE"
-                className="h-9 w-full bg-transparent text-base text-zinc-900 dark:text-zinc-100 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-              />
-            </div>
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={onClose}
-                className="h-8 rounded-md border border-zinc-200 dark:border-[#2A2F38] px-3 text-base text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={submit}
-                disabled={!canSubmit}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-red-600 px-3 text-base font-medium text-white hover:bg-red-700 disabled:opacity-40"
-              >
-                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                Delete workspace
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+          {done ? (
+            <>
+              <div className="px-6 pb-2 text-base text-ink-2">
+                <p className="m-0">{done}</p>
+                <p className="mt-2">You can undo this during the grace period from the staff console or by contacting support.</p>
+              </div>
+              <div className="flex h-16 items-center justify-end gap-2 px-6">
+                <button type="button" onClick={onClose} className="h-9 rounded-md border border-line-strong bg-raised px-3 text-base font-medium text-ink hover:bg-hover">Close</button>
+                <button type="button" onClick={() => { void signOut({ callbackUrl: "/login" }); }} className="h-9 rounded-md bg-brand px-3 text-base font-medium text-ink-inv hover:bg-brand-hover">{SHELL_LABELS.logOut}</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-col gap-4 px-6 pb-2">
+                <DialogPrimitive.Description className="m-0 text-base text-ink-2">
+                  This schedules the entire <span className="font-medium text-ink">{org.name}</span> workspace and all of its data for deletion. It stays recoverable for 30 days, then is permanently removed. {switchToOrg ? `You'll be moved to ${switchToOrg.name}.` : "You'll be logged out."}
+                </DialogPrimitive.Description>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+                  Type the workspace name to confirm
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder={org.name} className={input} />
+                </label>
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-ink">
+                  Type DELETE to confirm
+                  <input value={phrase} onChange={(e) => setPhrase(e.target.value)} placeholder="DELETE" className={input} />
+                </label>
+              </div>
+              <div className="flex h-16 items-center justify-end gap-2 px-6">
+                <button type="button" onClick={onClose} className="h-9 rounded-md px-3 text-base font-medium text-ink-2 hover:bg-hover hover:text-ink">Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => { void submit(); }}
+                  disabled={!canSubmit}
+                  className="h-9 rounded-md bg-danger-solid px-3 text-base font-medium text-ink-inv disabled:bg-active disabled:text-ink-4"
+                >
+                  {submitting ? "Deleting…" : "Delete workspace"}
+                </button>
+              </div>
+            </>
+          )}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

@@ -14,11 +14,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CalendarDays, ChevronLeft, ChevronRight, Plus, X, Flame,
-  CheckSquare, Activity, AlertOctagon, Hourglass,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  X,
+  Flame,
+  CheckSquare,
+  Activity,
+  AlertOctagon,
+  Hourglass,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -148,23 +155,20 @@ export default function TaskCalendarPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Task calendar"
-        Icon={CalendarDays}
-        iconGradient={GRAD.pinkPurple}
-        description={tasks === null ? "Loading…" : `${monthLabel} · ${stats.total} task${stats.total === 1 ? "" : "s"} this month`}
-        people={[PEOPLE.bb, PEOPLE.sc]}
-        morePeople={3}
-        actions={
-          <div className="tcal__head-actions">
-            <div className="tcal__nav">
-              <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month"><ChevronLeft /></button>
-              <span className="tcal__nav-label">{monthLabel}</span>
-              <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight /></button>
+        toolbar={{
+          left: (
+            <div className="tcal__head-actions">
+              <div className="tcal__nav">
+                <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Previous month"><ChevronLeft /></button>
+                <span className="tcal__nav-label">{monthLabel}</span>
+                <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Next month"><ChevronRight /></button>
+              </div>
+              <button type="button" onClick={() => setMonth(startOfMonth(new Date()))} className="tcal__today">Today</button>
             </div>
-            <button type="button" onClick={() => setMonth(startOfMonth(new Date()))} className="tcal__today">Today</button>
-          </div>
-        }
+          ),
+        }}
       />
 
       {loadError ? (

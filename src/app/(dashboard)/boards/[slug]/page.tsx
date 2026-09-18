@@ -10,12 +10,13 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 import {
-  Lock, ChevronDown, ListChecks, Zap, IterationCw,
+  Lock, ListChecks, Zap, IterationCw,
 } from "lucide-react";
 import { parseSprintMeta } from "@/lib/sprint";
-import { EntityTile } from "@/components/ui/entity-tile";
 import { BoardShareButton } from "@/components/layout/os/board-share-button";
 import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
+import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { BoardViewTabs } from "./board-view-tabs";
 import { getBoardStatuses, listBoardItems } from "@/lib/board-items";
 import { ensureCoreListViews } from "@/lib/board";
@@ -86,42 +87,21 @@ export default async function BoardPage(props: {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Title row — inline breadcrumb with Space tile + Folder + Board */}
-      <div className="px-4 pt-1.5 pb-1 flex items-center gap-1">
-        {/* Space tile + name */}
-        <Link
-          href={`/spaces/${board.space.slug}`}
-          className="inline-flex items-center gap-1.5 text-base text-zinc-700 hover:text-zinc-900 min-w-0 hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors"
-        >
-          <EntityTile
-            size="sm"
-            icon={board.space.icon}
-            color={board.space.color}
-            name={board.space.name}
-          />
-          <span className="truncate">{board.space.name}</span>
-        </Link>
-
-        {/* Folder breadcrumb segment (when board lives in a folder) */}
-        {board.folder ? (
-          <>
-            <span className="text-zinc-300 text-base px-0.5">/</span>
-            <span className="inline-flex items-center gap-1.5 text-base text-zinc-700 min-w-0 hover:bg-zinc-100 rounded px-1 py-0.5 transition-colors cursor-pointer">
-              <EntityTile
-                size="sm"
-                icon={board.folder.icon}
-                color={board.folder.color}
-                name={board.folder.name}
-                fallback="folder"
-              />
-              <span className="truncate">{board.folder.name}</span>
-            </span>
-          </>
-        ) : null}
-
-        {/* Board (current) — bold + star + filter */}
-        <span className="text-zinc-300 text-base px-0.5">/</span>
-        <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900 min-w-0 group cursor-pointer hover:bg-zinc-100 rounded px-1 -ml-1 py-0.5 transition-colors">
+      {/* Location lives in the navy bar and nowhere else (principle 3). The
+          in-page Space / Folder / Board row is gone; the crumbs it printed are
+          declared here instead, so the bar finally names the Space, the Folder
+          and this board. The Space link's destination is that Space crumb (and
+          the Work sidebar's Space row); the Folder segment was a span, never a
+          link, so no destination is lost. */}
+      <Breadcrumb
+        items={[
+          { label: board.space.name, href: `/spaces/${board.space.slug}`, tile: { icon: board.space.icon, color: board.space.color, name: board.space.name } },
+          ...(board.folder ? [{ label: board.folder.name }] : []),
+          { label: board.name },
+        ]}
+      />
+      <div className="px-4 pt-2 pb-1 flex items-center gap-1">
+        <h1 className="inline-flex items-center gap-1.5 text-[22px] font-semibold leading-tight text-zinc-900 min-w-0">
           {board.visibility === "PRIVATE" ? (
             <Lock className="w-4 h-4 text-zinc-500" />
           ) : sprint ? (
@@ -130,8 +110,12 @@ export default async function BoardPage(props: {
             <ListChecks className="w-4 h-4 text-zinc-700" />
           )}
           <span className="truncate">{board.name}</span>
-          <ChevronDown className="w-3 h-3 text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity" />
         </h1>
+        {/* Was a hover-only ChevronDown with no onClick. Same affordance, now
+            the real board menu the sidebar row uses. */}
+        <BoardMoreTrigger
+          board={{ id: board.id, name: board.name, slug: board.slug, icon: board.icon ?? null, color: board.color ?? null }}
+        />
         {/* The working board filter lives in the renderer's own toolbar (the
             FilterMenu BoardCanvas mounts below). The former title-row filter
             icon + Reader-mode toggle were inert with no backend, so they're
@@ -144,7 +128,8 @@ export default async function BoardPage(props: {
           className="text-base text-zinc-700 hover:text-zinc-900 inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md hover:bg-zinc-100"
           title="Automations"
         >
-          <Zap className="w-3.5 h-3.5 text-amber-500" />
+          {/* Grey, not amber: yellow is reserved for warning (principle 7). */}
+          <Zap className="w-3.5 h-3.5 text-zinc-500" />
           Automate
         </Link>
         <AskSidekickButton

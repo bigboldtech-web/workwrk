@@ -10,14 +10,18 @@
  *   POST  /api/policies/[id]/acknowledge  idempotent ack
  */
 
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { ShieldCheck, ArrowLeft, CheckCircle2, Loader2, Users, Pencil, Save, X, History, UserPlus, RotateCcw, CalendarDays, AlertTriangle } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { ShieldCheck, CheckCircle2, Users, Pencil, Save, X, History, UserPlus, RotateCcw, CalendarDays, AlertTriangle } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { OsPageHeader, OsPageHeaderSkeleton, HeaderAction } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
+import { BackButton } from "@/components/ui/back-button";
+import { ErrorState } from "@/components/ui/error-state";
 
 type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 type VersionRow = { id: string; version: number; title: string; createdAt: string; publishedBy: string | null };
@@ -60,6 +64,7 @@ export default function PolicyDetailPage() {
   const { toast } = useOsToast();
   const [policy, setPolicy] = useState<Policy | null>(null);
   const [loadErr, setLoadErr] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [acking, setAcking] = useState(false);
   const [attested, setAttested] = useState(false); // attestation checkbox
 
@@ -107,7 +112,7 @@ export default function PolicyDetailPage() {
         }
       } catch { setLoadErr(true); }
     })();
-  }, [id, search]);
+  }, [id, search, reloadKey]);
 
   function startEdit() {
     if (!policy) return;
@@ -236,52 +241,44 @@ export default function PolicyDetailPage() {
 
   const ackRate = policy && policy.totalUsers ? Math.round(((policy.totalAcks ?? 0) / policy.totalUsers) * 100) : 0;
 
+  // The one location row (spec-shell 2.1): a dynamic route declares its
+  // object crumb; until the fetch lands only the container is known.
+  const crumbs = [{ label: "Policies", href: "/policies" }, ...(policy ? [{ label: policy.title }] : [])];
+
   return (
     <>
-      <OsTitleBar
-        title="Policy"
-        Icon={ShieldCheck}
-        iconGradient={GRAD.indigoBlue}
-        showStandardActions={false}
-        actions={
-          <div className="flex items-center gap-2">
-            {policy?.canEdit && !editing ? (
+      <Breadcrumb items={crumbs} />
+      {!policy && !loadErr ? (
+        <OsPageHeaderSkeleton />
+      ) : (
+        <OsPageHeader
+          title={policy?.title || "Policy"}
+          back={{ fallbackHref: "/policies", label: "Policies" }}
+          actions={
+            policy?.canEdit && !editing ? (
               <>
-                <button type="button" onClick={openAssign} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-                  <UserPlus className="h-3.5 w-3.5" /> Assign
-                </button>
-                <button type="button" onClick={openAssignees} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-base hover:bg-zinc-50 ${showAssignees ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
-                  <Users className="h-3.5 w-3.5" /> Assignees
-                </button>
-                <button type="button" onClick={openHistory} className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-base hover:bg-zinc-50 ${showHistory ? "border-zinc-300 bg-zinc-50 text-zinc-900" : "border-zinc-200 text-zinc-700"}`}>
-                  <History className="h-3.5 w-3.5" /> History
-                </button>
-                <Link href={`/policies/${policy.id}/compliance`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Audit ledger
-                </Link>
-                <button type="button" onClick={startEdit} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </button>
+                <HeaderAction icon={UserPlus} label="Assign" onClick={openAssign} />
+                <HeaderAction icon={Users} label="Assignees" active={showAssignees} onClick={openAssignees} />
+                <HeaderAction icon={History} label="History" active={showHistory} onClick={openHistory} />
+                <HeaderAction icon={Pencil} label="Edit" onClick={startEdit} />
               </>
-            ) : null}
-            <Link href="/policies" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              <ArrowLeft className="h-3.5 w-3.5" /> All policies
-            </Link>
-            <Link href="/policies/compliance" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              Compliance
-            </Link>
-          </div>
-        }
-      />
+            ) : null
+          }
+          // Secondary destinations fold behind the title row's "..." so the
+          // title survives tablet width (design-system 4.4).
+          more={[
+            ...(policy?.canEdit ? [{ label: "Audit ledger", icon: ShieldCheck, href: `/policies/${policy.id}/compliance` }] : []),
+            { label: "Policy compliance", icon: CheckCircle2, href: "/policies/compliance" },
+          ]}
+        />
+      )}
 
       <div className={`px-6 py-8 ${editing ? "w-full max-w-none" : "mx-auto max-w-3xl"}`}>
         {loadErr ? (
-          <div className="text-xs text-zinc-500">
-            Couldn&apos;t load this policy. <Link href="/policies" className="text-[#0073EA] underline">Back to Policies</Link>
-          </div>
-        ) : !policy ? (
-          <div className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
-        ) : editing ? (
+          <ErrorState what="this policy" onRetry={() => { setLoadErr(false); setReloadKey((k) => k + 1); }}>
+            <BackButton fallbackHref="/policies" label="Policies" />
+          </ErrorState>
+        ) : !policy ? null : editing ? (
           /* ── Edit mode (manager) ── */
           <div className="space-y-4">
             <div className="flex items-center gap-2">
@@ -332,7 +329,7 @@ export default function PolicyDetailPage() {
                 <X className="h-3.5 w-3.5" /> Cancel
               </button>
               <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Save
+                {saving ? <Dots variant="pending" /> : <Save className="h-3.5 w-3.5" />} Save
               </button>
             </div>
             <input
@@ -358,13 +355,13 @@ export default function PolicyDetailPage() {
         ) : (
           /* ── View mode ── */
           <>
+            {/* The title lives in the page header (one page title, design-system 2.4); this line is the metadata. */}
             <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
               {policy.category ? <span className="font-medium text-zinc-500">{policy.category}</span> : null}
               <span>v{policy.version}</span>
               {policy.effectiveDate ? <span>· Effective {new Date(policy.effectiveDate).toLocaleDateString()}</span> : null}
               {policy.status !== "PUBLISHED" ? <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium text-zinc-500">{policy.status}</span> : null}
             </div>
-            <h1 className="text-2xl font-semibold tracking-[-0.01em] text-zinc-900">{policy.title}</h1>
 
             {policy.requiresAck ? (
               <div className="mt-4 rounded-xl border border-zinc-200 bg-white p-4">
@@ -394,7 +391,7 @@ export default function PolicyDetailPage() {
                         <span>{policy.ackStatement?.trim() || DEFAULT_ATTESTATION}</span>
                       </label>
                       <button type="button" onClick={acknowledge} disabled={acking || !attested} className="inline-flex h-9 items-center gap-1.5 rounded-md bg-[#0073EA] px-4 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
-                        {acking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Acknowledge
+                        {acking ? <Dots variant="pending" /> : <CheckCircle2 className="h-4 w-4" />} Acknowledge
                       </button>
                     </div>
                   )}
@@ -409,7 +406,7 @@ export default function PolicyDetailPage() {
                   <span className="text-zinc-400">· current v{policy.version}</span>
                 </div>
                 {versions === null ? (
-                  <div className="px-4 py-3 text-base text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                  <div className="px-4 py-3"><SkeletonLines lines={3} /></div>
                 ) : versions.length === 0 ? (
                   <div className="px-4 py-3 text-base text-zinc-400">No prior versions yet — edits to a published policy are versioned automatically.</div>
                 ) : (
@@ -422,7 +419,7 @@ export default function PolicyDetailPage() {
                           <div className="text-xs text-zinc-400">{new Date(v.createdAt).toLocaleString()}</div>
                         </div>
                         <button type="button" onClick={() => restore(v.id)} disabled={!!restoring} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2 text-sm text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
-                          {restoring === v.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
+                          {restoring === v.id ? <Dots variant="pending" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
                         </button>
                       </li>
                     ))}
@@ -438,7 +435,7 @@ export default function PolicyDetailPage() {
                   {assignees ? <span className="text-zinc-400">· {assignees.filter((a) => a.status === "COMPLETED").length}/{assignees.length} acknowledged</span> : null}
                 </div>
                 {assignees === null ? (
-                  <div className="px-4 py-3 text-base text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                  <div className="px-4 py-3"><SkeletonLines lines={3} /></div>
                 ) : assignees.length === 0 ? (
                   <div className="px-4 py-3 text-base text-zinc-400">No one assigned yet — use <strong>Assign</strong> to send this to employees.</div>
                 ) : (
@@ -491,7 +488,7 @@ export default function PolicyDetailPage() {
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
                   {orgUsers === null ? (
-                    <div className="px-4 py-3 text-base text-zinc-400"><Loader2 className="mr-1.5 inline h-3.5 w-3.5 animate-spin" /> Loading…</div>
+                    <div className="px-4 py-3"><SkeletonLines lines={3} /></div>
                   ) : (() => {
                     const q = userQuery.trim().toLowerCase();
                     const list = orgUsers.filter((u) => !q || `${u.firstName} ${u.lastName} ${u.email}`.toLowerCase().includes(q));
@@ -527,7 +524,7 @@ export default function PolicyDetailPage() {
             <div className="flex items-center justify-between border-t border-zinc-100 px-4 py-3">
               <div className="text-sm text-zinc-400">{assignAll ? "All active employees" : `${selectedIds.size} selected`}</div>
               <button type="button" onClick={doAssign} disabled={assignBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
-                {assignBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />} Assign
+                {assignBusy ? <Dots variant="pending" /> : <UserPlus className="h-3.5 w-3.5" />} Assign
               </button>
             </div>
           </div>

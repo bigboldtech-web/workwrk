@@ -1,26 +1,31 @@
 "use client";
 
-// A small client "Ask" button for Space/Board/Folder headers that opens the AI
-// Sidekick (optionally with a starter question). Self-contained so a SERVER
-// page can drop it in — the onClick lives here, not passed from the server.
-// (Distinct from AskAiButton, which is the topbar/palette Brain launcher.)
+// The page-header Ask AI slot for the Space / Board / Folder server pages
+// (design-system 4.4): a 28px ghost with Sparkles and the label "Ask AI",
+// rendered only when the AI hub is visible to the viewer; otherwise nothing,
+// never a disabled button. Self-contained so a SERVER page can drop it in.
 
 import { Sparkles } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { SHELL_LABELS } from "@/lib/nav/labels";
 import { askSidekick } from "./empty-view";
+import { useOsShell } from "./shell-context";
 
 export function AskSidekickButton({ prompt, className }: { prompt?: string; className?: string }) {
+  const { railApps } = useOsShell();
+  if (!railApps.some((a) => a.key === "ai")) return null;
   return (
     <button
       type="button"
-      title="Ask Sidekick"
+      title={`${SHELL_LABELS.askAi} (⌘J)`}
       onClick={() => askSidekick(prompt)}
-      className={
-        className ??
-        "text-xs text-zinc-600 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100 hover:text-zinc-900"
-      }
+      className={cn(
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink",
+        className,
+      )}
     >
-      <Sparkles className="w-3.5 h-3.5 text-[var(--os-brand)]" />
-      Ask
+      <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+      {SHELL_LABELS.askAi}
     </button>
   );
 }

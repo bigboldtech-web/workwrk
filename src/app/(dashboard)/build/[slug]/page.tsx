@@ -4,13 +4,11 @@
 // from /api/build/apps/[slug], renders a table with the generated
 // fields as columns, and lets the user add/edit/delete rows inline.
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  ArrowLeft,
   Plus,
-  Loader2,
   Trash2,
   Wand2,
   X,
@@ -18,6 +16,7 @@ import {
 } from "lucide-react";
 import { BoardView, type BoardField } from "@/components/board-view/board-view";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { BackButton } from "@/components/ui/back-button";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -115,7 +114,7 @@ export default function BuildAppPage() {
   if (loading) {
     return (
       <div className="p-6 text-center text-xs text-zinc-500">
-        <Loader2 size={20} className="mx-auto mb-2 animate-spin" />
+        <Dots variant="pending" />
         Loading app…
       </div>
     );
@@ -127,9 +126,7 @@ export default function BuildAppPage() {
 
   return (
     <div className="bldd p-6 max-w-[1600px] mx-auto">
-      <Link href="/build" className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 mb-3">
-        <ArrowLeft size={12} /> All apps
-      </Link>
+      <div className="mb-3"><BackButton fallbackHref="/build" label="Build apps" /></div>
 
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-start gap-4">
@@ -372,7 +369,7 @@ function NewRowModal({
             disabled={saving}
             className="px-4 py-2 rounded-lg text-xs font-medium bg-[#0073EA] hover:bg-[#0060B9] text-white disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {saving ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+            {saving ? <Dots variant="pending" /> : <Zap size={12} />}
             {saving ? "Saving…" : "Save row"}
           </button>
         </div>

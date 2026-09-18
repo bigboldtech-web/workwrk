@@ -12,10 +12,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import {
-  BookCopy, MousePointerClick, Puzzle, Play, ListChecks, CheckCircle2, ArrowRight, Info,
+  MousePointerClick,
+  Puzzle,
+  Play,
+  CheckCircle2,
+  ArrowRight,
+  Info,
 } from "lucide-react";
 
 const STEPS = [
@@ -97,22 +102,9 @@ export default function RecordSopPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Record a SOP"
-        showStandardActions={false}
-        Icon={BookCopy}
-        iconGradient={GRAD.tealGreen}
-        description="Capture a step-by-step SOP by clicking through your process"
-        actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops/new" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              Back
-            </Link>
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              <ListChecks className="h-3.5 w-3.5" /> All SOPs
-            </Link>
-          </div>
-        }
+        back={{ fallbackHref: "/sops", label: "SOPs" }}
       />
 
       <div className="px-6 py-6">

@@ -1,20 +1,24 @@
 "use client";
 
-// BackButton — THE back affordance for deep pages (detail views, editors,
-// full-page takeovers). One rule everywhere so the team never wonders how to
-// get back:
-//   - When this tab has history, it behaves like the browser Back button.
-//   - When it doesn't (direct link, new tab, hard refresh), it goes UP to the
-//     page's natural parent instead of dead-ending.
-// Icon-only by default for tight chrome; pass `label` for a text variant.
+// BackButton: THE back control (spec-shell 1.5, back-map 0, design-system
+// 5.18). A 28px ghost with ArrowLeft and the parent's name at 13/500 ink-2,
+// rendered 8px before the title in the title row of every full page reached
+// from a list. It uses browser back when the in-app history stack (navStack)
+// has an entry, and `fallbackHref` (the page's natural parent) otherwise, so
+// a direct link, a new tab or a hard refresh never dead-ends. The button is
+// always rendered with a fixed fallback: the browser exposes no way to read
+// the previous entry, so no route may make it conditional on where the
+// person came from. `router.back()` is allowed here and nowhere else.
 
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { navStackHasBack } from "@/components/layout/os/top-bar/nav-history";
 
 interface BackButtonProps {
   /** The page's natural parent (e.g. /docs, /sops, /people/roles). */
   fallbackHref: string;
-  /** Optional text next to the arrow ("Back", "All SOPs"…). */
+  /** The parent's name ("Docs", "SOPs", "Job titles"). Icon-only when omitted. */
   label?: string;
   className?: string;
 }
@@ -22,22 +26,24 @@ interface BackButtonProps {
 export function BackButton({ fallbackHref, label, className }: BackButtonProps) {
   const router = useRouter();
   const goBack = () => {
-    if (window.history.length > 1) router.back();
+    if (navStackHasBack()) router.back();
     else router.push(fallbackHref);
   };
   return (
     <button
       type="button"
       onClick={goBack}
-      aria-label={label ?? "Back"}
-      title={label ?? "Back"}
-      className={
-        className ??
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-base font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink)]"
-      }
+      aria-label={label ? `Back to ${label}` : "Back"}
+      title={label ? `Back to ${label}` : "Back"}
+      // .os-chrome: the 28px ghost is drawn in px (h-7 = 28, not 24.5 under
+      // the 14px root) wherever it renders, in or out of the page header.
+      className={cn(
+        "os-chrome inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink",
+        className,
+      )}
     >
-      <ArrowLeft className="h-4 w-4" />
-      {label ? <span>{label}</span> : null}
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} aria-hidden />
+      {label ? <span className="truncate">{label}</span> : null}
     </button>
   );
 }

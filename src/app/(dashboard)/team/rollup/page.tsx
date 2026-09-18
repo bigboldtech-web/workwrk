@@ -10,7 +10,7 @@
 //   - Direct ICs section — reports who don't have reports of their
 //     own, in a compact list with the three personal metrics.
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { getDirectorRollup, type SubTeam, type DirectIcSummary } from "@/lib/team-rollup";
@@ -37,7 +37,7 @@ export default async function TeamRollupPage() {
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
     { type: "module", name: "team/rollup" },
   );
-  if (!meets(decision, "read")) redirect("/team/alignment");
+  if (!meets(decision, "read")) notFound();
 
   const data = await getDirectorRollup({
     directorId: u.id,

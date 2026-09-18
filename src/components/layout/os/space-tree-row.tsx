@@ -14,9 +14,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
-  ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen, Loader2,
+  ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen,
   Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
-  BarChart3, ClipboardCheck, Download, Files, MoreHorizontal, IterationCw,
+  Files, MoreHorizontal, IterationCw,
 } from "lucide-react";
 import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
@@ -33,6 +33,7 @@ import { useOsToast } from "./toast";
 import { uploadDroppedFiles, dragHasFiles } from "@/lib/upload-dropped-files";
 import { useOsShell } from "./shell-context";
 import { SidebarQuickStar } from "./sidebar-quick-star";
+import { SkeletonLines } from "@/components/ui/skeleton";
 
 // Session-persistent expand state for the sidebar tree, keyed by id. The rail's
 // hover-preview swaps out (unmounts) the Home sidebar and remounts it when the
@@ -215,6 +216,9 @@ interface Props {
   // disables reordering. `place` is relative to THIS row's midpoint.
   onReorderSpace?: (draggedSpaceId: string, place: "before" | "after") => void;
   reorderable?: boolean;
+  /** The menu twins of the drag (spec-shell 1.16); absent at the list's ends. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
 export function SpaceTreeRow({
@@ -226,6 +230,8 @@ export function SpaceTreeRow({
   onRequestNewFolder,
   onReorderSpace,
   reorderable = false,
+  onMoveUp,
+  onMoveDown,
 }: Props) {
   const { toast } = useOsToast();
   const router = useRouter();
@@ -349,13 +355,13 @@ export function SpaceTreeRow({
           if (ok) { setExpanded(true); if (!expanded) loadChildren(); else refresh(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 px-2 rounded-md ${
-          rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"
+        className={`relative flex h-9 items-center gap-2 px-3 rounded-lg ${
+          rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-side-pill" : "hover:bg-hover"
         } ${reorderable ? "cursor-pointer" : ""}`}
       >
         {spaceDropEdge ? (
           <span
-            className={`pointer-events-none absolute left-1 right-1 h-0.5 rounded-full bg-[#0073EA] ${
+            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-[#0073EA] ${
               spaceDropEdge === "before" ? "-top-px" : "-bottom-px"
             }`}
           />
@@ -371,13 +377,13 @@ export function SpaceTreeRow({
             <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
           </span>
           <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-500">
-            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
           </span>
         </button>
         <Link
           href={`/spaces/${space.slug}`}
           className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 ${
-            isActive ? "text-zinc-900 font-medium" : "text-zinc-700"
+            isActive ? "text-ink font-medium" : "text-ink"
           }`}
         >
           <span className="min-w-0 flex-1 truncate">{space.name}</span>
@@ -385,13 +391,15 @@ export function SpaceTreeRow({
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
         </Link>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/space:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="space" id={space.id} />
           <SpaceMoreTrigger
             ref={moreRef}
             space={space}
             onUpdated={onReloadSpaces}
             onRequestShare={onRequestShareSpace}
+            onMoveUp={onMoveUp}
+            onMoveDown={onMoveDown}
           />
           <SpaceCreateTrigger
             spaceId={space.id}
@@ -403,12 +411,9 @@ export function SpaceTreeRow({
       </div>
 
       {expanded ? (
-        <ul className="mt-0.5 mb-1 pl-[19px]">
+        <ul className="mt-0.5 mb-1 ps-[19px]">
           {loading && data === null ? (
-            <li className="px-2 py-1 inline-flex items-center gap-1.5 text-xs text-zinc-400">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading…
-            </li>
+            <li><SkeletonLines lines={2} className="px-2 py-1" /></li>
           ) : data === null ? (
             <li className="px-2 py-1 text-xs text-zinc-400">Couldn&rsquo;t load</li>
           ) : data.folders.length === 0 && data.boards.length === 0 && data.tables.length === 0 && data.docs.length === 0 && data.whiteboards.length === 0 ? (
@@ -523,11 +528,11 @@ function FolderTreeRow({
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {dropZone === "before" || dropZone === "after" ? (
           <span
-            className={`pointer-events-none absolute left-1 right-1 h-0.5 rounded-full bg-[#0073EA] ${
+            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-[#0073EA] ${
               dropZone === "before" ? "-top-px" : "-bottom-px"
             }`}
           />
@@ -551,7 +556,7 @@ function FolderTreeRow({
           })()}
           {hasChildren ? (
             <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-500">
-              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
             </span>
           ) : null}
         </button>
@@ -560,11 +565,11 @@ function FolderTreeRow({
             inline tree expansion. */}
         <Link
           href={`/folders/${folder.id}`}
-          className={`min-w-0 flex-1 truncate text-sm text-left hover:text-zinc-900 ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`min-w-0 flex-1 truncate text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           {folder.name}
         </Link>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/folderrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="folder" id={folder.id} />
           <FolderMoreTrigger
             ref={moreRef}
@@ -583,7 +588,7 @@ function FolderTreeRow({
        (folder.boards.length > 0 ||
         folder.docs.length > 0 ||
         folder.childFolders.length > 0) ? (
-        <ul className="mt-0.5 pl-[19px]">
+        <ul className="mt-0.5 ps-[19px]">
           {folder.childFolders.map((cf) => (
             <FolderTreeRow
               key={cf.id}
@@ -627,12 +632,12 @@ function BoardTreeRow({
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "board", id: board.id })}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/boards/${board.slug}`)}
-          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           {sprint ? (
             <IterationCw className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
@@ -644,7 +649,7 @@ function BoardTreeRow({
             <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
           ) : null}
         </button>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/boardrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/boardrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="board" id={board.id} />
           <BoardMoreTrigger
             ref={moreRef}
@@ -672,17 +677,17 @@ function TableTreeRow({
     <li className="group/tablerow relative">
       <div
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/tables/${table.id}`)}
-          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <TableIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/tablerow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="table" id={table.id} />
           <TableMoreTrigger ref={moreRef} table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
         </span>
@@ -702,17 +707,17 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
         draggable
         onDragStart={(e) => startTreeDrag(e, { kind: "doc", id: doc.id })}
         onContextMenu={(e) => noteMenu.open(e, { id: doc.id, title: doc.title })}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/docs/${doc.id}`)}
-          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/docrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/docrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="doc" id={doc.id} />
           <button
             type="button"
@@ -746,17 +751,17 @@ function WhiteboardTreeRow({ whiteboard, onChanged }: { whiteboard: WhiteboardCh
     <li className="group/wbrow relative">
       <div
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-7 items-center gap-1.5 pl-1 pr-1.5 rounded-md cursor-pointer ${isActive ? "bg-zinc-200/70" : "hover:bg-white/80"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         <button
           type="button"
           onClick={() => router.push(`/canvas/${whiteboard.id}`)}
-          className={`flex items-center gap-1.5 text-sm flex-1 min-w-0 text-left ${isActive ? "text-zinc-900 font-medium" : "text-zinc-700"}`}
+          className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
         </button>
-        <span className={`absolute right-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded pl-1.5 opacity-0 group-hover/wbrow:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
           <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name }} onUpdated={onChanged} />
         </span>
@@ -797,7 +802,6 @@ function FolderAddTrigger({
   }, [open]);
 
   const close = () => setOpen(false);
-  const soon = (label: string) => { toast(`${label} — coming soon`); close(); };
 
   const createList = async () => {
     if (creating) return;
@@ -886,14 +890,13 @@ function FolderAddTrigger({
       <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="below">
         <MenuList className="min-w-[260px]">
           <MenuSectionLabel>Create</MenuSectionLabel>
+          {/* Only things that exist (spec-shell 1.15): no Dashboard, Form or
+              Imports rows until each has a backend. */}
           <MenuItem icon={ListChecks}      iconClassName="text-emerald-500" label="List" onClick={createList} />
           <MenuItem icon={FileText}        iconClassName="text-blue-500"    label="Doc" onClick={createDoc} />
-          <MenuItem icon={BarChart3}       iconClassName="text-sky-500"  label="Dashboard" onClick={() => soon("Dashboard")} />
           <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Canvas" onClick={createWhiteboard} />
-          <MenuItem icon={ClipboardCheck}  iconClassName="text-teal-500"  label="Form" onClick={() => soon("Form")} />
           <MenuItem icon={FolderIcon}      iconClassName="text-amber-500"   label="Folder" onClick={createSubFolder} />
           <MenuSeparator />
-          <MenuItem icon={Download} label="Imports" onClick={() => soon("Imports")} />
           <MenuItem icon={Files} label="Templates" onClick={() => { close(); openTemplateCenter({ kind: "FOLDER" }); }} />
         </MenuList>
       </MorePortal>

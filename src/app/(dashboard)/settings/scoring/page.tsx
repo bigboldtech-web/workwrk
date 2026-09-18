@@ -15,14 +15,19 @@
  * so a bad weight sum can't block the whole page.
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { Switch } from "@/components/ui/switch";
 import {
-  ChevronLeft, Sparkles, BarChart3, Award, MessageSquareText,
-  Check, AlertCircle, RotateCcw,
+  Sparkles,
+  BarChart3,
+  Award,
+  MessageSquareText,
+  Check,
+  AlertCircle,
+  RotateCcw,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { C } from "@/components/layout/os/catalog";
 import {
   CADENCE_LABELS, METRIC_LABELS,
@@ -75,27 +80,16 @@ export default function ScoringSettingsPage() {
   if (loading) {
     return (
       <div>
-        <OsTitleBar title="Scoring & reviews" Icon={Sparkles} iconGradient="" showInvite={false} starred={false} />
-        <div className="px-6 py-10 text-base text-zinc-400">Loading…</div>
+        <OsPageHeader title="Scoring & reviews" />
+        <div className="px-6 py-6"><SkeletonRows rows={6} /></div>
       </div>
     );
   }
 
   return (
     <div className="pb-16">
-      <OsTitleBar
-        title="Scoring & reviews"
-        Icon={Sparkles}
-        iconGradient=""
-        description="Cadences, score weights, performance bands & behavioral anchors"
-        showInvite={false}
-        starred={false}
-      />
+      <OsPageHeader title="Scoring & reviews" />
       <div className="px-6">
-        <Link href="/settings" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 mb-4">
-          <ChevronLeft className="w-3.5 h-3.5" /> Back to settings
-        </Link>
-
         <div className="max-w-3xl space-y-5">
           <CadencesSection cadences={cadences} setCadences={setCadences} />
           <WeightsSection weights={weights} setWeights={setWeights} />

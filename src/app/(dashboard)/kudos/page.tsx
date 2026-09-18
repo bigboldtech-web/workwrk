@@ -7,18 +7,25 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useCultureValues } from "@/lib/use-culture";
 import Link from "next/link";
 import {
-  Heart, Plus, Hash, ChevronRight, Trophy, Sparkles, Users, Calendar as CalendarIcon,
-  Search, TrendingUp,
+  Heart,
+  Hash,
+  ChevronRight,
+  Trophy,
+  Sparkles,
+  Users,
+  Calendar as CalendarIcon,
+  Search,
+  TrendingUp,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiKudos = {
   id: string;
@@ -133,17 +140,11 @@ export default function KudosPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Kudos"
-        Icon={Heart}
-        iconGradient={GRAD.redPink}
-        description={rows === null ? "Loading…" : `${stats.total} kudos · ${stats.week} this week · ${stats.totalReactions} reactions`}
         actions={
           <div className="kud__head-actions">
-            <Link href="/people" className="kud__nav-link"><Users /> People</Link>
-            <button type="button" className="kud__btn-primary" onClick={() => toast("Send kudos from any person's profile page")}>
-              <Plus /> Send kudos
-            </button>
+            <Link href="/people" className="os-head__link"><Users /> People</Link>
           </div>
         }
       />
@@ -188,17 +189,14 @@ export default function KudosPage() {
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={Heart} iconGradient={GRAD.redPink} title="Couldn't load kudos" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load kudos" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="kud__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Heart}
-            iconGradient={GRAD.redPink}
+            context="list"
             title="No kudos yet"
-            subtitle="Recognize a teammate's work. Pick a company value to reinforce the behavior you want to celebrate."
-            chips={orgValues.length ? orgValues.slice(0, 5) : ["Customer First", "Ownership", "Teamwork", "Boldness"]}
-            cta="Send kudos"
+            hint="Recognize a teammate and tie it to a company value."
           />
         ) : filtered.length === 0 ? (
           <div className="kud__no-match"><Search /> No kudos match the current filter.</div>

@@ -16,6 +16,7 @@
  *  PATCH /api/kras           — attach an orphan to a job title
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -287,17 +288,15 @@ export default function KraKpiPage() {
 
         {/* Job titles */}
         {loadError ? (
-          <OsEmptyView Icon={Target} iconGradient="#E2445C" title="Couldn't load job titles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load job titles" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
         ) : roles === null ? (
-          <div className="py-16 text-center text-base text-zinc-400">Loading…</div>
+          <SkeletonRows />
         ) : roles.length === 0 ? (
           <OsEmptyView
-            Icon={Briefcase}
-            iconGradient="#0073EA"
+            context="goals"
             title="No job titles yet"
-            subtitle="KRAs and KPIs live inside job titles. Create your roles first, then define what each one owns."
-            cta="Create roles"
-            onCta={() => router.push("/people/roles?new=1")}
+            hint="KRAs and KPIs live inside job titles, so create those first."
+            action={{ label: "Create roles", onClick: () => router.push("/people/roles?new=1") }}
           />
         ) : filteredRoles.length === 0 && definitionMatches.length === 0 ? (
           <div className="py-16 text-center text-base text-zinc-400">Nothing matches &ldquo;{search}&rdquo;.</div>

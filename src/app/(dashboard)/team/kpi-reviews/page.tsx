@@ -2,7 +2,7 @@
 // /team/reviews (weekly reviews). Two sections: "Awaiting your approval"
 // (SUBMITTED) with inline Approve / Request-changes, and "Recently acted".
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
@@ -23,7 +23,7 @@ export default async function TeamKpiReviewsPage() {
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
     { type: "module", name: "team/kpi-reviews" },
   );
-  if (!meets(decision, "read")) redirect("/today");
+  if (!meets(decision, "read")) notFound();
 
   const [pending, acted] = await Promise.all([
     listKpiReviewsForManager(u.id, u.organizationId, { status: "SUBMITTED", take: 50 }),

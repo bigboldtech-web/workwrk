@@ -8,20 +8,32 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Megaphone, Plus, Search, Hash, ChevronRight, Pin, AlertTriangle, CheckCircle2,
-  Info, PartyPopper, ShieldCheck, CalendarRange, Bell, Clock, Users2,
+  Megaphone,
+  Search,
+  Hash,
+  ChevronRight,
+  Pin,
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  PartyPopper,
+  ShieldCheck,
+  CalendarRange,
+  Bell,
+  Clock,
+  Users2,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePermission } from "@/hooks/use-permission";
 import { AnnouncementComposer } from "./composer-dialog";
 import { AckStatusDialog } from "./ack-status-dialog";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -143,21 +155,14 @@ export default function AnnouncementsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Announcements"
-        Icon={Megaphone}
-        iconGradient={GRAD.orangePink}
-        description={rows === null ? "Loading…" : `${stats.total} announcement${stats.total === 1 ? "" : "s"}${stats.ackPending > 0 ? ` · ${stats.ackPending} need your ack` : ""}${stats.urgent > 0 ? ` · ${stats.urgent} urgent` : ""}`}
         actions={
           <div className="ann__head-actions">
-            <Link href="/policies" className="ann__nav-link"><ShieldCheck /> Policies</Link>
-            {canManage && (
-              <button type="button" className="ann__btn-primary" onClick={() => setComposerOpen(true)}>
-                <Plus /> New announcement
-              </button>
-            )}
+            <Link href="/policies" className="os-head__link"><ShieldCheck /> Policies</Link>
           </div>
         }
+        primary={canManage ? { label: "New announcement", onClick: () => setComposerOpen(true) } : undefined}
       />
 
       <div className="ann">
@@ -200,19 +205,15 @@ export default function AnnouncementsPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="ann__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Megaphone}
-            iconGradient={GRAD.orangePink}
+            context="list"
             title="No announcements yet"
-            subtitle="Broadcast org-wide updates. Use Urgent for outages, Policy for rule changes, Celebration for wins."
-            chips={["Info", "Warning", "Policy", "Event", "Celebration"]}
-            cta="New announcement"
-            hideCta={!canManage}
-            onCta={() => setComposerOpen(true)}
+            hint="Broadcast updates to the whole workspace."
+            action={!canManage ? undefined : { label: "New announcement", onClick: () => setComposerOpen(true) }}
           />
         ) : filtered.length === 0 ? (
           <div className="ann__no-match"><Search /> No announcements match the filter.</div>

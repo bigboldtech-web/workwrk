@@ -15,7 +15,7 @@
 // Settings persist client-side in localStorage (no View row exists at
 // workspace scope) — see team-workload-view.tsx.
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { GaugeCircle } from "lucide-react";
@@ -29,6 +29,7 @@ import {
   type BoardItemRow,
 } from "@/lib/board-items-shared";
 import { TeamWorkloadView } from "./team-workload-view";
+import { LockedPage } from "@/components/access";
 
 export const dynamic = "force-dynamic";
 
@@ -43,10 +44,21 @@ export default async function TeamWorkloadPage() {
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
     { type: "module", name: "team/alignment" },
   );
-  if (!meets(decision, "read")) redirect("/today");
+  if (!meets(decision, "read")) notFound();
 
   const teamIds = await getTeamUserIds(u.organizationId, u.id);
-  if (teamIds.length <= 1) redirect("/team");
+  // The one sanctioned app-key LockedPage (consistency-report C29): a
+  // manager-tier viewer with nobody reporting to them. No Request access,
+  // because nobody can grant a report.
+  if (teamIds.length <= 1) {
+    return (
+      <LockedPage
+        name="Workload"
+        sentence="Workload shows the capacity of the people who report to you. Nobody reports to you yet."
+        back={{ fallbackHref: "/people", label: "Directory" }}
+      />
+    );
+  }
 
   // Readable boards (per-board visibility composed the same way the
   // Everything feed does it) — carrying each board's status set so the

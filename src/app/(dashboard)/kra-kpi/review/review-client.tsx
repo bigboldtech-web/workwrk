@@ -23,11 +23,12 @@
  *   POST /api/kpi-records      { kpiId, userId, period, actualValue, managerNotes }
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ChartLine, Save, AlertCircle, Calendar, ChevronRight, Target } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { getScoringBands, bandFor, DEFAULT_SCORING_BANDS, type ScoringBand } from "@/lib/review-cadence";
@@ -313,14 +314,11 @@ export default function ReviewPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="KPI review"
-        Icon={ChartLine}
-        iconGradient={GRAD.purpleIndigo}
-        description={reports === null ? "Loading…" : `${reports.length} direct report${reports.length === 1 ? "" : "s"} · ${monthLbl}`}
+      <OsPageHeader
+        title="KPI reviews"
         actions={
           <div className="krar__head-actions">
-            <Link href="/kra-kpi" className="krar__nav-link"><Target /> KRA library</Link>
+            <Link href="/kra-kpi" className="os-head__link"><Target /> KRA library</Link>
             <div className="krar__period krar__period--static" title="Readings record against the current month; review as often as you like.">
               <Calendar />
               <span>{monthLbl}</span>
@@ -333,7 +331,7 @@ export default function ReviewPage() {
       {loadError ? (
         <div className="review__error">{loadError}</div>
       ) : reports === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
+        <SkeletonRows />
       ) : reports.length === 0 ? (
         <div className="review__empty">
           <ChartLine />

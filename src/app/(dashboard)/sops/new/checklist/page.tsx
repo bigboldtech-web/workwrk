@@ -14,9 +14,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ListChecks, Send, Save, ArrowLeft, Loader2 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { Send, Save } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { OsPageHeader, HeaderAction } from "@/components/layout/os/page-header";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { ChecklistBuilder, normalizeChecklistSections, type ChecklistSection } from "@/components/checklist-builder";
 import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
@@ -138,51 +140,35 @@ export default function ChecklistSopEditor() {
   const totalSteps = sections.reduce((acc, s) => acc + s.steps.length, 0);
 
   if (!id) return (<>
-    <OsTitleBar title="New checklist SOP" Icon={ListChecks} iconGradient={GRAD.indigoBlue} showStandardActions={false} />
-    <div className="sop-edit__loading"><Loader2 className="bedit__spin" /> Creating checklist…</div>
+    <OsPageHeader title="New checklist SOP" back={{ fallbackHref: "/sops", label: "SOPs" }} />
+    <div className="sop-edit__loading"><Dots variant="pending" /> Creating checklist…</div>
   </>);
 
   return (<>
-    <OsTitleBar
-      title="Checklist SOP"
-      Icon={ListChecks}
-      iconGradient={GRAD.indigoBlue}
-      showStandardActions={false}
-      description={`${totalSteps} step${totalSteps === 1 ? "" : "s"} · ${saving ? "saving…" : lastSaved ? `saved ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "auto-saves every 5s"}`}
-      actions={
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => save()}
-            disabled={saving}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
-          >
-            <Save className="h-3.5 w-3.5" /> Save
-          </button>
-          {status !== "PUBLISHED" ? (
-            <button
-              type="button"
-              onClick={() => save({ publish: true })}
-              disabled={saving}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
-            >
-              <Send className="h-3.5 w-3.5" /> Publish
-            </button>
-          ) : (
-            <span className="inline-flex h-8 items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 text-base font-medium text-emerald-700">Published</span>
-          )}
-        </div>
+    <OsPageHeader
+      title={title || "Checklist SOP"}
+      back={{ fallbackHref: "/sops", label: "SOPs" }}
+      autosave={
+        <AutosaveIndicator
+          status={saving ? "saving" : lastSaved ? "saved" : "idle"}
+          lastSavedAt={lastSaved}
+          labels={{ idle: "Auto-saves every 5s" }}
+        />
       }
+      actions={
+        <>
+          <HeaderAction icon={Save} label="Save" disabled={saving} onClick={() => { void save(); }} />
+          {status === "PUBLISHED" ? (
+            <span className="inline-flex h-7 items-center gap-1.5 rounded-md bg-success-bg px-2 text-sm font-medium text-success-text">Published</span>
+          ) : null}
+        </>
+      }
+      primary={status !== "PUBLISHED"
+        ? { label: "Publish", icon: Send, disabled: saving, onClick: () => { void save({ publish: true }); } }
+        : undefined}
     />
 
     <div className="sop-edit">
-      <button
-        type="button"
-        onClick={() => router.push("/sops")}
-        className="inline-flex h-7 w-fit items-center gap-1.5 rounded-md px-2 text-base text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
-      >
-        <ArrowLeft className="h-4 w-4" /> All SOPs
-      </button>
 
       <input type="text" className="sop-edit__title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Checklist title…" />
 

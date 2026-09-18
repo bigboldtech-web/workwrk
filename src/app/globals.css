@@ -96,6 +96,20 @@
   --color-chrome-pill-fg: var(--os-chrome-pill-fg);
   --color-side: var(--os-side-bg);
   --color-side-pill: var(--os-side-pill);
+  /* The bar's search field, the two dot colours, kbd, skeleton and the
+     inverse (tooltip) surface: consumed by the frame (rail, top bar,
+     sidebar primitives, loading.tsx). */
+  --color-chrome-field: var(--os-chrome-field);
+  --color-chrome-field-fg: var(--os-chrome-field-fg);
+  --color-chrome-field-ph: var(--os-chrome-field-ph);
+  --color-chrome-presence: var(--os-chrome-presence);
+  --color-chrome-attention: var(--os-chrome-attention);
+  --color-presence: var(--os-presence);
+  --color-attention: var(--os-attention);
+  --color-kbd: var(--os-kbd-bg);
+  --color-skeleton: var(--os-skeleton);
+  --color-inverse: var(--os-inverse-bg);
+  --color-inverse-fg: var(--os-inverse-fg);
 }
 
 /* Tailwind 4 preflight gives <button> the ARROW cursor (a v3→v4 change).

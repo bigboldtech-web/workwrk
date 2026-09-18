@@ -10,6 +10,8 @@ import { notFound, redirect } from "next/navigation";
 import { SpaceFilesCard } from "@/components/spaces/space-files-card";
 import { SpaceBookmarks, type SpaceBookmark } from "@/components/spaces/space-bookmarks";
 import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
+import { SpaceMoreTrigger } from "@/components/layout/os/space-more-menu";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -18,7 +20,7 @@ import {
   Users as UsersIcon, User as UserIconSmall,
   FileText,
   LayoutDashboard, List as ListIcon, Kanban, Calendar as CalendarIcon, GanttChart,
-  ChevronLeft, ChevronRight, ChevronDown, X,
+  ChevronLeft, ChevronRight, X,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
@@ -575,37 +577,38 @@ export default async function SpacePage(props: {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Breadcrumb + title row */}
+      {/* Location lives in the navy bar and nowhere else (principle 3). The
+          Space's own name only reaches that bar if this page declares it,
+          which is why the in-page "Spaces" link is gone and Breadcrumb is
+          here: a dynamic route is the one place no static table knows the
+          object's name. */}
+      <Breadcrumb items={[{ label: "Spaces", href: "/spaces" }, { label: space.name }]} />
       <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/spaces" className="hover:text-zinc-900">Spaces</Link>
-        </div>
         <div className="flex items-center gap-3">
           <EntityTile size="lg" icon={space.icon} color={space.color} name={space.name} />
-          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
+          <h1 className="text-[22px] font-semibold leading-tight text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate" title={space.description || space.name}>{space.name}</span>
-            <button
-              type="button"
-              aria-label="Space menu"
-              title="Space menu"
-              className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-            >
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
             {space.visibility === "PRIVATE" ? (
-              <Lock className="w-3.5 h-3.5 text-zinc-400" />
+              <Lock className="w-4 h-4 text-zinc-400" />
             ) : null}
             {/* Space-level filtering lives inside the List view's own toolbar
                 (sort / status / owner / due). The former title-row filter icon
                 had no handler, so it's removed rather than left inert. */}
           </h1>
+          {/* Was a ChevronDown with no onClick and no menu. Same affordance,
+              now the real Space menu the sidebar row uses. */}
+          <SpaceMoreTrigger
+            space={{ id: space.id, slug: space.slug, name: space.name, icon: space.icon, color: space.color, visibility: space.visibility }}
+          />
           <div className="flex-1" />
           <Link
             href="/automation/workflows"
             className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100"
             title="Automations"
           >
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            {/* Grey, not amber: yellow is reserved for warning, and Automate
+                is an action, not a caution state (principle 7). */}
+            <Zap className="w-3.5 h-3.5 text-zinc-500" />
             Automate
           </Link>
           <AskSidekickButton prompt={`Help me with the ${space.name} space.`} />

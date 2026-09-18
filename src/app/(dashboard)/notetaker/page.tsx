@@ -11,14 +11,24 @@
  *         POST /api/notetaker/save    { title, type, decisions, ... }
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  Mic, Sparkles, Save, FileText, CheckCircle2, Loader2, Eraser,
-  AtSign, Calendar as CalendarIcon, Users, ArrowRight, ChevronRight,
+  Sparkles,
+  Save,
+  FileText,
+  CheckCircle2,
+  Eraser,
+  AtSign,
+  Calendar as CalendarIcon,
+  Users,
+  ArrowRight,
+  ChevronRight,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -141,13 +151,8 @@ export default function NotetakerPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Notetaker"
-        Icon={Mic}
-        iconGradient={GRAD.pinkPurple}
-        description="Paste any meeting transcript — Claude extracts decisions, action items, and attendees in seconds."
-        people={[PEOPLE.bb, PEOPLE.sc]}
-        morePeople={2}
         actions={
           <div className="ntk__head-actions">
             <button type="button" className="ntk__btn ntk__btn--ghost" onClick={loadExample}>
@@ -184,7 +189,7 @@ export default function NotetakerPage() {
                 disabled={extracting || transcript.trim().length < 20}
                 className="ntk__btn ntk__btn--primary"
               >
-                {extracting ? <><Loader2 className="ntk__spin" /> Extracting…</> : <><Sparkles /> Extract <ChevronRight /></>}
+                {extracting ? <><Dots variant="pending" /> Extracting…</> : <><Sparkles /> Extract <ChevronRight /></>}
               </button>
             </footer>
           </section>
@@ -305,7 +310,7 @@ export default function NotetakerPage() {
                     className="ntk__btn ntk__btn--primary"
                     disabled={saving || !extracted.title}
                   >
-                    {saving ? <><Loader2 className="ntk__spin" /> Saving…</> : <><Save /> Save meeting</>}
+                    {saving ? <><Dots variant="pending" /> Saving…</> : <><Save /> Save meeting</>}
                   </button>
                 </footer>
               </div>
@@ -322,7 +327,7 @@ export default function NotetakerPage() {
             )}
           </header>
           {recents === null ? (
-            <div className="ntk__recents-empty"><Loader2 className="ntk__spin" /> Loading recent meetings…</div>
+            <SkeletonLines lines={3} />
           ) : recents.length === 0 ? (
             <div className="ntk__recents-empty">No processed meetings yet — your first one will appear here.</div>
           ) : (

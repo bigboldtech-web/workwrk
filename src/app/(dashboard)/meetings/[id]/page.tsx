@@ -12,19 +12,39 @@
  * + delete + back. New `actions` slot used; no shared chrome.
  */
 
+import { BackButton } from "@/components/ui/back-button";
+import { Dots } from "@/components/ui/dots";
 import { useState, useEffect, useCallback, useRef } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  ArrowLeft, Edit3, Save, Trash2, FileText, Users, CheckSquare,
-  MessageSquare, Plus, Calendar as CalendarIcon, Clock, X,
-  CheckCircle, Square, ExternalLink, Mic, Sparkles, ClipboardPaste,
-  Loader2, AlertTriangle, ChevronRight, Video, Link2,
+  Edit3,
+  Save,
+  Trash2,
+  FileText,
+  Users,
+  CheckSquare,
+  MessageSquare,
+  Plus,
+  Calendar as CalendarIcon,
+  Clock,
+  X,
+  CheckCircle,
+  Square,
+  ExternalLink,
+  Mic,
+  Sparkles,
+  ClipboardPaste,
+  AlertTriangle,
+  ChevronRight,
+  Video,
+  Link2,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { C } from "@/components/layout/os/catalog";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 // ─── Types ────────────────────────────────────────────────
 
@@ -263,7 +283,7 @@ function AISummaryButton({ notes, onSummary }: { notes: string; onSummary: (s: s
 
   return (
     <button type="button" className="mtgr-tool__btn" onClick={generate} disabled={generating || !notes.trim()}>
-      {generating ? <Loader2 className="mtgr-spin" /> : <Sparkles />} {generating ? "Generating…" : "AI summary"}
+      {generating ? <Dots variant="pending" /> : <Sparkles />} {generating ? "Generating…" : "AI summary"}
     </button>
   );
 }
@@ -531,18 +551,10 @@ export default function MeetingDetailPage() {
 
   // ── Render ──────────────────────────────────────────────
   if (loading) {
-    return <div className="mtgr__loading"><ValueLoader size={32} /></div>;
+    return <SkeletonRows />;
   }
-  if (!meeting) {
-    return (
-      <div className="mtgr__not-found">
-        <p>Meeting not found.</p>
-        <button type="button" className="mtgr-btn mtgr-btn--ghost" onClick={() => router.push("/meetings")}>
-          <ArrowLeft /> Back to meetings
-        </button>
-      </div>
-    );
-  }
+  // The in-shell 404 (spec-shell 2.4): the same view as any unknown object.
+  if (!meeting) return <NotFoundView />;
 
   const color = TYPE_COLORS[meeting.type] ?? C.indigo;
   const typeLabel = TYPE_LABELS[meeting.type] ?? meeting.type;
@@ -556,9 +568,7 @@ export default function MeetingDetailPage() {
     <div className="mtgr" style={{ ["--mtgr-color" as string]: color }}>
       {/* Header */}
       <header className="mtgr__head">
-        <button type="button" className="mtgr__back" onClick={() => router.push("/meetings")} aria-label="Back">
-          <ArrowLeft />
-        </button>
+        <BackButton fallbackHref="/meetings" label="Meetings" />
         <div className="mtgr__head-main">
           <div className="mtgr__head-meta">
             <span className="mtgr__type-chip" style={{ background: `color-mix(in srgb, ${color} 12%, transparent)`, color }}>{typeLabel}</span>
@@ -643,7 +653,7 @@ export default function MeetingDetailPage() {
           <header className="mtgr__notes-head">
             <h2><FileText /> Notes</h2>
             <div className="mtgr__notes-status">
-              {notesSaving ? <><Loader2 className="mtgr-spin" /> Saving…</>
+              {notesSaving ? <><Dots variant="pending" /> Saving…</>
                 : notesDirty ? <>Unsaved</>
                 : <>All changes saved</>}
             </div>

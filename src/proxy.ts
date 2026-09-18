@@ -32,6 +32,9 @@ const MARKETING_PREFIXES = new Set([
   "about", "blog", "changelog", "compare", "contact", "cookies", "customers",
   "demo", "developers", "do-not-sell", "faq", "features", "help-center",
   "industries", "partners", "pricing", "privacy", "security", "terms",
+  // The marketing 404 route: the rewrite target for an unknown path on the
+  // marketing host under the hard split (spec-shell 2.5).
+  "404",
 ]);
 
 // Pages that belong to the APP (the product host) — the (dashboard), (auth) and
@@ -164,6 +167,14 @@ export function proxy(req: NextRequest) {
     // typo or removed page never bounces the visitor into the app.
     if (onMarketing && isAppPath(path)) {
       return redirectToHost(req, appHost);
+    }
+    // An UNKNOWN path on the marketing host renders the marketing 404 in
+    // place. Without this rewrite it would fall through to the app's
+    // catch-all ((dashboard)/[...rest]) and bounce the visitor to /login.
+    if (onMarketing && !isMarketingPath(path)) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/404";
+      return NextResponse.rewrite(url);
     }
     // A marketing route that landed on the app host → send it to marketing.
     // (Root "/" is left to the app-root redirect below.)

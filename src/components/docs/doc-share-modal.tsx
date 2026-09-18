@@ -19,6 +19,7 @@ import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 type DocRole = "edit" | "view";
 
@@ -223,15 +224,8 @@ export function DocShareModal({
 
           {canEdit && (
             <>
-              {/* Invite stub — honest Coming soon (no guest-invite backend yet). */}
-              <button
-                type="button"
-                onClick={() => toast("Guest invites are coming soon")}
-                className="mt-3 flex h-8 w-full items-center justify-between rounded-md border border-zinc-200 px-2.5 text-base text-zinc-400 hover:border-zinc-300"
-              >
-                <span>Invite by name or email</span>
-                <span className="inline-flex h-6 items-center rounded-md bg-zinc-900 px-2.5 text-sm font-semibold text-white">Invite</span>
-              </button>
+              {/* Guest invites have no backend yet: absent, or a ComingSoonRow behind Show upcoming. */}
+              <UpcomingOnly><ComingSoonRow label="Invite by name or email" className="mt-3 border border-line" /></UpcomingOnly>
 
               {/* Public link */}
               <div className="mt-3 flex h-8 items-center justify-between">

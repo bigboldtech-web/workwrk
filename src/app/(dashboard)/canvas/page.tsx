@@ -14,19 +14,21 @@
  * category's color — so a brand-new wall of boards still looks alive.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  Frame, Plus, Search, Pencil, ChevronRight, Clock, Loader2,
+  Search,
+  Pencil,
+  ChevronRight,
+  Clock,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiWhiteboard = {
   id: string;
@@ -104,6 +106,20 @@ export default function WhiteboardsPage() {
     finally { setCreating(false); }
   }
 
+  // The Docs "+" routes here with ?new=1: open the name prompt once and strip
+  // the param via the router, re-arming the latch so the "+" works every
+  // time, including after the prompt is cancelled (same latch as /forms).
+  const search$ = useSearchParams();
+  const newArmed = useRef(true);
+  useEffect(() => {
+    if (search$?.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current) return;
+    newArmed.current = false;
+    router.replace("/canvas", { scroll: false });
+    void createBoard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search$, router]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return boards ?? [];
@@ -142,35 +158,31 @@ export default function WhiteboardsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Canvases"
-        Icon={Frame}
-        iconGradient="linear-gradient(135deg, #a78b80, #8e7165)"
-        description={boards === null ? "Loading…" : `${total} board${total === 1 ? "" : "s"} · ${grouped.length} categor${grouped.length === 1 ? "y" : "ies"}`}
-        actions={
-          <div className="wb__head-actions">
+        toolbar={{
+          left: (
             <div className="wb__search">
               <Search />
               <input
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Find a board…"
+                placeholder="Find a canvas…"
+                aria-label="Find a canvas"
               />
             </div>
-            <button type="button" className="wb__new" onClick={createBoard} disabled={creating}>
-              {creating ? <><Loader2 className="wb__spin" /> Creating…</> : <><Plus /> New canvas</>}
-            </button>
-          </div>
-        }
+          ),
+          primary: { label: "New canvas", onClick: createBoard, busy: creating },
+        }}
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Frame} iconGradient={GRAD.redPink} title="Couldn't load canvases" subtitle={`API error: ${loadError}`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load canvases" hint={`API error: ${loadError}`} action={{ label: "Try again", onClick: () => { void load(); } }} />
       ) : boards === null ? (
-        <div className="wb__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : total === 0 ? (
-        <OsEmptyView Icon={Frame} iconGradient="linear-gradient(135deg, #a78b80, #8e7165)" title="Create your first Canvas" subtitle="Brainstorm, diagram, plan and more! A freeform canvas for you and your team." cta="New canvas" />
+        <OsEmptyView context="docs" title="Create your first Canvas" hint="A freeform canvas for you and your team." />
       ) : filtered.length === 0 ? (
         <div className="wb__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
       ) : (

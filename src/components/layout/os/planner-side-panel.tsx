@@ -7,7 +7,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Flag, Plus, ChevronRight, ChevronDown, Loader2, Search } from "lucide-react";
+import { Flag, Plus, ChevronRight, ChevronDown, Search } from "lucide-react";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 
 interface WorkItem { id: string; title: string; status: string | null; dueAt: string | null; priority: string | null; board: string | null; url: string }
 interface Buckets { today: WorkItem[]; overdue: WorkItem[]; next: WorkItem[]; unscheduled: WorkItem[]; done: WorkItem[] }
@@ -32,7 +34,7 @@ export function PlannerSidePanel({ onCreated, autoFocusMeet }: { onCreated: () =
   const backlog = buckets?.unscheduled ?? [];
 
   return (
-    <aside className="w-[256px] shrink-0 border-r border-zinc-200 dark:border-[#2A2F38] overflow-y-auto px-3 py-3 space-y-4">
+    <aside className="w-[256px] shrink-0 border-e border-zinc-200 dark:border-[#2A2F38] overflow-y-auto px-3 py-3 space-y-4">
       {/* Priorities */}
       <section>
         <h3 className="px-1 mb-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Priorities</h3>
@@ -61,20 +63,20 @@ function CollapsibleSection({ title, items, loading, onOpen, defaultOpen }: {
   return (
     <section>
       <button type="button" onClick={() => setOpen((v) => !v)} className="w-full flex items-center gap-1 px-1 py-1 text-sm font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white">
-        {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-        <span className="flex-1 text-left">{title}</span>
+        {open ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />}
+        <span className="flex-1 text-start">{title}</span>
         {!loading ? <span className="text-xs text-zinc-400">{items.length}</span> : null}
       </button>
       {open ? (
         loading ? (
-          <div className="py-2 flex justify-center"><Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" /></div>
+          <SkeletonLines lines={2} className="px-2" />
         ) : items.length === 0 ? (
           <div className="px-2 py-1.5 text-xs text-zinc-400 dark:text-zinc-500">Nothing here.</div>
         ) : (
           <ul className="space-y-0.5 mt-0.5">
             {items.map((it) => (
               <li key={it.id}>
-                <button type="button" onClick={() => onOpen(it.url)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-left">
+                <button type="button" onClick={() => onOpen(it.url)} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-start">
                   <span className="w-2 h-2 rounded-full border border-zinc-300 dark:border-zinc-600 shrink-0" />
                   <span className="flex-1 min-w-0 truncate text-sm text-zinc-700 dark:text-zinc-200">{it.title}</span>
                 </button>
@@ -132,7 +134,7 @@ function MeetWith({ onCreated, autoFocus }: { onCreated: () => void; autoFocus?:
             <li className="px-2 py-2 text-xs text-zinc-400 text-center">No teammates found.</li>
           ) : people.map((p) => (
             <li key={p.id}>
-              <button type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-left">
+              <button type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-start">
                 {p.avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.avatar} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
@@ -140,7 +142,7 @@ function MeetWith({ onCreated, autoFocus }: { onCreated: () => void; autoFocus?:
                   <span className="w-5 h-5 rounded-full bg-[#2F8BF0] text-white text-micro font-semibold flex items-center justify-center shrink-0">{personInitials(p)}</span>
                 )}
                 <span className="flex-1 min-w-0 truncate text-sm text-zinc-700 dark:text-zinc-200">{personName(p)}</span>
-                {busy === p.id ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400" /> : <span className="text-xs text-[#0073EA] font-medium shrink-0">Meet</span>}
+                {busy === p.id ? <Dots variant="pending" /> : <span className="text-xs text-[#0073EA] font-medium shrink-0">Meet</span>}
               </button>
             </li>
           ))}

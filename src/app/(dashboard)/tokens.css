@@ -21,7 +21,7 @@
  *                                 localStorage key) and by ThemeApplier
  *                                 once the stored preference is fetched
  *   data-density="comfortable|cozy|compact"
- *                                 written by ThemeApplier and lib/density
+ *                                 written by ThemeApplier from the boot prefs
  *   data-contrast="high"          reserved (nothing writes it yet)
  *
  * Tokens are declared on :root AND .workwrk-os so UI portaled to <body>
@@ -260,15 +260,14 @@
   --os-head-h:    48px;
   --os-views-h:   36px;
   --os-toolbar-h: 44px;
-  /* The old header names are still read by the live .os-title-bar,
-     .os-tabs, .os-filter, .os-chat and .os-notif rules. They keep today's
-     values until Phase 1 replaces OsTitleBar with the three-row header;
-     re-pointing them here would change the live header heights. Phase 1:
-     --os-top-h 48, then alias the three to head / views / toolbar. */
-  --os-top-h:    32px;
-  --os-title-h:  40px;
-  --os-tabs-h:   34px;
-  --os-filter-h: 34px;
+  /* The bar is 48 (Phase 1 frame). The three old header names are
+     retired aliases of head / views / toolbar (the three-row header
+     replaced OsTitleBar in Stage B); kept one release for any sheet that
+     still reads them. */
+  --os-top-h:    48px;
+  --os-title-h:  var(--os-head-h);
+  --os-tabs-h:   var(--os-views-h);
+  --os-filter-h: var(--os-toolbar-h);
 
   /* Density (3.2, 3.3). Data rows follow html[data-density]; nav rows are
      fixed at 36. Control heights: 36 default, 32 small. */
@@ -297,6 +296,24 @@
   letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* The frame is drawn on the 4px grid in px (design-system 3.1, 3.4, 4).
+   Tailwind's spacing and radius utilities are rem-based and the product root
+   is 14px (above), so inside a page `h-14` is 49px and `rounded-lg` is 7px.
+   Every chrome container (rail, bar, hub sidebar, settings takeover, the
+   chrome popovers and dialogs, skip links, offline strip, palette) carries
+   .os-chrome, which rebinds the two theme variables the utilities read so
+   the same classes render at their nominal px: h-14 = 56, h-9 = 36, h-5 = 20,
+   rounded-lg = 8, rounded-md = 6. Pages keep the 14px-root scale until their
+   own phase restyles them. */
+.os-chrome {
+  --spacing: 4px;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 }
 
 /* ── Density preference (3.2) ───────────────────────────────────────

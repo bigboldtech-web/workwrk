@@ -1,3 +1,5 @@
+"use client";
+
 /* Imports — the hub the sidebar "+" menu's Import button lands on.
  *
  * v1 surfaces the two CSV paths that already exist (Database CSV
@@ -10,21 +12,23 @@
 
 import Link from "next/link";
 import {
-  ArrowRight, Database, Import as ImportIcon, Table2, Users,
+  ArrowRight,
+  Database,
+  Table2,
+  Users,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { ComingSoonRow, useShowUpcoming } from "@/components/ui/coming-soon-row";
 
 const COMING_SOON = ["ClickUp", "Asana", "Trello", "Excel", "Google Sheets"];
 
 export default function ImportsPage() {
+  // Not-yet-wired sources render only for a viewer who opted in
+  // (spec-shell 1.15); otherwise they are absent, not dressed as chips.
+  const showUpcoming = useShowUpcoming();
   return (
     <div className="flex h-full flex-col">
-      <OsTitleBar
-        title="Imports"
-        Icon={ImportIcon}
-        iconGradient=""
-        description="Bring existing work into WorkwrK"
-      />
+      <OsPageHeader title="Imports" />
 
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
@@ -61,20 +65,18 @@ export default function ImportsPage() {
           </Link>
         </div>
 
-        <div className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-          Coming soon
-        </div>
-        <div className="flex max-w-3xl flex-wrap gap-2">
-          {COMING_SOON.map((source) => (
-            <span
-              key={source}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-dashed border-zinc-200 px-3 text-base text-zinc-400"
-            >
-              <Table2 className="h-3.5 w-3.5" />
-              {source}
-            </span>
-          ))}
-        </div>
+        {showUpcoming ? (
+          <>
+            <div className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wide text-zinc-400">
+              Upcoming
+            </div>
+            <div className="max-w-3xl">
+              {COMING_SOON.map((source) => (
+                <ComingSoonRow key={source} label={`Import from ${source}`} icon={Table2} />
+              ))}
+            </div>
+          </>
+        ) : null}
       </div>
     </div>
   );

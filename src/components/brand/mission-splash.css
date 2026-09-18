@@ -1,0 +1,78 @@
+/* The mission splash (design-system 5.15). The navy is the chrome colour in
+   every chrome variant so the fade reveals the frame as if it opened onto
+   the work. Values render in white; colour stays on the dots. */
+
+.wwk-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  cursor: pointer;
+  background: #1B2537;
+  color: #FFFFFF;
+  opacity: 0;
+  transition: opacity 160ms cubic-bezier(0.4, 0, 1, 1);
+  -webkit-font-smoothing: antialiased;
+}
+.wwk-splash.is-in { opacity: 1; }
+
+.wwk-splash__inner {
+  max-width: 660px;
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.wwk-splash__dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 20px;
+}
+.wwk-splash__dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  animation: wwk-splash-rise 600ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes wwk-splash-rise {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.wwk-splash__eyebrow {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.wwk-splash__line {
+  margin: 0;
+  font-size: clamp(22px, 3vw, 32px);
+  line-height: 1.3;
+  font-weight: 600;
+  color: #FFFFFF;
+  text-wrap: balance;
+}
+
+.wwk-splash__skip {
+  position: absolute;
+  inset-block-end: 16px;
+  inset-inline-end: 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wwk-splash { transition: none; }
+  .wwk-splash__dot { animation: none; }
+}

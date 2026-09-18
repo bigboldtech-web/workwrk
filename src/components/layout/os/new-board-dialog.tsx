@@ -55,6 +55,7 @@ import {
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { BloomMark } from "./bloom-mark";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 // ── Tile definitions ──────────────────────────────────────────────
 
@@ -168,10 +169,7 @@ export function NewBoardDialog({
       setError("Pick a view type to continue");
       return;
     }
-    if (tile.viewType === null) {
-      setError(`"${tile.label}" is coming soon — pick a different view to create the board.`);
-      return;
-    }
+    if (tile.viewType === null) return;
     setSubmitting(true);
     try {
       const res = await fetch("/api/boards", {
@@ -231,11 +229,11 @@ export function NewBoardDialog({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search or describe a view to create"
-              className="w-full h-8 px-3 pr-9 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-[var(--os-brand)]"
+              className="w-full h-8 px-3 pe-9 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-[var(--os-brand)]"
             />
             <button
               type="button"
-              className="absolute right-1.5 top-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900"
+              className="absolute end-1.5 top-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-zinc-500 hover:text-zinc-900"
               aria-label="Search views"
               tabIndex={-1}
             >
@@ -303,17 +301,21 @@ function TileGrid({
   selectedKey: string;
   onPick: (key: string) => void;
 }) {
+  // A view type with no renderer is absent, or a ComingSoonRow behind Show
+  // upcoming features (spec-shell 1.15); never a tile that cannot be picked.
+  const live = tiles.filter((t) => t.viewType !== null);
+  const soon = tiles.filter((t) => t.viewType === null);
   return (
+    <>
     <div className="grid grid-cols-2 gap-1">
-      {tiles.map((t) => {
+      {live.map((t) => {
         const active = selectedKey === t.key;
-        const disabled = t.viewType === null;
         return (
           <button
             key={t.key}
             type="button"
             onClick={() => onPick(t.key)}
-            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
+            className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-start transition-colors ${
               active
                 ? "bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
                 : "hover:bg-zinc-100"
@@ -328,11 +330,18 @@ function TileGrid({
             <span className="text-base flex items-baseline gap-1.5">
               {t.label}
               {t.sublabel ? <span className="text-sm text-zinc-500">{t.sublabel}</span> : null}
-              {disabled ? <span className="text-micro uppercase tracking-wide text-zinc-500">Soon</span> : null}
             </span>
           </button>
         );
       })}
     </div>
+    {soon.length > 0 ? (
+      <UpcomingOnly>
+        <div className="mt-1">
+          {soon.map((t) => <ComingSoonRow key={t.key} label={t.sublabel ? `${t.label} ${t.sublabel}` : t.label} />)}
+        </div>
+      </UpcomingOnly>
+    ) : null}
+    </>
   );
 }

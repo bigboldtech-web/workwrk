@@ -10,18 +10,19 @@
  *  scoped to the caller's organization.
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Activity, Search, Hash, ChevronRight, User as UserIcon, Edit3, Trash2,
   Plus, Eye, ShieldAlert, Key, FileText, Calendar as CalendarIcon, Download, X,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type AuditActor = {
   id: string;
@@ -231,18 +232,15 @@ export default function AuditLogPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Audit log"
-        Icon={Activity}
-        iconGradient={GRAD.orangePink}
-        description={`${stats.inView} in view · ${stats.today} today${nextCursor ? " · more available" : ""}`}
         actions={
           <div className="adt__head-actions">
-            <button type="button" className="adt__nav-link" onClick={exportLog} disabled={exporting}>
+            <button type="button" className="os-head__link" onClick={exportLog} disabled={exporting}>
               <Download /> {exporting ? "Exporting…" : "Export"}
             </button>
-            <Link href="/settings" className="adt__nav-link"><Hash /> Settings</Link>
-            <Link href="/settings/api" className="adt__nav-link"><Key /> API keys</Link>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
+            <Link href="/settings/api" className="os-head__link"><Key /> {SETTINGS_PAGES.api.label}</Link>
           </div>
         }
       />
@@ -310,21 +308,18 @@ export default function AuditLogPage() {
         )}
 
         {rows === null ? (
-          <div className="adt__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : errorMsg ? (
           <OsEmptyView
-            Icon={Activity}
-            iconGradient={GRAD.orangePink}
+            variant="error"
             title="Couldn't load the audit log"
-            subtitle={errorMsg}
+            hint={errorMsg}
           />
         ) : filtered.length === 0 ? (
           <OsEmptyView
-            Icon={Activity}
-            iconGradient={GRAD.orangePink}
+            context="list"
             title="No audit events"
-            subtitle="Events appear here as soon as someone takes action in this organization."
-            chips={["create", "update", "delete", "check-in"]}
+            hint="Events appear here as soon as someone takes action in this organization."
           />
         ) : (
           <>
@@ -363,7 +358,7 @@ export default function AuditLogPage() {
             {nextCursor && (
               <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
                 <button type="button" className="adt__nav-link" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? <Dots variant="pending" label="Loading more" /> : "Load more"}
                 </button>
               </div>
             )}

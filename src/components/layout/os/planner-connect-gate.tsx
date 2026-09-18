@@ -7,6 +7,7 @@
 // meetings on top. Microsoft Outlook is the next integration.
 
 import { CalendarClock, X } from "lucide-react";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
   return (
@@ -29,15 +30,7 @@ export function PlannerConnectBanner({ onDismiss }: { onDismiss: () => void }) {
       >
         <GoogleMark /> Connect Google Calendar
       </a>
-      <button
-        type="button"
-        disabled
-        title="Microsoft Outlook is coming soon"
-        className="shrink-0 h-8 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] text-base font-medium text-zinc-400 dark:text-zinc-500 inline-flex items-center gap-1.5 cursor-not-allowed"
-      >
-        <OutlookMark /> Outlook
-        <span className="text-micro font-semibold uppercase tracking-wide text-zinc-400 bg-zinc-100 dark:bg-white/10 rounded px-1 py-0.5">Soon</span>
-      </button>
+      <UpcomingOnly><ComingSoonRow label="Microsoft Outlook" className="shrink-0 h-8" /></UpcomingOnly>
       <button
         type="button"
         onClick={onDismiss}
@@ -59,11 +52,3 @@ function GoogleMark() {
   );
 }
 
-function OutlookMark() {
-  return (
-    <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden>
-      <rect x="3" y="6" width="12" height="12" rx="2" fill="#0A66C2"/>
-      <path d="M21 8v8l-5-2.5V10.5L21 8z" fill="#0A66C2" opacity="0.6"/>
-    </svg>
-  );
-}

@@ -7,17 +7,31 @@
  *  Status enum: DRAFT | IN_REVIEW | APPROVED | PUBLISHED | ARCHIVED
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BookCopy, Plus, Search, ClipboardCheck, ChevronRight, ChevronDown, FileText,
-  CheckCircle2, Archive, Eye, Edit3, AlertTriangle, BookOpen, Target, Loader2,
-  LayoutGrid, List as ListIcon, MoreHorizontal, Trash2, FolderTree,
+  Search,
+  ClipboardCheck,
+  ChevronRight,
+  ChevronDown,
+  FileText,
+  CheckCircle2,
+  Archive,
+  Eye,
+  Edit3,
+  AlertTriangle,
+  BookOpen,
+  Target,
+  LayoutGrid,
+  List as ListIcon,
+  MoreHorizontal,
+  Trash2,
+  FolderTree,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -145,31 +159,12 @@ export default function SopsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="SOPs"
-        showStandardActions={false}
-        Icon={BookCopy}
-        iconGradient={GRAD.tealGreen}
-        description={rows === null ? "Loading…" : `${stats.total} SOP${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · ${stats.totalAssignments} assignment${stats.totalAssignments === 1 ? "" : "s"}`}
-        actions={
-          <div className="flex items-center gap-2">
-            {canManageSOPs && (
-              <Link
-                href="/sops/manage"
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-3 text-base font-medium text-zinc-600 hover:bg-zinc-50"
-              >
-                <FolderTree className="h-3.5 w-3.5" /> Organize
-              </Link>
-            )}
-            <Link
-              href="/sops/new"
-              className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-base font-medium hover:opacity-90"
-              style={{ background: "var(--os-brand)", color: "#fff" }}
-            >
-              <Plus className="h-3.5 w-3.5" /> New SOP
-            </Link>
-          </div>
-        }
+        actions={canManageSOPs ? <Link href="/sops/manage" className="os-head__link"><FolderTree /> Organize</Link> : null}
+        // Only a viewer who may create renders the primary (POST /api/sops
+        // gates on sops.create); a control that cannot succeed is absent.
+        primary={canManageSOPs ? { label: "New SOP", href: "/sops/new" } : undefined}
       />
 
       <div className="px-6 py-5">
@@ -244,15 +239,15 @@ export default function SopsPage() {
                   borderRadius: "9999px",
                   fontSize: "13px",
                   fontWeight: active ? 600 : 400,
-                  border: active ? "1px solid var(--os-brand)" : "1px solid #e4e4e7",
-                  background: active ? "var(--os-brand)" : "#fff",
-                  color: active ? "#fff" : "#52525b",
+                  border: active ? "1px solid var(--os-line-strong)" : "1px solid var(--os-line)",
+                  background: active ? "var(--os-surface-2)" : "var(--os-surface)",
+                  color: active ? "var(--os-ink)" : "var(--os-ink-2)",
                   cursor: "pointer",
                   transition: "all .12s",
                 }}
               >
                 {s === "ALL" ? "All" : STATUS_LABEL[s as SopStatus]}
-                <span style={{ color: active ? "rgba(255,255,255,0.75)" : "#a1a1aa", fontVariantNumeric: "tabular-nums" }}>{count}</span>
+                <span style={{ color: "var(--os-ink-3)", fontVariantNumeric: "tabular-nums" }}>{count}</span>
               </button>
             );
           })}
@@ -261,20 +256,15 @@ export default function SopsPage() {
         {/* Body */}
         <div className="mt-5">
           {loadError ? (
-            <OsEmptyView Icon={BookCopy} iconGradient={GRAD.redPink} title="Couldn't load SOPs" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+            <OsEmptyView variant="error" title="Couldn't load SOPs" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
           ) : rows === null ? (
-            <div className="flex items-center gap-2 py-16 text-xs text-zinc-400">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading SOPs…
-            </div>
+            <SkeletonRows />
           ) : stats.total === 0 ? (
             <OsEmptyView
-              Icon={BookCopy}
-              iconGradient={GRAD.tealGreen}
+              context="docs"
               title="No SOPs yet"
-              subtitle="Document a process once, then assign it to teammates. SOPs version automatically as you edit."
-              chips={["Text", "Checklist", "Video"]}
-              cta="New SOP"
-              onCta={() => router.push("/sops/new")}
+              hint="Document a process once and assign it to teammates."
+              action={{ label: "New SOP", onClick: () => router.push("/sops/new") }}
             />
           ) : grouped.length === 0 ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs text-zinc-400">

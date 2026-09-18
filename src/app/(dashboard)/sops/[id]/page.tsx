@@ -58,7 +58,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/components/ui/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton, SkeletonLines } from "@/components/ui/skeleton";
+import { NotFoundView } from "@/components/access/not-found-view";
 import { ChecklistBuilder, normalizeChecklistSections, ChecklistSection } from "@/components/checklist-builder";
 import { CustomFieldsPanel } from "@/components/custom-fields/custom-fields-panel";
 import { ProcessFlowBuilder, type ProcessFlow } from "@/components/process-flow-builder";
@@ -77,6 +78,7 @@ import { SopTaxonomyPicker } from "@/components/sops/sop-taxonomy-picker";
 import { SopTagInput } from "@/components/sops/sop-tag-input";
 import Link from "next/link";
 import { useRole } from "@/hooks/use-role";
+import { BackButton } from "@/components/ui/back-button";
 import {
   useAutosave,
   readAutosaveBackup,
@@ -454,7 +456,7 @@ function SopKraPicker({
           <MorePortal anchorRef={anchorRef} width={240} open={open} placement="below">
             <MenuList>
               {kras === null ? (
-                <div className="px-3 py-2 text-sm text-zinc-400">Loading…</div>
+                <div className="px-3 py-2"><SkeletonLines lines={3} /></div>
               ) : loadFailed ? (
                 <div className="px-3 py-2 text-sm text-zinc-500">Couldn&rsquo;t load KRAs. Reopen to retry.</div>
               ) : kras.length === 0 ? (
@@ -1289,17 +1291,9 @@ export default function SOPDetailPage() {
     );
   }
 
-  if (!sop) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 space-y-4">
-        <AlertCircle size={48} className="text-zinc-500" />
-        <p className="text-zinc-500">SOP not found</p>
-        <Button variant="outline" onClick={() => router.push("/sops")}>
-          Back to SOPs
-        </Button>
-      </div>
-    );
-  }
+  // The in-shell 404, identical for a deleted SOP and one the viewer may
+  // not know exists (spec-shell 2.4).
+  if (!sop) return <NotFoundView />;
 
   const complianceCompleted = sop.compliance.filter((c) => c.completedAt);
   const compliancePending = sop.compliance.filter((c) => !c.completedAt);
@@ -1352,14 +1346,7 @@ export default function SOPDetailPage() {
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => router.push("/sops")}
-            className="shrink-0"
-          >
-            <ArrowLeft size={18} />
-          </Button>
+          <BackButton fallbackHref="/sops" label="SOPs" />
           <div className="flex items-center gap-3 min-w-0">
             <div className="rounded-lg p-2 shrink-0" style={{ background: "var(--os-brand-soft)" }}>
               <FileText size={20} style={{ color: "var(--os-brand)" }} />

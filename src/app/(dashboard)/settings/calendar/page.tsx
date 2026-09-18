@@ -13,8 +13,9 @@ import Link from "next/link";
 import {
   Calendar as CalendarIcon, Hash, Link2, Globe, Clock, ExternalLink,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { ComingSoonRow, useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 
 type Provider = "google" | "outlook" | "icloud" | "fastmail" | "ics";
 
@@ -28,45 +29,34 @@ const PROVIDER_INFO: Record<Provider, { label: string; hue: string }> = {
 
 export default function CalendarSettingsPage() {
   const providers = Object.keys(PROVIDER_INFO) as Provider[];
+  // The planned providers render only for a viewer who opted into upcoming
+  // features (spec-shell 1.15); otherwise the page says plainly that sync
+  // is not available yet.
+  const showUpcoming = useShowUpcoming();
 
   return (
     <>
-      <OsTitleBar
-        title="Calendar integrations"
-        Icon={CalendarIcon}
-        iconGradient={GRAD.indigoBlue}
-        description="External calendar sync is coming soon — no calendars are connected yet"
+      <OsPageHeader
+        title={SETTINGS_PAGES["account/connections"].label}
         actions={
           <div className="cli__head-actions">
-            <Link href="/settings" className="cli__nav-link"><Hash /> Settings</Link>
-            <Link href="/integrations" className="cli__nav-link"><Globe /> Integrations</Link>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
+            <Link href="/integrations" className="os-head__link"><Globe /> Integrations</Link>
           </div>
         }
       />
 
       <div className="cli">
-        <section className="cli__section">
-          <header><h2><Link2 /> Planned providers</h2></header>
-          <div className="cli__providers">
-            {providers.map((p) => {
-              const info = PROVIDER_INFO[p];
-              return (
-                <article key={p} className="cli__provider" style={{ ["--p-c" as unknown as string]: info.hue }}>
-                  <div className="cli__provider-head">
-                    <span className="cli__provider-icon"><CalendarIcon /></span>
-                    <h3>{info.label}</h3>
-                  </div>
-                  <span
-                    className="cli__provider-status"
-                    style={{ background: "var(--os-surface-2)", color: "var(--os-ink-3)" }}
-                  >
-                    <Clock /> Coming soon
-                  </span>
-                </article>
-              );
-            })}
-          </div>
-        </section>
+        {showUpcoming ? (
+          <section className="cli__section">
+            <header><h2><Link2 /> Planned providers</h2></header>
+            <div>
+              {providers.map((p) => (
+                <ComingSoonRow key={p} label={PROVIDER_INFO[p].label} icon={CalendarIcon} />
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <div className="cli__empty">
           Two-way calendar sync isn&rsquo;t available yet. When it ships, connected

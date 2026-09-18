@@ -11,12 +11,13 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { MoreHorizontal, Edit2, Link2, Trash2, Loader2 } from "lucide-react";
+import { MoreHorizontal, Edit2, Link2, Trash2 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { refreshSidebar } from "./sidebar-refresh";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Dots } from "@/components/ui/dots";
 
 interface CanvasRowLike {
   id: string;
@@ -180,7 +181,7 @@ function CanvasMoreMenu({
             disabled={Boolean(busy) || !draft.trim()}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "rename" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>

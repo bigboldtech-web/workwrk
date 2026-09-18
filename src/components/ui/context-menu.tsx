@@ -69,7 +69,7 @@ const ContextMenuSubTrigger = React.forwardRef<
     {...props}
   >
     {children}
-    <ChevronRight className="ml-auto h-3.5 w-3.5 text-muted-2" />
+    <ChevronRight className="ms-auto h-3.5 w-3.5 text-muted-2 rtl:rotate-180" />
   </ContextMenuPrimitive.SubTrigger>
 ));
 ContextMenuSubTrigger.displayName = ContextMenuPrimitive.SubTrigger.displayName;

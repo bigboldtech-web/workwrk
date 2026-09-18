@@ -30,6 +30,7 @@ import {
   type FieldCatalogEntry,
   type BuiltinColumn,
 } from "@/lib/field-catalog";
+import { ComingSoonRow, UpcomingOnly, useShowUpcoming } from "@/components/ui/coming-soon-row";
 
 const CHOICE_TYPES: ReadonlySet<string> = new Set(["DROPDOWN", "MULTI_SELECT", "LABELS", "TSHIRT_SIZE", "CUSTOM_DROPDOWN"]);
 
@@ -112,6 +113,7 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
+  const showUpcoming = useShowUpcoming();
   const hidden = useMemo(() => new Set(hiddenFields ?? []), [hiddenFields]);
   const extra = useMemo(() => new Set(extraColumns ?? []), [extraColumns]);
   const ordered = useMemo(() => [...fields].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)), [fields]);
@@ -132,7 +134,8 @@ export function FieldShelf({ boardId, open, canEdit, customFieldsEnabled = true,
   const hideSoon = new Set(
     fields.some((f) => f.key === "sprint_points") ? ["__soon_sprint_points", "__soon_sprints"] : [],
   );
-  const soonBuiltins = BUILTIN_COLUMNS.filter((c) => c.soon && !hideSoon.has(c.key) && matchQ(c.label));
+  // Properties with no data yet render only behind Show upcoming features (spec-shell 1.15).
+  const soonBuiltins = showUpcoming ? BUILTIN_COLUMNS.filter((c) => c.soon && !hideSoon.has(c.key) && matchQ(c.label)) : [];
   const properties = [...availableBuiltins, ...soonBuiltins].sort((a, b) => a.label.localeCompare(b.label));
 
   const filtered = useMemo(() => {
@@ -404,16 +407,12 @@ function ShelfSection({ title, count, children }: { title: string; count?: numbe
 // disabled "Soon" when the data isn't wired yet).
 function BuiltinRow({ col, shown, locked, soon, onToggle }: { col: BuiltinColumn; shown: boolean; locked?: boolean; soon?: boolean; onToggle?: () => void }) {
   const I = col.Icon;
+  if (soon) return <li><ComingSoonRow label={col.label} icon={I} className="h-8 px-2" /></li>;
   return (
-    <li className={`group flex items-center gap-2.5 px-2 py-1.5 rounded-md ${soon ? "opacity-60" : "hover:bg-zinc-50"}`}>
+    <li className="group flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50">
       <I className="w-4 h-4 shrink-0" style={{ color: col.color }} />
       <span className="text-xs flex-1 text-zinc-700 truncate">{col.label}</span>
-      {soon ? (
-        <span className="inline-flex items-center gap-1.5" title="Coming soon — no data for this yet">
-          <span className="text-micro uppercase tracking-wide text-zinc-400">Soon</span>
-          <EyeOff className="w-4 h-4 text-zinc-300" aria-hidden />
-        </span>
-      ) : locked ? (
+      {locked ? (
         <Lock className="w-3.5 h-3.5 text-zinc-300" aria-label="Always shown" />
       ) : onToggle ? (
         <button
@@ -460,20 +459,21 @@ function CreateNewTab({
   }, [boardId, canEdit]);
   const showSuggestions = !query.trim() && suggestions.length > 0;
 
-  const Row = (e: FieldCatalogEntry) => (
+  // A type with no renderer yet (tier1:false) is absent, or a ComingSoonRow
+  // behind Show upcoming features; never a disabled tile (spec-shell 1.15).
+  const Row = (e: FieldCatalogEntry) => !e.tier1 ? (
+    <UpcomingOnly key={e.type}><li><ComingSoonRow label={e.label} icon={e.Icon} className="h-8 px-2" /></li></UpcomingOnly>
+  ) : (
     <li key={e.type}>
       <button
         type="button"
-        // "Soon" (tier1:false) types have no renderer yet — creating one made
-        // a permanent dead "—" column, so the tile is disabled until it ships.
-        onClick={() => { if (e.tier1) onPick(e.type, e.label); }}
-        disabled={busy || !canEdit || !e.tier1}
-        title={e.tier1 ? e.description : `${e.description} — coming soon`}
+        onClick={() => onPick(e.type, e.label)}
+        disabled={busy || !canEdit}
+        title={e.description}
         className="group w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left disabled:opacity-50 disabled:hover:bg-transparent disabled:cursor-not-allowed"
       >
         <e.Icon className="w-4 h-4 shrink-0" style={{ color: e.color }} />
         <span className="text-xs flex-1 truncate">{e.label}</span>
-        {!e.tier1 ? <span className="text-micro uppercase tracking-wide text-zinc-400">Soon</span> : null}
         {e.tier1 ? (
           <span className="text-xs text-[var(--os-brand)] opacity-0 group-hover:opacity-100 inline-flex items-center gap-0.5">
             <Plus className="w-3 h-3" /> Create

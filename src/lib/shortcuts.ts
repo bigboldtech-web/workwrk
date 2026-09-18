@@ -319,9 +319,14 @@ export const shortcuts = new ShortcutRegistry();
  */
 export function useShortcut(def: ShortcutDef, enabled: boolean = true): void {
   const runRef = useRef(def.run);
-  runRef.current = def.run;
   const whenRef = useRef(def.when);
-  whenRef.current = def.when;
+  // Written after the commit, never in the render body: a ref mutated during
+  // render is unsafe under concurrent rendering, and it is the same pattern
+  // useLayer already uses for its own close/canClose refs.
+  useEffect(() => {
+    runRef.current = def.run;
+    whenRef.current = def.when;
+  });
   const { id, keys, label, scope, group, inInputs, hidden } = def;
   useEffect(() => {
     if (!enabled) return;

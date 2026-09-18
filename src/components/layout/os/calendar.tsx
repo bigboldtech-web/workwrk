@@ -129,10 +129,10 @@ export function OsCalendar({
       <div className="os-cal__head">
         <div className="os-cal__nav">
           <button type="button" className="os-cal__nav-btn" onClick={goPrev} aria-label="Previous month">
-            <ChevronLeft />
+            <ChevronLeft className="rtl:rotate-180" />
           </button>
           <button type="button" className="os-cal__nav-btn" onClick={goNext} aria-label="Next month">
-            <ChevronRight />
+            <ChevronRight className="rtl:rotate-180" />
           </button>
         </div>
         <button type="button" className="os-cal__today" onClick={goToday}>Today</button>

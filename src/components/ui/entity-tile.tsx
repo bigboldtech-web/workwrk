@@ -95,8 +95,12 @@ export function EntityTile({
   const sz = size ?? "sm";
   const glyph = GLYPH[sz];
   const lucide = resolveLucide(icon);
-  // A string `icon` that isn't a catalog name (e.g. an emoji) renders as text.
-  const emoji = typeof icon === "string" && !lucide && icon.trim() ? icon.trim() : null;
+  // A string `icon` that isn't a catalog name renders as text only when it
+  // looks like an emoji (one or two symbols). A stored icon name the catalog
+  // no longer knows ("palette") used to print as a clipped word on the tile;
+  // it falls through to the neutral initial instead.
+  const raw = typeof icon === "string" && !lucide ? icon.trim() : "";
+  const emoji = raw && [...raw].length <= 2 && !/^[\w\s-]+$/.test(raw) ? raw : null;
   const namedFallback = fallback ? FALLBACK_ICONS[fallback] : null;
   const Glyph = lucide ?? (emoji ? null : (fallbackIcon ?? namedFallback ?? null));
 

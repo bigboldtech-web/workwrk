@@ -1,13 +1,17 @@
 "use client";
 
-// Dashboard error boundary — catches any thrown render/data error inside the
-// app shell so a single broken page (e.g. a Space whose data fails to load)
-// no longer traps the user on an unrecoverable "could not be loaded" screen.
-// Always offers a retry plus guaranteed-good escape routes.
+// In-shell error boundary (spec-shell 2.3): the page you see when a page
+// breaks, with the rail, sidebar and bar intact. The quiet ErrorState: four
+// dots in a row, "This page couldn't load", the text link "Try again"
+// (reset), "Reference {digest}" when there is one, a BackButton to the
+// current hub. The digest also goes to POST /api/client-errors, fire and
+// forget, so shell errors are visible on the server. In development the
+// message renders in a mono block.
 
 import { useEffect } from "react";
-import Link from "next/link";
-import { AlertTriangle, Home, LayoutGrid, RotateCw } from "lucide-react";
+import { ErrorState } from "@/components/ui/error-state";
+import { BackButton } from "@/components/ui/back-button";
+import { useHubBack } from "@/components/layout/os/use-hub-back";
 
 export default function DashboardError({
   error,
@@ -16,57 +20,30 @@ export default function DashboardError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const back = useHubBack();
+
   useEffect(() => {
-    // Surfaces in the server/pm2 logs and the browser console for triage.
     console.error("Dashboard route error:", error);
+    try {
+      void fetch("/api/client-errors", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({ digest: error?.digest ?? null, pathname: window.location.pathname, userAgent: navigator.userAgent, message: error?.message ?? null }),
+      }).catch(() => {});
+    } catch {
+      // Reporting must never re-throw into the boundary.
+    }
   }, [error]);
 
   return (
-    <div className="min-h-full flex items-center justify-center px-6 py-12">
-      <div className="max-w-md w-full text-center">
-        <div className="w-12 h-12 mx-auto rounded-xl bg-red-50 flex items-center justify-center mb-4">
-          <AlertTriangle className="w-6 h-6 text-red-500" />
-        </div>
-        <h1 className="text-lg font-semibold text-zinc-900">
-          This page couldn&apos;t load
-        </h1>
-        <p className="text-base text-zinc-500 mt-2 leading-relaxed">
-          Something went wrong while rendering this page. You can retry, or jump
-          to somewhere that always works.
-        </p>
-        {error?.digest ? (
-          <p className="mt-2 text-xs text-zinc-400">Reference: {error.digest}</p>
-        ) : null}
-        {process.env.NODE_ENV !== "production" && error?.message ? (
-          <pre className="mt-3 text-left text-xs text-red-600 bg-red-50 border border-red-100 rounded-md p-3 overflow-auto max-h-56 whitespace-pre-wrap">
-            {error.message}
-          </pre>
-        ) : null}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => reset()}
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-          >
-            <RotateCw className="w-3.5 h-3.5" />
-            Try again
-          </button>
-          <Link
-            href="/spaces"
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-base hover:bg-zinc-50"
-          >
-            <LayoutGrid className="w-3.5 h-3.5" />
-            All spaces
-          </Link>
-          <Link
-            href="/today"
-            className="inline-flex items-center gap-2 h-8 px-3.5 rounded-full border border-zinc-200 text-zinc-700 text-base hover:bg-zinc-50"
-          >
-            <Home className="w-3.5 h-3.5" />
-            Home
-          </Link>
-        </div>
-      </div>
-    </div>
+    <ErrorState what="this page" title="This page couldn't load" onRetry={() => reset()} reference={error?.digest}>
+      <BackButton fallbackHref={back.fallbackHref} label={back.label} />
+      {process.env.NODE_ENV !== "production" && error?.message ? (
+        <pre className="os-chrome mt-2 max-h-56 max-w-md overflow-auto whitespace-pre-wrap rounded-md border border-line bg-subtle p-3 text-start font-mono text-sm text-danger-text">
+          {error.message}
+        </pre>
+      ) : null}
+    </ErrorState>
   );
 }

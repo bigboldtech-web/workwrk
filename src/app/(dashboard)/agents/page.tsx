@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Bot, Plus, Check, MessageCircle } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { Plus, Check, MessageCircle } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { GRAD } from "@/components/layout/os/catalog";
 
 type Agent = {
   id: string;
@@ -116,14 +116,7 @@ export default function AgentsPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Agents"
-        Icon={Bot}
-        iconGradient={GRAD.bluePurple}
-        description="Hire AI teammates. They show up in Sidekick, your Inbox, and on the boards they own."
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.pr]}
-        morePeople={9}
-      />
+      <OsPageHeader title="Agents" />
 
       <div className="os-mkt">
         <div className="os-mkt__hero">

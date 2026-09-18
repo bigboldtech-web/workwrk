@@ -4,7 +4,7 @@
  * Shareable URL: /tasks/<id>
  *
  * Layout:
- *   - OsTitleBar with back-to-tasks + copy-link in actions slot.
+ *   - OsPageHeader with back-to-tasks + copy-link in actions slot.
  *   - Hero card with status accent strip + inline-editable title + description.
  *   - 2-col body: Updates feed (left, 2/3) + properties sidebar (right, 1/3).
  *   - Sidebar: status / priority pills (open picker), owner, due, labels, key dates.
@@ -13,19 +13,30 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
-  CheckSquare, ArrowLeft, Calendar as CalendarIcon, MessageCircle,
-  Send, Paperclip, Smile, AtSign, Share2, MoreHorizontal,
-  User as UserIcon, Tag, Clock, Flag, Activity as ActivityIcon,
+  CheckSquare,
+  Calendar as CalendarIcon,
+  MessageCircle,
+  Send,
+  Paperclip,
+  Smile,
+  AtSign,
+  Share2,
+  User as UserIcon,
+  Tag,
+  Clock,
+  Flag,
+  Activity as ActivityIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { OsPageHeader, OsPageHeaderSkeleton, HeaderAction } from "@/components/layout/os/page-header";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPickerPopover, type PickerOption } from "@/components/layout/os/picker-popover";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiTask = {
   id: string;
@@ -100,7 +111,6 @@ function avatarFor(seed: string) {
 
 export default function TaskDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const id = params?.id ?? "";
   const { bumpRowVersion } = useOsShell();
   const { toast } = useOsToast();
@@ -221,25 +231,15 @@ export default function TaskDetailPage() {
   if (loading) {
     return (
       <>
-        <OsTitleBar title="Loading task…" Icon={CheckSquare} iconGradient={GRAD.bluePurple} showInvite={false} />
-        <div className="tdt__loading"><ValueLoader size={32} /></div>
+        <Breadcrumb items={[{ label: "My work", href: "/tasks" }]} />
+        <OsPageHeaderSkeleton />
+        <SkeletonRows />
       </>
     );
   }
-  if (notFound || !task) {
-    return (
-      <>
-        <OsTitleBar title="Task not found" Icon={CheckSquare} iconGradient={GRAD.redPink} showInvite={false} />
-        <OsEmptyView
-          Icon={CheckSquare}
-          iconGradient={GRAD.redPink}
-          title="We couldn't find that task"
-          subtitle="It may have been deleted, archived, or you don't have access. Go back to your task board."
-          cta="Back to My tasks"
-        />
-      </>
-    );
-  }
+  // The in-shell 404, identical for a deleted task and one the viewer may
+  // not know exists (spec-shell 2.4, back-map 1): no header, no hint.
+  if (notFound || !task) return <NotFoundView />;
 
   const statusMeta = STATUS_META[task.status];
   const prioMeta = PRIO_META[task.priority];
@@ -247,22 +247,11 @@ export default function TaskDetailPage() {
 
   return (
     <>
-      <OsTitleBar
+      <Breadcrumb items={[{ label: "My work", href: "/tasks" }, { label: title || "(untitled)" }]} />
+      <OsPageHeader
         title={title || "(untitled)"}
-        Icon={CheckSquare}
-        iconGradient={GRAD.bluePurple}
-        description={`Task · ${statusMeta.label}`}
-        actions={
-          <div className="tdt__head-actions">
-            <button type="button" className="tdt__back" onClick={() => router.push("/tasks")}>
-              <ArrowLeft /> My tasks
-            </button>
-            <button type="button" className="tdt__btn tdt__btn--ghost" onClick={copyLink}>
-              <Share2 /> Copy link
-            </button>
-            <button type="button" className="tdt__btn tdt__btn--icon" aria-label="More"><MoreHorizontal /></button>
-          </div>
-        }
+        back={{ fallbackHref: "/tasks", label: "My work" }}
+        actions={<HeaderAction icon={Share2} label="Copy link" onClick={copyLink} />}
       />
 
       <div className="tdt">

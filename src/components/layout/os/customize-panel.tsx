@@ -1,769 +1,219 @@
 "use client";
 
-// CustomizePanel — the ClickUp-style "personalize your interface" modal.
-// Four tabs (Appearance / Home / Sections / Themes) that read and write
-// the user's UserPreference row via /api/preferences. Org-level locked
-// keys (OrgPreference.lockedKeys) disable their controls so the user
-// can't override what admin has frozen.
-//
-// 2026-08-22: the app-pinning section is GONE — rail membership/order is
-// now the org ACCESS system (OrgPreference.sidebarDefault.apps, edited in
-// the Settings admin door), not a personal choice. This panel keeps its
-// personal-appearance jobs (rail labels, Home cards, sections, themes),
-// and the sidebar's "Customize Sidebar" footer button stays as the
-// discoverable entry point to it.
-//
-// Design rules from the 2026-06-02 screenshots:
-//   - Whitespace > color. One accent (mint). No hue-keyed chrome.
-//   - Items: icon + label, flat hover background, no badges/dots.
-//   - Modal layout: header → tabs row → content block. Save is silent.
+// CustomizePanel (spec-shell 2.16): make the sidebar and the look yours. A
+// 560 Radix dialog, header 56 with a title, a one-line description and a
+// close; no footer, because every control writes immediately through
+// PATCH /api/preferences and shows an inline "Saved" tick that fades. Body:
+// three settings rows (Theme, Chrome, Density as segmented controls, each
+// greyed with a lock when the workspace locked the key) and a SIDEBAR
+// SECTIONS card listing the Work hub's sections with a switch and Move up /
+// Move down. No accents, no icons-only, no Home cards tab, no coming-soon
+// "Create section" row. The founder's "Customize Sidebar" footer button is
+// the door.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Check, X, GripVertical, Plus, EyeOff, Eye,
-  Inbox, MessageSquare, CheckSquare, Send, Globe, ListTodo,
-  Layers, Star,
-} from "lucide-react";
-import { useOsShell } from "./shell-context";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import type {
-  EffectivePreferences,
-  SidebarPref,
-  HomePref,
-  ThemePref,
-  DensityPref,
-} from "@/lib/preferences";
+import { useEffect, useRef, useState } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { ArrowDown, ArrowUp, Check, X } from "lucide-react";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { Switch } from "@/components/ui/switch";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { SETTINGS_PAGES, settingsHrefToday } from "@/lib/settings-registry";
+import { CHROME_CONTROL_EXPOSED } from "@/lib/nav/labels";
+import type { DensityPref } from "@/lib/preferences";
+import { useLayer, useOsShell } from "./shell-context";
+import { useOsToast } from "./toast";
 
-/* ─────────────── Catalog: home + section keys ─────────────── */
+type Appearance = "LIGHT" | "DARK" | "AUTO";
+type Chrome = "navy" | "light";
 
-// The Navigation tab pulls its app list from CATALOG_APPS in
-// apps-catalog.tsx — same source of truth the rail uses for pinning.
-
-const HOME_CARDS: Array<{ key: string; label: string; Icon: React.ComponentType<{ className?: string }>; alwaysOn?: boolean }> = [
-  { key: "inbox",             label: "Inbox",             Icon: Inbox, alwaysOn: true },
-  { key: "assigned-comments", label: "Assigned Comments", Icon: MessageSquare },
-  { key: "my-tasks",          label: "My Wrk",          Icon: CheckSquare },
-  { key: "drafts-sent",       label: "Drafts & Sent",     Icon: Send },
-  { key: "all-spaces",        label: "All Spaces",        Icon: Globe },
-  { key: "all-tasks",         label: "All Tasks",         Icon: ListTodo },
+/** The Work hub's optional sections (the personal block is required and never listed). */
+const SECTIONS: Array<{ key: string; label: string }> = [
+  { key: "favorites", label: "Favorites" },
+  { key: "spaces", label: "Spaces" },
 ];
 
-const SECTION_OPTIONS: Array<{ key: string; label: string; Icon: React.ComponentType<{ className?: string }> }> = [
-  { key: "favorites", label: "Favorites", Icon: Star },
-  { key: "spaces",    label: "Spaces",    Icon: Layers },
-];
-
-const ACCENT_OPTIONS: Array<{ key: string; label: string; swatch: string }> = [
-  // First = the brand default. "workwrk" has NO data-accent CSS override,
-  // so the base --os-brand tokens (#0073EA) apply untouched.
-  { key: "workwrk", label: "WorkwrK", swatch: "#0073EA" },
-  { key: "black",  label: "Black",  swatch: "#1f2024" },
-  { key: "grape",  label: "Purple", swatch: "#7c3aed" },
-  { key: "blue",   label: "Blue",   swatch: "#3b82f6" },
-  { key: "pink",   label: "Pink",   swatch: "#ec4899" },
-  { key: "violet", label: "Violet", swatch: "#a855f7" },
-  { key: "indigo", label: "Indigo", swatch: "#6366f1" },
-  { key: "orange", label: "Orange", swatch: "#f59e0b" },
-  { key: "teal",   label: "Teal",   swatch: "#14b8a6" },
-  { key: "bronze", label: "Bronze", swatch: "#a78b6c" },
-  { key: "mint",   label: "Mint",   swatch: "#3ab39e" },
-];
-
-/* ─────────────── Hook: read + patch /api/preferences ─────────────── */
-
-function useCustomizePrefs() {
-  const [effective, setEffective] = useState<EffectivePreferences | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const reload = useCallback(async () => {
-    try {
-      const res = await fetch("/api/preferences", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = (await res.json()) as { effective: EffectivePreferences };
-      setEffective(data.effective);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+function SavedTick({ at }: { at: number }) {
+  // Shown from the moment of the save until 2s later.
+  const [hiddenAt, setHiddenAt] = useState(0);
   useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  const patch = useCallback(
-    async (body: {
-      sidebar?: Partial<SidebarPref>;
-      home?: Partial<HomePref>;
-      theme?: Partial<ThemePref>;
-      density?: DensityPref;
-    }) => {
-      // Optimistic update so the UI snaps; reconcile on response.
-      setEffective((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          sidebar: { ...prev.sidebar, ...(body.sidebar ?? {}) },
-          home: { ...prev.home, ...(body.home ?? {}) },
-          theme: { ...prev.theme, ...(body.theme ?? {}) },
-          density: body.density ?? prev.density,
-        };
-      });
-      const res = await fetch("/api/preferences", {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        // On failure, reload truth from server.
-        void reload();
-        return;
-      }
-      const data = (await res.json()) as { effective: EffectivePreferences };
-      setEffective(data.effective);
-      // Notify ThemeApplier (and any other listeners) so they re-fetch
-      // their copy of effective preferences and re-apply.
-      window.dispatchEvent(new CustomEvent("workwrk:prefs-changed"));
-    },
-    [reload],
-  );
-
-  return { effective, loading, patch };
-}
-
-/* ─────────────── Subcomponents ─────────────── */
-
-function CheckRow({
-  Icon,
-  label,
-  checked,
-  disabled,
-  locked,
-  onChange,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  checked: boolean;
-  disabled?: boolean;
-  locked?: boolean;
-  onChange: (next: boolean) => void;
-}) {
+    if (!at) return;
+    const t = window.setTimeout(() => setHiddenAt(at), 2000);
+    return () => window.clearTimeout(t);
+  }, [at]);
+  const show = at > 0 && hiddenAt < at;
+  if (!show) return null;
   return (
-    <label
-      className={`group flex items-center gap-2 px-2 py-0.5 rounded-md transition-colors ${
-        disabled || locked ? "opacity-60 cursor-not-allowed" : "hover:bg-zinc-50 dark:hover:bg-white/10 cursor-pointer"
-      }`}
-    >
-      <span
-        className={`inline-flex items-center justify-center w-[16px] h-[16px] rounded border-[1.5px] transition-colors ${
-          checked
-            ? "bg-zinc-900 border-zinc-900 text-white"
-            : "bg-white border-zinc-400 text-transparent"
-        }`}
-        aria-hidden
-      >
-        <Check className="w-2.5 h-2.5" strokeWidth={3.5} />
-      </span>
-      <Icon className="w-[14px] h-[14px] text-zinc-500 dark:text-zinc-400" />
-      <span className="text-sm text-zinc-800 dark:text-zinc-200 flex-1">{label}</span>
-      {locked ? (
-        <span className="text-micro uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Locked</span>
-      ) : null}
-      <input
-        type="checkbox"
-        className="sr-only"
-        checked={checked}
-        disabled={disabled || locked}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-    </label>
+    <span className="inline-flex items-center gap-1 text-xs font-medium text-success-text" role="status">
+      <Check className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden /> Saved
+    </span>
   );
 }
 
-/** Mini rail illustration: a column of icon-sized rectangles. Drives the
- *  appearance cards in the Navigation tab so the user can see what the
- *  rail will look like before committing. */
-function AppearancePreview({ iconsOnly }: { iconsOnly: boolean }) {
-  // Match the ShellPreview proportions so the two appearance pickers
-  // (Nav-tab "Icons only / Icons & Labels" and Themes-tab "Light/Dark/Auto")
-  // read as the same shell from a distance — same rail, sidebar, canvas.
-  const railW = iconsOnly ? 10 : 18;
-  const sbX = 2 + railW + 2;
-  const sbW = 24;
-  const cvX = sbX + sbW + 2;
+function Row({ label, hint, children, savedAt }: { label: string; hint?: string; children: React.ReactNode; savedAt: number }) {
   return (
-    <svg viewBox="0 0 120 68" className="w-full h-[48px]" aria-hidden role="img">
-      <rect x="0" y="0" width="120" height="68" rx="6" fill="#F4F4F5" />
-      {/* Rail */}
-      <rect
-        x="2"
-        y="2"
-        width={railW}
-        height="64"
-        rx="3"
-        fill="var(--os-brand-rail)"
-      />
-      {/* Rail icons (5 dots, evenly spaced) */}
-      {[8, 19, 30, 41, 52].map((y) => (
-        <g key={y}>
-          <rect
-            x={2 + (railW - 5) / 2}
-            y={y}
-            width="5"
-            height="5"
-            rx="1"
-            fill="rgba(255,255,255,0.92)"
-          />
-          {!iconsOnly ? (
-            <rect
-              x={2 + (railW - 7) / 2}
-              y={y + 6}
-              width="7"
-              height="0.8"
-              rx="0.3"
-              fill="rgba(255,255,255,0.6)"
-            />
-          ) : null}
-        </g>
-      ))}
-      {/* Secondary sidebar */}
-      <rect x={sbX} y="2" width={sbW} height="64" rx="2" fill="#FFFFFF" stroke="#E4E4E7" strokeWidth="0.5" />
-      <rect x={sbX + 3} y="6" width="13" height="1.6" rx="0.4" fill="#3F3F46" />
-      {[12, 19, 26, 33, 40, 47, 54, 61].map((y) => (
-        <rect key={`s-${y}`} x={sbX + 3} y={y} width={y % 14 === 0 ? 16 : 13} height="1.4" rx="0.3" fill="#D4D4D8" />
-      ))}
-      {/* Canvas — with two fake task tiles so the card reads as "an app"
-          and not just empty space. */}
-      <rect x={cvX} y="2" width={120 - cvX - 2} height="64" rx="2" fill="#FFFFFF" stroke="#E4E4E7" strokeWidth="0.5" />
-      <rect x={cvX + 3} y="6" width="40" height="2" rx="0.5" fill="#27272A" />
-      <rect x={cvX + 3} y="13" width={120 - cvX - 8} height="14" rx="2" fill="#FAFAFA" stroke="#E4E4E7" strokeWidth="0.4" />
-      <rect x={cvX + 6} y="17" width="20" height="1.6" rx="0.4" fill="#52525B" />
-      <rect x={cvX + 6} y="21" width="32" height="1.2" rx="0.3" fill="#D4D4D8" />
-      <rect x={cvX + 3} y="30" width={120 - cvX - 8} height="14" rx="2" fill="#FAFAFA" stroke="#E4E4E7" strokeWidth="0.4" />
-      <rect x={cvX + 6} y="34" width="24" height="1.6" rx="0.4" fill="#52525B" />
-      <rect x={cvX + 6} y="38" width="28" height="1.2" rx="0.3" fill="#D4D4D8" />
-      <circle cx={cvX + (120 - cvX - 8) - 4} cy="20" r="1.8" fill="var(--os-brand)" />
-      <circle cx={cvX + (120 - cvX - 8) - 4} cy="37" r="1.8" fill="#A1A1AA" />
-    </svg>
-  );
-}
-
-function AppearanceToggle({
-  iconsOnly,
-  onChange,
-  locked,
-}: {
-  iconsOnly: boolean;
-  onChange: (v: boolean) => void;
-  locked?: boolean;
-}) {
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      {[
-        { value: true,  label: "Icons only" },
-        { value: false, label: "Icons & Labels" },
-      ].map((opt) => {
-        const active = iconsOnly === opt.value;
-        return (
-          <button
-            key={String(opt.value)}
-            type="button"
-            disabled={locked}
-            onClick={() => onChange(opt.value)}
-            className={`p-2 rounded-lg border-[1.5px] text-left transition-all ${
-              active
-                ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]"
-                : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
-            } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            <AppearancePreview iconsOnly={opt.value} />
-            <div className="text-sm mt-1.5 font-medium text-zinc-800 dark:text-zinc-200">{opt.label}</div>
-          </button>
-        );
-      })}
+    <div className="flex min-h-12 items-center justify-between gap-4 border-b border-line-soft py-2 last:border-b-0">
+      <div className="min-w-0">
+        <div className="text-base font-medium text-ink">{label}</div>
+        {hint ? <div className="text-sm text-ink-2">{hint}</div> : null}
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <SavedTick at={savedAt} />
+        {children}
+      </div>
     </div>
   );
 }
 
-/** Mini OS-shell illustration used inside the Light/Dark/Auto cards.
- *  Shows a rail (brand-rail color), a secondary sidebar, and a canvas
- *  panel populated with fake task tiles — so the user sees the actual
- *  theme applied to a tiny replica of their app, not just empty bands. */
-function ShellPreview({ mode }: { mode: "LIGHT" | "DARK" | "AUTO" }) {
-  const isDark = mode === "DARK";
-  const split = mode === "AUTO";
-  // Token set per mode. AUTO uses a vertical gradient so both halves
-  // render their respective surfaces — the rail stays brand on both.
-  const tokens = isDark
-    ? { bg: "#0F1115", sb: "#181B22", card: "#1E222B", border: "#2A2F38", primary: "#E5E7EB", muted: "#6B7280" }
-    : { bg: "#FFFFFF", sb: "#FAFAFA", card: "#FFFFFF", border: "#E4E4E7", primary: "#27272A", muted: "#D4D4D8" };
-  return (
-    <svg viewBox="0 0 120 68" className="w-full h-[48px]" aria-hidden role="img">
-      <defs>
-        {split ? (
-          <linearGradient id="autoGrad" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="50%" stopColor="#FFFFFF" />
-            <stop offset="50%" stopColor="#0F1115" />
-          </linearGradient>
-        ) : null}
-      </defs>
-      <rect x="0" y="0" width="120" height="68" rx="6" fill={split ? "url(#autoGrad)" : tokens.bg} />
-      {/* Rail — always brand-rail */}
-      <rect x="2" y="2" width="10" height="64" rx="3" fill="var(--os-brand-rail)" />
-      {[8, 19, 30, 41, 52].map((y) => (
-        <rect key={y} x="4.5" y={y} width="5" height="5" rx="1" fill="rgba(255,255,255,0.92)" />
-      ))}
-      {/* Secondary sidebar */}
-      <rect
-        x="14"
-        y="2"
-        width="24"
-        height="64"
-        rx="2"
-        fill={split ? "rgba(0,0,0,0)" : tokens.sb}
-        stroke={tokens.border}
-        strokeWidth="0.4"
-      />
-      <rect x="17" y="6" width="13" height="1.6" rx="0.4" fill={tokens.primary} />
-      {[12, 19, 26, 33, 40, 47, 54, 61].map((y) => (
-        <rect key={`s-${y}`} x="17" y={y} width="14" height="1.4" rx="0.3" fill={tokens.muted} />
-      ))}
-      {/* Canvas with two fake task tiles */}
-      <rect
-        x="40"
-        y="2"
-        width="78"
-        height="64"
-        rx="2"
-        fill={split ? "rgba(0,0,0,0)" : tokens.bg}
-        stroke={tokens.border}
-        strokeWidth="0.4"
-      />
-      <rect x="43" y="6" width="40" height="2" rx="0.5" fill={tokens.primary} />
-      <rect x="43" y="13" width="72" height="14" rx="2" fill={tokens.card} stroke={tokens.border} strokeWidth="0.4" />
-      <rect x="46" y="17" width="20" height="1.6" rx="0.4" fill={tokens.primary} />
-      <rect x="46" y="21" width="32" height="1.2" rx="0.3" fill={tokens.muted} />
-      <circle cx="111" cy="20" r="1.8" fill="var(--os-brand)" />
-      <rect x="43" y="30" width="72" height="14" rx="2" fill={tokens.card} stroke={tokens.border} strokeWidth="0.4" />
-      <rect x="46" y="34" width="24" height="1.6" rx="0.4" fill={tokens.primary} />
-      <rect x="46" y="38" width="28" height="1.2" rx="0.3" fill={tokens.muted} />
-      <circle cx="111" cy="37" r="1.8" fill={tokens.muted} />
-    </svg>
-  );
-}
+export function CustomizePanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const { prefs, patchPrefs, closeTopLayer } = useOsShell();
+  const { toast } = useOsToast();
+  const { openSettings } = useSettingsNav();
+  const [saved, setSaved] = useState<Record<string, number>>({});
+  const closeRef = useRef(onOpenChange);
+  useEffect(() => { closeRef.current = onOpenChange; }, [onOpenChange]);
+  useLayer(open, { id: "customize-panel", kind: "dialog", close: () => closeRef.current(false) });
 
-function ThemeAppearancePicker({
-  value,
-  onChange,
-  locked,
-}: {
-  value: "LIGHT" | "DARK" | "AUTO";
-  onChange: (v: "LIGHT" | "DARK" | "AUTO") => void;
-  locked?: boolean;
-}) {
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      {[
-        { value: "LIGHT", label: "Light" },
-        { value: "DARK",  label: "Dark"  },
-        { value: "AUTO",  label: "Auto"  },
-      ].map((opt) => {
-        const active = value === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            disabled={locked}
-            onClick={() => onChange(opt.value as "LIGHT" | "DARK" | "AUTO")}
-            className={`p-1.5 rounded-lg border text-left transition-all ${
-              active
-                ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]"
-                : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
-            } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            <ShellPreview mode={opt.value as "LIGHT" | "DARK" | "AUTO"} />
-            <div className="text-sm mt-1.5 font-medium text-zinc-800 dark:text-zinc-200">{opt.label}</div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+  const locked = new Set(prefs.lockedKeys ?? []);
+  const appearance: Appearance = prefs.theme.appearance ?? "LIGHT";
+  const chrome: Chrome = prefs.theme.chrome ?? "navy";
+  const density: DensityPref = prefs.density ?? "comfortable";
+  const order = prefs.sidebar.sectionsOrder?.length ? prefs.sidebar.sectionsOrder : SECTIONS.map((s) => s.key);
+  const hidden = new Set(prefs.sidebar.hiddenSections ?? []);
+  const visibleOrder = [...order.filter((k) => SECTIONS.some((s) => s.key === k)), ...SECTIONS.map((s) => s.key).filter((k) => !order.includes(k))];
 
-function AccentPicker({
-  value,
-  onChange,
-  locked,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  locked?: boolean;
-}) {
-  return (
-    <div className="grid grid-cols-3 gap-2">
-      {ACCENT_OPTIONS.map((a) => {
-        const active = value === a.key;
-        return (
-          <button
-            key={a.key}
-            type="button"
-            disabled={locked}
-            onClick={() => onChange(a.key)}
-            className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border text-left transition-colors ${
-              active
-                ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                : "border-zinc-200 dark:border-[#2A2F38] hover:bg-zinc-50 dark:hover:bg-white/10 hover:border-zinc-300"
-            } ${locked ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            {/* Active: small accent chip with the check inside (ClickUp
-                pattern). Inactive: just the swatch dot. */}
-            {active ? (
-              <span
-                className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
-                style={{ background: a.swatch, color: "#fff" }}
-              >
-                <Check className="w-3 h-3" strokeWidth={3.5} />
-              </span>
-            ) : (
-              <span
-                className="w-4 h-4 rounded-full flex-shrink-0"
-                style={{ background: a.swatch }}
-              />
-            )}
-            <span className="text-base text-zinc-800 dark:text-zinc-200 font-medium truncate">{a.label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+  const write = async (key: string, patch: Parameters<typeof patchPrefs>[0]) => {
+    const ok = await patchPrefs(patch);
+    if (ok) setSaved((s) => ({ ...s, [key]: Date.now() }));
+    else toast("Couldn't save. Try again", { action: { label: "Try again", onClick: () => { void write(key, patch); } } });
+  };
 
-function SectionRow({
-  Icon,
-  label,
-  onHide,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  dragging,
-  dropIndicator,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  onHide: () => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
-  onDragEnd: () => void;
-  dragging: boolean;
-  dropIndicator: boolean;
-}) {
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={(e) => { e.preventDefault(); onDragOver(e); }}
-      onDrop={(e) => { e.preventDefault(); onDrop(); }}
-      onDragEnd={onDragEnd}
-      className={`relative flex items-center gap-2.5 px-2.5 py-1.5 rounded-md border bg-white dark:bg-[#1B1F26] mb-1.5 transition ${
-        dragging ? "opacity-40" : "border-zinc-200 dark:border-[#2A2F38] hover:border-zinc-300"
-      } cursor-grab active:cursor-grabbing`}
-    >
-      {dropIndicator ? (
-        <div aria-hidden className="absolute -top-1 left-2 right-2 h-0.5 rounded bg-[var(--os-brand)]" />
-      ) : null}
-      <GripVertical className="w-3.5 h-3.5 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
-      <Icon className="w-4 h-4 text-zinc-500 dark:text-zinc-400 flex-shrink-0" />
-      <span className="text-base flex-1 text-zinc-800 dark:text-zinc-200">{label}</span>
-      <button
-        type="button"
-        onClick={onHide}
-        className="p-1 rounded text-zinc-400 dark:text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-white/10"
-        aria-label={`Hide ${label}`}
-        title={`Hide ${label}`}
-      >
-        <EyeOff className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
-}
+  const move = (key: string, dir: -1 | 1) => {
+    const idx = visibleOrder.indexOf(key);
+    const next = idx + dir;
+    if (idx < 0 || next < 0 || next >= visibleOrder.length) return;
+    const arr = [...visibleOrder];
+    [arr[idx], arr[next]] = [arr[next], arr[idx]];
+    void write("sections", { sidebar: { sectionsOrder: arr } });
+  };
+  const toggle = (key: string, on: boolean) => {
+    const nextHidden = on ? [...hidden].filter((k) => k !== key) : [...new Set([...hidden, key])];
+    void write("sections", { sidebar: { hiddenSections: nextHidden } });
+  };
 
-function HiddenSectionRow({
-  Icon,
-  label,
-  onShow,
-}: {
-  Icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  onShow: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-md bg-zinc-50 dark:bg-white/5 mb-1.5">
-      <Icon className="w-4 h-4 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
-      <span className="text-sm flex-1 text-zinc-500 dark:text-zinc-400">{label}</span>
-      <button
-        type="button"
-        onClick={onShow}
-        className="text-xs font-medium px-2 py-0.5 rounded text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-white/10"
-      >
-        <span className="flex items-center gap-1">
-          <Eye className="w-3 h-3" />
-          Show
-        </span>
-      </button>
-    </div>
-  );
-}
-
-/* ─────────────── Main component ─────────────── */
-
-export function CustomizePanel({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
-  const { effective, loading, patch } = useCustomizePrefs();
-  const { iconsOnly: railIconsOnly, setIconsOnly } = useOsShell();
-
-  // ── Sections drag state ──────────────────────────────────────
-  const [sectionDragKey, setSectionDragKey] = useState<string | null>(null);
-  const [sectionDropKey, setSectionDropKey] = useState<string | null>(null);
-
-  const lockedSet = useMemo(
-    () => new Set(effective?.lockedKeys ?? []),
-    [effective?.lockedKeys],
-  );
-
-  if (!open) return null;
+  const preferencesHref = settingsHrefToday(SETTINGS_PAGES["account/preferences"]) ?? "/account/appearance";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="max-w-[440px] p-0 gap-0 overflow-hidden rounded-xl shadow-xl dark:bg-[#181C22] dark:border-[#2A2F38] [&>button:has(>span.sr-only)]:hidden"
-        style={{ ["--os-brand" as string]: "#0073EA", ["--os-brand-rail" as string]: "#2B2233" }}
-      >
-        {/* Header with X close button. The default DialogContent ships
-            its own Close button — ours sits in the same spot but uses the
-            larger ClickUp-style chip, so we hide the built-in one via the
-            wrapper's CSS (Radix's Close still works through Escape). */}
-        <div className="px-4 pt-3 pb-2 relative">
-          <DialogTitle className="text-base font-semibold text-zinc-900 dark:text-zinc-100 leading-tight">Customize</DialogTitle>
-          <DialogDescription className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Personalize and organize your WorkwrK interface
-          </DialogDescription>
-          <button
-            type="button"
-            onClick={() => onOpenChange(false)}
-            className="absolute top-2.5 right-3 w-5 h-5 rounded-full bg-zinc-100 dark:bg-white/10 hover:bg-zinc-200 dark:hover:bg-white/10 flex items-center justify-center text-zinc-600 dark:text-zinc-300 transition-colors"
-            aria-label="Close"
-          >
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-
-        <Tabs defaultValue="appearance" className="w-full">
-          {/* Pill-style segmented tabs (matches ClickUp ref) */}
-          <div className="px-4 pb-2">
-            <TabsList className="w-full bg-zinc-100 dark:bg-white/5 p-0.5 rounded-lg h-7">
-              <TabsTrigger value="appearance" className="flex-1 rounded-md text-xs font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Appearance</TabsTrigger>
-              <TabsTrigger value="home" className="flex-1 rounded-md text-xs font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Home</TabsTrigger>
-              <TabsTrigger value="sections" className="flex-1 rounded-md text-xs font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Sections</TabsTrigger>
-              <TabsTrigger value="themes" className="flex-1 rounded-md text-xs font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-[#262B33] data-[state=active]:shadow-sm data-[state=active]:text-zinc-900 dark:data-[state=active]:text-zinc-100 text-zinc-600 dark:text-zinc-300">Themes</TabsTrigger>
-            </TabsList>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-[var(--os-scrim)]" />
+        <DialogPrimitive.Content
+          className="workwrk-os os-chrome fixed inset-x-0 mx-auto top-1/2 z-[61] flex max-h-[85vh] w-[560px] max-w-[calc(100vw-24px)] -translate-y-1/2 flex-col rounded-xl border border-line bg-raised text-ink shadow-[var(--os-shadow-modal)] outline-none"
+          // Radix sees Esc first (a document capture listener) and would close
+          // this dialog even when another layer sits on top of it. Hand the
+          // key to the LayerStack instead: it closes the top layer only, which
+          // is this panel when nothing else is open (spec-shell 1.5).
+          onEscapeKeyDown={(e) => { e.preventDefault(); closeTopLayer(); }}
+        >
+          <div className="flex h-14 shrink-0 items-center gap-3 px-6">
+            <div className="min-w-0 flex-1">
+              <DialogPrimitive.Title className="text-lg font-semibold text-ink">Customize</DialogPrimitive.Title>
+              <DialogPrimitive.Description className="truncate text-sm text-ink-2">Changes save as you make them</DialogPrimitive.Description>
+            </div>
+            <DialogPrimitive.Close
+              aria-label="Close"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <X className="h-4 w-4" strokeWidth={1.5} />
+            </DialogPrimitive.Close>
           </div>
 
-          {/* Appearance tab — rail label density only. The app pin list
-              that used to live here is gone: which apps show in the rail
-              (and their order) is the org ACCESS config now, managed by
-              admins in Settings, so there is nothing app-related for an
-              individual to toggle. */}
-          <TabsContent value="appearance" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
-            <div className="px-2 pt-1">
-              <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-300 mb-2">Appearance</h3>
-              <AppearanceToggle
-                iconsOnly={railIconsOnly}
-                onChange={(v) => {
-                  // Update local state immediately, persist to the server
-                  // in the background so the choice syncs across devices.
-                  setIconsOnly(v);
-                  void patch({ sidebar: { iconsOnly: v } });
-                }}
-              />
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+            <div className="rounded-lg border border-line px-4">
+              <Row label="Theme" savedAt={saved.theme ?? 0}>
+                <SegmentedControl<Appearance>
+                  label="Theme"
+                  value={appearance}
+                  locked={locked.has("theme.appearance")}
+                  options={[{ value: "LIGHT", label: "Light" }, { value: "DARK", label: "Dark" }, { value: "AUTO", label: "System" }]}
+                  onChange={(v) => { void write("theme", { theme: { appearance: v } }); }}
+                />
+              </Row>
+              {CHROME_CONTROL_EXPOSED ? (
+                <Row label="Chrome" hint="The rail and the bar" savedAt={saved.chrome ?? 0}>
+                  <SegmentedControl<Chrome>
+                    label="Chrome"
+                    value={chrome}
+                    locked={locked.has("theme.chrome")}
+                    options={[{ value: "navy", label: "Navy" }, { value: "light", label: "Light" }]}
+                    onChange={(v) => { void write("chrome", { theme: { chrome: v } }); }}
+                  />
+                </Row>
+              ) : null}
+              <Row label="Density" hint="Tables use Compact" savedAt={saved.density ?? 0}>
+                <SegmentedControl<DensityPref>
+                  label="Density"
+                  value={density}
+                  locked={locked.has("density")}
+                  options={[{ value: "comfortable", label: "Comfortable" }, { value: "cozy", label: "Cozy" }, { value: "compact", label: "Compact" }]}
+                  onChange={(v) => { void write("density", { density: v }); }}
+                />
+              </Row>
             </div>
-          </TabsContent>
 
-          {/* Home / Sections / Themes need /api/preferences. Show a small
-              inline notice if the fetch is still pending or failed. */}
-          <TabsContent value="home" className="px-3 pb-3 max-h-[66vh] overflow-y-auto">
-            {loading ? (
-              <div className="px-2 py-4 text-xs text-zinc-500 dark:text-zinc-400">Loading…</div>
-            ) : !effective ? (
-              <PrefsUnavailable />
-            ) : (
-              <div className="flex flex-col">
-                {HOME_CARDS.map((c) => {
-                  const checked = effective.home.cards.includes(c.key);
+            <div className="mt-6">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-micro uppercase tracking-[0.06em] text-ink-2">Sidebar sections</span>
+                <span className="h-px flex-1 bg-line" aria-hidden />
+                <SavedTick at={saved.sections ?? 0} />
+              </div>
+              <ul className="rounded-lg border border-line">
+                {visibleOrder.map((key, i) => {
+                  const section = SECTIONS.find((s) => s.key === key);
+                  if (!section) return null;
+                  const on = !hidden.has(key);
                   return (
-                    <CheckRow
-                      key={c.key}
-                      Icon={c.Icon}
-                      label={c.label}
-                      checked={checked}
-                      disabled={c.alwaysOn}
-                      locked={lockedSet.has(`home.cards.${c.key}`)}
-                      onChange={(next) => {
-                        const set = new Set(effective.home.cards);
-                        if (next) set.add(c.key);
-                        else set.delete(c.key);
-                        void patch({ home: { cards: Array.from(set) } });
-                      }}
-                    />
+                    <li key={key} className="flex h-12 items-center gap-3 border-b border-line-soft px-4 last:border-b-0">
+                      <span className="flex-1 text-base text-ink">{section.label}</span>
+                      <button
+                        type="button"
+                        onClick={() => move(key, -1)}
+                        disabled={i === 0}
+                        aria-label={`Move ${section.label} up`}
+                        title="Move up"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        <ArrowUp className="h-4 w-4" strokeWidth={1.5} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => move(key, 1)}
+                        disabled={i === visibleOrder.length - 1}
+                        aria-label={`Move ${section.label} down`}
+                        title="Move down"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+                      >
+                        <ArrowDown className="h-4 w-4" strokeWidth={1.5} />
+                      </button>
+                      <Switch checked={on} onChange={(v) => toggle(key, v)} aria-label={`Show ${section.label}`} />
+                    </li>
                   );
                 })}
-              </div>
-            )}
-          </TabsContent>
+              </ul>
+              <p className="mt-2 text-sm text-ink-2">The personal rows at the top are always on.</p>
+            </div>
 
-          <TabsContent value="sections" className="px-4 pb-3 max-h-[66vh] overflow-y-auto">
-            {loading ? (
-              <div className="px-2 py-4 text-xs text-zinc-500 dark:text-zinc-400">Loading…</div>
-            ) : !effective ? (
-              <PrefsUnavailable />
-            ) : (
-              <>
-                <div className="flex flex-col">
-                  {effective.sidebar.sectionsOrder.map((key) => {
-                    const opt = SECTION_OPTIONS.find((s) => s.key === key);
-                    if (!opt) return null;
-                    const order = effective.sidebar.sectionsOrder;
-                    return (
-                      <SectionRow
-                        key={key}
-                        Icon={opt.Icon}
-                        label={opt.label}
-                        dragging={sectionDragKey === key}
-                        dropIndicator={sectionDropKey === key && sectionDragKey !== null && sectionDragKey !== key}
-                        onDragStart={() => setSectionDragKey(key)}
-                        onDragOver={() => { if (sectionDragKey && sectionDragKey !== key) setSectionDropKey(key); }}
-                        onDrop={() => {
-                          if (!sectionDragKey || sectionDragKey === key) {
-                            setSectionDragKey(null);
-                            setSectionDropKey(null);
-                            return;
-                          }
-                          const next = [...order];
-                          const fromIdx = next.indexOf(sectionDragKey);
-                          const toIdx = next.indexOf(key);
-                          if (fromIdx === -1 || toIdx === -1) {
-                            setSectionDragKey(null);
-                            setSectionDropKey(null);
-                            return;
-                          }
-                          next.splice(fromIdx, 1);
-                          next.splice(toIdx, 0, sectionDragKey);
-                          void patch({ sidebar: { sectionsOrder: next } });
-                          setSectionDragKey(null);
-                          setSectionDropKey(null);
-                        }}
-                        onDragEnd={() => {
-                          setSectionDragKey(null);
-                          setSectionDropKey(null);
-                        }}
-                        onHide={() => {
-                          const next = order.filter((k) => k !== key);
-                          void patch({ sidebar: { sectionsOrder: next } });
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-
-                {/* Add (placeholder) — custom sections is a larger feature.
-                    For now the button is here for visual parity with the ref. */}
-                <button
-                  type="button"
-                  disabled
-                  title="Custom sections coming soon"
-                  className="w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-md border border-dashed border-zinc-300 dark:border-[#2A2F38] text-sm text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Create section
-                </button>
-
-                {(() => {
-                  const hidden = SECTION_OPTIONS.filter(
-                    (s) => !effective.sidebar.sectionsOrder.includes(s.key),
-                  );
-                  return (
-                    <>
-                      <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mt-5 mb-2">
-                        Hidden sections
-                      </div>
-                      {hidden.length === 0 ? (
-                        <div className="text-sm text-zinc-400 dark:text-zinc-400 px-2">All sections shown</div>
-                      ) : (
-                        hidden.map((s) => (
-                          <HiddenSectionRow
-                            key={s.key}
-                            Icon={s.Icon}
-                            label={s.label}
-                            onShow={() => {
-                              const next = [...effective.sidebar.sectionsOrder, s.key];
-                              void patch({ sidebar: { sectionsOrder: next } });
-                            }}
-                          />
-                        ))
-                      )}
-                    </>
-                  );
-                })()}
-              </>
-            )}
-          </TabsContent>
-
-          <TabsContent value="themes" className="px-4 pb-3 max-h-[66vh] overflow-y-auto">
-            {loading ? (
-              <div className="px-2 py-4 text-xs text-zinc-500 dark:text-zinc-400">Loading…</div>
-            ) : !effective ? (
-              <PrefsUnavailable />
-            ) : (
-              <>
-                <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-300 mb-2">Appearance</h3>
-                <ThemeAppearancePicker
-                  value={effective.theme.appearance}
-                  locked={lockedSet.has("theme.appearance")}
-                  onChange={(v) => void patch({ theme: { appearance: v } })}
-                />
-                <div className="h-3" />
-                <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-300 mb-2">WorkwrK theme</h3>
-                <AccentPicker
-                  value={effective.theme.accent}
-                  locked={lockedSet.has("theme.accent")}
-                  onChange={(v) => void patch({ theme: { accent: v } })}
-                />
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function PrefsUnavailable() {
-  return (
-    <div className="px-3 py-6 text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-      Couldn&apos;t load your saved preferences from the server. The Appearance
-      tab still works — that choice applies locally right away. Try
-      reloading the page if this persists.
-    </div>
+            <div className="mt-6 text-sm">
+              <button
+                type="button"
+                onClick={() => { onOpenChange(false); openSettings(preferencesHref); }}
+                className="font-medium text-brand-deep hover:underline"
+              >
+                More in My settings › Preferences
+              </button>
+            </div>
+          </div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

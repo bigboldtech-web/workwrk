@@ -2,7 +2,7 @@
 
 /* Sprint — the live sprint room.
  *
- * Top: OsTitleBar with sprint name + verdict pill (ahead/on-track/behind) + actions.
+ * Top: OsPageHeader with sprint name + verdict pill (ahead/on-track/behind) + actions.
  * Hero strip: 4 KPI tiles (Day X/Y · Committed h · Burned h · Completion %).
  * Body grid:
  *   - Burndown card (left, spans 2 rows): ideal vs actual line with today marker,
@@ -16,9 +16,9 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Zap, TrendingDown, AlertTriangle, CheckCircle2, Users, Play, Flag } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { TrendingDown, AlertTriangle, CheckCircle2, Users, Flag } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -156,27 +156,19 @@ export default function SprintPage() {
   }
 
   return (
-    <div className="sprint">
-      <OsTitleBar
+    <>
+      <OsPageHeader
         title="Sprint"
-        Icon={Zap}
-        iconGradient={GRAD.orangePink}
-        description={tasks === null ? "Loading…" : `Day ${burndown.dayElapsed} of ${SPRINT_DAYS} · ${doneCount}/${totalCount} done`}
         actions={
           <div className="sprint__head-actions">
             <span className={`sprint__verdict sprint__verdict--${verdict.tone}`}>
               <Flag /> {verdict.label}
             </span>
-            <button type="button" className="sprint__btn sprint__btn--ghost">
-              <Flag /> End sprint
-            </button>
-            <button type="button" className="sprint__btn sprint__btn--primary">
-              <Play /> Start next
-            </button>
           </div>
         }
       />
 
+    <div className="sprint">
       {/* KPI strip */}
       <div className="sprint__kpis">
         <KpiTile
@@ -298,6 +290,7 @@ export default function SprintPage() {
         </div>
       )}
     </div>
+    </>
   );
 }
 

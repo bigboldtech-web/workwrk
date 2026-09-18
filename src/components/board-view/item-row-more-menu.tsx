@@ -17,6 +17,7 @@ import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useItemTypes } from "./use-item-types";
 import { itemTypeIcon } from "@/lib/item-type-icons";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   item: { id: string; boardId?: string | null; title: string };
@@ -78,7 +79,6 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
   }, [open]);
 
   const close = () => setOpen(false);
-  const soon = (label: string) => { toast(`${label} — coming soon`); close(); };
 
   const copyLink = async () => {
     try { await navigator.clipboard.writeText(`${window.location.origin}/item/${item.id}`); toast("Link copied"); } catch {}
@@ -165,7 +165,7 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
             <button type="button" onClick={newTab} className="flex-1 h-7 rounded-lg border border-zinc-200 text-sm font-medium text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-900 transition-colors">New tab</button>
           </div>
           <MenuSeparator />
-          <MenuItem icon={Star} label="Favorite" onClick={() => soon("Favorite")} />
+          <UpcomingOnly><ComingSoonRow icon={Star} label="Favorite" /></UpcomingOnly>
           {onOpen ? <MenuItem icon={ExternalLink} label="Open" onClick={() => { onOpen(); close(); }} /> : null}
           {canEdit && onRename ? <MenuItem icon={Pencil} label="Rename" onClick={() => { onRename(); close(); }} /> : null}
           {canEdit ? (
@@ -176,14 +176,14 @@ export const ItemRowMoreMenu = forwardRef<ContextMenuHandle, {
           {canEdit ? (
             <>
               <MenuSeparator />
-              <MenuItem icon={CornerUpRight} label="Move to" onClick={() => soon("Move to")} />
+              <UpcomingOnly><ComingSoonRow icon={CornerUpRight} label="Move to" /></UpcomingOnly>
               {onDuplicate ? <MenuItem icon={Copy} label="Duplicate" onClick={() => { onDuplicate(); close(); }} /> : null}
               {onSetType ? (
                 <MenuSubmenu icon={Box} label="Task type">
                   <TaskTypeSubmenu currentId={itemTypeId ?? null} onSet={setType} />
                 </MenuSubmenu>
               ) : (
-                <MenuItem icon={Box} label="Task type" onClick={() => soon("Task type")} />
+                <UpcomingOnly><ComingSoonRow icon={Box} label="Task type" /></UpcomingOnly>
               )}
               {timeTrackingEnabled ? <MenuItem icon={Clock} label="Start timer" onClick={startTimer} busy={busy === "timer"} /> : null}
             </>

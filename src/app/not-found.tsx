@@ -1,39 +1,33 @@
-// Root 404 — catches every unmatched URL (including app typos). Clean,
-// standalone light/dark page on the design system; stays a server
+// Root 404 (spec-shell 2.5): an unmatched path outside every route group.
+// Signed-in app paths never reach it: (dashboard)/[...rest] catches every
+// unknown path and renders the in-shell 404 inside the frame (or sends a
+// signed-out person to /login with the path as callbackUrl), and the
+// marketing host renders its own 404 through the proxy rewrite. What is
+// left for this file is a notFound() thrown outside those groups (onboard,
+// setup, the embeds). The same sentence as the in-shell page, "Log in" as
+// its ONE link, no chrome, no hint about what the path was. Stays a server
 // component so `metadata` keeps working.
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { SearchX } from "lucide-react";
-import { GoBackButton } from "@/components/system/go-back-button";
+import { DotsArt } from "@/components/ui/dots-art";
 
 export const metadata: Metadata = {
   title: "Not found · WorkwrK",
-  description: "This page doesn't exist. Head home or jump back into the product.",
   robots: { index: false, follow: false },
 };
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-white dark:bg-zinc-950 px-6 py-12">
-      <div className="max-w-md w-full text-center">
-        <div className="w-12 h-12 mx-auto rounded-xl bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center mb-4">
-          <SearchX className="w-6 h-6 text-zinc-500" />
-        </div>
-        <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-          Page not found
-        </h1>
-        <p className="text-base text-zinc-500 dark:text-zinc-400 mt-2 leading-relaxed">
-          The link may be broken, or the page may have moved.
-        </p>
-        <div className="mt-6 flex items-center justify-center gap-2">
-          <Link
-            href="/"
-            className="inline-flex items-center h-9 px-4 rounded-full bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-          >
-            Back home
-          </Link>
-          <GoBackButton />
+    // Inline colours on purpose: this page renders outside the dashboard
+    // stylesheet, so no --os-* token reaches it (the same rule as
+    // global-error.tsx). The values are the sRGB of the light tokens.
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px", background: "#FFFFFF", color: "#1F2430", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif" }}>
+      <div style={{ display: "flex", maxWidth: 420, flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+        <DotsArt arrangement="row" stroke="#D0D5DD" sheet="#F6F7F9" />
+        <p style={{ margin: "16px 0 0", fontSize: 15, lineHeight: "22px", color: "#5C6779" }}>We couldn&apos;t find that page</p>
+        <div style={{ marginTop: 12, fontSize: 14, fontWeight: 500 }}>
+          <Link href="/login" style={{ color: "#0B5FC2" }}>Log in</Link>
         </div>
       </div>
     </div>

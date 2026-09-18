@@ -1,0 +1,29 @@
+/* The rail mark (design-system 5.15): four dots in a row. At rest they are
+   static; while `.is-pulsing` each dot dims and lifts back to full on a
+   900ms loop, 120ms apart, which is the whole route-transition loader. */
+
+.wwk-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.wwk-logo__dot {
+  display: inline-block;
+  border-radius: 50%;
+  opacity: 1;
+}
+
+.wwk-logo.is-pulsing .wwk-logo__dot {
+  animation: wwk-logo-pulse 900ms ease-in-out infinite;
+}
+
+@keyframes wwk-logo-pulse {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wwk-logo.is-pulsing .wwk-logo__dot { animation: none; opacity: 1; transform: none; }
+}

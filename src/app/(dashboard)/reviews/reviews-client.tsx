@@ -12,20 +12,30 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
-  Award, Plus, Search, Calendar as CalendarIcon, CheckCircle2,
-  Loader2, Play, ChevronRight, ArrowRight, Sparkles, Target,
-  Activity, Users, TrendingUp, Rocket,
+  Award,
+  Search,
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  Play,
+  ChevronRight,
+  ArrowRight,
+  Sparkles,
+  Target,
+  Activity,
+  Users,
+  TrendingUp,
+  Rocket,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { NewReviewCycleDialog } from "./new-review-dialog";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type CycleStatus = "DRAFT" | "ACTIVE" | "IN_CALIBRATION" | "COMPLETED" | "CANCELLED";
 
@@ -192,45 +202,35 @@ export default function ReviewsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Review cycles"
-        Icon={Award}
-        iconGradient={GRAD.yellowOrange}
-        description={cycles === null ? "Loading cycles…" : `${stats.total} cycle${stats.total === 1 ? "" : "s"} · ${stats.activeCount} active · ${stats.completedReviews}/${stats.totalReviews} reviews done`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.pr]}
-        morePeople={5}
         actions={
           <div className="rvw__head-actions">
-            <Link href="/kra-kpi" className="rvw__nav-link"><Target /> KRA/KPI</Link>
-            <Link href="/talent" className="rvw__nav-link"><Users /> Talent</Link>
-            <button type="button" className="rvw__btn-primary" onClick={() => setNewOpen(true)}>
-              <Plus /> New cycle
-            </button>
+            <Link href="/kra-kpi" className="os-head__link"><Target /> KRA/KPI</Link>
+            <Link href="/talent" className="os-head__link"><Users /> Talent</Link>
           </div>
         }
+        primary={{ label: "New cycle", onClick: () => setNewOpen(true) }}
       />
 
       <div className="rvw">
         {loadError ? (
-          <OsEmptyView Icon={Award} iconGradient="linear-gradient(135deg, var(--os-c-red), var(--os-c-orange))" title="Couldn't load cycles" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load cycles" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
         ) : cycles === null ? (
-          <div className="rvw__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : !featured ? (
           <OsEmptyView
-            Icon={Award}
-            iconGradient={GRAD.yellowOrange}
+            context="goals"
             title="No review cycles yet"
-            subtitle="Plan your first review cycle. Pick monthly pulse, quarterly, annual, probation, or PIP."
-            chips={["Monthly pulse", "Quarterly", "Annual", "Probation", "PIP"]}
-            cta="New cycle"
-            onCta={() => setNewOpen(true)}
+            hint="Plan a review cycle: pulse, quarterly, annual, probation or PIP."
+            action={{ label: "New cycle", onClick: () => setNewOpen(true) }}
           />
         ) : (
           <>
             <FeaturedCycle cycle={featured} onAdvance={patch} onLaunch={launch} />
 
             <div className="rvw__kpis">
-              <KpiTile accent="var(--os-c-orange)" Icon={Loader2}      label="Active"     value={`${stats.activeCount}`}                                  sub={`${stats.byStatus.IN_CALIBRATION} in calibration`} />
+              <KpiTile accent="var(--os-c-orange)" Icon={Activity}      label="Active"     value={`${stats.activeCount}`}                                  sub={`${stats.byStatus.IN_CALIBRATION} in calibration`} />
               <KpiTile accent="var(--os-c-blue)"   Icon={Play}         label="Draft"      value={`${stats.byStatus.DRAFT}`}                              sub="planning stage" />
               <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Completed"  value={`${stats.byStatus.COMPLETED}`}                          sub="historical" />
               <KpiTile accent="var(--os-c-teal)"   Icon={Activity}     label="Progress"   value={`${stats.progress}%`}                                    sub={`${stats.completedReviews}/${stats.totalReviews} reviews`} progress={stats.progress} />
@@ -288,7 +288,7 @@ function FeaturedCycle({ cycle: c, onAdvance, onLaunch }: {
   // DRAFT never advances via a status PATCH — it launches (which creates
   // the per-person Review rows and flips the status server-side).
   const next = c.status === "ACTIVE" ? "IN_CALIBRATION" : c.status === "IN_CALIBRATION" ? "COMPLETED" : null;
-  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Loader2 : Play;
+  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Activity : Play;
   const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
   const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
   const progress = totalReviews > 0 ? Math.round((doneReviews / totalReviews) * 100) : 0;
@@ -387,7 +387,7 @@ function CycleRow({ cycle: c, onLaunch }: { cycle: ApiCycle; onLaunch: (id: stri
   const totalReviews = c._count?.reviews ?? c.reviews?.length ?? 0;
   const doneReviews = c.reviews?.filter((r) => r.status === "COMPLETED").length ?? 0;
   const progress = totalReviews > 0 ? Math.round((doneReviews / totalReviews) * 100) : 0;
-  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Loader2 : Play;
+  const StatusIcon = c.status === "COMPLETED" ? CheckCircle2 : c.status === "ACTIVE" ? Activity : Play;
 
   return (
     <Link href={`/reviews/${c.id}`} className="rvw__row" style={{ ["--row-c" as unknown as string]: statusColor }}>

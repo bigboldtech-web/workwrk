@@ -12,11 +12,12 @@
  * GET /api/assets · POST /api/assets · PATCH+DELETE /api/assets/[id]
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Box, Search, AlertTriangle, Plus, Calendar, Hash } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { Box, Search, AlertTriangle, Calendar, Hash } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsShell } from "@/components/layout/os/shell-context";
 import {
   STATUS_HUE, STATUS_LABEL, CONDITION_HUE, typeLabel, personName,
@@ -103,17 +104,14 @@ export default function AssetsPage() {
   }, [assets, filter, search]);
 
   return (<>
-    <OsTitleBar
+    <OsPageHeader
       title="Asset register"
-      Icon={Box}
-      iconGradient={GRAD.bluePurple}
-      description={assets === null ? "Loading…" : `${stats.total} asset${stats.total === 1 ? "" : "s"} on the books${stats.totalValue > 0 ? ` · ${fmtMoney(stats.totalValue)} total value` : ""}`}
       actions={
         <div className="ast__head-actions">
-          <Link href="/settings" className="ast__nav-link"><Hash /> Settings</Link>
-          <button type="button" className="ast__btn-primary" onClick={() => setCreateOpen(true)}><Plus /> Add asset</button>
+          <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
         </div>
       }
+      primary={{ label: "Add asset", onClick: () => setCreateOpen(true) }}
     />
 
     {/* Actions column + row-menu styling. Scoped to this page's table via the
@@ -139,7 +137,7 @@ export default function AssetsPage() {
       {loadError ? (
         <div className="ast__error">{loadError}</div>
       ) : assets === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
+        <SkeletonRows />
       ) : (
         <>
           <section className="ast__stats">

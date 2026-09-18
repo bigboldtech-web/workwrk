@@ -7,12 +7,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
-import { AtSign, FileText, BookCopy } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { FileText, BookCopy } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Hit = {
   source: "doc" | "sop";
@@ -40,6 +39,7 @@ function relTime(iso: string): string {
 export default function MentionsInboxPage() {
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,29 +54,21 @@ export default function MentionsInboxPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   return (
     <>
-      <OsTitleBar
-        title="Mentions"
-        Icon={AtSign}
-        iconGradient={GRAD.purpleIndigo}
-        description={hits === null ? "Loading…" : `${hits.length} mention${hits.length === 1 ? "" : "s"}`}
-      />
+      <OsPageHeader title="Mentions" />
 
       {error ? (
-        <OsEmptyView Icon={AtSign} iconGradient={GRAD.redPink} title="Couldn't load mentions" subtitle={`API error: ${error}`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load mentions" hint={`API error: ${error}`} action={{ label: "Try again", onClick: () => { setError(null); setHits(null); setReloadKey((k) => k + 1); } }} />
       ) : hits === null ? (
-        <div className="mention-inbox__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : hits.length === 0 ? (
         <OsEmptyView
-          Icon={AtSign}
-          iconGradient={GRAD.purpleIndigo}
+          context="list"
           title="No mentions yet"
-          subtitle="When someone @-mentions you in a note or SOP, it'll show up here. Try mentioning yourself in any note to test it."
-          chips={["Inline @", "Notes", "SOPs"]}
-          cta="Open notes"
+          hint="Mentions of you in docs and SOPs show up here."
         />
       ) : (
         <ul className="mention-inbox">

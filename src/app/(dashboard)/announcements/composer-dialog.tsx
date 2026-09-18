@@ -12,12 +12,15 @@
  * targeting as Coming soon rather than faking a selector the backend ignores.
  */
 
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useEffect, useState } from "react";
-import { AlertTriangle, CalendarRange, Info, PartyPopper, ShieldCheck, Loader2, Check } from "lucide-react";
+import { AlertTriangle, CalendarRange, Info, PartyPopper, ShieldCheck, Check } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 type AnnType = "INFO" | "WARNING" | "CELEBRATION" | "POLICY" | "EVENT";
 type AnnPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
@@ -241,7 +244,7 @@ export function AnnouncementComposer({
             {audienceType !== "ALL" && (
               <div className="mt-1 max-h-[168px] overflow-y-auto rounded-lg border border-[var(--os-line)] p-1.5">
                 {audLoading ? (
-                  <div className="px-2 py-3 text-center text-sm text-[var(--os-ink-4)]">Loading…</div>
+                  <div className="px-2 py-2"><SkeletonLines lines={3} /></div>
                 ) : audOptions.length === 0 ? (
                   <div className="px-2 py-3 text-center text-sm text-[var(--os-ink-4)]">
                     {audienceType === "TAGS" ? "No tags yet — create some in Settings → Tags" : "Nothing to pick here"}
@@ -329,12 +332,7 @@ export function AnnouncementComposer({
               <span className="inline-flex items-center h-8 px-3 rounded-lg text-base border border-[var(--os-brand)] bg-[var(--os-brand-soft)] text-[var(--os-brand-deep)] font-medium">
                 Everyone in the organization
               </span>
-              <span
-                className="inline-flex items-center h-8 px-3 rounded-lg text-base border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
-                title="Targeting specific teams or roles is coming soon"
-              >
-                Specific teams / roles · Coming soon
-              </span>
+              <UpcomingOnly><ComingSoonRow label="Specific teams / roles" className="h-8" /></UpcomingOnly>
             </div>
           </div>
 
@@ -412,7 +410,7 @@ export function AnnouncementComposer({
             disabled={submitting}
             className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-base font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
           >
-            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            {submitting ? <Dots variant="pending" /> : null}
             {scheduleOn && publishedAt ? "Schedule announcement" : "Post announcement"}
           </button>
         </DialogFooter>

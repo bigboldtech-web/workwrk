@@ -8,6 +8,8 @@
 
 import Link from "next/link";
 import { Sparkles, Shield, Zap, Globe, FormInput, Table as TableIcon, FileText, Bot } from "lucide-react";
+import { ConsentBanner } from "@/components/layout/consent-banner";
+import { ConsentProvider } from "@/components/layout/consent-provider";
 
 export default function AuthLayout({
   children,
@@ -98,6 +100,11 @@ export default function AuthLayout({
           </figure>
         </div>
       </div>
+      {/* Cookie consent lives on the marketing and auth hosts only
+          (spec-shell 1.13); the app never mounts the banner. */}
+      <ConsentProvider>
+        <ConsentBanner />
+      </ConsentProvider>
     </div>
   );
 }

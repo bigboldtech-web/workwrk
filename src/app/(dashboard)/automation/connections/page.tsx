@@ -1,32 +1,27 @@
 "use client";
 
-/* /automation/connections — integration providers for automation actions.
+/* /automation/connections: the org's automation connections. Owner and
+ * Admin only; the directory layout renders LockedPage for everyone else.
  *
- *  GET  /api/automation/connections           → the org's connection rows
- *  POST /api/automation/connections/WEBHOOK   → real: upserts a CONNECTED
- *                                               row with the target URL
- *  POST /api/automation/connections/<other>   → 501 today; the card's
- *                                               Connect button surfaces
- *                                               the honest "coming soon"
+ *  GET  /api/automation/connections           the org's connection rows
+ *  POST /api/automation/connections/WEBHOOK   upserts a CONNECTED row with
+ *                                             the target URL
  *
- * Provider cards show live status from IntegrationConnection. Only
- * admins can connect (API-enforced; errors surface as toasts). There is
- * no disconnect endpoint yet, so no disconnect control is rendered —
- * the webhook card offers "Update" to repoint the URL instead.
+ * One provider card today: Webhook, the only connection the API can make.
+ * The four provider cards this page used to fake (WhatsApp, Gmail, Google
+ * Calendar, Slack) are gone (naming-canon 2.13); they live on /integrations
+ * as "Request this" cards. There is no disconnect endpoint yet, so no
+ * disconnect control is rendered; the card offers "Update" to repoint the
+ * URL instead. A failed read is the error primitive with Try again, never
+ * an empty grid (spec-shell 1.7).
  */
 
 import { useCallback, useEffect, useState } from "react";
-import {
-  CalendarDays,
-  Loader2,
-  Mail,
-  MessageCircle,
-  MessagesSquare,
-  Plug,
-  Webhook,
-  type LucideIcon,
-} from "lucide-react";
+import { Plug, Webhook } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { Dots } from "@/components/ui/dots";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { AutomationHeader, CARD, DARK_PILL, StatusPill, relTime } from "../shared";
 
 interface ApiConnection {
@@ -45,46 +40,6 @@ const CONNECTION_STATUS_META: Record<string, { label: string; color: string }> =
   EXPIRED: { label: "Expired", color: "#F59E0B" },
   ERROR: { label: "Error", color: "#E2445C" },
 };
-
-const PROVIDERS: Array<{
-  key: string;
-  name: string;
-  Icon: LucideIcon;
-  description: string;
-  isWebhook?: boolean;
-}> = [
-  {
-    key: "WHATSAPP",
-    name: "WhatsApp",
-    Icon: MessageCircle,
-    description: "Message customers and teammates from automation actions.",
-  },
-  {
-    key: "GMAIL",
-    name: "Gmail",
-    Icon: Mail,
-    description: "Send automation emails through your own Gmail account.",
-  },
-  {
-    key: "GOOGLE_CALENDAR",
-    name: "Google Calendar",
-    Icon: CalendarDays,
-    description: "Create and update calendar events from workflows.",
-  },
-  {
-    key: "SLACK",
-    name: "Slack",
-    Icon: MessagesSquare,
-    description: "Post automation messages into Slack channels.",
-  },
-  {
-    key: "WEBHOOK",
-    name: "Webhook",
-    Icon: Webhook,
-    description: "POST trigger payloads to any https endpoint you control.",
-    isWebhook: true,
-  },
-];
 
 function WebhookForm({
   connection,
@@ -145,7 +100,7 @@ function WebhookForm({
         className="h-7 min-w-0 flex-1 rounded-md border border-zinc-200 bg-white px-2 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-zinc-400"
       />
       <button type="button" onClick={() => void connect()} disabled={busy} className={DARK_PILL}>
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+        {busy ? <Dots variant="pending" label="Connecting" /> : null}
         {existingUrl ? "Update" : "Connect"}
       </button>
     </div>
@@ -153,59 +108,32 @@ function WebhookForm({
 }
 
 export default function AutomationConnectionsPage() {
-  const { toast } = useOsToast();
   const [connections, setConnections] = useState<Map<string, ApiConnection> | null>(null);
-  const [connectingKey, setConnectingKey] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/automation/connections", { cache: "no-store" });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const rows: ApiConnection[] = Array.isArray(data.connections) ? data.connections : [];
       setConnections(new Map(rows.map((c) => [c.provider, c])));
+      setLoadError(false);
     } catch {
-      setConnections(new Map());
-      toast("Couldn't load connections");
+      setLoadError(true);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Non-webhook providers: the endpoint answers 501 until their OAuth
-  // flows ship — surface exactly that instead of a dead button.
-  const connectStub = useCallback(
-    async (key: string, name: string) => {
-      setConnectingKey(key);
-      try {
-        const res = await fetch(`/api/automation/connections/${key}`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({}),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 501) {
-          toast(`${name} connection is coming soon`);
-        } else if (!res.ok) {
-          toast(data?.error ?? `Couldn't connect ${name}`);
-        } else {
-          toast(`${name} connected`);
-          void load();
-        }
-      } catch {
-        toast(`Couldn't connect ${name}`);
-      } finally {
-        setConnectingKey(null);
-      }
-    },
-    [toast, load],
-  );
-
   const connectedCount = connections
     ? [...connections.values()].filter((c) => c.status === "CONNECTED").length
     : 0;
+  const webhook = connections?.get("WEBHOOK");
+  const statusMeta =
+    CONNECTION_STATUS_META[webhook?.status ?? "DISCONNECTED"] ?? CONNECTION_STATUS_META.DISCONNECTED;
 
   return (
     <div className="flex h-full flex-col bg-white">
@@ -220,59 +148,35 @@ export default function AutomationConnectionsPage() {
       />
 
       <div className="flex-1 overflow-y-auto p-4">
-        {connections === null ? (
-          <div className="flex items-center gap-2 p-6 text-base text-zinc-500">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-          </div>
+        {loadError ? (
+          <ErrorState what="connections" onRetry={() => { setLoadError(false); void load(); }} />
+        ) : connections === null ? (
+          <SkeletonRows rows={3} />
         ) : (
           <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {PROVIDERS.map((p) => {
-              const row = connections.get(p.key);
-              const statusMeta =
-                CONNECTION_STATUS_META[row?.status ?? "DISCONNECTED"] ??
-                CONNECTION_STATUS_META.DISCONNECTED;
-              return (
-                <div key={p.key} className={`${CARD} flex flex-col p-4`}>
-                  <div className="flex items-center gap-2.5">
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-zinc-100 bg-zinc-50">
-                      <p.Icon className="h-4.5 w-4.5 text-zinc-600" />
-                    </span>
-                    <div className="min-w-0">
-                      <div className="text-base font-semibold text-zinc-900">{p.name}</div>
-                      <StatusPill color={statusMeta.color} label={statusMeta.label} />
-                    </div>
-                  </div>
-                  <p className="mt-2.5 flex-1 text-sm leading-relaxed text-zinc-500">
-                    {p.description}
-                  </p>
-                  {row?.errorMessage ? (
-                    <p className="mt-1.5 text-xs text-[#E2445C]">{row.errorMessage}</p>
-                  ) : null}
-                  {row?.lastSyncAt ? (
-                    <p className="mt-1.5 text-xs text-zinc-400">
-                      Last synced {relTime(row.lastSyncAt)}
-                    </p>
-                  ) : null}
-                  {p.isWebhook ? (
-                    <WebhookForm connection={row} onConnected={() => void load()} />
-                  ) : (
-                    <div className="mt-3">
-                      <button
-                        type="button"
-                        onClick={() => void connectStub(p.key, p.name)}
-                        disabled={connectingKey === p.key}
-                        className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-200 bg-white px-3 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-                      >
-                        {connectingKey === p.key ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : null}
-                        Connect
-                      </button>
-                    </div>
-                  )}
+            <div className={`${CARD} flex flex-col p-4`}>
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-zinc-100 bg-zinc-50">
+                  <Webhook className="h-4.5 w-4.5 text-zinc-600" />
+                </span>
+                <div className="min-w-0">
+                  <div className="text-base font-semibold text-zinc-900">Webhook</div>
+                  <StatusPill color={statusMeta.color} label={statusMeta.label} />
                 </div>
-              );
-            })}
+              </div>
+              <p className="mt-2.5 flex-1 text-sm leading-relaxed text-zinc-500">
+                POST trigger payloads to any https endpoint you control.
+              </p>
+              {webhook?.errorMessage ? (
+                <p className="mt-1.5 text-xs text-[#E2445C]">{webhook.errorMessage}</p>
+              ) : null}
+              {webhook?.lastSyncAt ? (
+                <p className="mt-1.5 text-xs text-zinc-400">
+                  Last synced {relTime(webhook.lastSyncAt)}
+                </p>
+              ) : null}
+              <WebhookForm connection={webhook} onConnected={() => void load()} />
+            </div>
           </div>
         )}
       </div>

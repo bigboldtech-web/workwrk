@@ -5,8 +5,10 @@
 // "Meet with" picker that schedules a meeting with anyone in one click.
 
 import { useEffect, useRef, useState } from "react";
-import { Search, Sparkles, Loader2 } from "lucide-react";
+import { Search, Sparkles } from "lucide-react";
 import { useOsShell } from "./shell-context";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 
 interface Person { id: string; firstName?: string | null; lastName?: string | null; email: string; avatar?: string | null }
 
@@ -57,16 +59,16 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
   const showList = showMeet || (people !== null && q.trim().length >= 2);
 
   return (
-    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 w-[560px] max-w-[82vw]">
+    <div className="absolute bottom-5 inset-x-0 mx-auto z-30 w-[560px] max-w-[82vw]">
       {showList ? (
         <div className="mb-2 rounded-xl bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl max-h-[260px] overflow-y-auto p-1">
           {people === null ? (
-            <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-zinc-300" /></div>
+            <SkeletonLines lines={3} className="px-3" />
           ) : people.length === 0 ? (
             <div className="px-3 py-4 text-center text-base text-zinc-400 dark:text-zinc-500">Type a name to find a teammate.</div>
           ) : (
             people.map((p) => (
-              <button key={p.id} type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-white/5 text-left">
+              <button key={p.id} type="button" onClick={() => meetWith(p)} disabled={busy === p.id} className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-white/5 text-start">
                 {p.avatar ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.avatar} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
@@ -77,14 +79,14 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
                   <span className="block truncate text-base text-zinc-800 dark:text-zinc-100">{name(p)}</span>
                   <span className="block truncate text-xs text-zinc-400 dark:text-zinc-500">{p.email}</span>
                 </span>
-                {busy === p.id ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" /> : <span className="text-xs text-[#0073EA] font-medium shrink-0">Meet</span>}
+                {busy === p.id ? <Dots variant="pending" /> : <span className="text-xs text-[#0073EA] font-medium shrink-0">Meet</span>}
               </button>
             ))
           )}
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2 h-11 rounded-full bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl pl-4 pr-1.5">
+      <div className="flex items-center gap-2 h-11 rounded-full bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl ps-4 pe-1.5">
         <Search className="w-4 h-4 text-zinc-400 shrink-0" />
         <input
           ref={inputRef}

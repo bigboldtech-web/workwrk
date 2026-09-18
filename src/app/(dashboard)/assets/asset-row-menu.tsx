@@ -25,6 +25,7 @@ import {
   STATUS_LABEL, STATUS_HUE, personName,
   type ApiAsset, type AssetStatus,
 } from "./types";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 // Statuses a person can set directly. ASSIGNED is intentionally excluded —
 // it's derived from assigning an owner, not picked from a list.
@@ -161,7 +162,7 @@ export function AssetRowMenu({
             ))}
           </MenuSubmenu>
 
-          <MenuItem icon={LogOut} label="Check-out log" badge={<span className="ast__soon">Soon</span>} disabled />
+          <UpcomingOnly><ComingSoonRow label="Check-out log" icon={LogOut} /></UpcomingOnly>
 
           <MenuSeparator />
           <MenuItem icon={Trash2} label="Delete asset" destructive onClick={() => void del()} />

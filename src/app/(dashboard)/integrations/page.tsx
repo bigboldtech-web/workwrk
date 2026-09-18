@@ -15,9 +15,10 @@ import {
   Globe, Search, Hash, CheckCircle2, Clock, Sparkles,
   MessageCircle, Mail, Code, Hash as HashIcon, Cloud, Banknote, BarChart, Briefcase,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { ComingSoonRow, useShowUpcoming } from "@/components/ui/coming-soon-row";
+import { C } from "@/components/layout/os/catalog";
 
 type Category = "messaging" | "code" | "storage" | "finance" | "analytics" | "sso";
 
@@ -59,6 +60,9 @@ const CATEGORY_LABEL: Record<Category | "all", string> = {
 };
 
 export default function IntegrationsPage() {
+  // Nothing here is wired yet: the catalogue of planned connectors renders
+  // only for a viewer who opted into upcoming features (spec-shell 1.15).
+  const showUpcoming = useShowUpcoming();
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<Category | "all">("all");
 
@@ -79,15 +83,12 @@ export default function IntegrationsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Integrations"
-        Icon={Globe}
-        iconGradient={GRAD.tealGreen}
-        description={`${stats.total} connectors on the roadmap · none available yet · demand-driven`}
         actions={
           <div className="ing__head-actions">
-            <Link href="/settings" className="ing__nav-link"><Hash /> Settings</Link>
-            <Link href="/settings/calendar" className="ing__nav-link"><Sparkles /> Calendar</Link>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
+            <Link href="/settings/calendar" className="os-head__link"><Sparkles /> Calendar</Link>
           </div>
         }
       />
@@ -115,52 +116,41 @@ export default function IntegrationsPage() {
           </span>
         </div>
 
-        <div className="ing__toolbar">
-          <div className="ing__search">
-            <Search />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search integrations…" />
-          </div>
-        </div>
-
-        <div className="ing__cats">
-          {cats.map((c) => (
-            <button
-              key={c}
-              type="button"
-              className={`ing__cat${activeCategory === c ? " is-active" : ""}`}
-              onClick={() => setActiveCategory(c)}
-            >
-              {CATEGORY_LABEL[c]}
-              <span>{c === "all" ? stats.total : INTEGRATIONS.filter((i) => i.category === c).length}</span>
-            </button>
-          ))}
-        </div>
-
-        {filtered.length === 0 ? (
-          <OsEmptyView Icon={Globe} iconGradient={GRAD.tealGreen} title="No integrations match" subtitle="Try a different search or category." />
+        {!showUpcoming ? (
+          <OsEmptyView context="list" title="No integrations yet" hint="Connectors are added by demand." />
         ) : (
-          <div className="ing__grid">
-            {filtered.map((i) => (
-              <article key={i.id} className="ing__card" style={{ ["--c-c" as unknown as string]: i.hue }}>
-                <header className="ing__card-head">
-                  <span className="ing__card-icon"><i.Icon /></span>
-                  <div>
-                    <h3>{i.name}</h3>
-                    <span className="ing__card-cat">{CATEGORY_LABEL[i.category]}</span>
-                  </div>
-                </header>
-                <p className="ing__card-tagline">{i.tagline}</p>
-                <footer className="ing__card-foot">
-                  <span
-                    className="ing__card-btn"
-                    style={{ marginLeft: "auto", background: "var(--os-surface-1)", color: "var(--os-ink-3)", cursor: "default" }}
-                  >
-                    <Clock /> Coming soon
-                  </span>
-                </footer>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className="ing__toolbar">
+              <div className="ing__search">
+                <Search />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search integrations…" />
+              </div>
+            </div>
+
+            <div className="ing__cats">
+              {cats.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={`ing__cat${activeCategory === c ? " is-active" : ""}`}
+                  onClick={() => setActiveCategory(c)}
+                >
+                  {CATEGORY_LABEL[c]}
+                  <span>{c === "all" ? stats.total : INTEGRATIONS.filter((i) => i.category === c).length}</span>
+                </button>
+              ))}
+            </div>
+
+            {filtered.length === 0 ? (
+              <OsEmptyView context="list" title="No integrations match" hint="Try a different search or category." />
+            ) : (
+              <div>
+                {filtered.map((i) => (
+                  <ComingSoonRow key={i.id} label={`${i.name} · ${i.tagline}`} icon={i.Icon} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </>

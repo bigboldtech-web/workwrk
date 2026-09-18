@@ -13,12 +13,15 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getServerSession } from "next-auth";
 import {
-  Building2, Briefcase, MapPin, ShieldCheck, ChevronRight, Users, Layers, Lock,
+  Building2, Briefcase, ShieldCheck, ChevronRight, Users, Layers, Lock,
   type LucideIcon,
 } from "lucide-react";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ACCESS_LEVELS } from "@/lib/access-levels";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { AdminOnly } from "@/components/access";
+import { SHELL_LABELS } from "@/lib/nav/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -59,22 +62,10 @@ export default async function StructurePage() {
   const orgId = u.organizationId;
   const isAdmin = ADMIN_LEVELS.has(u.accessLevel ?? "");
 
+  // The denial family, not a bespoke card (spec-shell 1.6, 2.8): a non-admin
+  // at this URL gets the AdminOnly card with the rail and bar intact.
   if (!isAdmin) {
-    return (
-      <div className="mx-auto w-full max-w-3xl px-6 py-16">
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-10 text-center">
-          <div className="grid h-11 w-11 place-items-center rounded-xl bg-zinc-100 text-zinc-400">
-            <Lock className="h-5 w-5" />
-          </div>
-          <h1 className="text-base font-semibold text-zinc-900">Org structure is an admin area</h1>
-          <p className="max-w-sm text-base leading-relaxed text-zinc-500">
-            Shaping functions, roles, offices and the access ladder is limited to Company Admins.
-            You can still explore the org in{" "}
-            <Link href="/people" className="font-medium text-[#0073EA] hover:underline">People</Link>.
-          </p>
-        </div>
-      </div>
-    );
+    return <AdminOnly page="Structure" back={{ fallbackHref: "/account/profile", label: SHELL_LABELS.mySettings }} />;
   }
 
   // Live counts. One groupBy for the level holders; cheap counts for blocks.
@@ -140,25 +131,11 @@ export default async function StructurePage() {
             meta={`${TIERS.length} tiers · ${totalPeople} people`}
             desc="The fixed ladder that drives permissions. Read-only — see below."
           />
-          {/* Offices: the model + API exist, the directory UI does not yet. Honest,
-              non-clickable placeholder rather than a link to a page that isn't built. */}
-          <div className="flex items-start gap-3 rounded-xl border border-dashed border-zinc-200 bg-zinc-50/60 p-4">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-zinc-200 text-zinc-500">
-              <MapPin className="h-[18px] w-[18px]" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-base font-semibold text-zinc-700">Offices</span>
-                <span className="rounded bg-zinc-200 px-1.5 py-0.5 text-xs font-medium text-zinc-500">Coming soon</span>
-              </div>
-              <div className="mt-0.5 text-sm text-zinc-400">
-                {officeCount > 0 ? `${officeCount} location${officeCount === 1 ? "" : "s"} on file` : "No locations yet"} · directory in progress
-              </div>
-              <p className="mt-1 text-sm leading-relaxed text-zinc-400">
-                Where people work. The location viewer is not built yet.
-              </p>
-            </div>
-          </div>
+          {/* Offices: the model and API exist, the directory UI does not yet
+              (spec-shell 1.15: absent, or a ComingSoonRow behind Show upcoming). */}
+          <UpcomingOnly>
+            <ComingSoonRow label={`Offices${officeCount > 0 ? ` · ${officeCount} location${officeCount === 1 ? "" : "s"} on file` : ""}`} />
+          </UpcomingOnly>
         </div>
       </section>
 

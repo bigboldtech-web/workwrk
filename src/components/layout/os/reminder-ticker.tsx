@@ -130,7 +130,7 @@ export function ReminderTicker() {
 
   return createPortal(
     <div
-      className="workwrk-os fixed bottom-4 right-4 z-[130] w-[340px] max-w-[92vw] flex flex-col gap-2 max-h-[75vh] overflow-y-auto"
+      className="workwrk-os fixed bottom-4 end-4 z-[130] w-[340px] max-w-[92vw] flex flex-col gap-2 max-h-[75vh] overflow-y-auto"
       role="alertdialog"
       aria-label="Fired reminders"
     >
@@ -225,7 +225,7 @@ export function ReminderTicker() {
                 <button
                   type="button"
                   onClick={() => void act(r.id, {})}
-                  className="ml-auto inline-flex items-center h-7 px-2.5 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
+                  className="ms-auto inline-flex items-center h-7 px-2.5 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10"
                 >
                   Dismiss
                 </button>

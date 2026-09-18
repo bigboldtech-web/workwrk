@@ -22,8 +22,8 @@ import {
   Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock, CircleUser,
   Inbox, MessageSquare, CheckSquare, MoreHorizontal,
-  Plus, ChevronDown, ChevronRight, Pin, Star, X,
-  Megaphone, Briefcase, Wrench, Building2,
+  Plus, ChevronDown, ChevronRight, X,
+  Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
   UserCheck, Award, ThumbsUp, FileSpreadsheet,
   HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
@@ -32,7 +32,7 @@ import {
   Activity, LayoutTemplate, Plug,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
-  LayoutDashboard, Target, GaugeCircle,
+  Target, GaugeCircle, BookUser, Network, Heart,
   type LucideIcon,
   MessageCircle, Hash, Table2 } from "lucide-react";
 import { BloomMark } from "./bloom-mark";
@@ -48,12 +48,15 @@ import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
 import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
 import { useSidebarSearch } from "./sidebar-search-context";
-import { useOsShell } from "./shell-context";
+import { useBoot } from "./boot-context";
 import { MorePortal } from "./more-portal";
 import { FOLDED_APP_HUB, type HubKey } from "@/lib/nav/route-hub";
 import { useActiveRowHref } from "./use-active-row";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { MenuItem, MenuList } from "@/components/ui/menu";
+import {
+  SidebarEmptyLine, SidebarErrorLine, SidebarGhostRow, SidebarRow, SidebarSectionAction, SidebarSectionLabel,
+} from "./sidebar-primitives";
 
 /** Access tiers reused by app entries and per-action gates. */
 // AccessTier is defined in ./access-tiers and re-exported above.
@@ -260,126 +263,62 @@ function NavItem({
   active?: boolean;
   badge?: string | number;
 }) {
+  const count = typeof badge === "number" ? badge : typeof badge === "string" ? Number(badge) || 0 : 0;
+  return <SidebarRow href={href} label={label} icon={Icon} active={active} count={count} />;
+}
+
+// Goals, folded into Work: a group row with the four views as children
+// (indent 20). The active row comes from the one resolver over the whole
+// sidebar, so two rows can never light at once.
+function GroupRow({
+  href, label, Icon, active, expanded, onToggle,
+}: {
+  href: string;
+  label: string;
+  Icon: LucideIcon;
+  active: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <Link
+    <SidebarRow
       href={href}
-      className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
-        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
-      }`}
-    >
-      <Icon className="h-4 w-4 shrink-0 text-zinc-500" />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {badge !== undefined ? <span className="text-xs text-zinc-500">{badge}</span> : null}
-    </Link>
+      label={label}
+      icon={Icon}
+      active={active}
+      trailing={
+        <button
+          type="button"
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+          aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+          aria-expanded={expanded}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-2 hover:bg-active hover:text-ink"
+        >
+          {expanded ? <ChevronDown className="h-4 w-4" strokeWidth={1.5} /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" strokeWidth={1.5} />}
+        </button>
+      }
+    />
   );
 }
 
-function MoreNavItem() {
-  const [open, setOpen] = useState(false);
-  const { openCustomize } = useOsShell();
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  return (
-    <li className="relative">
-      <button
-        ref={buttonRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-sm leading-5 text-zinc-700 hover:bg-white/80"
-      >
-        <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-500" />
-        <span className="min-w-0 flex-1 truncate text-left">More</span>
-      </button>
-      {open ? (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} aria-hidden />
-          <MorePortal anchorRef={buttonRef} panelRef={panelRef} width={240} open={open} placement="right">
-            <MenuList>
-              <MenuItem href="#" icon={Inbox} label="Drafts & Sent" disabled title="Coming soon" trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
-              <MenuItem href="/spaces" icon={Folder} label="All Spaces" onClick={() => setOpen(false)} trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
-              <MenuItem href="/tasks" icon={CheckSquare} label="All Tasks" onClick={() => setOpen(false)} trailing={<Pin className="w-3.5 h-3.5 text-zinc-400" />} />
-              <MenuSeparator />
-              <MenuItem
-                href="#"
-                icon={SettingsIcon}
-                label="Customize"
-                onClick={(e) => {
-                  e.preventDefault();
-                  setOpen(false);
-                  openCustomize();
-                }}
-              />
-            </MenuList>
-          </MorePortal>
-        </>
-      ) : null}
-    </li>
-  );
-}
-
-// Goals, folded into Work: the same collapsible group shape as "My Wrk", so
-// nothing the old Goals sidebar offered is lost — My / Team (managers) /
-// Company Goals + My KRAs & KPIs. Views are ?mine / ?team / ?level=company on
-// /okrs, so the active row is read from the query string.
 function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel;
   const isManager = canAccessTier("manager", accessLevel);
-  // The active row comes from the one resolver over the whole sidebar, so the
-  // ?mine / ?team / ?level=company views are read the same way every other row
-  // is read, and two rows can never light at once.
-  const [expanded, setExpanded] = useState(
-    Boolean(activeHref && (activeHref.startsWith("/okrs") || activeHref === "/people/me")),
-  );
-
+  const [expanded, setExpanded] = useState(Boolean(activeHref && activeHref.startsWith("/okrs")));
   return (
     <>
-      <li className="relative group/goalrow">
-        <Link
-          href="/okrs"
-          className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
-            activeHref === "/okrs"
-              ? "bg-zinc-200/70 text-zinc-900 font-medium"
-              : "text-zinc-700 hover:bg-white/80"
-          }`}
-        >
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500" aria-hidden>
-            <Trophy className="h-4 w-4 transition-opacity group-hover/goalrow:opacity-0" />
-          </span>
-          <span className="min-w-0 flex-1 truncate">Goals</span>
-        </Link>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setExpanded((v) => !v);
-          }}
-          aria-label={expanded ? "Collapse Goals" : "Expand Goals"}
-          className="absolute left-2 top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded-md bg-zinc-200/80 text-zinc-600 opacity-0 transition-opacity hover:text-zinc-900 group-hover/goalrow:opacity-100 focus-visible:opacity-100"
-        >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </li>
+      <GroupRow href="/okrs" label="Goals" Icon={Target} active={activeHref === "/okrs"} expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
-        <li>
-          <ul className="ml-[18px] border-l border-zinc-200/70 pl-2">
-            <SubNavItem href="/okrs?mine=1" Icon={Trophy} label="My Goals" active={activeHref === "/okrs?mine=1"} iconTint="#0073EA" />
-            {isManager ? (
-              <SubNavItem href="/okrs?team=1" Icon={Users} label="Team Goals" active={activeHref === "/okrs?team=1"} iconTint="#16a34a" />
-            ) : null}
-            <SubNavItem href="/okrs?level=company" Icon={Building2} label="Company Goals" active={activeHref === "/okrs?level=company"} iconTint="#f59e0b" />
-            {/* Same href as the personal "My profile" row above, so the
-                resolver's tie rule lights that one; this row stays a door. */}
-            <SubNavItem href="/people/me" Icon={Target} label="My KRAs & KPIs" iconTint="#e2445c" />
-          </ul>
-        </li>
+        <>
+          <SidebarRow depth={1} href="/okrs?mine=1" icon={Trophy} label="My goals" active={activeHref === "/okrs?mine=1"} />
+          {isManager ? <SidebarRow depth={1} href="/okrs?team=1" icon={Users} label="Team goals" active={activeHref === "/okrs?team=1"} /> : null}
+          <SidebarRow depth={1} href="/okrs?level=company" icon={Building2} label="Company goals" active={activeHref === "/okrs?level=company"} />
+          {/* sidebar-map 1 row 5d ("My KRAs & KPIs" as a jump to
+              /people/me?tab=kras) waits for the profile page to grow a KRAs
+              tab; until then it would be a second row to the My profile
+              destination, which spec-shell 1.3 retires. */}
+        </>
       ) : null}
     </>
   );
@@ -387,115 +326,29 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
 
 function MyTasksGroup({ activeHref }: { activeHref: string | undefined }) {
   const [expanded, setExpanded] = useState(Boolean(activeHref?.startsWith("/tasks")));
-
   return (
     <>
-      <li className="relative group/taskrow">
-        <Link
-          href="/tasks"
-          className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
-            activeHref === "/tasks"
-              ? "bg-zinc-200/70 text-zinc-900 font-medium"
-              : "text-zinc-700 hover:bg-white/80"
-          }`}
-        >
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center text-zinc-500" aria-hidden>
-            <CheckSquare className="h-4 w-4 transition-opacity group-hover/taskrow:opacity-0" />
-          </span>
-          <span className="min-w-0 flex-1 truncate">My Wrk</span>
-        </Link>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            setExpanded((v) => !v);
-          }}
-          aria-label={expanded ? "Collapse My Wrk" : "Expand My Wrk"}
-          className="absolute left-2 top-1/2 z-10 flex h-5 w-4 -translate-y-1/2 items-center justify-center rounded-md bg-zinc-200/80 text-zinc-600 opacity-0 transition-opacity hover:text-zinc-900 group-hover/taskrow:opacity-100 focus-visible:opacity-100"
-        >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </button>
-      </li>
+      <GroupRow href="/tasks" label="My work" Icon={CheckSquare} active={activeHref === "/tasks"} expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
-        <li>
-          <ul className="ml-[18px] border-l border-zinc-200/70 pl-2">
-            <SubNavItem
-              href="/tasks/assigned-to-me"
-              Icon={UserCheck}
-              label="Assigned to me"
-              active={activeHref === "/tasks/assigned-to-me"}
-              iconTint="#f97316"
-            />
-            <SubNavItem
-              href="/tasks/today-overdue"
-              Icon={Calendar}
-              label="Today & Overdue"
-              active={activeHref === "/tasks/today-overdue"}
-              iconTint="#3b82f6"
-            />
-            <SubNavItem
-              href="/tasks/personal-list"
-              Icon={ClipboardCheck}
-              label="Personal List"
-              active={activeHref === "/tasks/personal-list"}
-            />
-          </ul>
-        </li>
+        <>
+          <SidebarRow depth={1} href="/tasks/assigned-to-me" icon={UserCheck} label="Assigned to me" active={activeHref === "/tasks/assigned-to-me"} />
+          <SidebarRow depth={1} href="/tasks/today-overdue" icon={Calendar} label="Today & overdue" active={activeHref === "/tasks/today-overdue"} />
+          <SidebarRow depth={1} href="/tasks/personal-list" icon={ClipboardCheck} label="Personal list" active={activeHref === "/tasks/personal-list"} />
+        </>
       ) : null}
     </>
   );
 }
 
-function SubNavItem({
-  href,
-  label,
-  Icon,
-  active,
-  iconTint,
-}: {
-  href: string;
-  label: string;
-  Icon: LucideIcon;
-  active?: boolean;
-  iconTint?: string;
-}) {
-  return (
-    <li>
-      <Link
-        href={href}
-        className={`flex h-7 items-center gap-2 rounded-md px-2 text-sm leading-5 ${
-          active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
-        }`}
-      >
-        <Icon
-          className="h-4 w-4 shrink-0"
-          style={iconTint ? { color: iconTint } : { color: "var(--os-ink, #71717a)" }}
-        />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-      </Link>
-    </li>
-  );
-}
-
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-2 pt-2.5 pb-1 text-sm font-semibold text-zinc-500">
-      {children}
-    </div>
-  );
+  return <SidebarSectionLabel>{children}</SidebarSectionLabel>;
 }
 
-function EmptyState({ title, body }: { title: string; body?: string }) {
+function EmptyState({ title }: { title: string; body?: string }) {
   return (
-    <div className="px-3 py-6 text-center">
-      <div className="text-sm font-medium text-zinc-700">{title}</div>
-      {body ? <div className="text-xs text-zinc-500 mt-1">{body}</div> : null}
-    </div>
+    <ul>
+      <SidebarEmptyLine>{title}</SidebarEmptyLine>
+    </ul>
   );
 }
 
@@ -513,17 +366,12 @@ interface SpaceRow {
 /** Default order if /api/preferences isn't loaded yet or the user hasn't customised. */
 const DEFAULT_SECTIONS_ORDER: string[] = ["favorites", "spaces"];
 
-// Label for the user's personal profile entry at the top of the Home
-// sidebar. Kept as a single constant so the wording changes in one place.
-// TODO(rename): user-chosen label pending
-const PROFILE_NAV_LABEL = "Me";
+// The person record row (naming-canon 2.18): "My profile" everywhere.
+const PROFILE_NAV_LABEL = "My profile";
 
 function FavSubLabel({ children }: { children: React.ReactNode }) {
   return (
-    <li
-      className="px-2 pt-2 pb-0.5 text-micro font-semibold uppercase tracking-wide text-zinc-400 select-none"
-      aria-hidden
-    >
+    <li className="px-3 pb-0.5 pt-2 text-micro uppercase tracking-[0.06em] text-ink-3 select-none" aria-hidden>
       {children}
     </li>
   );
@@ -558,7 +406,7 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
       onClick={onClick}
       title="Remove from favorites"
       aria-label="Remove from favorites"
-      className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/fav:opacity-100 transition-opacity inline-flex items-center justify-center w-4 h-4 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+      className="absolute end-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/fav:opacity-100 focus-visible:opacity-100 transition-opacity inline-flex items-center justify-center w-7 h-7 rounded-md text-ink-2 hover:text-ink hover:bg-active"
     >
       <X className="w-3 h-3" />
     </button>
@@ -581,6 +429,7 @@ const WORK_ROWS = [
   { href: "/okrs?mine=1" },
   { href: "/okrs?team=1" },
   { href: "/okrs?level=company" },
+  { href: "/templates" },
   { href: "/trash" },
 ];
 
@@ -589,6 +438,8 @@ function HomeSidebar() {
   const { data: session } = useSession();
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const activeHref = useActiveRowHref(WORK_ROWS);
+  const { counts } = useBoot();
+  const inboxUnread = counts.inboxUnread;
   // /people/me redirects to /people/<myId>, so the profile row also answers to
   // the resolved id, which no declared href can match.
   const pathname = usePathname() || "";
@@ -597,6 +448,13 @@ function HomeSidebar() {
     activeHref === "/people/me" || (meId !== null && pathname === `/people/${meId}`);
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
+  // A failed Spaces read shows the one-line error with Try again (spec-shell
+  // 1.2 rule 7); the section never renders empty on a failed fetch.
+  const [spacesError, setSpacesError] = useState(false);
+  // POST /api/spaces refuses below the manager tier, so the Space creates
+  // (section "+", ghost row) exist only for the tier that can use them
+  // (spec-shell 2.10: a row that appears always works).
+  const canCreateSpace = canAccessTier("manager", accessLevel);
   const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [favoriteBoards, setFavoriteBoards] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteSpaces, setFavoriteSpaces] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
@@ -606,7 +464,10 @@ function HomeSidebar() {
   const [favoriteWhiteboards, setFavoriteWhiteboards] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
   const [favoriteFiles, setFavoriteFiles] = useState<Array<{ id: string; name: string; url: string; mimeType: string }>>([]);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
+  const [spacesMenuOpen, setSpacesMenuOpen] = useState(false);
+  const spacesMenuRef = useRef<HTMLButtonElement>(null);
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(DEFAULT_SECTIONS_ORDER);
+  const [hiddenSections, setHiddenSections] = useState<string[]>([]);
   // Per-Space create dialogs — co-hosted at the sidebar level so we
   // don't mount one dialog per row. The SpaceCreateTrigger popover
   // sets the activeSpaceId and which dialog kind to show.
@@ -624,12 +485,15 @@ function HomeSidebar() {
 
   const reload = useCallback(() => {
     fetch("/api/spaces", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!data) return;
-        setSpaces(Array.isArray(data.spaces) ? data.spaces : []);
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
       })
-      .catch(() => {});
+      .then((data) => {
+        setSpaces(Array.isArray(data.spaces) ? data.spaces : []);
+        setSpacesError(false);
+      })
+      .catch(() => setSpacesError(true));
   }, []);
 
   // Drag-reorder: move `draggedId` to just before/after `targetId`. Updates the
@@ -679,6 +543,8 @@ function HomeSidebar() {
         const data = await res.json();
         const next = data?.effective?.sidebar?.sectionsOrder;
         if (alive && Array.isArray(next)) setSectionsOrder(next);
+        const hidden = data?.effective?.sidebar?.hiddenSections;
+        if (alive && Array.isArray(hidden)) setHiddenSections(hidden);
       } catch {}
     };
     void load();
@@ -749,28 +615,20 @@ function HomeSidebar() {
       favoriteBoards.length + favoriteSpaces.length + favoriteDocs.length
       + favoriteFolders.length + favoriteTables.length
       + favoriteWhiteboards.length + favoriteFiles.length;
+    // FAVORITES renders only when non-empty (sidebar-map 1).
+    if (total === 0) return null;
     return (
       <div key="favorites">
-        <button
-          type="button"
-          onClick={() => setFavoritesOpen((v) => !v)}
-          className="flex h-7 items-center gap-2 px-2 mt-2 text-sm font-medium w-full text-zinc-700 hover:text-zinc-900"
-        >
-          {favoritesOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-          <span>Favorites</span>
-          {total > 0 ? (
-            <span className="ml-1 text-xs text-zinc-400 font-normal tabular-nums">
-              {total}
-            </span>
-          ) : null}
-        </button>
+        <SidebarSectionLabel collapsed={!favoritesOpen} onToggle={() => setFavoritesOpen((v) => !v)} count={total}>
+          Favorites
+        </SidebarSectionLabel>
         {favoritesOpen ? (
           total === 0 ? (
-            <div className="px-2.5 py-1 text-sm text-zinc-400">
-              Star a Space or Board to add it here.
-            </div>
+            <ul>
+              <SidebarEmptyLine>No favorites yet</SidebarEmptyLine>
+            </ul>
           ) : (
-            <ul className="space-y-0.5">
+            <ul>
               {/* Phase 85 — when the user has more than 6 favorites,
                   group by kind with small uppercase sub-headers so the
                   list doesn't become a mystery soup. */}
@@ -783,8 +641,8 @@ function HomeSidebar() {
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
-                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
                       <EntityTile size="sm" icon={s.icon} color={s.color} name={s.name} />
@@ -803,8 +661,8 @@ function HomeSidebar() {
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
-                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
                       <EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} />
@@ -823,8 +681,8 @@ function HomeSidebar() {
                   <li key={`d-${d.id}`} className="group/fav relative">
                     <Link
                       href={`/docs/${d.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
-                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
                       <EntityTile size="sm" color="#3B82F6" fallbackIcon={FileText} name={d.title} />
@@ -842,7 +700,7 @@ function HomeSidebar() {
                   <li key={`f-${f.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${f.space.slug}#folder-${f.id}`}
-                      className="flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-700 hover:bg-white/80"
+                      className="flex h-9 items-center gap-3 px-3 rounded-lg text-ink hover:bg-hover"
                     >
                       <EntityTile size="sm" color={f.color} fallbackIcon={Folder} name={f.name} />
                       <span className="truncate flex-1">{f.name}</span>
@@ -860,8 +718,8 @@ function HomeSidebar() {
                   <li key={`t-${t.id}`} className="group/fav relative">
                     <Link
                       href={`/tables/${t.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
-                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
                       <EntityTile size="sm" color="#0EA5E9" fallbackIcon={FileSpreadsheet} name={t.name} />
@@ -880,8 +738,8 @@ function HomeSidebar() {
                   <li key={`w-${w.id}`} className="group/fav relative">
                     <Link
                       href={`/canvas/${w.id}`}
-                      className={`flex h-7 items-center gap-2 px-2 rounded-md text-sm ${
-                        active ? "bg-zinc-200/70 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-white/80"
+                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
+                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                       }`}
                     >
                       <EntityTile size="sm" color="#06B6D4" fallbackIcon={Brush} name={w.name} />
@@ -900,7 +758,7 @@ function HomeSidebar() {
                     href={f.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-700 hover:bg-white/80"
+                    className="flex h-9 items-center gap-3 px-3 rounded-lg text-ink hover:bg-hover"
                   >
                     <EntityTile size="sm" color="#A1A1AA" fallbackIcon={FileText} name={f.name} />
                     <span className="truncate flex-1">{f.name}</span>
@@ -922,27 +780,32 @@ function HomeSidebar() {
       : spaces;
     return (
       <div key="spaces">
-        <div className="flex h-7 items-center gap-2 px-2 mt-1">
-          <span className="text-sm font-medium flex-1 text-zinc-700">
-            Spaces
-            {q && visibleSpaces.length !== spaces.length ? (
-              <span className="ml-1 text-xs text-zinc-400 font-normal">
-                {visibleSpaces.length}/{spaces.length}
-              </span>
-            ) : null}
-          </span>
-          <button
-            type="button"
-            onClick={() => setNewSpaceOpen(true)}
-            className="h-[22px] w-[22px] inline-flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-100"
-            aria-label="New space"
-          >
-            <Plus className="w-4 h-4" />
-          </button>
-        </div>
+        <SidebarSectionLabel
+          count={q && visibleSpaces.length !== spaces.length ? visibleSpaces.length : null}
+          actions={
+            <>
+              <SidebarSectionAction ref={spacesMenuRef} icon={MoreHorizontal} label="Spaces options" aria-haspopup="menu" aria-expanded={spacesMenuOpen} onClick={() => setSpacesMenuOpen((v) => !v)} />
+              {canCreateSpace ? <SidebarSectionAction icon={Plus} label="New Space" onClick={() => setNewSpaceOpen(true)} /> : null}
+            </>
+          }
+        >
+          Spaces
+        </SidebarSectionLabel>
+        {spacesMenuOpen ? (
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setSpacesMenuOpen(false)} aria-hidden />
+            <MorePortal anchorRef={spacesMenuRef} width={220} open={spacesMenuOpen} placement="below">
+              <MenuList>
+                <MenuItem href="/spaces" icon={Layers} label="Browse all Spaces" onClick={() => setSpacesMenuOpen(false)} />
+              </MenuList>
+            </MorePortal>
+          </>
+        ) : null}
         <ul>
-          {visibleSpaces.map((s) => {
+          {visibleSpaces.map((s, i) => {
             const isActive = pathname === `/spaces/${s.slug}`;
+            const prev = q ? null : visibleSpaces[i - 1];
+            const next = q ? null : visibleSpaces[i + 1];
             return (
               <SpaceTreeRow
                 key={s.id}
@@ -955,24 +818,17 @@ function HomeSidebar() {
                 // Reordering only makes sense on the full, unfiltered list.
                 reorderable={!q}
                 onReorderSpace={(draggedId, place) => reorderSpaces(draggedId, s.id, place)}
+                onMoveUp={prev ? () => reorderSpaces(s.id, prev.id, "before") : undefined}
+                onMoveDown={next ? () => reorderSpaces(s.id, next.id, "after") : undefined}
               />
             );
           })}
-          {q && visibleSpaces.length === 0 ? (
-            <li className="px-2 py-2 text-xs text-zinc-400">
-              No Spaces match &ldquo;{searchQuery}&rdquo;
-            </li>
+          {spacesError ? (
+            <SidebarErrorLine what="Spaces" onRetry={() => void reload()} />
+          ) : q && visibleSpaces.length === 0 ? (
+            <SidebarEmptyLine>No Spaces match &ldquo;{searchQuery}&rdquo;</SidebarEmptyLine>
           ) : null}
-          <li>
-            <button
-              type="button"
-              onClick={() => setNewSpaceOpen(true)}
-              className="w-full flex h-7 items-center gap-2 px-2 rounded-md text-sm text-zinc-500 hover:bg-white/80"
-            >
-              <Plus className="w-4 h-4" />
-              <span>New Space</span>
-            </button>
-          </li>
+          {canCreateSpace ? <SidebarGhostRow icon={Plus} label="New Space" onClick={() => setNewSpaceOpen(true)} /> : null}
         </ul>
       </div>
     );
@@ -982,23 +838,36 @@ function HomeSidebar() {
     <>
       <ul>
         <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={profileActive} />
-        <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={activeHref === "/inbox"} />
-        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned Comments" active={activeHref === "/assigned-comments"} />
         <MyTasksGroup activeHref={activeHref} />
+        <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={activeHref === "/inbox"} badge={inboxUnread} />
+        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned comments" active={activeHref === "/assigned-comments"} />
+        {/* sidebar-map 1 row 4. /activity is a live, ungated page that had no
+            row, no catalog key and no link anywhere in src, so the palette's
+            Apps group could not list it either: it was reachable by typing
+            the URL and by nothing else. */}
+        <NavItem href="/activity" Icon={Activity} label="Activity" active={activeHref === "/activity"} />
         <NavItem href="/everything" Icon={Layers} label="Everything" active={activeHref === "/everything"} />
         <GoalsGroup activeHref={activeHref} />
-        {/* Trash re-parented here from the Settings sidebar: /trash is a Work
-            route by ROUTE_HUB, and Settings is a takeover with no sidebar of
-            its own (spec-shell §1.2 rule 3). Same hr-admin gate it carried
-            there, so nobody gains a door they did not have. */}
-        {canAccessTier("hr-admin", accessLevel) ? (
+        {/* The rule between the personal rows and the two workspace rows
+            (sidebar-map 1). Templates (row 6): the workspace starter bundles
+            at /templates, every Member; this row is the page's one door since
+            the workspace menu lost its Templates row. Trash (row 7): the
+            org-wide recycle bin. The spec gives it to every Member, but
+            GET /api/trash and the page still answer 403 below manager, so the
+            row keeps the manager tier until the trash rule moves into
+            APP_RULES; a row that lands on a denial is worse than no row. */}
+        {accessLevel ? <li aria-hidden className="my-2 h-px bg-line" /> : null}
+        {accessLevel ? (
+          <NavItem href="/templates" Icon={LayoutTemplate} label="Templates" active={activeHref === "/templates"} />
+        ) : null}
+        {canAccessTier("manager", accessLevel) ? (
           <NavItem href="/trash" Icon={Trash2} label="Trash" active={activeHref === "/trash"} />
         ) : null}
-        <MoreNavItem />
       </ul>
 
-      {/* Sections rendered in user's preferred order; hidden ones omitted. */}
+      {/* Sections in the viewer's order; hidden ones (Customize) omitted. */}
       {sectionsOrder.map((key) => {
+        if (hiddenSections.includes(key)) return null;
         if (key === "favorites") return renderFavorites();
         if (key === "spaces") return renderSpaces();
         return null;
@@ -1046,9 +915,15 @@ function HomeSidebar() {
 
 /* ───────────────────────── Calendar sidebar ───────────────────────── */
 
+// sidebar-map 2. Meetings (row 2) and Clock in/out (row 4) are live, ungated
+// pages that carried a ROUTE_HUB row and a ROUTE_TITLES label but no door
+// anywhere in the product; these two rows are that door. Team calendar (row 5)
+// and Approvals (row 6) still have no page and stay out until they do.
 const PLANNER_ROWS = [
-  { href: "/planner", label: "Planner", Icon: Calendar },
-  { href: "/timesheets", label: "Timesheets", Icon: Calendar },
+  { href: "/planner", label: "Calendar", Icon: Calendar },
+  { href: "/meetings", label: "Meetings", Icon: Video },
+  { href: "/clock", label: "Clock in/out", Icon: Clock },
+  { href: "/timesheets", label: "Timesheets", Icon: ListOrdered },
 ];
 
 function CalendarSidebar() {
@@ -1066,11 +941,12 @@ function CalendarSidebar() {
 
 /* ───────────────────────── AI sidebar ───────────────────────── */
 
+// sidebar-map section 3: the personal rows are Ask AI and Agents. History
+// and Prompts had no page behind them (/sidekick/history and
+// /sidekick/prompts 404), and a row with no destination is not a row.
 const AI_ROWS = [
-  { href: "/sidekick", label: "Ask Sidekick", Icon: Sparkles },
-  { href: "/sidekick/history", label: "History", Icon: MessageSquare },
-  { href: "/sidekick/prompts", label: "Prompts", Icon: FileText },
-  { href: "/agents", label: "Agents", Icon: Sparkles },
+  { href: "/sidekick", label: "Ask AI", Icon: Sparkles },
+  { href: "/agents", label: "Agents", Icon: Bot },
 ];
 const AI_AUTOMATION_ROWS = [
   { href: "/automation/workflows", label: "Workflows", Icon: Workflow },
@@ -1078,14 +954,23 @@ const AI_AUTOMATION_ROWS = [
   { href: "/automation/health", label: "Health", Icon: Activity },
   { href: "/automation/usage", label: "Usage", Icon: GaugeCircle },
   { href: "/automation/logs", label: "Logs", Icon: ScrollText },
-  { href: "/automation/connections", label: "Connections", Icon: Plug },
+  { href: "/automation/connections", label: "Connections", Icon: Cable },
 ];
-// Re-parented from the Settings sidebar: ROUTE_HUB puts /build and /store in
-// this hub, and Settings is a takeover with no sidebar of its own (spec-shell
-// §1.2 rule 3). Open to everyone, exactly as they were there.
-const AI_BUILD_ROWS = [
-  { href: "/build", label: "Build apps", Icon: Wrench },
+// APPS (sidebar-map section 3 rows 10 to 12): Marketplace and Build apps
+// re-parented from the Settings sidebar (ROUTE_HUB puts /build and /store in
+// this hub, and Settings is a takeover with no sidebar of its own, spec-shell
+// §1.2 rule 3), plus Integrations, whose only member-wide door used to be a
+// palette command. Icons per the map: Cable for Connections so it does not
+// share Plug with Integrations, Hammer for Build apps so it does not share
+// Wrench with the Teams Tools row.
+// The map says every Member browses Integrations, but /integrations/layout.tsx
+// still redirects below manager (requireManagerOrRedirect, a tools-misc gate
+// this phase does not touch), so the row renders for the viewers the route
+// serves and never lands anyone on a redirect.
+const AI_BUILD_ROWS: { href: string; label: string; Icon: LucideIcon; manager?: boolean }[] = [
   { href: "/store", label: "Marketplace", Icon: ShoppingBag },
+  { href: "/integrations", label: "Integrations", Icon: Plug, manager: true },
+  { href: "/build", label: "Build apps", Icon: Hammer },
 ];
 // One list across every section: the active row is resolved over every
 // candidate at once, so two sections can never both light up.
@@ -1113,9 +998,9 @@ function AiSidebar() {
           </ul>
         </>
       ) : null}
-      <SectionLabel>Build</SectionLabel>
+      <SectionLabel>Apps</SectionLabel>
       <ul>
-        {AI_BUILD_ROWS.map((r) => (
+        {AI_BUILD_ROWS.filter((r) => !r.manager || isManager).map((r) => (
           <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
         ))}
       </ul>
@@ -1170,7 +1055,7 @@ function TeamsSidebar() {
   if (!isManagerTier) {
     return (
       <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={activeHref === "/people/me"} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My profile" active={activeHref === "/people/me"} />
       </ul>
     );
   }
@@ -1178,26 +1063,26 @@ function TeamsSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/team" Icon={LayoutDashboard} label="Overview" active={activeHref === "/team"} />
-        <NavItem href="/people/me" Icon={CircleUser} label="My Profile" active={activeHref === "/people/me"} />
+        <NavItem href="/team" Icon={Users} label="My team" active={activeHref === "/team"} />
+        <NavItem href="/people/me" Icon={CircleUser} label="My profile" active={activeHref === "/people/me"} />
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
-        <NavItem href="/people" Icon={Users} label="Directory" active={activeHref === "/people"} />
-        <NavItem href="/organization" Icon={Building2} label="Org chart" active={activeHref === "/organization"} />
-        <NavItem href="/people/roles" Icon={Briefcase} label="Roles" active={activeHref === "/people/roles"} />
+        <NavItem href="/people" Icon={BookUser} label="Directory" active={activeHref === "/people"} />
+        <NavItem href="/organization" Icon={Network} label="Org chart" active={activeHref === "/organization"} />
+        <NavItem href="/people/roles" Icon={Briefcase} label="Job titles" active={activeHref === "/people/roles"} />
       </ul>
       <SectionLabel>Alignment</SectionLabel>
       <ul>
-        <NavItem href="/kra-kpi" Icon={Star} label="KRAs & KPIs" active={activeHref === "/kra-kpi"} />
-        <NavItem href="/team/alignment" Icon={Target} label="Alignment board" active={activeHref === "/team/alignment"} />
+        <NavItem href="/kra-kpi" Icon={GaugeCircle} label="KRAs & KPIs" active={activeHref === "/kra-kpi"} />
+        <NavItem href="/team/alignment" Icon={Target} label="Alignment" active={activeHref === "/team/alignment"} />
       </ul>
       <SectionLabel>Performance</SectionLabel>
       <ul>
-        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Reviews" active={activeHref === "/team/reviews"} />
-        <NavItem href="/team/kpi-reviews" Icon={Award} label="KPI approvals" active={activeHref === "/team/kpi-reviews"} />
+        <NavItem href="/team/reviews" Icon={ClipboardCheck} label="Weekly reviews" active={activeHref === "/team/reviews"} />
+        <NavItem href="/team/kpi-reviews" Icon={ClipboardCheck} label="KPI reviews" active={activeHref === "/team/kpi-reviews"} />
         {DIRECTOR_LEVELS.has(accessLevel) ? (
-          <NavItem href="/team/rollup" Icon={BarChart3} label="Rollup" active={activeHref === "/team/rollup"} />
+          <NavItem href="/team/rollup" Icon={BarChart3} label="Sub-teams" active={activeHref === "/team/rollup"} />
         ) : null}
         <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={activeHref === "/team/workload"} />
         {isHrAdmin ? (
@@ -1212,8 +1097,8 @@ function TeamsSidebar() {
           <SectionLabel>Culture</SectionLabel>
           <ul>
             <NavItem href="/candor" Icon={MessageSquare} label="Candor" active={activeHref === "/candor"} />
-            <NavItem href="/kudos" Icon={ThumbsUp} label="Kudos" active={activeHref === "/kudos"} />
-            <NavItem href="/surveys" Icon={FileSpreadsheet} label="Surveys" active={activeHref === "/surveys"} />
+            <NavItem href="/kudos" Icon={Heart} label="Kudos" active={activeHref === "/kudos"} />
+            <NavItem href="/surveys" Icon={ListChecks} label="Surveys" active={activeHref === "/surveys"} />
           </ul>
         </>
       ) : null}
@@ -1223,7 +1108,7 @@ function TeamsSidebar() {
               carried there. */}
           <SectionLabel>Resourcing</SectionLabel>
           <ul>
-            <NavItem href="/tools" Icon={HardDrive} label="Tools & SaaS" active={activeHref === "/tools"} />
+            <NavItem href="/tools" Icon={Wrench} label="Tools" active={activeHref === "/tools"} />
             <NavItem href="/assets" Icon={Boxes} label="Assets" active={activeHref === "/assets"} />
           </ul>
         </>
@@ -1348,30 +1233,11 @@ function TimesheetsSidebar() {
   );
 }
 
-/* ───────────────────────── Settings sidebar (workspace + folded ops) ───────────────────────── */
-
-// Settings is a takeover: os-shell.tsx renders /settings/* and /account/* with
-// no rail and no sidebar, so this component only ever paints on /imports, the
-// one Settings-hub route outside the takeover. Its old Operations block (Build
-// apps, Marketplace, Tools & SaaS, Assets, Trash) is re-parented to the hubs
-// ROUTE_HUB gives those routes: Build and Marketplace to AI, Tools and Assets
-// to Teams, Trash to Work (spec-shell §1.2 rule 3, settings spec §7.1a). Every
-// one of the five kept its gate in the move, and the More launcher still lists
-// all five apps.
-const SETTINGS_DOOR_ROWS = [
-  { href: "/settings", label: "Workspace settings", Icon: SettingsIcon, match: "exact" as const },
-  { href: "/account/security", label: "Account · Security", Icon: ShieldCheck },
-];
-
+/* ───────────────────────── Settings ─────────────────────────
+ * Settings is a takeover (spec-shell 2.8): SettingsShell carries its own 264px
+ * list, so the hub has no sidebar body. /imports renders inside it too. */
 function SettingsSidebar() {
-  const activeHref = useActiveRowHref(SETTINGS_DOOR_ROWS);
-  return (
-    <ul>
-      {SETTINGS_DOOR_ROWS.map((r) => (
-        <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
-      ))}
-    </ul>
-  );
+  return null;
 }
 
 /* ───────────────────────── catalog ─────────────────────────
@@ -1414,27 +1280,44 @@ export const APPS: AppEntry[] = [
     CreateMenu: TeamsCreateMenu },
   { key: "docs", label: "Docs", Icon: FileText, defaultHref: "/docs",
     Sidebar: DocsSidebar, category: "Core", defaultPinned: true,
-    // DocsSidebar listens for this event and runs its "New page" flow.
-    createActions: [{ label: "New doc", icon: FileText, event: "docs-new-page" }] },
+    // sidebar-map section 6: the Docs "+" offers the three content creates.
+    // DocsSidebar listens for the event and runs its "New page" flow; the
+    // canvas list page opens its name prompt on ?new=1; Files has the upload
+    // zone. The PROCESS creates (SOP, policy, contract) stay on their pages'
+    // own primaries until the Docs phase gates them here by role.
+    createActions: [
+      { label: "New doc", icon: FileText, event: "docs-new-page" },
+      { label: "New canvas", icon: Brush, href: "/canvas?new=1" },
+      { label: "Upload file", icon: Upload, href: "/files" },
+    ] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables", category: "Core", defaultPinned: true,
     // TablesSidebar lists every worksheet (like Docs lists docs); the old
     // single "All tables" link survives as a secondary row inside it.
     Sidebar: TablesSidebar,
-    // ?new=1 is an armed latch on the list page: it opens the name prompt
-    // once on arrival, so the rail "+" goes straight into creation.
-    createActions: [{ label: "New sheet", icon: Table2, href: "/tables?new=1" }] },
-  { key: "library", label: "Library", Icon: LibraryIcon, defaultHref: "/library", Sidebar: LibrarySidebar,
+    // sidebar-map section 7: New table, New form, Import a CSV. ?new=1 is an
+    // armed latch on each list page: it opens the create flow once on
+    // arrival, so the "+" goes straight into creation.
+    createActions: [
+      { label: "New table", icon: Table2, href: "/tables?new=1" },
+      { label: "New form", icon: ClipboardCheck, href: "/forms?new=1" },
+      { label: "Import a CSV", icon: Upload, href: "/imports" },
+    ] },
+  // "Library" is retired as a word (naming-canon 2.8); the key survives as
+  // the gate for Files, and that is the label and door the palette prints.
+  { key: "library", label: "Files", Icon: LibraryIcon, defaultHref: "/files", Sidebar: LibrarySidebar,
     category: "Core", defaultPinned: true,
     createActions: [
       { label: "New note", icon: FileText, description: "A standalone note in the Library", onSelect: createLibraryNote },
       { label: "New canvas", icon: Brush, description: "Freeform canvas", onSelect: createLibraryWhiteboard },
-      { label: "Upload file", icon: Upload, description: "Drop a file into the Library", href: "/library?tab=files" },
+      // One label, one door (naming-canon 2.5): Files is /files everywhere
+      // in the chrome (the Docs sidebar row, the palette and the Docs "+").
+      { label: "Upload file", icon: Upload, description: "Drop a file into Files", href: "/files" },
     ] },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms", Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
   // Clips has no separate creatable object — /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
-  { key: "clips", label: "Clips", Icon: Video, defaultHref: "/notetaker", Sidebar: ClipsSidebar,
+  { key: "clips", label: "Notetaker", Icon: Video, defaultHref: "/notetaker", Sidebar: ClipsSidebar,
     category: "Core", defaultPinned: true },
   { key: "goals", label: "Goals", Icon: Trophy, defaultHref: "/okrs", Sidebar: GoalsSidebar,
     category: "Core", defaultPinned: true,
@@ -1463,7 +1346,10 @@ export const APPS: AppEntry[] = [
     ]) },
   { key: "candor", label: "Candor", Icon: MessageSquare, defaultHref: "/candor", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/candor", label: "Candor", Icon: MessageSquare }]) },
-  { key: "announcements", label: "Announce", Icon: Megaphone, defaultHref: "/announcements", category: "People", requiredAccess: "hr-admin",
+  // Every Member reads announcements (sidebar-map section 4 row 4; the page
+  // renders read-only below manager). Ungated here so the Talk hub and its
+  // Announcements row stay reachable with the Talk module off.
+  { key: "announcements", label: "Announcements", Icon: Megaphone, defaultHref: "/announcements", category: "People",
     Sidebar: linksSidebar([{ href: "/announcements", label: "Announcements", Icon: Megaphone }]) },
   { key: "kudos", label: "Kudos", Icon: ThumbsUp, defaultHref: "/kudos", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/kudos", label: "Kudos", Icon: ThumbsUp }]) },
@@ -1509,7 +1395,7 @@ export const APPS: AppEntry[] = [
       { href: "/agreements?view=trash", label: "Trash", Icon: Trash2 },
     ]) },
   // ── Build & Extend ──────────────────────────────────────────
-  { key: "build", label: "Build", Icon: Wrench, defaultHref: "/build", category: "Build & Extend",
+  { key: "build", label: "Build apps", Icon: Hammer, defaultHref: "/build", category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/build", label: "Build apps", Icon: Wrench }]) },
   { key: "store", label: "Marketplace", Icon: ShoppingBag, defaultHref: "/store", category: "Build & Extend",
     Sidebar: linksSidebar([{ href: "/store", label: "Marketplace", Icon: ShoppingBag }]) },
@@ -1530,8 +1416,11 @@ export const APPS: AppEntry[] = [
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
     category: "Workspace", alwaysPinned: true,
     Sidebar: SettingsSidebar },
-  // Org-wide recycle bin — one place to recover anything deleted (60-day window).
-  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash", category: "Workspace", requiredAccess: "hr-admin", defaultPinned: true,
+  // Org-wide Trash: one place to recover anything deleted (60-day window).
+  // Manager tier, matching GET /api/trash and the page (isManager) today;
+  // sidebar-map 1 row 7 widens it to every Member when the API's rule does.
+  { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash", category: "Workspace", defaultPinned: true,
+    requiredAccess: "manager",
     Sidebar: linksSidebar([
       { href: "/trash", label: "All deleted items", Icon: Trash2 },
     ]) },

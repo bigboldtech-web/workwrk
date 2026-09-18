@@ -18,8 +18,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { useRouter } from "next/navigation";
 import {
   MoreHorizontal, Edit2, Palette, Lock, Globe, Archive, Settings,
-  Share2, EyeOff, Loader2, Star, Link as LinkIcon, PanelLeft, PanelTop,
-  Plus, Zap, Tag, CircleDot, Download, Files, ArrowRightLeft, Copy, Trash2, Save,
+  Share2, Star, Link as LinkIcon,
+  Plus, Files, ArrowRightLeft, ArrowUp, ArrowDown, Copy, Trash2, Save,
   FileText, FolderPlus, ListChecks, Blocks,
 } from "lucide-react";
 import { SpaceIconPicker } from "./space-icon-picker";
@@ -31,6 +31,7 @@ import { useOsShell } from "./shell-context";
 import { MorePortal, type ContextMenuHandle } from "./more-portal";
 import { MenuItem, MenuList, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Dots } from "@/components/ui/dots";
 
 interface SpaceRowLike {
   id: string;
@@ -45,10 +46,13 @@ interface Props {
   space: SpaceRowLike;
   onUpdated?: () => void;
   onRequestShare?: () => void;
+  /** Reorder without a drag (spec-shell 1.16): absent at the ends of the list and while searching. */
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }
 
 export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function SpaceMoreTrigger(
-  { space, onUpdated, onRequestShare },
+  { space, onUpdated, onRequestShare, onMoveUp, onMoveDown },
   ref,
 ) {
   const [open, setOpen] = useState(false);
@@ -114,6 +118,8 @@ export const SpaceMoreTrigger = forwardRef<ContextMenuHandle, Props>(function Sp
           onRequestShare={onRequestShare}
           onOpenModules={() => setModulesOpen(true)}
           onRequestMove={() => setMoveOpen(true)}
+          onMoveUp={onMoveUp}
+          onMoveDown={onMoveDown}
         />
       </MorePortal>
       {modulesOpen ? (
@@ -141,6 +147,8 @@ function SpaceMoreMenu({
   onRequestShare,
   onOpenModules,
   onRequestMove,
+  onMoveUp,
+  onMoveDown,
 }: {
   space: SpaceRowLike;
   onClose: () => void;
@@ -148,6 +156,8 @@ function SpaceMoreMenu({
   onRequestShare?: () => void;
   onOpenModules?: () => void;
   onRequestMove?: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
 }) {
   const router = useRouter();
   const { toast } = useOsToast();
@@ -159,8 +169,9 @@ function SpaceMoreMenu({
   const [iconName, setIconName] = useState(space.icon);
   const [color, setColor] = useState(space.color ?? "#71717A");
   const [starred, setStarred] = useState<boolean | null>(null);
-  const [pinnedTop, setPinnedTop] = useState<boolean | null>(null);
 
+  // Favorites only: the "pin to top" action went with the pins strip
+  // (spec-shell 0: pins become Favorites).
   useEffect(() => {
     let alive = true;
     fetch("/api/preferences", { cache: "no-store" })
@@ -169,28 +180,10 @@ function SpaceMoreMenu({
         if (!alive) return;
         const ids: string[] = d?.effective?.home?.favoriteSpaceIds ?? [];
         setStarred(ids.includes(space.id));
-        const pins: { kind: string; id: string }[] = d?.effective?.home?.topPins ?? [];
-        setPinnedTop(pins.some((p) => p.kind === "space" && p.id === space.id));
       })
-      .catch(() => { if (alive) { setStarred(false); setPinnedTop(false); } });
+      .catch(() => { if (alive) setStarred(false); });
     return () => { alive = false; };
   }, [space.id]);
-
-  const togglePinTop = useCallback(async () => {
-    if (pinnedTop === null) return;
-    const next = !pinnedTop;
-    setPinnedTop(next);
-    try {
-      await fetch("/api/me/pins", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "space", id: space.id, on: next }),
-      });
-      if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("workwrk:pins-changed"));
-    } catch {
-      setPinnedTop(pinnedTop);
-    }
-  }, [space.id, pinnedTop]);
 
   const toggleFavorite = useCallback(async () => {
     if (starred === null) return;
@@ -407,7 +400,7 @@ function SpaceMoreMenu({
             disabled={Boolean(busy) || !draft.trim()}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "rename" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>
@@ -451,7 +444,7 @@ function SpaceMoreMenu({
             disabled={Boolean(busy)}
             className="h-7 px-2.5 rounded-md text-sm font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "icon" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "icon" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>
@@ -463,20 +456,12 @@ function SpaceMoreMenu({
 
   return (
     <MenuList>
-      <MenuSubmenu icon={Star} label="Favorite">
-        <MenuItem
-          icon={PanelLeft}
-          label={starred ? "Remove from Sidebar" : "Sidebar"}
-          onClick={toggleFavorite}
-          iconFilled={!!starred}
-        />
-        <MenuItem
-          icon={PanelTop}
-          label={pinnedTop ? "Remove from Top" : "Top"}
-          onClick={togglePinTop}
-          iconFilled={!!pinnedTop}
-        />
-      </MenuSubmenu>
+      <MenuItem
+        icon={Star}
+        label={starred ? "Remove from favorites" : "Add to favorites"}
+        onClick={toggleFavorite}
+        iconFilled={!!starred}
+      />
       <MenuItem icon={Edit2}    label="Rename"      onClick={() => setMode("rename")} />
       <MenuItem icon={LinkIcon} label="Copy link"   onClick={copyLink} />
 
@@ -495,24 +480,28 @@ function SpaceMoreMenu({
         onClick={() => patch({ visibility: isPrivate ? "WORKSPACE" : "PRIVATE" }, "visibility")}
       />
       <MenuItem icon={Blocks}    label="Modules"       onClick={() => { onClose(); onOpenModules?.(); }} />
-      <MenuItem icon={Zap}       label="Automations"   onClick={() => toast("Automations are coming soon")} />
-      <MenuItem icon={Tag}       label="Custom Fields" onClick={() => toast("Custom Fields are set per List")} />
-      <MenuItem icon={CircleDot} label="Task statuses" onClick={() => toast("Task statuses are set per List")} />
+      {/* Automations, Imports and Hide are absent until each exists
+          (spec-shell 1.15); Custom Fields and Task statuses live in the
+          List menu, where they are set. */}
       <MenuItem icon={Settings}  label="Space settings" onClick={() => { onClose(); router.push(`/spaces/${space.slug ?? space.id}`); }} />
 
       <MenuSeparator />
 
-      <MenuItem icon={Download}       label="Imports"   onClick={() => toast("Imports are coming soon")} />
       <MenuSubmenu icon={Files} label="Templates">
         <MenuItem icon={Files} label="Browse templates" onClick={() => { onClose(); openTemplateCenter({ applyContext: { spaceId: space.id } }); }} />
         <MenuItem icon={Save}  label="Save as template"  busy={busy === "save-template"} onClick={saveAsTemplate} />
       </MenuSubmenu>
       <MenuItem icon={ArrowRightLeft} label="Move"      onClick={() => { onClose(); onRequestMove?.(); }} />
+      {onMoveUp || onMoveDown ? (
+        <>
+          <MenuItem icon={ArrowUp}   label="Move up"   disabled={!onMoveUp}   onClick={() => { onClose(); onMoveUp?.(); }} />
+          <MenuItem icon={ArrowDown} label="Move down" disabled={!onMoveDown} onClick={() => { onClose(); onMoveDown?.(); }} />
+        </>
+      ) : null}
 
       <MenuSeparator />
 
       <MenuItem icon={Copy}    label="Duplicate" busy={busy === "duplicate"} onClick={duplicate} />
-      <MenuItem icon={EyeOff}  label="Hide from sidebar" onClick={() => toast("Hide is coming soon")} />
       <MenuItem icon={Archive} label="Archive"   busy={busy === "archive"} onClick={archive} />
       <MenuItem icon={Trash2}  label="Delete"    destructive busy={busy === "delete"} onClick={del} />
 

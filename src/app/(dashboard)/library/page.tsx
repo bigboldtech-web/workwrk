@@ -6,15 +6,28 @@
 // Notes live in Doc table; Whiteboards in Whiteboard table; Files is
 // a placeholder until the upload surface lands.
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  Library as LibraryIcon, FileText, Frame, Folder, Plus, Search, Loader2, Clock,
-  Upload, Star, Trash2, Download, ImageIcon, FileVideo, FileAudio, FileType,
+  FileText,
+  Frame,
+  Folder,
+  Plus,
+  Search,
+  Clock,
+  Upload,
+  Star,
+  Trash2,
+  Download,
+  ImageIcon,
+  FileVideo,
+  FileAudio,
+  FileType,
   Database,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
 import { DocFavoriteButton } from "@/components/docs/doc-favorite-button";
@@ -94,14 +107,7 @@ export default function LibraryPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Library"
-        Icon={LibraryIcon}
-        iconGradient={GRAD.tealGreen}
-        description="Notes, whiteboards, and files — connectable everywhere"
-        people={[PEOPLE.bb, PEOPLE.sc]}
-        morePeople={6}
-      />
+      <OsPageHeader title="Library" />
 
       <div className="px-6 pt-2 pb-3 border-b border-zinc-200 bg-white sticky top-0 z-10">
         <div className="flex items-center gap-4">
@@ -242,7 +248,7 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
 
       <div className="flex items-center justify-between mb-4">
         <div className="text-base text-zinc-500">
-          {rows === null ? "Loading…" : `${filtered.length} note${filtered.length === 1 ? "" : "s"}`}
+          {rows === null ? null : `${filtered.length} note${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
@@ -250,7 +256,7 @@ function NotesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
           disabled={creating}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
-          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          {creating ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
           New note
         </button>
       </div>
@@ -378,7 +384,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
 
       <div className="flex items-center justify-between mb-4">
         <div className="text-base text-zinc-500">
-          {rows === null ? "Loading…" : `${filtered.length} whiteboard${filtered.length === 1 ? "" : "s"}`}
+          {rows === null ? null : `${filtered.length} whiteboard${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
@@ -386,7 +392,7 @@ function WhiteboardsTab({ query, spaces }: { query: string; spaces: SpaceChip[] 
           disabled={creating}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
-          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          {creating ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
           New canvas
         </button>
       </div>
@@ -624,7 +630,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
 
       <div className="flex items-center justify-between mb-4">
         <div className="text-base text-zinc-500">
-          {rows === null ? "Loading…" : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}
+          {rows === null ? null : `${filtered.length} file${filtered.length === 1 ? "" : "s"}`}
         </div>
         <div className="flex items-center gap-2">
           <input
@@ -640,7 +646,7 @@ function FilesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
             disabled={uploading}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 disabled:opacity-50"
           >
-            {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {uploading ? <Dots variant="pending" /> : <Upload className="h-3.5 w-3.5" />}
             Upload
           </button>
         </div>
@@ -816,7 +822,7 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
 
       <div className="flex items-center justify-between mb-4">
         <div className="text-base text-zinc-500">
-          {rows === null ? "Loading…" : `${filtered.length} table${filtered.length === 1 ? "" : "s"}`}
+          {rows === null ? null : `${filtered.length} table${filtered.length === 1 ? "" : "s"}`}
         </div>
         <button
           type="button"
@@ -824,7 +830,7 @@ function TablesTab({ query, spaces }: { query: string; spaces: SpaceChip[] }) {
           disabled={creating}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 disabled:opacity-50"
         >
-          {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+          {creating ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
           New table
         </button>
       </div>

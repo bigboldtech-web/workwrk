@@ -21,14 +21,14 @@
  * opaque rows here, never silently dropped).
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowDown,
   ChevronDown,
-  ChevronLeft,
-  Loader2,
   Plus,
   Search,
   Trash2,
@@ -51,6 +51,8 @@ import {
   WORKFLOW_STATUS_META,
   relTime,
 } from "../../shared";
+import { BackButton } from "@/components/ui/back-button";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 /* ───────────────────────────── types ───────────────────────────── */
 
@@ -283,20 +285,14 @@ function ActionToken({
                 <div key={category}>
                   {i > 0 ? <MenuSeparator /> : null}
                   <MenuSectionLabel>{category}</MenuSectionLabel>
-                  {list.map((a) => (
+                  {list.map((a) => !a.available ? (
+                    <UpcomingOnly key={a.key}><ComingSoonRow label={a.name} /></UpcomingOnly>
+                  ) : (
                     <MenuItem
                       key={a.key}
                       label={a.name}
                       title={a.description}
                       selected={a.key === value}
-                      disabled={!a.available}
-                      trailing={
-                        !a.available ? (
-                          <span className="text-xs font-medium text-zinc-400">
-                            coming soon
-                          </span>
-                        ) : undefined
-                      }
                       onClick={() => {
                         onChange(a.key);
                         setOpen(false);
@@ -900,19 +896,14 @@ export default function AutomationBuilderPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-white">
         <p className="text-base text-zinc-500">This automation doesn&apos;t exist or you can&apos;t view it.</p>
-        <Link
-          href="/automation/workflows"
-          className="mt-3 text-base font-medium text-[#0073EA] hover:underline"
-        >
-          Back to automations →
-        </Link>
+        <div className="mt-3"><BackButton fallbackHref="/automation/workflows" label="Workflows" /></div>
       </div>
     );
   }
   if (!wf) {
     return (
-      <div className="flex h-full items-center gap-2 bg-white p-6 text-base text-zinc-500">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+      <div className="h-full bg-white p-6">
+        <SkeletonRows />
       </div>
     );
   }
@@ -925,13 +916,7 @@ export default function AutomationBuilderPage() {
     <div className="flex h-full flex-col bg-white">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2">
-        <Link
-          href="/automation/workflows"
-          aria-label="Back to automations"
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </Link>
+        <BackButton fallbackHref="/automation/workflows" label="Workflows" />
         <Workflow className="h-4 w-4 shrink-0 text-zinc-500" />
         <input
           value={name}
@@ -974,7 +959,7 @@ export default function AutomationBuilderPage() {
             disabled={saving || publishing}
             className={OUTLINE_PILL}
           >
-            {saving && !publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {saving && !publishing ? <Dots variant="pending" /> : null}
             Save draft
           </button>
           <button
@@ -983,7 +968,7 @@ export default function AutomationBuilderPage() {
             disabled={saving || publishing}
             className={DARK_PILL}
           >
-            {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {publishing ? <Dots variant="pending" /> : null}
             {wf.publishedVersionId ? "Republish" : "Publish"}
           </button>
         </div>

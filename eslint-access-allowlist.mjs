@@ -324,7 +324,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/components/layout/os/access-tiers.ts",
   "src/components/layout/os/apps-catalog.tsx",
   "src/components/layout/os/chat-sidebar.tsx",
-  "src/components/layout/os/click-sidebar.tsx",
+  "src/components/layout/os/hub-sidebar.tsx",
   "src/components/layout/os/docs-sidebar.tsx",
   "src/components/layout/os/invite-modal.tsx",
   "src/components/layout/os/settings-shell.tsx",

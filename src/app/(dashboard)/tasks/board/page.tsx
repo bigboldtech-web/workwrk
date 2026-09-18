@@ -13,17 +13,21 @@
  *  PATCH /api/tasks   { id, status?, title? }
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import {
-  KanbanSquare, Plus, Flame, Loader2, Clock, UserMinus,
-  CheckSquare, Activity,
+  Plus,
+  Flame,
+  Clock,
+  UserMinus,
+  CheckSquare,
+  Activity,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 type ApiStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
@@ -164,21 +168,12 @@ export default function SprintBoardPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Sprint board"
-        Icon={KanbanSquare}
-        iconGradient={GRAD.orangePink}
-        description={tasks === null
-          ? "Loading…"
-          : `${total} task${total === 1 ? "" : "s"} · ${inFlight} in flight · ${pct}% complete`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={5}
-      />
+      <OsPageHeader title="Sprint board" />
 
       {loadError ? (
-        <OsEmptyView Icon={KanbanSquare} iconGradient={GRAD.redPink} title="Couldn't load board" subtitle={`API error: ${loadError}`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load board" hint={`API error: ${loadError}`} action={{ label: "Try again", onClick: () => { void load(); } }} />
       ) : tasks === null ? (
-        <div className="spbd__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : (
         <div className="spbd">
           {/* Workload heatmap */}
@@ -222,7 +217,7 @@ export default function SprintBoardPage() {
 
           {/* Kanban columns */}
           {total === 0 ? (
-            <OsEmptyView Icon={KanbanSquare} iconGradient={GRAD.orangePink} title="No tasks in the window" subtitle="The board shows tasks from -14 days to +60 days. Add a task to any column to get started." chips={["Drag to move", "Quick-add at the top", "Priority sort built in"]} cta="Plan a task" />
+            <OsEmptyView context="board" title="No tasks in the window" hint="The board shows tasks from 14 days back to 60 days ahead." />
           ) : (
             <div className="spbd__cols">
               {COLS.map((c) => {
@@ -243,7 +238,7 @@ export default function SprintBoardPage() {
                       <span className="spbd__col-count">{items.length}</span>
                     </header>
                     <div className="spbd__col-add">
-                      {adding === c.id ? <Loader2 className="spbd__spin" /> : <Plus />}
+                      {adding === c.id ? <Dots variant="pending" /> : <Plus />}
                       <input
                         type="text"
                         value={drafts[c.id]}

@@ -7,16 +7,32 @@
  *  GET /api/settings
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import {
-  ShieldCheck, Key, Mail, Hash, CheckCircle2, AlertTriangle, Building,
-  Smartphone, Activity, ChevronRight, KeyRound, LogIn, LogOut, Clock,
-  RotateCcw, MonitorSmartphone, ShieldAlert, Loader2,
+  ShieldCheck,
+  Key,
+  Mail,
+  Hash,
+  CheckCircle2,
+  AlertTriangle,
+  Building,
+  Smartphone,
+  Activity,
+  ChevronRight,
+  KeyRound,
+  LogIn,
+  LogOut,
+  Clock,
+  RotateCcw,
+  MonitorSmartphone,
+  ShieldAlert,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { MfaEnrollDialog, MfaDisableDialog } from "./mfa-modal";
 import { ChangePasswordDialog } from "./change-password-modal";
@@ -141,14 +157,11 @@ export default function AccountSecurityPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Account · Security"
-        Icon={ShieldCheck}
-        iconGradient={GRAD.greenTeal}
-        description={me === null ? "Loading…" : `${me.user?.email ?? "you"} · MFA ${mfa?.mfaEnabled ? "on" : "off"} · email ${mfa?.emailVerified ? "verified" : "unverified"}`}
+      <OsPageHeader
+        title="Security"
         actions={
           <div className="acs__head-actions">
-            <Link href="/settings" className="acs__nav-link"><Hash /> Settings</Link>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
           </div>
         }
       />
@@ -197,7 +210,7 @@ export default function AccountSecurityPage() {
               sign out everywhere — it ends every session, including this one.
             </div>
             <button type="button" className="acs__danger-btn" onClick={() => void signOutEverywhere()} disabled={signingOutAll}>
-              {signingOutAll ? <Loader2 className="animate-spin" /> : <LogOut />}
+              {signingOutAll ? <Dots variant="pending" /> : <LogOut />}
               Sign out of all devices
             </button>
           </div>
@@ -206,7 +219,7 @@ export default function AccountSecurityPage() {
         <section className="acs__section">
           <header><h2><Clock /> Recent security activity</h2></header>
           {events === null ? (
-            <div className="acs__act-empty">Loading…</div>
+            <SkeletonLines lines={3} />
           ) : events.length === 0 ? (
             <div className="acs__act-empty">No recent activity yet.</div>
           ) : (

@@ -13,16 +13,44 @@
  *   { blocks: Block[]; meta?: { icon?: string; coverGradient?: string; coverUrl?: string } }
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonRows, SkeletonLines } from "@/components/ui/skeleton";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Link as LinkIcon, Sparkles, Loader2, Table as TableIcon,
-  ImagePlus, Smile, Trash2, MessageSquare, ListTree, X, Send, Star,
-  ArrowDownLeft, FileText, BookCopy, BookOpen, History, RotateCcw,
-  MoreHorizontal, Download, Copy, PanelRightOpen, Search, ArrowUp, AtSign,
-  ClipboardCopy, Type as TypeIcon, MoveHorizontal, Lock, ChevronRight, Paperclip,
-  FilePlus, ChevronUp,
+  Link as LinkIcon,
+  Sparkles,
+  Table as TableIcon,
+  ImagePlus,
+  Smile,
+  Trash2,
+  MessageSquare,
+  ListTree,
+  X,
+  Send,
+  Star,
+  ArrowDownLeft,
+  FileText,
+  BookCopy,
+  BookOpen,
+  History,
+  RotateCcw,
+  MoreHorizontal,
+  Download,
+  Copy,
+  PanelRightOpen,
+  Search,
+  ArrowUp,
+  AtSign,
+  ClipboardCopy,
+  Type as TypeIcon,
+  MoveHorizontal,
+  Lock,
+  ChevronRight,
+  Paperclip,
+  FilePlus,
+  ChevronUp,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
@@ -676,14 +704,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return (
       <div className="bdoc__error">
         <p>Couldn&apos;t load doc: {loadError}</p>
-        <BackButton fallbackHref="/docs" label="Back" />
+        <BackButton fallbackHref="/docs" label="Docs" />
       </div>
     );
   }
   if (!doc) {
     return (
       <div className="bdoc__loading">
-        <Loader2 className="bdoc__spin" /> Loading…
+        <SkeletonRows rows={6} />
       </div>
     );
   }
@@ -716,7 +744,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             }}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-base font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
           >
-            {restoring ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            {restoring ? <Dots variant="pending" /> : null}
             Restore page
           </button>
           <Link
@@ -755,7 +783,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             panes keep it minimal — DocSplitView provides Close + Swap. */}
         {pane !== "peek" && (
           <div className="flex min-w-0 items-center gap-1.5">
-            <BackButton fallbackHref="/docs" />
+            <BackButton fallbackHref="/docs" label="Docs" />
             <button
               type="button"
               onClick={() => void addSubpage()}
@@ -900,7 +928,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                   </div>
                   <div className="bdoc__peek-list">
                     {peekDocs === null ? (
-                      <div className="bdoc__peek-empty"><Loader2 className="bdoc__spin" /> Loading notes…</div>
+                      <div className="bdoc__peek-empty"><Dots variant="pending" /> Loading notes…</div>
                     ) : (() => {
                       const q = peekQuery.trim().toLowerCase();
                       const rows = q
@@ -1107,7 +1135,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
           </div>
         ) : blocks === null ? (
-          <div className="bdoc__loading"><Loader2 className="bdoc__spin" /> Loading content…</div>
+          <div className="bdoc__loading"><Dots variant="pending" /> Loading content…</div>
         ) : (
           // Key by docId + reading-mode + restoreNonce so the editor
           // force-remounts on doc switch, reading-mode toggle, or version
@@ -1346,13 +1374,13 @@ function PageComments({ docId, me, open, onClose }: { docId: string; me: MeUser 
         <div className="bdoc__pcmts-actions">
           <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void attachFile(f); }} />
           <button type="button" title="Attach file" aria-label="Attach file" disabled={!me || uploading} onClick={() => fileRef.current?.click()}>
-            {uploading ? <Loader2 className="bdoc__spin" /> : <Paperclip />}
+            {uploading ? <Dots variant="pending" /> : <Paperclip />}
           </button>
           <button type="button" title="Mention" aria-label="Mention" disabled={!me} onClick={() => { setDraft((p) => `${p}@`); inputRef.current?.focus(); }}>
             <AtSign />
           </button>
           <button type="button" className="bdoc__pcmts-send" title="Comment" aria-label="Send comment" disabled={!me || busy || !draft.trim()} onClick={() => void post()}>
-            {busy ? <Loader2 className="bdoc__spin" /> : <ArrowUp />}
+            {busy ? <Dots variant="pending" /> : <ArrowUp />}
           </button>
         </div>
       </div>
@@ -1666,14 +1694,14 @@ function PageActionsMenu({
               <>
                 {match("Summarize") && (
                   <PamRow
-                    icon={summarizing ? <Loader2 className="bdoc__spin" /> : <Sparkles />}
+                    icon={summarizing ? <Dots variant="pending" /> : <Sparkles />}
                     label={summary ? "Re-summarize" : "Summarize with AI"}
                     disabled={summarizing} onClick={act(onSummarize)}
                   />
                 )}
                 {match("Extract table") && (
                   <PamRow
-                    icon={extracting ? <Loader2 className="bdoc__spin" /> : <TableIcon />}
+                    icon={extracting ? <Dots variant="pending" /> : <TableIcon />}
                     label="Extract table" disabled={extracting} onClick={act(onExtractTable)}
                   />
                 )}
@@ -1888,7 +1916,7 @@ function AskDocPanel({ docId, docTitle, onClose }: { docId: string; docTitle: st
         ))}
         {running && (
           <div className="bdoc__ask-turn bdoc__ask-turn--assistant bdoc__ask-loading">
-            <Loader2 className="bdoc__spin" /> Reading the note…
+            <Dots variant="pending" /> Reading the note…
           </div>
         )}
       </div>
@@ -1909,7 +1937,7 @@ function AskDocPanel({ docId, docTitle, onClose }: { docId: string; docTitle: st
           }}
         />
         <button type="submit" disabled={running || !input.trim()}>
-          {running ? <Loader2 className="bdoc__spin" /> : <Send />}
+          {running ? <Dots variant="pending" /> : <Send />}
         </button>
       </form>
     </aside>
@@ -2070,7 +2098,7 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
           disabled={busy || !me}
         />
         <button type="submit" disabled={busy || !me || !draft.trim()}>
-          {busy ? <Loader2 className="bdoc__spin" /> : <Send />}
+          {busy ? <Dots variant="pending" /> : <Send />}
         </button>
       </form>
     </aside>
@@ -2181,7 +2209,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
       <div className="bdoc__hist-body">
         <div className="bdoc__hist-list">
           {versions === null ? (
-            <div className="bdoc__hist-loading"><Loader2 className="bdoc__spin" /> Loading…</div>
+            <div className="bdoc__hist-loading"><SkeletonLines lines={3} /></div>
           ) : versions.length === 0 ? (
             <div className="bdoc__hist-empty">No versions yet.</div>
           ) : (
@@ -2209,7 +2237,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
           {!selectedId ? (
             <div className="bdoc__hist-hint">Pick a version on the left to preview it here.</div>
           ) : previewLoading || !preview ? (
-            <div className="bdoc__hist-loading"><Loader2 className="bdoc__spin" /> Loading preview…</div>
+            <div className="bdoc__hist-loading"><Dots variant="pending" /> Loading preview…</div>
           ) : preview.blocks ? (
             <>
               <div className="bdoc__hist-preview-title">{preview.title || "Untitled"}</div>
@@ -2218,7 +2246,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
               </div>
               <footer className="bdoc__hist-foot">
                 <button type="button" className="bdoc__hist-restore" onClick={restore} disabled={restoring}>
-                  {restoring ? <Loader2 className="bdoc__spin" /> : <RotateCcw />}
+                  {restoring ? <Dots variant="pending" /> : <RotateCcw />}
                   Restore this version
                 </button>
               </footer>
@@ -2357,7 +2385,7 @@ function CoverPicker({ meta, onPick, onClear }: { meta: DocMeta; onPick: (m: Par
             if (f) void uploadFile(f);
           }}
         />
-        {uploading ? <><Loader2 className="bdoc__spin" /> Uploading…</> : <><ImagePlus /> Upload from device</>}
+        {uploading ? <><Dots variant="pending" /> Uploading…</> : <><ImagePlus /> Upload from device</>}
       </div>
 
       {/* Image gallery — real photo thumbnails */}

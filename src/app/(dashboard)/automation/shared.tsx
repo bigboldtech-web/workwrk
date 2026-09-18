@@ -17,6 +17,7 @@
 
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 
 export const BRAND_BLUE = "#0073EA";
 
@@ -79,24 +80,29 @@ export function StatusPill({ color, label }: { color: string; label: string }) {
 
 /** Board-page style header: icon + title left, meta beside, actions right. */
 export function AutomationHeader({
-  Icon,
+  Icon: _Icon,
   title,
   meta,
   actions,
 }: {
-  Icon: LucideIcon;
+  /** Retired: the page pattern carries no title icon (design-system 4.4). */
+  Icon?: LucideIcon;
   title: string;
   meta?: ReactNode;
   actions?: ReactNode;
 }) {
+  void _Icon;
   return (
-    <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-2">
-      <h1 className="inline-flex items-center gap-1.5 text-base font-semibold text-zinc-900">
-        <Icon className="h-4 w-4 text-zinc-500" />
-        <span>{title}</span>
-      </h1>
-      {meta ? <span className="text-sm text-zinc-500">{meta}</span> : null}
-      {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
-    </div>
+    <OsPageHeader
+      title={title}
+      actions={
+        meta || actions ? (
+          <>
+            {meta ? <span className="me-1 text-sm text-ink-2">{meta}</span> : null}
+            {actions}
+          </>
+        ) : undefined
+      }
+    />
   );
 }

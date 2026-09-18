@@ -13,9 +13,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { FileSignature, ArrowLeft, Loader2, Send, Link2, Pencil, Check, LayoutTemplate, Copy, X, Archive } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { GRAD } from "@/components/layout/os/catalog";
+import { FileSignature, Send, Link2, Pencil, Check, LayoutTemplate, Copy, X, Archive } from "lucide-react";
+import { OsPageHeader, OsPageHeaderSkeleton, HeaderAction } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
+
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
@@ -141,42 +144,45 @@ export default function AgreementEditorPage() {
     else toast("Couldn't archive");
   }
 
+  const parentCrumb = ag?.isTemplate
+    ? { label: "Contract templates", href: "/agreements?view=templates" }
+    : { label: "Contracts", href: "/agreements" };
+
   return (
     <>
-      <OsTitleBar
-        title={ag?.isTemplate ? "Contract template" : "Contract"}
-        Icon={FileSignature}
-        iconGradient={GRAD.indigoBlue}
-        showStandardActions={false}
-        description={ag ? (ag.isTemplate ? "reusable template" : ag.status.replace(/_/g, " ").toLowerCase()) : ""}
+      <Breadcrumb items={[parentCrumb, ...(ag ? [{ label: ag.title }] : [])]} />
+      {!ag && !loadErr ? (
+        <OsPageHeaderSkeleton />
+      ) : (
+      <OsPageHeader
+        title={ag?.title || (ag?.isTemplate ? "Contract template" : "Contract")}
+        back={ag?.isTemplate
+          ? { fallbackHref: "/agreements?view=templates", label: "Contract templates" }
+          : { fallbackHref: "/agreements", label: "Contracts" }}
         actions={
-          <div className="flex items-center gap-2">
+          <>
             {ag && ag.sourceType !== "pdf" ? (
-              <button type="button" onClick={() => setEditText((v) => !v)} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-                {editText ? <><Check className="h-3.5 w-3.5" /> Done editing</> : <><Pencil className="h-3.5 w-3.5" /> Edit text</>}
-              </button>
+              <HeaderAction icon={editText ? Check : Pencil} label={editText ? "Done editing" : "Edit text"} active={editText} onClick={() => setEditText((v) => !v)} />
             ) : null}
-            {ag?.isTemplate ? (
-              <button type="button" onClick={useTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9]"><FileSignature className="h-3.5 w-3.5" /> Use template</button>
-            ) : (
+            {ag && !ag.isTemplate ? (
               <>
-                <button type="button" onClick={saveAsTemplate} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><LayoutTemplate className="h-3.5 w-3.5" /> Save as template</button>
-                <button type="button" onClick={copyViewLink} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Link2 className="h-3.5 w-3.5" /> Copy view link</button>
-                <button type="button" onClick={send} disabled={sendBusy} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
-                  {sendBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send to signers
-                </button>
+                <HeaderAction icon={LayoutTemplate} label="Save as template" onClick={saveAsTemplate} />
+                <HeaderAction icon={Link2} label="Copy view link" onClick={copyViewLink} />
               </>
-            )}
-            <button type="button" onClick={archive} title="Move to Trash" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50 hover:text-red-600"><Archive className="h-3.5 w-3.5" /></button>
-            <Link href={ag?.isTemplate ? "/agreements?view=templates" : "/agreements"} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><ArrowLeft className="h-3.5 w-3.5" /> All</Link>
-          </div>
+            ) : null}
+            {ag ? <HeaderAction icon={Archive} aria-label="Move to Trash" title="Move to Trash" onClick={archive} /> : null}
+          </>
         }
+        primary={!ag ? undefined : ag.isTemplate
+          ? { label: "Use template", icon: FileSignature, onClick: useTemplate }
+          : { label: "Send to signers", icon: Send, onClick: send, busy: sendBusy }}
       />
+      )}
 
       {loadErr ? (
-        <div className="px-6 py-8 text-xs text-zinc-500">Couldn&apos;t load this contract. <Link href="/agreements" className="text-[#0073EA] underline">Back</Link></div>
+        <ErrorState what="this contract" onRetry={() => { setLoadErr(false); void load(); }} />
       ) : !ag ? (
-        <div className="flex items-center gap-2 px-6 py-8 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+        <SkeletonRows />
       ) : (
         <div className="px-6 py-6">
           <div className="mb-4 flex flex-wrap items-end gap-3">

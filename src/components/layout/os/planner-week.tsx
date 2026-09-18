@@ -8,11 +8,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
-  ChevronLeft, ChevronRight, Loader2, X, Plus, Video, Users, Link2, MapPin, AlignLeft,
+  ChevronLeft, ChevronRight, X, Plus, Video, Users, Link2, MapPin, AlignLeft,
 } from "lucide-react";
 import { PlannerCommandBar } from "./planner-command-bar";
 import { PlannerSidePanel } from "./planner-side-panel";
 import { PlannerConnectBanner } from "./planner-connect-gate";
+import { Dots } from "@/components/ui/dots";
 
 const BANNER_DISMISS_KEY = "planner:connectBannerDismissed";
 
@@ -149,13 +150,13 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
     <div className="flex flex-col h-full relative" onMouseUp={finishDrag} onMouseLeave={() => { if (draggingRef.current) finishDrag(); }}>
       <div className="px-6 h-12 flex items-center gap-3 border-b border-zinc-200 dark:border-[#2A2F38] shrink-0">
         <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Planner</div>
-        <div className="flex items-center gap-1 ml-2">
-          <button type="button" onClick={() => setAnchor(addDays(weekStart, -7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Previous week"><ChevronLeft className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
+        <div className="flex items-center gap-1 ms-2">
+          <button type="button" onClick={() => setAnchor(addDays(weekStart, -7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Previous week"><ChevronLeft className="h-4 w-4 text-zinc-600 dark:text-zinc-300 rtl:rotate-180" /></button>
           <button type="button" onClick={() => setAnchor(new Date())} className="h-7 px-2.5 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 text-base text-zinc-700 dark:text-zinc-200">Today</button>
-          <button type="button" onClick={() => setAnchor(addDays(weekStart, 7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Next week"><ChevronRight className="h-4 w-4 text-zinc-600 dark:text-zinc-300" /></button>
+          <button type="button" onClick={() => setAnchor(addDays(weekStart, 7))} className="h-7 w-7 rounded-md hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center" aria-label="Next week"><ChevronRight className="h-4 w-4 text-zinc-600 dark:text-zinc-300 rtl:rotate-180" /></button>
         </div>
         <div className="text-base font-medium text-zinc-700 dark:text-zinc-200">{label}</div>
-        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" /> : null}
+        {loading ? <Dots variant="pending" /> : null}
       </div>
 
       {/* Not a gate: the grid below renders local tasks + work items for
@@ -169,7 +170,7 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
         {!embedded ? <PlannerSidePanel onCreated={load} autoFocusMeet={initialMeet} /> : null}
 
             <div className="flex-1 flex flex-col min-w-0">
-              <div className="flex shrink-0 border-b border-zinc-200 dark:border-[#2A2F38] pr-[14px]">
+              <div className="flex shrink-0 border-b border-zinc-200 dark:border-[#2A2F38] pe-[14px]">
                 <div className="w-14 shrink-0" />
                 {days.map((d) => {
                   const today = sameDay(d, now);
@@ -186,7 +187,7 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                 <div className="flex" style={{ height: DAY_PX }}>
                   <div className="w-14 shrink-0 relative">
                     {Array.from({ length: 24 }, (_, h) => (
-                      <div key={h} className="absolute right-2 -translate-y-1/2 text-xs text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
+                      <div key={h} className="absolute end-2 -translate-y-1/2 text-xs text-zinc-400 dark:text-zinc-500" style={{ top: h * HOUR_PX }}>{h === 0 ? "" : fmtHour(h)}</div>
                     ))}
                   </div>
                   {days.map((day) => {
@@ -198,20 +199,20 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                     return (
                       <div
                         key={day.toISOString()}
-                        className="flex-1 relative border-l border-zinc-100 dark:border-[#23272F] cursor-pointer select-none"
+                        className="flex-1 relative border-s border-zinc-100 dark:border-[#23272F] cursor-pointer select-none"
                         onMouseDown={(e) => onColMouseDown(day, e)}
                         onMouseMove={(e) => onColMouseMove(day, e)}
                       >
                         {Array.from({ length: 24 }, (_, h) => (
-                          <div key={h} className="absolute left-0 right-0 border-b border-zinc-100 dark:border-[#1F232A]" style={{ top: h * HOUR_PX, height: HOUR_PX, background: h < WORK_START || h >= WORK_END ? "rgba(120,130,150,0.05)" : undefined }} />
+                          <div key={h} className="absolute start-0 end-0 border-b border-zinc-100 dark:border-[#1F232A]" style={{ top: h * HOUR_PX, height: HOUR_PX, background: h < WORK_START || h >= WORK_END ? "rgba(120,130,150,0.05)" : undefined }} />
                         ))}
                         {showSel && selHi > selLo ? (
-                          <div className="absolute left-1 right-1 z-20 rounded-md pointer-events-none" style={{ top: (selLo / 60) * HOUR_PX, height: ((selHi - selLo) / 60) * HOUR_PX, background: "#2F8BF033", border: "1px solid #2F8BF0" }} />
+                          <div className="absolute start-1 end-1 z-20 rounded-md pointer-events-none" style={{ top: (selLo / 60) * HOUR_PX, height: ((selHi - selLo) / 60) * HOUR_PX, background: "#2F8BF033", border: "1px solid #2F8BF0" }} />
                         ) : null}
                         {isToday ? (
-                          <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: (minutesOfDay(now) / 60) * HOUR_PX }}>
+                          <div className="absolute start-0 end-0 z-10 pointer-events-none" style={{ top: (minutesOfDay(now) / 60) * HOUR_PX }}>
                             <div className="h-px bg-[#FB5A6F]" />
-                            <div className="absolute -left-1 -top-1 h-2 w-2 rounded-full bg-[#FB5A6F]" />
+                            <div className="absolute -start-1 -top-1 h-2 w-2 rounded-full bg-[#FB5A6F]" />
                           </div>
                         ) : null}
                         {events.map((e) => {
@@ -225,7 +226,7 @@ export function PlannerWeek({ embedded }: { embedded?: boolean }) {
                               type="button"
                               onMouseDown={(ev) => ev.stopPropagation()}
                               onClick={(ev) => { ev.stopPropagation(); openEvent(e); }}
-                              className="absolute left-1 right-1 rounded-md px-1.5 py-0.5 text-left overflow-hidden hover:brightness-95 z-10"
+                              className="absolute start-1 end-1 rounded-md px-1.5 py-0.5 text-start overflow-hidden hover:brightness-95 z-10"
                               style={{ top, height, background: `${color}22`, borderLeft: `3px solid ${color}` }}
                               title={e.title}
                             >
@@ -311,7 +312,7 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
           {CREATE_TABS.map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={`px-2.5 h-7 rounded-md text-base font-medium ${tab === t ? "bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white" : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-white/5"}`}>{t}</button>
           ))}
-          <button type="button" onClick={onClose} className="ml-auto w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500" aria-label="Close"><X className="w-4 h-4" /></button>
+          <button type="button" onClick={onClose} className="ms-auto w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
 
         <div className="px-3 pb-3 space-y-2.5">
@@ -339,7 +340,7 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
             <Row icon={Users} label="Add participants" muted />
             <Row icon={Link2} label="Add tasks and docs" muted />
             <Row icon={MapPin} label="Add location or room" muted />
-            <button type="button" onClick={() => setShowDesc((v) => !v)} className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-white/5 text-left text-base text-zinc-500 dark:text-zinc-400">
+            <button type="button" onClick={() => setShowDesc((v) => !v)} className="w-full flex items-center gap-2.5 px-1.5 py-1.5 rounded-md hover:bg-zinc-50 dark:hover:bg-white/5 text-start text-base text-zinc-500 dark:text-zinc-400">
               <AlignLeft className="w-4 h-4" /> {showDesc ? "Hide description" : "Add description"}
             </button>
             {showDesc ? (
@@ -350,7 +351,7 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="px-3 h-9 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
             <button type="button" onClick={() => void create()} disabled={saving} className="px-4 h-9 rounded-md text-base font-medium text-white inline-flex items-center gap-1.5 disabled:opacity-40" style={{ background: accent }}>
-              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} Create
+              {saving ? <Dots variant="pending" /> : <Plus className="w-3.5 h-3.5" />} Create
             </button>
           </div>
         </div>

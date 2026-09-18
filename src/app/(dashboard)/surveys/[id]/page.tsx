@@ -14,15 +14,27 @@
  * gated; returns only the caller's own prior answers).
  */
 
+import { Dots } from "@/components/ui/dots";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
 import {
-  ArrowLeft, Lock, Loader2, CheckCircle2, AlertTriangle, BarChart3, MessageSquare,
-  Download, Users, Pencil, Activity, Edit3, Star, TrendingUp,
+  Lock,
+  CheckCircle2,
+  AlertTriangle,
+  BarChart3,
+  MessageSquare,
+  Download,
+  Users,
+  Pencil,
+  Activity,
+  Edit3,
+  Star,
+  TrendingUp,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SurveyBuilder, type EditableSurvey, type BuilderQuestion } from "../_components/survey-builder";
+import { BackButton } from "@/components/ui/back-button";
 
 type SrStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 type AnswerValue = string | number | string[];
@@ -139,7 +151,7 @@ export default function SurveyDetailPage() {
   useEffect(() => { void load(); }, [load]);
 
   if (status === "loading") {
-    return <Centered><Loader2 className="w-4 h-4 animate-spin" /> Loading survey…</Centered>;
+    return <SkeletonRows />;
   }
   if (status === "notfound") {
     return <StatePanel Icon={AlertTriangle} title="Survey not found" subtitle="It may have been deleted, or it belongs to another workspace." />;
@@ -174,9 +186,7 @@ export default function SurveyDetailPage() {
     <>
       {/* Header */}
       <div className="px-7 pt-4 pb-3 bg-white border-b border-[var(--os-line)]">
-        <Link href="/surveys" className="inline-flex items-center gap-1.5 text-sm text-[var(--os-ink-3)] hover:text-[var(--os-ink)] mb-2">
-          <ArrowLeft className="w-3.5 h-3.5" /> All surveys
-        </Link>
+        <div className="mb-2"><BackButton fallbackHref="/surveys" label="Surveys" /></div>
         <div className="flex items-start gap-3 flex-wrap">
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold text-[var(--os-ink)] leading-tight truncate">{survey.title}</h1>
@@ -391,7 +401,7 @@ function RespondPanel({
           disabled={submitting}
           className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-[var(--os-brand)] text-white text-base font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
         >
-          {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          {submitting ? <Dots variant="pending" /> : null}
           {done ? "Update response" : "Submit response"}
         </button>
       </div>
@@ -588,7 +598,7 @@ function ResultsPanel({
 
   useEffect(() => { void load(); }, [load]);
 
-  if (state === "loading") return <Centered inline><Loader2 className="w-4 h-4 animate-spin" /> Loading results…</Centered>;
+  if (state === "loading") return <SkeletonRows rows={4} />;
   if (state === "error" || !results) {
     return <StatePanel Icon={AlertTriangle} title="Couldn't load results" subtitle="Please try again." inline onRetry={() => { setState("loading"); void load(); }} />;
   }
@@ -757,14 +767,6 @@ function StatTile({ label, value, sub, Icon }: { label: string; value: string; s
       </div>
       <div className="mt-1 text-xl font-semibold text-[var(--os-ink)] leading-none tabular-nums">{value}</div>
       <div className="mt-0.5 text-xs text-[var(--os-ink-4)]">{sub}</div>
-    </div>
-  );
-}
-
-function Centered({ children, inline }: { children: React.ReactNode; inline?: boolean }) {
-  return (
-    <div className={`flex items-center justify-center gap-2 text-base text-[var(--os-ink-3)] ${inline ? "py-16" : "h-full py-24"}`}>
-      {children}
     </div>
   );
 }

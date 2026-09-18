@@ -1,44 +1,42 @@
 "use client";
 
-// Menu primitives — the one option-row used by every dropdown, "..."
+// Menu primitives: the one option-row used by every dropdown, "..."
 // overflow, create popover, context menu and picker in the app.
 //
-// Before this, ~25 surfaces each re-implemented their own row with
-// drifting `gap-2 / gap-2.5 / gap-3`, `px-2 / px-2.5 / px-3`,
-// `py-1 / py-1.5 / py-2` and `text-base / text-base / text-xs`.
-// That is the "unaligned options" the redesign is fixing.
+// Restyled onto the design-system tokens (design-system 5.6, 3.2): a
+// bordered `--os-surface` panel with the popover shadow and radius 8; rows
+// 36px, 14/400, 16px icon in `--os-ink-2`, hover `--os-surface-hov`, a
+// destructive row in `--os-danger-text`. No zinc, no hex, no dark literals:
+// dark is a rebinding of the tokens.
 //
-// Canonical row (variant="flush", the dense menu default):
-//   gap-2.5 · px-3 py-1.5 · text-base · 14px icon · full-bleed hover
-// Comfortable row (variant="inset", create-style with descriptions):
-//   gap-2 · rounded-lg px-2 · min-h-9 · text-base · 16px icon
-//
-// IMPORTANT: these render real <button>/<a> elements. Inside the OS
-// shell (`.workwrk-os`) a global reset strips button border/padding/bg,
-// so always render menus through a portal (MorePortal / Radix) — every
-// existing call site already does.
+// IMPORTANT: these render real <button>/<a> elements. Inside the OS shell
+// (`.workwrk-os`) a global reset strips button border/padding/bg, so always
+// render menus through a portal (MorePortal / Radix) as every call site does.
 
 import { createElement, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { cva, type VariantProps } from "class-variance-authority";
-import { Check, ChevronRight, Loader2, type LucideIcon } from "lucide-react";
+import { Check, ChevronRight, type LucideIcon } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { cn } from "@/lib/utils";
 
 /* ─────────────────────────── hover submenu ─────────────────────────── */
 
-// A row that reveals a nested MenuList to its right on hover/click (ClickUp
-// "Favorite ›" style). The nested panel is a descendant, and a padding bridge
-// spans the gap, so moving onto it doesn't close the submenu.
+// A row that reveals a nested MenuList to its right on hover/click. The
+// nested panel is a descendant, and a padding bridge spans the gap, so
+// moving onto it doesn't close the submenu.
 export function MenuSubmenu({
   icon,
   iconClassName,
   label,
   children,
+  width = 200,
 }: {
   icon?: LucideIcon;
   iconClassName?: string;
   label: ReactNode;
   children: ReactNode;
+  width?: number;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -47,10 +45,10 @@ export function MenuSubmenu({
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
     >
-      <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => setOpen((v) => !v)} />
+      <MenuItem icon={icon} iconClassName={iconClassName} label={label} submenu onClick={() => setOpen((v) => !v)} aria-expanded={open} />
       {open ? (
-        <div className="absolute left-full top-[-6px] z-[120] pl-1">
-          <MenuList className="min-w-[190px]">{children}</MenuList>
+        <div className="absolute start-full top-[-6px] z-[120] ps-1">
+          <MenuList style={{ minWidth: width }}>{children}</MenuList>
         </div>
       ) : null}
     </div>
@@ -68,7 +66,7 @@ export function MenuList({
     <div
       role="menu"
       className={cn(
-        "bg-white dark:bg-[#1B1F26] rounded-xl border border-zinc-200 dark:border-[#2A2F38] shadow-2xl py-1.5",
+        "rounded-lg border border-line bg-raised py-1 text-ink shadow-[var(--os-shadow-pop)]",
         className,
       )}
       {...rest}
@@ -79,7 +77,7 @@ export function MenuList({
 }
 
 export function MenuSeparator({ className }: { className?: string }) {
-  return <div role="separator" className={cn("h-px bg-zinc-100 dark:bg-[#2A2F38] my-1", className)} />;
+  return <div role="separator" className={cn("my-1 h-px bg-line", className)} />;
 }
 
 export function MenuSectionLabel({
@@ -92,7 +90,7 @@ export function MenuSectionLabel({
   return (
     <div
       className={cn(
-        "px-3 pt-1 pb-0.5 text-micro font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500",
+        "px-3 pb-1 pt-2 text-micro uppercase tracking-[0.06em] text-ink-2",
         className,
       )}
     >
@@ -105,46 +103,42 @@ export function MenuSectionLabel({
 
 const rowVariants = cva(
   // appearance-none + bg-transparent: these rows often render in a portal
-  // (outside .workwrk-os), where the global button reset doesn't reach — native
-  // buttons then draw their OS gray chrome (which ignores background-color), so
-  // appearance-none is required to kill it. hover/active still paint the fill.
-  "group/menuitem w-full flex items-center text-left appearance-none bg-transparent transition-colors disabled:opacity-100 focus-visible:outline-none",
+  // (outside .workwrk-os), where the global button reset doesn't reach; native
+  // buttons then draw their OS gray chrome, so appearance-none is required.
+  "group/menuitem w-full flex items-center text-left appearance-none bg-transparent transition-colors disabled:opacity-100 focus-visible:outline-none focus-visible:bg-hover",
   {
     variants: {
       variant: {
-        flush: "gap-2.5 px-3 py-1.5 text-base",
-        inset: "gap-2 rounded-lg px-2 py-1.5 min-h-9 text-base",
+        flush: "gap-2.5 px-3 min-h-9 text-base",
+        inset: "gap-2 rounded-md px-2 py-1.5 min-h-9 text-base",
       },
       tone: {
-        default: "text-zinc-800 dark:text-zinc-200",
-        destructive: "text-red-600 dark:text-red-400",
-        disabled: "text-zinc-400 dark:text-zinc-500 cursor-not-allowed",
+        default: "text-ink",
+        destructive: "text-danger-text",
+        disabled: "text-ink-4 cursor-not-allowed",
       },
     },
     compoundVariants: [
-      // NB: avoid `bg-white/10` here — a light-mode guardrail in globals.css
-      // (`[class*="bg-white/10"] { background:#0000000f !important }`) matches the
-      // class substring even on a `dark:hover:` variant and paints every row gray.
-      { tone: "default", class: "hover:bg-zinc-50 dark:hover:bg-zinc-800" },
-      { tone: "destructive", class: "hover:bg-red-50 dark:hover:bg-red-500/15" },
+      { tone: "default", class: "hover:bg-hover" },
+      { tone: "destructive", class: "hover:bg-danger-bg" },
     ],
     defaultVariants: { variant: "flush", tone: "default" },
   },
 );
 
-const ICON_SIZE = { flush: "h-3.5 w-3.5", inset: "h-4 w-4" } as const;
+const ICON_SIZE = { flush: "h-4 w-4", inset: "h-4 w-4" } as const;
 
 export interface MenuItemProps extends VariantProps<typeof rowVariants> {
   /** Leading lucide icon. Ignored if `leading` is supplied. */
   icon?: LucideIcon;
-  /** Arbitrary leading node (avatar, swatch, EntityTile) — overrides `icon`. */
+  /** Arbitrary leading node (avatar, swatch, EntityTile); overrides `icon`. */
   leading?: ReactNode;
   label: ReactNode;
   /** Optional second line (forces the comfortable two-line layout). */
   description?: ReactNode;
   /** Right-aligned custom content. */
   trailing?: ReactNode;
-  /** Right-aligned keyboard hint, e.g. "⌥T". */
+  /** Right-aligned keyboard hint, e.g. "⌘⇧K". */
   shortcut?: string;
   badge?: ReactNode;
   /** Renders a chevron-right (opens a sub-step / submenu). */
@@ -157,7 +151,7 @@ export interface MenuItemProps extends VariantProps<typeof rowVariants> {
   active?: boolean;
   destructive?: boolean;
   disabled?: boolean;
-  /** Override the leading icon color (e.g. "text-blue-500"). */
+  /** Override the leading icon colour class. */
   iconClassName?: string;
   /** Fill the leading icon (e.g. a favorited star). */
   iconFilled?: boolean;
@@ -166,6 +160,7 @@ export interface MenuItemProps extends VariantProps<typeof rowVariants> {
   title?: string;
   className?: string;
   role?: string;
+  "aria-expanded"?: boolean;
 }
 
 export function MenuItem({
@@ -190,6 +185,7 @@ export function MenuItem({
   title,
   className,
   role = "menuitem",
+  "aria-expanded": ariaExpanded,
 }: MenuItemProps) {
   const v = variant ?? "flush";
   const tone = disabled ? "disabled" : destructive ? "destructive" : "default";
@@ -205,21 +201,22 @@ export function MenuItem({
               "shrink-0",
               iconClassName ??
                 (disabled
-                  ? "text-zinc-300 dark:text-zinc-600"
+                  ? "text-ink-4"
                   : destructive
-                    ? "text-red-500"
+                    ? "text-danger-text"
                     : iconFilled
-                      ? "text-amber-400"
-                      : "text-zinc-500 dark:text-zinc-400"),
+                      ? "text-warning-solid"
+                      : "text-ink-2"),
             ),
+            strokeWidth: 1.5,
             style: iconFilled ? { fill: "currentColor" } : undefined,
           })
         : null;
 
   const labelBlock = description ? (
-    <span className="min-w-0 flex-1">
+    <span className="min-w-0 flex-1 py-0.5">
       <span className="block truncate font-medium">{label}</span>
-      <span className="block truncate text-sm font-normal text-zinc-500 dark:text-zinc-400">{description}</span>
+      <span className="block truncate text-sm font-normal text-ink-2">{description}</span>
     </span>
   ) : (
     <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -228,18 +225,18 @@ export function MenuItem({
   const trailingNode = (
     <>
       {badge}
-      {shortcut ? <span className="text-sm text-zinc-400 dark:text-zinc-500">{shortcut}</span> : null}
+      {shortcut ? <span className="text-xs font-medium text-ink-3">{shortcut}</span> : null}
       {trailing}
-      {selected ? <Check className="h-3.5 w-3.5 text-zinc-900 dark:text-zinc-100 shrink-0" /> : null}
-      {submenu ? <ChevronRight className="h-3 w-3 text-zinc-400 dark:text-zinc-500 shrink-0" /> : null}
-      {busy ? <Loader2 className="h-3 w-3 animate-spin text-zinc-400 dark:text-zinc-500 shrink-0" /> : null}
+      {selected ? <Check className="h-4 w-4 shrink-0 text-ink" strokeWidth={1.5} /> : null}
+      {submenu ? <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-3 rtl:rotate-180" strokeWidth={1.5} /> : null}
+      {busy ? <Dots variant="pending" /> : null}
     </>
   );
   const hasTrailing = badge || shortcut || trailing || selected || submenu || busy;
 
   const rowClass = cn(
     rowVariants({ variant: v, tone }),
-    active ? "bg-zinc-100 dark:bg-zinc-800" : null,
+    active ? "bg-active" : null,
     className,
   );
 
@@ -248,7 +245,7 @@ export function MenuItem({
       {leadingNode}
       {labelBlock}
       {hasTrailing ? (
-        <span className="ml-auto flex items-center gap-1.5 shrink-0 pl-1.5">{trailingNode}</span>
+        <span className="ms-auto flex shrink-0 items-center gap-1.5 ps-1.5">{trailingNode}</span>
       ) : null}
     </>
   );
@@ -269,6 +266,7 @@ export function MenuItem({
       disabled={isDisabled}
       title={title}
       aria-disabled={isDisabled || undefined}
+      aria-expanded={ariaExpanded}
       className={rowClass}
     >
       {inner}

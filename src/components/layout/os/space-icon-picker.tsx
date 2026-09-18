@@ -66,17 +66,17 @@ export function SpaceIconPicker({ iconName, color, fallbackInitial, onChange }: 
       {open ? (
         <div
           ref={popoverRef}
-          className="absolute left-0 top-12 z-[60] w-[320px] rounded-xl border border-border bg-surface shadow-2xl p-3"
+          className="absolute start-0 top-12 z-[60] w-[320px] rounded-xl border border-border bg-surface shadow-2xl p-3"
         >
           <div className="flex items-center gap-2 mb-3">
             <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
+              <Search className="absolute start-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
               <input
                 type="text"
                 placeholder="Search…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-surface-2 text-base focus:outline-none focus:border-[color:var(--accent)]"
+                className="w-full h-8 ps-8 pe-2 rounded-md border border-border bg-surface-2 text-base focus:outline-none focus:border-[color:var(--accent)]"
                 autoFocus
               />
             </div>
@@ -113,7 +113,7 @@ export function SpaceIconPicker({ iconName, color, fallbackInitial, onChange }: 
             ))}
           </div>
 
-          <div className="grid grid-cols-9 gap-1 max-h-[280px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-9 gap-1 max-h-[280px] overflow-y-auto pe-1">
             {filtered.map((entry) => {
               const selected = iconName === entry.name;
               return (

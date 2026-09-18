@@ -12,16 +12,39 @@
 // Calls POST /api/boards/[id]/views { name, type, isShared? } and on success
 // router.refresh()es the board page so the new tab appears.
 
+import { Dots } from "@/components/ui/dots";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Plus, Search, Loader2, Sparkles,
-  List as ListIcon, GanttChart, Calendar as CalIcon, FileText, LayoutGrid, ClipboardList,
-  BarChart3, Table2, Brush, AlignLeft, Activity, GaugeCircle, Workflow, MapPin, Users as UsersIcon,
-  Globe, FileSpreadsheet, FileType, FileImage, Grid3X3, ListTree, SquareStack,
+  Plus,
+  Search,
+  Sparkles,
+  List as ListIcon,
+  GanttChart,
+  Calendar as CalIcon,
+  FileText,
+  LayoutGrid,
+  ClipboardList,
+  BarChart3,
+  Table2,
+  Brush,
+  AlignLeft,
+  Activity,
+  GaugeCircle,
+  Workflow,
+  MapPin,
+  Users as UsersIcon,
+  Globe,
+  FileSpreadsheet,
+  FileType,
+  FileImage,
+  Grid3X3,
+  ListTree,
+  SquareStack,
 } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 interface ViewTile {
   type: ViewType;
@@ -163,11 +186,7 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
         toast(data?.error ?? "Could not create view");
         return;
       }
-      if (pinView) {
-        toast(`${tile.label} view added · pin coming soon`);
-      } else {
-        toast(`${tile.label} view added`);
-      }
+      toast(`${tile.label} view added`);
       onClose();
       router.refresh();
     } finally {
@@ -175,7 +194,6 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
     }
   };
 
-  const stub = (label: string) => () => toast(`${label} embed coming soon`);
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white shadow-2xl overflow-hidden">
@@ -186,19 +204,10 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search or describe a view to create"
-            className="w-full h-9 pl-8 pr-9 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
+            placeholder="Search views"
+            className="w-full h-9 pl-8 pr-3 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
             autoFocus
           />
-          <button
-            type="button"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md inline-flex items-center justify-center text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-            aria-label="Submit"
-            title="AI-create coming soon"
-            onClick={() => toast("AI-create coming soon")}
-          >
-            <Search className="h-3.5 w-3.5" />
-          </button>
         </div>
       </div>
 
@@ -223,15 +232,15 @@ function ViewCreatePanel({ boardId, onClose }: { boardId: string; onClose: () =>
           </Grid>
         </Section>
 
-        <Section label="Embed">
-          <Grid>
-            {EMBEDS
-              .filter((e) => !filter || filter(e.label))
-              .map((e) => (
-                <EmbedTileButton key={e.key} tile={e} onClick={stub(e.label)} />
-              ))}
-          </Grid>
-        </Section>
+        <UpcomingOnly>
+          <Section label="Embed">
+            <div className="px-1">
+              {EMBEDS
+                .filter((e) => !filter || filter(e.label))
+                .map((e) => <ComingSoonRow key={e.key} label={e.label} />)}
+            </div>
+          </Section>
+        </UpcomingOnly>
       </div>
 
       <div className="px-3 py-2 border-t border-zinc-100 flex items-center gap-4 text-sm text-zinc-700">
@@ -295,7 +304,7 @@ function ViewTileButton({
         className="h-7 w-7 rounded-[8px] flex items-center justify-center text-white shrink-0"
         style={{ backgroundColor: tile.swatch }}
       >
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <tile.Icon className="h-3.5 w-3.5" />}
+        {busy ? <Dots variant="pending" /> : <tile.Icon className="h-3.5 w-3.5" />}
       </span>
       <span className="text-base text-zinc-900 truncate">
         <span className="font-medium">{tile.label}</span>
@@ -305,20 +314,3 @@ function ViewTileButton({
   );
 }
 
-function EmbedTileButton({ tile, onClick }: { tile: EmbedTile; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-zinc-100 text-left"
-    >
-      <span
-        className="h-7 w-7 rounded-[8px] flex items-center justify-center text-white shrink-0"
-        style={{ backgroundColor: tile.swatch }}
-      >
-        <tile.Icon className="h-3.5 w-3.5" />
-      </span>
-      <span className="text-base text-zinc-700 truncate">{tile.label}</span>
-    </button>
-  );
-}

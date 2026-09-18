@@ -4,6 +4,8 @@
 
 import { MarketingTopbar } from "@/components/landing/marketing-topbar";
 import { MarketingFooter } from "@/components/landing/marketing-footer";
+import { ConsentBanner } from "@/components/layout/consent-banner";
+import { ConsentProvider } from "@/components/layout/consent-provider";
 
 export default function MarketingLayout({
   children,
@@ -15,6 +17,9 @@ export default function MarketingLayout({
       <MarketingTopbar />
       <main>{children}</main>
       <MarketingFooter />
+      <ConsentProvider>
+        <ConsentBanner />
+      </ConsentProvider>
     </div>
   );
 }

@@ -1,134 +1,118 @@
 "use client";
 
-// MissionSplash — the company's mission + values ARE the loader. On each page
-// load (initial app open and every navigation) it covers the screen for ~2s
-// with ONE item, rotating through [mission, ...values] one at a time, then
-// fades to reveal the page. So instead of a blank spinner, people see (and
-// absorb) the mission and a value every time. Skippable (click / Esc). Renders
-// nothing until a mission or value is set, so it never gates an unconfigured
-// workspace. Reads /api/organization/culture (all members).
+// MissionSplash (spec-shell 2.18, design-system 5.15): the company's mission
+// and one value as the app opens. Full screen on the navy chrome colour, the
+// four dots at 12px rising in sequence, an eyebrow, one line, 1.2s hold and
+// a 160ms fade. Skippable by any key or click: it registers as a layer and
+// the shell's one keydown listener closes it on any key. Boot only, per the
+// org setting `companyProfile.splash` from /api/boot:
+//
+//   every-open        once per tab session (a cold boot, never a navigation)
+//   first-open-daily  once per calendar day on this device
+//   off               never
+//
+// An org with no mission and no values never shows it. The 10-minute
+// navigation re-trigger is gone; the old bottom progress line is gone.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import { DotsLoader } from "./dots-loader";
-import { fetchCulture, nextRotateIndex, type Culture } from "@/lib/use-culture";
+import { useEffect, useRef, useState } from "react";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { useLayer } from "@/components/layout/os/shell-context";
+import { nextRotateIndex } from "@/lib/use-culture";
+import "./mission-splash.css";
 
-type Item = { kind: "mission" | "value"; text: string; color: string };
+const HOLD_MS = 1200;
+const FADE_MS = 160;
+const SESSION_KEY = "workwrk:splash:shown";
+const DAY_KEY = "workwrk:splash:day";
+const DOTS = ["#FFCB00", "#0073EA", "#FF3D57", "#00C875"] as const;
 
-const VALUE_COLORS = ["#579BFC", "#00C875", "#FFCB00", "#E2445C"]; // YBRG accents
-const HOLD_MS = 1600;              // how long the screen stays up per show (snappy)
-const FADE_MS = 380;
-const NAV_THROTTLE_MS = 10 * 60 * 1000; // during a session, re-show on nav at most this often
+function today(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
 
-// `lastShownAt` throttles navigation shows so people see the mission on every
-// app open + periodically as they work — never a gate on every click. Culture
-// itself is fetched once via the shared cache in @/lib/use-culture.
-let lastShownAt = 0;
-
-function buildPool(c: Culture): Item[] {
-  const pool: Item[] = [];
-  if (c.mission) pool.push({ kind: "mission", text: c.mission, color: "#ffffff" });
-  c.values.forEach((v, i) => pool.push({ kind: "value", text: v, color: VALUE_COLORS[i % VALUE_COLORS.length] }));
-  return pool;
+function shouldShow(policy: string): boolean {
+  if (policy === "off") return false;
+  try {
+    if (policy === "first-open-daily") {
+      if (window.localStorage.getItem(DAY_KEY) === today()) return false;
+      window.localStorage.setItem(DAY_KEY, today());
+      window.sessionStorage.setItem(SESSION_KEY, "1");
+      return true;
+    }
+    if (window.sessionStorage.getItem(SESSION_KEY) === "1") return false;
+    window.sessionStorage.setItem(SESSION_KEY, "1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function MissionSplash() {
-  const pathname = usePathname();
-  const [item, setItem] = useState<Item | null>(null);
+  const { boot } = useBoot();
   const [phase, setPhase] = useState<"idle" | "in" | "out">("idle");
-  const [meta, setMeta] = useState<{ orgName: string; logo: string | null }>({ orgName: "", logo: null });
-  const poolRef = useRef<Item[]>([]);
-  const readyRef = useRef(false);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [item, setItem] = useState<{ kind: "mission" | "value"; text: string } | null>(null);
+  const timers = useRef<number[]>([]);
+  // The one decision per boot, cached: the throttle in shouldShow writes
+  // storage, so it must run exactly once, while the timers below must be
+  // (re)scheduled on every effect run, because React's development double
+  // effect cleans the first run up before its 0ms timer fires. A ref that
+  // only said "decided" made the second run bail out with the throttle
+  // already consumed, so the splash never mounted on the dev server.
+  const decision = useRef<{ kind: "mission" | "value"; text: string } | null | undefined>(undefined);
+  const played = useRef(false);
 
-  const clearTimers = () => { timers.current.forEach(clearTimeout); timers.current = []; };
-  const dismiss = useCallback(() => {
-    clearTimers();
-    setPhase("out");
-    timers.current = [setTimeout(() => setPhase("idle"), FADE_MS)];
-  }, []);
-
-  const showNext = useCallback(() => {
-    const pool = poolRef.current;
-    if (!pool.length) return;
-    clearTimers();
-    lastShownAt = Date.now();
-    setItem(pool[nextRotateIndex(pool.length)]);
-    setPhase("in");
-    timers.current.push(setTimeout(() => setPhase("out"), HOLD_MS));
-    timers.current.push(setTimeout(() => setPhase("idle"), HOLD_MS + FADE_MS));
-  }, []);
-
-  // Load culture once (shared cache), then show the first item.
-  useEffect(() => {
-    let active = true;
-    void fetchCulture().then((c) => {
-      if (!active || !c) return;
-      setMeta({ orgName: c.orgName, logo: c.logo });
-      poolRef.current = buildPool(c);
-      readyRef.current = true;
-      showNext();
-    });
-    return () => { active = false; clearTimers(); };
-  }, [showNext]);
-
-  // Navigation re-shows the next item, but at most once per NAV_THROTTLE_MS so
-  // it's periodic reinforcement, not a gate on every click. (Initial app-open
-  // show is handled above and always fires.)
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) { first.current = false; return; }
-    if (readyRef.current && Date.now() - lastShownAt >= NAV_THROTTLE_MS) showNext();
-  }, [pathname, showNext]);
+  const dismiss = () => {
+    timers.current.forEach((t) => window.clearTimeout(t));
+    timers.current = [];
+    setPhase((p) => (p === "in" ? "out" : p));
+    timers.current.push(window.setTimeout(() => setPhase("idle"), FADE_MS));
+  };
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismiss(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [dismiss]);
+    if (decision.current === undefined) {
+      const { mission, values, splash } = boot.org.culture;
+      const pool: Array<{ kind: "mission" | "value"; text: string }> = [];
+      if (mission) pool.push({ kind: "mission", text: mission });
+      for (const v of values) pool.push({ kind: "value", text: v });
+      decision.current = pool.length > 0 && shouldShow(splash) ? pool[nextRotateIndex(pool.length)] : null;
+    }
+    const chosen = decision.current;
+    if (!chosen || played.current) return;
+    // Next tick, so the frame commits once before the splash paints over it.
+    timers.current.push(window.setTimeout(() => {
+      played.current = true;
+      setItem(chosen);
+      setPhase("in");
+    }, 0));
+    timers.current.push(window.setTimeout(() => setPhase("out"), HOLD_MS));
+    timers.current.push(window.setTimeout(() => setPhase("idle"), HOLD_MS + FADE_MS));
+    return () => { timers.current.forEach((t) => window.clearTimeout(t)); timers.current = []; };
+  }, [boot.org.culture]);
+
+  useLayer(phase === "in", { id: "mission-splash", kind: "splash", close: dismiss });
 
   if (phase === "idle" || !item) return null;
-  const visible = phase === "in";
-  const eyebrow = `${meta.orgName ? meta.orgName + " · " : ""}${item.kind === "mission" ? "Our mission" : "We live by"}`;
+  const eyebrow = `${boot.org.name ? boot.org.name + " · " : ""}${item.kind === "mission" ? "Our mission" : "We live by"}`;
 
   return (
     <div
-      role="status" aria-label="Loading"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading"
       onClick={dismiss}
-      style={{
-        position: "fixed", inset: 0, zIndex: 100000, cursor: "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-        background: "radial-gradient(120% 120% at 50% 0%, #22345A 0%, #16233E 55%, #0F1B31 100%)",
-        opacity: visible ? 1 : 0, transition: `opacity ${FADE_MS}ms ease`, WebkitFontSmoothing: "antialiased",
-      }}
+      className={`wwk-splash${phase === "in" ? " is-in" : ""}`}
     >
-      <div
-        style={{
-          maxWidth: 660, width: "100%", textAlign: "center",
-          display: "flex", flexDirection: "column", alignItems: "center", gap: 22,
-          transform: visible ? "translateY(0)" : "translateY(8px)", transition: `transform ${FADE_MS}ms ease`,
-        }}
-      >
-        {meta.logo ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={meta.logo} alt="" style={{ height: 38, width: "auto", objectFit: "contain", opacity: 0.95 }} />
-        ) : (
-          <DotsLoader />
-        )}
-
-        <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)" }}>
-          {eyebrow}
+      <div className="wwk-splash__inner">
+        <span className="wwk-splash__dots" aria-hidden>
+          {DOTS.map((c, i) => (
+            <span key={i} className="wwk-splash__dot" style={{ backgroundColor: c, animationDelay: `${i * 80}ms` }} />
+          ))}
         </span>
-
-        <p style={{ margin: 0, fontSize: "clamp(22px, 3.4vw, 32px)", lineHeight: 1.35, fontWeight: 600, color: item.color, textWrap: "balance" }}>
-          {item.text}
-        </p>
+        <span className="wwk-splash__eyebrow">{eyebrow}</span>
+        <p className="wwk-splash__line">{item.text}</p>
       </div>
-
-      <div style={{ position: "absolute", left: 0, bottom: 0, height: 3, width: "100%", background: "rgba(255,255,255,0.08)" }}>
-        <div style={{ height: "100%", background: "linear-gradient(90deg, #579BFC, #00C875)", width: visible ? "100%" : "0%", transition: `width ${HOLD_MS}ms linear` }} />
-      </div>
-      <span style={{ position: "absolute", bottom: 14, right: 16, fontSize: 11.5, color: "rgba(255,255,255,0.4)" }}>Click or press Esc to skip</span>
+      <span className="wwk-splash__skip">Press any key or click to skip</span>
     </div>
   );
 }

@@ -17,17 +17,22 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Calendar as CalendarIcon, Clock, Users, FileText, CheckSquare,
-  Sparkles, Plus, Loader2, ChevronRight, Video,
+  Calendar as CalendarIcon,
+  Clock,
+  FileText,
+  CheckSquare,
+  Sparkles,
+  ChevronRight,
+  Video,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type MeetingType = "DAILY_STANDUP" | "WEEKLY_REVIEW" | "ONE_ON_ONE" | "QUARTERLY_REVIEW" | "ANNUAL_PLANNING" | "ADHOC";
 
@@ -193,26 +198,17 @@ export default function MeetingsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Meetings"
-        Icon={CalendarIcon}
-        iconGradient={GRAD.pinkPurple}
-        description={meetings === null ? "Loading…" : `${total} total · ${upcomingCount} upcoming`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.pr]}
-        morePeople={9}
-        actions={
-          <button type="button" className="mtg__new" onClick={newMeeting} disabled={creating}>
-            {creating ? <><Loader2 className="mtg__spin" /> Creating…</> : <><Plus /> New meeting</>}
-          </button>
-        }
+        primary={{ label: "New meeting", onClick: newMeeting, busy: creating }}
       />
 
       {loadError ? (
-        <OsEmptyView Icon={CalendarIcon} iconGradient={GRAD.redPink} title="Couldn't load meetings" subtitle={`API error: ${loadError}.`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load meetings" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
       ) : meetings === null ? (
-        <div className="mtg__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : total === 0 ? (
-        <OsEmptyView Icon={CalendarIcon} iconGradient={GRAD.pinkPurple} title="No meetings yet" subtitle="Capture standups, 1:1s, quarterly reviews — pre-fill agenda, take notes inline, leave with action items already assigned." chips={["Standup", "1:1", "Weekly review", "Ad hoc"]} cta="New meeting" />
+        <OsEmptyView context="board" title="No meetings yet" hint="Capture standups, 1:1s and reviews with an agenda, notes and action items." />
       ) : (
         <div className="mtg">
           {hero && <HeroCard meeting={hero} />}

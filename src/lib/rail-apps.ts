@@ -220,6 +220,18 @@ export function visibleRailApps<T extends AppLike = AppEntry>(opts: {
           const keeper = keeperKey ? catalog.find((a) => a.key === keeperKey) : undefined;
           if (!keeper || !allowed(cfg, hiddenSet, keeper)) return false;
         }
+        // A folded app of an off module goes with the module (spec-shell
+        // §1.4: a module-off app is absent for everyone), so Forms cannot
+        // outlive Tables in the palette. The keeper (Announcements under
+        // Talk) is the one exception, by the same table as above.
+        if (
+          app.hubKey &&
+          MODULE_APP_KEYS.has(app.hubKey) &&
+          !activeModules?.has(app.hubKey) &&
+          MODULE_HUB_SURVIVES_ON[app.hubKey] !== app.key
+        ) {
+          return false;
+        }
         // Catalog baseline first — the org can only TIGHTEN access, never
         // widen it (applies to alwaysPinned apps too).
         return allowed(cfg, hiddenSet, app);

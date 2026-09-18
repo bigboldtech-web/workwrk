@@ -10,22 +10,34 @@
  * There is NO client-side key fabrication and NO local-only revoke: every
  * row, secret, and revocation round-trips the real backend. */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Key, Plus, Copy, Trash2, Hash, Activity, Clock, ShieldCheck,
-  AlertTriangle, Search, Loader2, Ban, Lock, Check,
+  Key,
+  Plus,
+  Copy,
+  Trash2,
+  Hash,
+  Activity,
+  Clock,
+  ShieldCheck,
+  AlertTriangle,
+  Search,
+  Ban,
+  Lock,
+  Check,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { SETTINGS_PAGES } from "@/lib/settings-registry";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { useRole } from "@/hooks/use-role";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Scope = "READ" | "WRITE" | "ADMIN";
 
@@ -213,26 +225,15 @@ export default function ApiKeysPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="API keys"
-        Icon={Key}
-        iconGradient={GRAD.indigoBlue}
-        description={
-          canManage
-            ? `${stats.total} active · ${stats.active} used this week · ${stats.revoked} revoked`
-            : "Organization API access"
-        }
+      <OsPageHeader
+        title={SETTINGS_PAGES.api.label}
         actions={
           <div className="apk__head-actions">
-            <Link href="/settings" className="apk__nav-link"><Hash /> Settings</Link>
-            <Link href="/settings/audit" className="apk__nav-link"><Activity /> Audit</Link>
-            {canManage ? (
-              <button type="button" className="apk__btn-primary" onClick={openCreate}>
-                <Plus /> Generate key
-              </button>
-            ) : null}
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
+            <Link href="/settings/audit" className="os-head__link"><Activity /> Audit</Link>
           </div>
         }
+        primary={canManage ? { label: "Generate key", onClick: openCreate } : undefined}
       />
 
       <div className="apk">
@@ -273,18 +274,15 @@ export default function ApiKeysPage() {
             </div>
 
             {loading ? (
-              <div className="apk__loading"><ValueLoader size={32} /></div>
+              <SkeletonRows />
             ) : loadError ? (
               <div className="apk__no-match"><AlertTriangle /> {loadError}</div>
             ) : keys.length === 0 ? (
               <OsEmptyView
-                Icon={Key}
-                iconGradient={GRAD.indigoBlue}
+                context="list"
                 title="No API keys yet"
-                subtitle="Generate a key to access the WorkwrK API from scripts, webhooks, or integrations."
-                chips={["read", "write", "admin"]}
-                cta="Generate key"
-                onCta={openCreate}
+                hint="Generate a key to access the WorkwrK API from scripts, webhooks, or integrations."
+                action={{ label: "Generate key", onClick: openCreate }}
               />
             ) : filtered.length === 0 ? (
               <div className="apk__no-match"><Search /> No keys match.</div>
@@ -443,7 +441,7 @@ export default function ApiKeysPage() {
               disabled={creating || !newName.trim()}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#0073EA] px-4 text-base font-semibold text-white hover:bg-[#0060B9] disabled:opacity-50"
             >
-              {creating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+              {creating ? <Dots variant="pending" /> : <Plus className="h-3.5 w-3.5" />}
               Generate key
             </button>
           </DialogFooter>

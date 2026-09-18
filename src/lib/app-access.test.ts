@@ -62,14 +62,22 @@ describe("APP_ACCESS mirrors apps-catalog.tsx", () => {
   });
 
   it("resolves the same rail through visibleRailApps for the server", () => {
-    const employee = visibleRailApps({ config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS, activeModules: new Set(["chat"]) });
+    const asEmployee = { config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS };
+    const employee = visibleRailApps({ ...asEmployee, activeModules: new Set(["chat"]) });
     expect(employee.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "settings"]);
+    // Talk off: the hub stays on the rail for a Member because Announcements does.
+    const employeeTalkOff = visibleRailApps({ ...asEmployee, activeModules: new Set() });
+    expect(employeeTalkOff.map((a) => a.key)).toEqual(["home", "planner", "ai", "chat", "docs", "settings"]);
     const admin = visibleRailApps({ config: { order: ["settings", "home"] }, accessLevel: "COMPANY_ADMIN", apps: APP_ACCESS, activeModules: new Set(["chat", "tables"]) });
     expect(admin.map((a) => a.key)).toEqual(["settings", "home", "planner", "ai", "chat", "teams", "docs", "tables"]);
-    const launcher = visibleRailApps({ config: {}, accessLevel: "EMPLOYEE", apps: APP_ACCESS, activeModules: new Set(), includeFolded: true });
+    const launcher = visibleRailApps({ ...asEmployee, activeModules: new Set(), includeFolded: true });
     expect(launcher.map((a) => a.key)).toContain("goals");
     expect(launcher.map((a) => a.key)).not.toContain("tables"); // module off
-    expect(launcher.map((a) => a.key)).not.toContain("chat"); // module off, and no Announcements for an employee
+    expect(launcher.map((a) => a.key)).not.toContain("forms"); // folded into Tables: goes with the module
+    // Module off, but Announcements is read by every Member (sidebar-map 4
+    // row 4), so the Talk hub survives on it and the row stays reachable.
+    expect(launcher.map((a) => a.key)).toContain("chat");
+    expect(launcher.map((a) => a.key)).toContain("announcements");
     expect(launcher.map((a) => a.key)).not.toContain("reviews"); // hr-admin
   });
 });

@@ -6,7 +6,7 @@
  *  PATCH /api/marketing/campaigns          { id, status?, name?, ... }
  *
  * Layout:
- *   OsTitleBar with back-to-Marketing + copy + more in actions.
+ *   OsPageHeader with back-to-Marketing + copy + more in actions.
  *   Hero card: status accent strip, channel chip, inline-editable name + description, date range.
  *   Lifecycle stepper: Planning → Approved → Active → Completed.
  *   Scoreboard: 4 KPI tiles (Days, Goal %, Spend %, Goal-vs-Spend ratio).
@@ -15,19 +15,31 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import {
-  Megaphone, ArrowLeft, Share2, MoreHorizontal, Calendar as CalendarIcon,
-  Target, DollarSign, Activity, Clock, Play, Pause, CheckCircle2,
-  Loader2, Flag, ChevronRight, TrendingUp,
+  Megaphone,
+  Share2,
+  Calendar as CalendarIcon,
+  Target,
+  DollarSign,
+  Activity,
+  Clock,
+  Play,
+  Pause,
+  CheckCircle2,
+  Flag,
+  ChevronRight,
+  TrendingUp,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { OsPageHeader, OsPageHeaderSkeleton, HeaderAction } from "@/components/layout/os/page-header";
+import { NotFoundView } from "@/components/access/not-found-view";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPickerPopover, type PickerOption } from "@/components/layout/os/picker-popover";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 type CampaignStatus = "PLANNING" | "APPROVED" | "ACTIVE" | "PAUSED" | "COMPLETED" | "CANCELLED";
 
@@ -95,7 +107,6 @@ function dayDiff(iso?: string | null): number | null {
 
 export default function MarketingDetail() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const id = params?.id ?? "";
   const { toast } = useOsToast();
   const { bumpRowVersion } = useOsShell();
@@ -186,42 +197,27 @@ export default function MarketingDetail() {
   if (loading) {
     return (
       <>
-        <OsTitleBar title="Loading campaign…" Icon={Megaphone} iconGradient={GRAD.orangePink} showInvite={false} />
-        <div className="camp__loading"><ValueLoader size={32} /></div>
+        <Breadcrumb items={[{ label: "Marketing", href: "/marketing" }]} />
+        <OsPageHeaderSkeleton />
+        <SkeletonRows />
       </>
     );
   }
-  if (notFound || !c) {
-    return (
-      <>
-        <OsTitleBar title="Campaign not found" Icon={Megaphone} iconGradient={GRAD.redPink} showInvite={false} />
-        <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="We couldn't find that campaign" subtitle="It may have been deleted, archived, or you don't have access." cta="Back to Marketing" />
-      </>
-    );
-  }
+  // The in-shell 404, identical for a deleted campaign and one the viewer
+  // may not know exists (spec-shell 2.4): no header, no hint.
+  if (notFound || !c) return <NotFoundView />;
 
   const accent = STATUS_COLORS[c.status];
   const chColor = channelColor(c.channel);
-  const StatusIcon = c.status === "ACTIVE" ? Play : c.status === "PAUSED" ? Pause : c.status === "COMPLETED" ? CheckCircle2 : Loader2;
+  const StatusIcon = c.status === "ACTIVE" ? Play : c.status === "PAUSED" ? Pause : c.status === "COMPLETED" ? CheckCircle2 : Activity;
 
   return (
     <>
-      <OsTitleBar
+      <Breadcrumb items={[{ label: "Marketing", href: "/marketing" }, { label: title || "(untitled campaign)" }]} />
+      <OsPageHeader
         title={title || "(untitled campaign)"}
-        Icon={Megaphone}
-        iconGradient={GRAD.orangePink}
-        description={`${STATUS_LABELS[c.status]} · ${c.channel ?? "no channel"}`}
-        actions={
-          <div className="camp__head-actions">
-            <button type="button" className="camp__back" onClick={() => router.push("/marketing")}>
-              <ArrowLeft /> Marketing
-            </button>
-            <button type="button" className="camp__btn" onClick={copyLink}>
-              <Share2 /> Copy link
-            </button>
-            <button type="button" className="camp__btn camp__btn--icon" aria-label="More"><MoreHorizontal /></button>
-          </div>
-        }
+        back={{ fallbackHref: "/marketing", label: "Marketing" }}
+        actions={<HeaderAction icon={Share2} label="Copy link" onClick={copyLink} />}
       />
 
       <div className="camp">
@@ -410,12 +406,12 @@ export default function MarketingDetail() {
               </div>
             </div>
 
-            <div className="camp__panel">
-              <div className="camp__panel-head"><Activity /> Activity</div>
-              <div className="camp__activity-empty">
-                Campaign activity log coming soon. For now, edits update the hub live.
+            <UpcomingOnly>
+              <div className="camp__panel">
+                <div className="camp__panel-head"><Activity /> Activity</div>
+                <ComingSoonRow label="Campaign activity log" />
               </div>
-            </div>
+            </UpcomingOnly>
           </aside>
         </div>
       </div>

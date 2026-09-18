@@ -34,7 +34,9 @@ const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-3 p-5 duration-200 rounded-xl",
+        // Narrow widths keep a 12px gutter on each side (spec-shell 1.16:
+        // a modal is 100% minus 24px below 1024); max-w-* still rules wide.
+        "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-24px)] max-w-lg max-h-[85vh] overflow-y-auto translate-x-[-50%] translate-y-[-50%] gap-3 p-5 duration-200 rounded-xl",
         "border border-border bg-white dark:bg-[#14171D] text-foreground",
         "shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)]",
         "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]",
@@ -49,7 +51,10 @@ const DialogContent = React.forwardRef<
           "flex items-center justify-center",
           "bg-transparent",
           "text-muted hover:text-foreground hover:bg-surface-2",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
+          // design-system 4.7: the one focus treatment, on the tokens. The
+          // dialog portals to <body>, outside .workwrk-os, so it carries the
+          // ring itself rather than inheriting the shell's rule.
+          "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]",
           "transition-all disabled:pointer-events-none",
         )}
       >

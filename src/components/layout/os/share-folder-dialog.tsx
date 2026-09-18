@@ -16,9 +16,11 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Search, X, Loader2, Plus, FolderTree } from "lucide-react";
+import { Search, X, Plus, FolderTree } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 
 type FolderRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
 
@@ -217,17 +219,17 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
           <div className="text-xs uppercase tracking-wide text-zinc-500 font-semibold mb-2">Add people</div>
           <div className="flex items-center gap-1.5">
             <div className="relative flex-1" ref={pickerRef}>
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="absolute start-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
                 onFocus={() => setPickerOpen(true)}
                 placeholder="Type a name or email…"
-                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
+                className="w-full h-9 ps-8 pe-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
               />
               {pickerOpen ? (
-                <div className="absolute left-0 right-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
+                <div className="absolute start-0 end-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
                   {candidates.length === 0 ? (
                     <div className="px-3 py-3 text-sm text-zinc-400">
                       {query ? `No match for "${query}"` : "Start typing to find people"}
@@ -239,7 +241,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                         type="button"
                         onClick={() => addMember(u)}
                         disabled={busyAddId === u.id}
-                        className="w-full text-left px-2.5 py-1.5 flex items-center gap-2 hover:bg-zinc-50 disabled:opacity-60"
+                        className="w-full text-start px-2.5 py-1.5 flex items-center gap-2 hover:bg-zinc-50 disabled:opacity-60"
                       >
                         <Avatar user={u} />
                         <span className="flex-1 min-w-0">
@@ -247,7 +249,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                           <span className="block text-xs text-zinc-500 truncate">{u.email}</span>
                         </span>
                         {busyAddId === u.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                          <Dots variant="pending" />
                         ) : (
                           <Plus className="h-3.5 w-3.5 text-zinc-400" />
                         )}
@@ -276,7 +278,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
             {members === null ? "Shared with" : `Shared with · ${members.length}`}
           </div>
           {members === null ? (
-            <div className="text-sm text-zinc-400">Loading…</div>
+            <SkeletonLines lines={2} />
           ) : members.length === 0 ? (
             <div className="text-sm text-zinc-400">
               Not shared with anyone yet. Space members already have access.
@@ -309,7 +311,7 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
                       className="h-7 w-7 rounded hover:bg-red-50 inline-flex items-center justify-center text-zinc-400 hover:text-red-500 disabled:opacity-50"
                       aria-label="Remove access"
                     >
-                      {busyRemoveId === m.user.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                      {busyRemoveId === m.user.id ? <Dots variant="pending" /> : <X className="h-3.5 w-3.5" />}
                     </button>
                   </li>
                 );

@@ -23,11 +23,14 @@ import {
   Edit3, Clock, ChevronDown, MoreHorizontal,
   ChevronsRight, ArrowUp, Plus, Globe, Search, Lightbulb,
   Wand2, ListChecks, Image as ImageIcon, CalendarDays, MessageCircle, HelpCircle,
-  FileSearch, Globe2, Loader2, Wrench,
+  FileSearch, Globe2, Wrench,
 } from "lucide-react";
-import { useOsShell } from "./shell-context";
+import { useLayer, useOsShell } from "./shell-context";
+import { SHELL_LABELS } from "@/lib/nav/labels";
 import { OsMarkdown } from "./markdown";
 import { BloomMark } from "./bloom-mark";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 
 type View = "chat" | "history";
 
@@ -102,6 +105,9 @@ const SEARCH: Array<{ icon: typeof Search; label: string; tag?: string }> = [
 export function OsSidekickPanel() {
   const { sidekickOpen, closeSidekick, consumeSidekickInitialPrompt } = useOsShell();
   const pathname = usePathname() ?? "/";
+  // The panel is a layer (spec-shell 2.1: "Ask AI panel (360, ⌘J, ✕/Esc)"),
+  // so Esc closes it through the shell's one listener.
+  useLayer(sidekickOpen, { id: "ask-ai-panel", kind: "panel", close: closeSidekick });
 
   const [view, setView] = useState<View>("chat");
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
@@ -319,8 +325,13 @@ export function OsSidekickPanel() {
   return (
     <aside
       className={`os-sk ${sidekickOpen ? "is-open" : ""}`}
+      // Closed, the panel is width 0 but still mounted: `inert` takes every
+      // control inside out of the tab order and the accessibility tree, so
+      // a keyboard user never lands on an invisible button (spec-shell 1.8,
+      // design-system 4.7; aria-hidden alone left them focusable).
+      inert={!sidekickOpen}
       aria-hidden={!sidekickOpen}
-      aria-label="Brain — AI knowledge assistant"
+      aria-label={SHELL_LABELS.askAi}
     >
       <div className="os-sk__inner">
         <div className="os-sk__topbar">
@@ -354,10 +365,10 @@ export function OsSidekickPanel() {
             type="button"
             className="os-sk__iconbtn"
             onClick={closeSidekick}
-            title="Collapse"
-            aria-label="Collapse Brain panel"
+            title="Close (Esc)"
+            aria-label={`Close ${SHELL_LABELS.askAi}`}
           >
-            <ChevronsRight />
+            <ChevronsRight className="rtl:rotate-180" />
           </button>
         </div>
 
@@ -374,7 +385,7 @@ export function OsSidekickPanel() {
             </div>
             <div className="os-sk__hist-list">
               {grouped === null ? (
-                <div className="os-sk__hist-empty">Loading…</div>
+                <SkeletonLines lines={3} className="px-3" />
               ) : grouped.length === 0 ? (
                 <div className="os-sk__hist-empty">
                   {historySearch ? "No chats match that search." : "No chats yet. Start one below."}
@@ -525,7 +536,7 @@ export function OsSidekickPanel() {
                 disabled={busy || input.trim().length === 0}
                 title="Send (Enter)"
               >
-                {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                {busy ? <Dots variant="pending" /> : <ArrowUp />}
               </button>
             </div>
           </div>

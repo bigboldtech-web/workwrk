@@ -14,7 +14,7 @@
  * open, edit/delete/create only for those the matrix allows.
  *
  * Layout:
- *   OsTitleBar with back + nav + New function.
+ *   OsPageHeader with back + nav + New function.
  *   4-tile KPI strip: Departments · Headcount · With head · Vacant head.
  *   Toolbar: search + view toggle (Tree / Grid) + expand all / collapse all.
  *   Tree: indented nested rows with connector lines, color stripe, head avatar,
@@ -24,16 +24,28 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Building2, Plus, Users, ChevronDown, ChevronRight, Search,
-  ArrowLeft, UserX, ListTree, LayoutGrid, GraduationCap, Briefcase, Network,
-  MoreHorizontal, Pencil, Trash2, CornerDownRight, Check,
+  Building2,
+  Users,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  UserX,
+  ListTree,
+  LayoutGrid,
+  GraduationCap,
+  Briefcase,
+  Network,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  CornerDownRight,
+  Check,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
@@ -43,6 +55,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { checkPermission, type PermissionMatrix, type AccessLevel } from "@/lib/permissions";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiDept = {
   id: string;
@@ -292,29 +305,15 @@ export default function DepartmentsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Departments"
-        Icon={Building2}
-        iconGradient={GRAD.indigoBlue}
-        description={depts === null
-          ? "Loading org structure…"
-          : `${stats.total} department${stats.total === 1 ? "" : "s"} · ${stats.totalHeadcount} people${stats.vacant > 0 ? ` · ${stats.vacant} need head` : ""}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={Math.max(0, stats.total - 3)}
         actions={
           <div className="dept__head-actions">
-            <button type="button" className="dept__back" onClick={() => history.back()}>
-              <ArrowLeft /> People
-            </button>
-            <Link href="/people/roles" className="dept__nav-link"><Briefcase /> Roles</Link>
-            <Link href="/people/skills" className="dept__nav-link"><GraduationCap /> Skills</Link>
-            {canManage && (
-              <button type="button" className="dept__btn-primary" onClick={() => openCreate(null)}>
-                <Plus /> New department
-              </button>
-            )}
+            <Link href="/people/roles" className="os-head__link"><Briefcase /> Job titles</Link>
+            <Link href="/people/skills" className="os-head__link"><GraduationCap /> Skills</Link>
           </div>
         }
+        primary={canManage ? { label: "New department", onClick: () => openCreate(null) } : undefined}
       />
 
       <div className="dept">
@@ -356,18 +355,15 @@ export default function DepartmentsPage() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={Building2} iconGradient={GRAD.redPink} title="Couldn't load departments" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load departments" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => void load() }} />
         ) : depts === null ? (
-          <div className="dept__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Building2}
-            iconGradient="#0073EA"
+            context="list"
             title="No departments yet"
-            subtitle="Departments organize your people and route policies and announcements. Create your first one to get started."
-            cta="New department"
-            onCta={() => openCreate(null)}
-            hideCta={!canManage}
+            hint="Departments group your people and route policies and announcements."
+            action={!canManage ? undefined : { label: "New department", onClick: () => openCreate(null) }}
           />
         ) : filteredTree.length === 0 ? (
           <div className="dept__empty">

@@ -12,16 +12,20 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Star, MessageSquare, ChevronRight, Pin, PinOff, Clock, Sparkles,
+  MessageSquare,
+  ChevronRight,
+  Pin,
+  PinOff,
+  Clock,
+  Sparkles,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView, askSidekick } from "@/components/layout/os/empty-view";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiSession = {
   id: string;
@@ -92,21 +96,14 @@ export default function FavoritesPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Favorites"
-        Icon={Star}
-        iconGradient={GRAD.yellowOrange}
-        description={rows === null ? "Loading…" : `${pinned.length} pinned${recent.length > 0 ? ` · ${recent.length} recent` : ""}`}
-        people={[PEOPLE.bb]}
-        morePeople={0}
-      />
+      <OsPageHeader title="Favorites" />
 
       {loadError ? (
-        <OsEmptyView Icon={Star} iconGradient={GRAD.redPink} title="Couldn't load favorites" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
+        <OsEmptyView variant="error" title="Couldn't load favorites" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => void load() }} />
       ) : rows === null ? (
-        <div className="fav__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : rows.length === 0 ? (
-        <OsEmptyView Icon={Star} iconGradient={GRAD.yellowOrange} title="No favorites yet" subtitle="Pin a Sidekick chat or star a board item to keep it one click away. Cross-module starring is shipping soon." chips={["Pinned chats", "Recent", "Quick access"]} cta="Open Sidekick" onCta={() => askSidekick()} />
+        <OsEmptyView context="list" title="No favorites yet" hint="Star a chat or a board item to keep it one click away." action={{ label: "Open Sidekick", onClick: () => askSidekick() }} />
       ) : (
         <div className="fav">
           <section className="fav__section">

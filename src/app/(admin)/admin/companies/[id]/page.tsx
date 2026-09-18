@@ -1,13 +1,15 @@
 "use client";
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/components/ui/toast";
-import { ArrowLeft, Building2, Crown, Sparkles, Palette, Globe2, Loader2 } from "lucide-react";
+import { Building2, Crown, Sparkles, Palette, Globe2 } from "lucide-react";
+import { BackButton } from "@/components/ui/back-button";
 
 interface Company {
   id: string;
@@ -22,7 +24,7 @@ interface Company {
 }
 
 export default function CompanyDetailPage() {
-  const router = useRouter();
+  
   const { id } = useParams<{ id: string }>();
   const { success: toastSuccess, error: toastError } = useToast();
   const [company, setCompany] = useState<Company | null>(null);
@@ -62,8 +64,8 @@ export default function CompanyDetailPage() {
 
   if (loading || !company) {
     return (
-      <div className="flex items-center justify-center py-16 text-muted text-base">
-        <Loader2 size={16} className="animate-spin mr-2" /> Loading company…
+      <div className="py-8">
+        <SkeletonRows rows={4} />
       </div>
     );
   }
@@ -73,9 +75,7 @@ export default function CompanyDetailPage() {
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-5 animate-fade-in">
       <div>
-        <Button variant="ghost" size="sm" className="gap-1.5 -ml-2" onClick={() => router.push("/admin/companies")}>
-          <ArrowLeft size={14} /> Back to companies
-        </Button>
+        <BackButton fallbackHref="/admin/companies" label="Companies" />
         <div className="flex items-start justify-between gap-3 mt-3">
           <div>
             <h1 className="text-xl font-semibold flex items-center gap-2">

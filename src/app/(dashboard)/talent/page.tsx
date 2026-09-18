@@ -6,19 +6,32 @@
  *  POST /api/talent-assessment   { userId, period, performance, potential, ... }
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Users2, Plus, Star, Award, AlertTriangle, Heart, Briefcase,
-  TrendingUp, ChevronRight, Activity, Target, Calendar,
-  X, Wand2, Loader2, Search,
+  Users2,
+  Plus,
+  Star,
+  Award,
+  AlertTriangle,
+  Heart,
+  Briefcase,
+  TrendingUp,
+  ChevronRight,
+  Activity,
+  Target,
+  Calendar,
+  X,
+  Wand2,
+  Search,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiAssessment = {
   id: string;
@@ -205,20 +218,15 @@ export default function TalentPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Talent"
-        Icon={Users2}
-        iconGradient={GRAD.greenTeal}
-        description={assessments === null ? "Loading…" : `${stats.total} assessment${stats.total === 1 ? "" : "s"} · ${stats.stars} stars · ${stats.atRisk} at risk`}
         actions={
           <div className="tal__head-actions">
-            <Link href="/people" className="tal__nav-link"><Briefcase /> People</Link>
-            <Link href="/reviews" className="tal__nav-link"><Award /> Reviews</Link>
-            <button type="button" className="tal__btn-primary" onClick={() => openPlace()}>
-              <Plus /> New assessment
-            </button>
+            <Link href="/people" className="os-head__link"><Briefcase /> People</Link>
+            <Link href="/reviews" className="os-head__link"><Award /> Reviews</Link>
           </div>
         }
+        primary={{ label: "New assessment", onClick: () => openPlace() }}
       />
 
       <div className="tal">
@@ -230,18 +238,15 @@ export default function TalentPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Users2} iconGradient={GRAD.redPink} title="Couldn't load assessments" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load assessments" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
         ) : assessments === null ? (
-          <div className="tal__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Users2}
-            iconGradient={GRAD.greenTeal}
+            context="goals"
             title="No talent assessments yet"
-            subtitle="Place each person on the 9-box by performance × potential. Sets up succession planning and development conversations. Or auto-place everyone from their latest performance scores."
-            chips={["Stars", "Future leaders", "Core players", "At risk"]}
-            cta="Place first person"
-            onCta={() => openPlace()}
+            hint="Place each person on the 9-box by performance and potential."
+            action={{ label: "Place first person", onClick: () => openPlace() }}
           />
         ) : (
           <div className="tal__grid-wrap">
@@ -266,7 +271,7 @@ export default function TalentPage() {
                     title="Seed placements for anyone with a performance score but no assessment yet"
                     style={{ height: 28, padding: "0 10px", borderRadius: 6, border: "1px solid var(--os-line)", background: "var(--os-surface, #fff)", color: "var(--os-ink)", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, cursor: autoBusy ? "default" : "pointer" }}
                   >
-                    {autoBusy ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Wand2 style={{ width: 13, height: 13 }} />}
+                    {autoBusy ? <Dots variant="pending" /> : <Wand2 style={{ width: 13, height: 13 }} />}
                     Auto-place from scores
                   </button>
                   <button
@@ -578,7 +583,7 @@ function PlaceModal({
             className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-white text-base font-medium"
             style={{ background: canSave ? "#0073EA" : "#9dbfe8", cursor: canSave ? "pointer" : "default" }}
           >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+            {saving ? <Dots variant="pending" /> : <Plus className="w-3.5 h-3.5" />}
             {saving ? "Placing…" : "Place person"}
           </button>
         </div>

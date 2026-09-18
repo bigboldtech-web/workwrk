@@ -111,12 +111,15 @@ describe("closeSettings origin rule", () => {
     expect(resolveCloseTarget({ returnTo: "/account/profile", lastAppPath: "/account/security" })).toBe("/today");
     expect(resolveCloseTarget({ returnTo: "//evil.example", lastAppPath: "https://evil.example" })).toBe("/today");
   });
-  it("knows the two takeover prefixes and nothing else", () => {
+  it("knows the three takeover prefixes and nothing else", () => {
     expect(isSettingsRoute("/settings")).toBe(true);
     expect(isSettingsRoute("/settings/members")).toBe(true);
     expect(isSettingsRoute("/account/profile")).toBe(true);
+    // /imports renders inside the takeover until it 308s into
+    // /settings/data?tab=import (spec-shell 2.8).
+    expect(isSettingsRoute("/imports")).toBe(true);
     expect(isSettingsRoute("/settingsx")).toBe(false);
     expect(isSettingsRoute("/accounting")).toBe(false);
-    expect(isSettingsRoute("/imports")).toBe(false);
+    expect(isSettingsRoute("/importsx")).toBe(false);
   });
 });

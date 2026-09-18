@@ -7,13 +7,13 @@
  * Reads: GET /api/policies/[id]/ledger ; CSV: /api/policies/[id]/ledger/export
  */
 
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ShieldCheck, ArrowLeft, Download, Loader2, CheckCircle2, AlertCircle, Clock, RefreshCw } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { Download, CheckCircle2, AlertCircle, Clock, RefreshCw } from "lucide-react";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 
 type Row = {
   userId: string; name: string; email: string | null; department: string; required: boolean;
@@ -58,31 +58,24 @@ export default function PolicyLedgerPage() {
 
   return (
     <>
-      <OsTitleBar
+      <Breadcrumb
+        items={[
+          { label: "Policies", href: "/policies" },
+          ...(data ? [{ label: data.policy.title, href: `/policies/${id}` }] : []),
+          { label: "Audit ledger" },
+        ]}
+      />
+      <OsPageHeader
         title="Audit ledger"
-        Icon={ShieldCheck}
-        iconGradient={GRAD.indigoBlue}
-        showStandardActions={false}
-        description={data ? `${data.policy.title} · v${data.policy.version} · acks measured on v${data.policy.ackVersion}` : "Loading…"}
-        actions={
-          <div className="flex items-center gap-2">
-            {data ? (
-              <a href={`/api/policies/${id}/ledger/export`} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9]">
-                <Download className="h-3.5 w-3.5" /> Export CSV
-              </a>
-            ) : null}
-            <Link href={`/policies/${id}`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50">
-              <ArrowLeft className="h-3.5 w-3.5" /> Back to policy
-            </Link>
-          </div>
-        }
+        back={{ fallbackHref: `/policies/${id}`, label: data?.policy.title || "Policy" }}
+        primary={data ? { label: "Export CSV", icon: Download, href: `/api/policies/${id}/ledger/export`, external: true } : undefined}
       />
 
       <div className="px-6 py-6">
         {err ? (
-          <OsEmptyView Icon={ShieldCheck} iconGradient={GRAD.indigoBlue} title="Couldn't load ledger" subtitle={err} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load ledger" hint={err} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : data === null ? (
-          <div className="flex items-center gap-2 text-xs text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+          <SkeletonRows rows={4} />
         ) : (
           <>
             <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

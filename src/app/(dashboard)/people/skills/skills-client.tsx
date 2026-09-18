@@ -5,7 +5,7 @@
  *  GET /api/skills
  *
  * Layout:
- *   OsTitleBar with back + nav.
+ *   OsPageHeader with back + nav.
  *   4-tile KPI strip: Skills · Holders · Expert-level · Coverage gaps.
  *   Toolbar: search + sort (Holders / Rating / A-Z) + coverage filter.
  *   2-col body:
@@ -14,16 +14,24 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Sparkles, Search, ArrowLeft, ChevronDown, Star, TrendingUp,
-  AlertOctagon, Users, Award, Building2, GraduationCap, Briefcase,
+  Sparkles,
+  Search,
+  ChevronDown,
+  Star,
+  TrendingUp,
+  AlertOctagon,
+  Users,
+  Award,
+  Building2,
+  Briefcase,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiSkill = {
   name: string;
@@ -114,22 +122,12 @@ export default function SkillsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Skills"
-        Icon={Sparkles}
-        iconGradient={GRAD.tealGreen}
-        description={skills === null
-          ? "Loading skill matrix…"
-          : `${stats.total} skill${stats.total === 1 ? "" : "s"} · ${stats.totalHolders} rating${stats.totalHolders === 1 ? "" : "s"}${stats.expertSkills > 0 ? ` · ${stats.expertSkills} expert-level` : ""}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={4}
         actions={
           <div className="skl__head-actions">
-            <button type="button" className="skl__back" onClick={() => history.back()}>
-              <ArrowLeft /> People
-            </button>
-            <Link href="/people/departments" className="skl__nav-link"><Building2 /> Departments</Link>
-            <Link href="/people/roles" className="skl__nav-link"><Briefcase /> Roles</Link>
+            <Link href="/people/departments" className="os-head__link"><Building2 /> Departments</Link>
+            <Link href="/people/roles" className="os-head__link"><Briefcase /> Job titles</Link>
           </div>
         }
       />
@@ -179,16 +177,14 @@ export default function SkillsPage() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={Sparkles} iconGradient={GRAD.redPink} title="Couldn't load skills" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load skills" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : skills === null ? (
-          <div className="skl__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Sparkles}
-            iconGradient={GRAD.tealGreen}
+            context="list"
             title="No skills tracked yet"
-            subtitle="Once people add skills to their profile and rate themselves, the org-wide taxonomy populates here automatically."
-            cta="Open my profile"
+            hint="Once people add skills to their profile and rate themselves, the org-wide taxonomy populates here automatically."
           />
         ) : filtered.length === 0 ? (
           <div className="skl__empty">

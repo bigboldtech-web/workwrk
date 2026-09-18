@@ -6,25 +6,33 @@
  *  POST  /api/marketing/campaigns   { name }
  *
  * Layout:
- *   OsTitleBar with subview nav links + New campaign in actions.
+ *   OsPageHeader with subview nav links + New campaign in actions.
  *   KPI strip: Active · Budget · Spent · Goal completion (live calc).
  *   Subview tiles (4 cards): Campaigns / Content / Events / Reports.
  *   Featured campaigns: 2-col grid of active/approved campaigns with progress rings.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Megaphone, Plus, Target, DollarSign, Activity, CheckCircle2,
-  LayoutGrid, FileText, CalendarDays, LineChart,
-  ChevronRight, Play, Pause, Loader2,
+  Target,
+  DollarSign,
+  Activity,
+  CheckCircle2,
+  LayoutGrid,
+  FileText,
+  CalendarDays,
+  LineChart,
+  ChevronRight,
+  Play,
+  Pause,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C, GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type CampaignStatus = "PLANNING" | "APPROVED" | "ACTIVE" | "PAUSED" | "COMPLETED" | "CANCELLED";
 
@@ -165,25 +173,16 @@ export default function MarketingPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Marketing"
-        Icon={Megaphone}
-        iconGradient={GRAD.orangePink}
-        description={campaigns === null
-          ? "Loading hub…"
-          : `${stats.total} campaign${stats.total === 1 ? "" : "s"} · ${stats.active.length} active · ${fmtMoney(stats.totalSpent)} spent`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.an]}
-        morePeople={3}
         actions={
           <div className="mkt__head-actions">
-            <Link href="/marketing/campaigns" className="mkt__nav-link">Campaigns</Link>
-            <Link href="/marketing/content" className="mkt__nav-link">Content</Link>
-            <Link href="/marketing/events" className="mkt__nav-link">Events</Link>
-            <button type="button" className="mkt__btn-primary" onClick={newCampaign}>
-              <Plus /> New campaign
-            </button>
+            <Link href="/marketing/campaigns" className="os-head__link">Campaigns</Link>
+            <Link href="/marketing/content" className="os-head__link">Content</Link>
+            <Link href="/marketing/events" className="os-head__link">Events</Link>
           </div>
         }
+        primary={{ label: "New campaign", onClick: newCampaign }}
       />
 
       <div className="mkt">
@@ -205,17 +204,14 @@ export default function MarketingPage() {
 
         {/* Featured campaigns */}
         {loadError ? (
-          <OsEmptyView Icon={Megaphone} iconGradient={GRAD.redPink} title="Couldn't load campaigns" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load campaigns" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : campaigns === null ? (
-          <div className="mkt__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : campaigns.length === 0 ? (
           <OsEmptyView
-            Icon={Megaphone}
-            iconGradient={GRAD.orangePink}
+            context="list"
             title="No campaigns yet"
-            subtitle="Plan your first campaign — track budget vs spend, goal vs actual, and pipeline impact."
-            chips={["Email", "Paid search", "Social", "Outbound", "Event", "Content"]}
-            cta="New campaign"
+            hint="Plan your first campaign and track budget, goal and pipeline impact."
           />
         ) : (
           <section className="mkt__section">
@@ -291,7 +287,7 @@ function CampaignTile({ campaign }: { campaign: ApiCampaign }) {
   const goalPct = campaign.goalTarget
     ? Math.min(100, Math.round(((campaign.goalActual ?? 0) / campaign.goalTarget) * 100))
     : null;
-  const StatusIcon = campaign.status === "ACTIVE" ? Play : campaign.status === "PAUSED" ? Pause : campaign.status === "COMPLETED" ? CheckCircle2 : Loader2;
+  const StatusIcon = campaign.status === "ACTIVE" ? Play : campaign.status === "PAUSED" ? Pause : campaign.status === "COMPLETED" ? CheckCircle2 : Activity;
   return (
     <Link href={`/marketing/${campaign.id}`} className="mkt__camp" style={{ ["--camp-c" as unknown as string]: statusColor }}>
       <span className="mkt__camp-accent" aria-hidden="true" />

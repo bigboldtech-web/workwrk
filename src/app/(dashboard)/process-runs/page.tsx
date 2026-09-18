@@ -7,17 +7,25 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  ListChecks, Search, Hash, ChevronRight, AlertTriangle, CheckCircle2, Clock,
-  XCircle, Layers, Activity, Calendar as CalendarIcon, BookCopy,
+  Search,
+  Hash,
+  ChevronRight,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  XCircle,
+  Layers,
+  Activity,
+  Calendar as CalendarIcon,
+  BookCopy,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type PrStatus = "ACTIVE" | "COMPLETED" | "OVERDUE" | "CANCELLED";
 
@@ -120,19 +128,12 @@ export default function ProcessRunsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Process runs"
-        Icon={ListChecks}
-        iconGradient={GRAD.orangePink}
-        showStandardActions={false}
-        description={rows === null ? "Loading…" : `${stats.total} run${stats.total === 1 ? "" : "s"} · ${stats.counts.ACTIVE} active · ${stats.counts.OVERDUE} overdue · ${stats.avgProgress}% avg`}
         actions={
-          <div className="flex items-center gap-2">
-            <Link href="/sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><BookCopy className="h-3.5 w-3.5" /> SOPs</Link>
-            <Link href="/sops/my-sops" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50"><Activity className="h-3.5 w-3.5" /> My SOPs</Link>
-            <button type="button" onClick={() => toast("Start a run from any checklist SOP")} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9]">
-              Start run
-            </button>
+          <div className="flex items-center gap-1">
+            <Link href="/sops" className="os-head__link"><BookCopy /> SOPs</Link>
+            <Link href="/sops/my-sops" className="os-head__link"><Activity /> My SOPs</Link>
           </div>
         }
       />
@@ -170,17 +171,14 @@ export default function ProcessRunsPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={ListChecks} iconGradient={GRAD.redPink} title="Couldn't load runs" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load runs" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="prun__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={ListChecks}
-            iconGradient={GRAD.orangePink}
+            context="docs"
             title="No process runs yet"
-            subtitle="Process runs are instances of checklist SOPs. Open a checklist SOP and click Start run."
-            chips={["Checklist", "Assignee", "Due date", "Share link"]}
-            cta="Browse SOPs"
+            hint="Start a run from any checklist SOP to see it here."
           />
         ) : grouped.length === 0 && cancelled.length === 0 ? (
           <div className="prun__no-match"><AlertTriangle /> No runs match the current filter.</div>

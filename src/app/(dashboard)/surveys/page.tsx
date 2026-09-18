@@ -8,18 +8,28 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  BarChart, Plus, Search, Hash, ChevronRight, Activity, CheckCircle2, Edit3,
-  Lock, Users, MessageCircle, AlertTriangle, Eye, Calendar as CalendarIcon,
+  BarChart,
+  Search,
+  Hash,
+  ChevronRight,
+  Activity,
+  CheckCircle2,
+  Edit3,
+  Lock,
+  Users,
+  MessageCircle,
+  AlertTriangle,
+  Eye,
+  Calendar as CalendarIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { SurveyBuilder } from "./_components/survey-builder";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type SrStatus = "DRAFT" | "ACTIVE" | "CLOSED";
 
@@ -133,20 +143,15 @@ export default function SurveysPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Surveys"
-        Icon={BarChart}
-        iconGradient={GRAD.bluePurple}
-        description={rows === null ? "Loading…" : `${stats.total} survey${stats.total === 1 ? "" : "s"} · ${stats.counts.ACTIVE} active · ${stats.totalResponses} response${stats.totalResponses === 1 ? "" : "s"}${stats.avgRate > 0 ? ` · ${stats.avgRate}% avg rate` : ""}`}
         actions={
           <div className="srv__head-actions">
-            <Link href="/candor" className="srv__nav-link"><Lock /> Candor</Link>
-            <Link href="/people" className="srv__nav-link"><Users /> People</Link>
-            <button type="button" className="srv__btn-primary" onClick={() => setBuilderOpen(true)}>
-              <Plus /> New pulse
-            </button>
+            <Link href="/candor" className="os-head__link"><Lock /> Candor</Link>
+            <Link href="/people" className="os-head__link"><Users /> People</Link>
           </div>
         }
+        primary={{ label: "New pulse", onClick: () => setBuilderOpen(true) }}
       />
 
       <div className="srv">
@@ -182,18 +187,15 @@ export default function SurveysPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={BarChart} iconGradient={GRAD.redPink} title="Couldn't load" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="srv__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={BarChart}
-            iconGradient={GRAD.bluePurple}
+            context="list"
             title="No surveys yet"
-            subtitle="Launch your first pulse. Anonymous by default so people speak freely."
-            chips={["Rating", "NPS", "Free text", "Multiple choice"]}
-            cta="New pulse"
-            onCta={() => setBuilderOpen(true)}
+            hint="Launch a pulse survey, anonymous by default."
+            action={{ label: "New pulse", onClick: () => setBuilderOpen(true) }}
           />
         ) : grouped.length === 0 ? (
           <div className="srv__no-match"><AlertTriangle /> No surveys match.</div>

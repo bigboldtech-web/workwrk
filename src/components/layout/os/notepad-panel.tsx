@@ -10,10 +10,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
-import { X, Plus, ChevronLeft, Loader2, FileText } from "lucide-react";
+import { X, Plus, ChevronLeft, FileText } from "lucide-react";
 import type { BnDocJSON } from "@/components/docs/blocknote-canvas";
 import type { Block as LegacyBlock } from "@/components/docs/block-editor";
 import { useLayer } from "./shell-context";
+import { SkeletonLines } from "@/components/ui/skeleton";
 
 // BlockNoteCanvas statically imports heavy editor CSS — load its chunk only
 // when a note is actually opened (this panel is mounted on every page).
@@ -22,7 +23,7 @@ const BlockNoteCanvas = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex-1 flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-zinc-300" /></div>
+      <SkeletonLines lines={4} className="flex-1 px-4 py-6" />
     ),
   },
 );
@@ -203,24 +204,28 @@ export function NotepadPanel() {
 
   return (
     <>
-      <div className="fixed inset-0 z-[90] bg-black/20" onClick={closePanel} aria-hidden />
-      <aside className="fixed top-0 right-0 z-[91] h-screen w-[440px] max-w-[92vw] bg-white dark:bg-[#14171D] border-l border-zinc-200 dark:border-[#2A2F38] shadow-2xl flex flex-col">
-        <div className="flex items-center gap-2 px-3 h-12 border-b border-zinc-200 dark:border-[#2A2F38] shrink-0" style={{ background: "#FBE9AE" }}>
+      {/* Scrim and panel both start after the rail and below the bar: the rail
+          at 64 and the bar at 48 stay visible and live at every width
+          (spec-shell 1.16), so the bar's Create, bell, Help and avatar are
+          not covered while the Notepad is open. */}
+      <div className="fixed bottom-0 end-0 start-[var(--os-rail-w)] top-[var(--os-top-h)] z-[90] bg-[var(--os-scrim)]" onClick={closePanel} aria-hidden />
+      <aside className="fixed bottom-0 end-0 top-[var(--os-top-h)] z-[91] w-[440px] max-w-[92vw] bg-white dark:bg-[#14171D] border-s border-zinc-200 dark:border-[#2A2F38] shadow-2xl flex flex-col">
+        <div className="flex items-center gap-2 px-3 h-12 border-b border-zinc-200 dark:border-[#2A2F38] shrink-0 bg-warning-bg text-ink">
           {activeId ? (
-            <button type="button" onClick={() => { flushPending(); loadTokenRef.current++; setActiveId(null); loadList(); }} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Back">
-              <ChevronLeft className="w-4 h-4" />
+            <button type="button" onClick={() => { flushPending(); loadTokenRef.current++; setActiveId(null); loadList(); }} className="w-7 h-7 rounded-full hover:bg-hover flex items-center justify-center text-ink-2" aria-label="Back">
+              <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
             </button>
           ) : null}
-          <div className="text-base font-semibold text-zinc-900 flex-1">Notepad</div>
-          {saving ? <span className="text-xs text-zinc-600">Saving…</span> : null}
-          <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-black/5 flex items-center justify-center text-zinc-700" aria-label="Close">
+          <div className="text-base font-semibold text-ink flex-1">Notepad</div>
+          {saving ? <span className="text-xs text-ink-2">Saving…</span> : null}
+          <button type="button" onClick={closePanel} className="w-7 h-7 rounded-full hover:bg-hover flex items-center justify-center text-ink-2" aria-label="Close">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {activeId ? (
           seed === "loading" ? (
-            <div className="flex-1 flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-zinc-300" /></div>
+            <SkeletonLines lines={4} className="flex-1 px-4 py-6" />
           ) : seed === "error" ? (
             // No editor on a failed load — typing into an empty canvas here
             // would save over the note's real content.
@@ -242,14 +247,14 @@ export function NotepadPanel() {
         ) : (
           <div className="flex-1 overflow-y-auto">
             {notes === null ? (
-              <div className="flex justify-center py-12"><Loader2 className="w-5 h-5 animate-spin text-zinc-300" /></div>
+              <SkeletonLines lines={4} className="px-4 py-6" />
             ) : notes.length === 0 ? (
               <div className="px-4 py-10 text-center text-base text-zinc-400 dark:text-zinc-500">No notes yet. Create your first sticky note.</div>
             ) : (
               <ul className="py-1">
                 {notes.map((n) => (
                   <li key={n.id}>
-                    <button type="button" onClick={() => openNote(n.id)} className="w-full flex items-start gap-2.5 px-4 py-2.5 text-left hover:bg-zinc-50 dark:hover:bg-white/5 border-b border-zinc-100 dark:border-[#23272F]">
+                    <button type="button" onClick={() => openNote(n.id)} className="w-full flex items-start gap-2.5 px-4 py-2.5 text-start hover:bg-zinc-50 dark:hover:bg-white/5 border-b border-zinc-100 dark:border-[#23272F]">
                       <FileText className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-base font-medium text-zinc-800 dark:text-zinc-100">{n.title}</span>

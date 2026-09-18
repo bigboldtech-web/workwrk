@@ -11,18 +11,27 @@
  *  POST  /api/tasks   { title, date, allDay }
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import {
-  Layers, ChevronUp, ChevronDown, Flame, Trash2, ArrowUpDown,
-  Plus, AlertOctagon, UserMinus, Hourglass, ListChecks, Loader2,
+  Layers,
+  ChevronUp,
+  ChevronDown,
+  Flame,
+  Trash2,
+  ArrowUpDown,
+  Plus,
+  AlertOctagon,
+  UserMinus,
+  Hourglass,
+  ListChecks,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiPrio = "LOW" | "NORMAL" | "HIGH" | "URGENT";
 type ApiStatus = "PLANNED" | "IN_PROGRESS" | "COMPLETED";
@@ -207,13 +216,8 @@ export default function BacklogPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Backlog"
-        Icon={Layers}
-        iconGradient={GRAD.indigoBlue}
-        description={tasks === null ? "Loading…" : `${stats.total} item${stats.total === 1 ? "" : "s"} · ${stats.hours.toFixed(0)}h estimated`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={5}
         actions={
           selected.size > 0 ? (
             <div className="bklg__bulk">
@@ -227,9 +231,9 @@ export default function BacklogPage() {
       />
 
       {loadError ? (
-        <OsEmptyView Icon={Layers} iconGradient={GRAD.redPink} title="Couldn't load backlog" subtitle={`API error: ${loadError}`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load backlog" hint={`API error: ${loadError}`} action={{ label: "Try again", onClick: () => { void load(); } }} />
       ) : tasks === null ? (
-        <div className="bklg__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : (
         <div className="bklg">
           {/* Stat strip */}
@@ -329,7 +333,7 @@ export default function BacklogPage() {
             <div className="bklg__row bklg__row--add">
               <div className="bklg__cell bklg__cell--check" />
               <div className="bklg__cell bklg__cell--prio">
-                {adding ? <Loader2 className="bklg__spin" /> : <Plus />}
+                {adding ? <Dots variant="pending" /> : <Plus />}
               </div>
               <div className="bklg__cell bklg__cell--add-input" style={{ gridColumn: "span 5" }}>
                 <input

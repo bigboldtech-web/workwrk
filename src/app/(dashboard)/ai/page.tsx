@@ -13,8 +13,8 @@ import {
   Cpu, MessageCircle, Hash, ChevronRight, Sparkles, FileText, Mail, Code,
   Database, PieChart, Megaphone, Briefcase, Send, Activity, Bot, ArrowRight, Layers,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { C } from "@/components/layout/os/catalog";
 
 type Category = "writing" | "marketing" | "code" | "data" | "ops" | "hr";
 
@@ -67,15 +67,12 @@ export default function AiPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="AI"
-        Icon={Cpu}
-        iconGradient={GRAD.bluePurple}
-        description="Prompt playground · curated templates · runs in your account"
         actions={
           <div className="aip__head-actions">
-            <Link href="/sidekick" className="aip__nav-link"><MessageCircle /> Sidekick</Link>
-            <Link href="/agents" className="aip__nav-link"><Bot /> Agents</Link>
+            <Link href="/sidekick" className="os-head__link"><MessageCircle /> Ask AI</Link>
+            <Link href="/agents" className="os-head__link"><Bot /> Agents</Link>
           </div>
         }
       />

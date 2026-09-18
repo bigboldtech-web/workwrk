@@ -1,39 +1,38 @@
 "use client";
 
-// OsShell — ClickUp-style three-column shell rebuilt 2026-06-03.
-// Layout (top to bottom, left to right):
+// OsShell: the frame (spec-shell 2.1, design-system 4). Reading order, left
+// to right, top to bottom:
 //
-//   ┌─────────────────────────── Top bar (48px) ──────────────────────────┐
-//   │ [Workspace] [📅] [    Search ⌘K          ] [👥 avatars]            │
-//   ├──────┬──────────────┬──────────────────────────────────────────────┤
-//   │ App  │  Sidebar     │  Main content                                │
-//   │ Rail │  (Home /     │  (page renders here)                         │
-//   │ 88px │  Favorites / │                                              │
-//   │      │  Spaces)     │                                              │
-//   │      │  280px       │                                              │
-//   └──────┴──────────────┴──────────────────────────────────────────────┘
+//   rail 64 (navy, flush)  |  bar 48 (navy) over the content column
+//                          |  [offline strip]
+//                          |  sidebar 264 (N50) | <main> white | Ask AI 360
 //
-// Old components (OsTopbar / OsSidebar in topbar.tsx / sidebar.tsx) are
-// untouched in case we want to revert; this shell uses the new Click*
-// variants in click-topbar.tsx / click-app-rail.tsx / click-sidebar.tsx.
+// No gutters, no floating cards, no radius: the colour step is the edge.
+// Inside the settings takeover (SETTINGS_ROUTES) the rail and the bar stay
+// and the settings layout supplies its own 48px white bar, 264px list and
+// content in place of the hub sidebar and main.
+//
+// Every overlay the frame mounts is listed in spec-shell 2.1 "Side panel /
+// drawer / modal used here"; the More launcher, the pins strip, the legacy
+// item drawer, the My Work panel and the quick-capture chord are gone.
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { OsShellProvider, useOsShell } from "./shell-context";
+import { OsShellProvider, useLayer, useOsShell } from "./shell-context";
 import { OsCommandPalette } from "./command-palette";
-import { QuickCaptureHandler } from "./quick-capture";
-import { OsItemDrawer } from "./item-drawer";
 import { OsToastProvider } from "./toast";
 import { CustomizePanel } from "./customize-panel";
 import { ThemeApplier } from "./theme-applier";
-import { ClickAppRail } from "./click-app-rail";
-import { ClickSidebar } from "./click-sidebar";
-import { ClickTopbar } from "./click-topbar";
-import { TopPinsStrip } from "./top-pins-strip";
-import { AppsMorePopover } from "./apps-more-popover";
+import { Rail } from "./rail";
+import { HubSidebar } from "./hub-sidebar";
+import { TopBar } from "./top-bar/top-bar";
+import { BreadcrumbProvider, useDeclaredBreadcrumb } from "./top-bar/breadcrumb";
+import { useNavHistoryRecorder } from "./top-bar/nav-history";
+import { OfflineStrip } from "./offline-strip";
+import { SkipLinks, MAIN_ID, SIDEBAR_ID } from "./skip-links";
 import { OsSidekickPanel } from "./sidekick-panel";
 import { SetStatusModal } from "./set-status-modal";
 import { CreateTaskModal } from "./create-task-modal";
-import { MyWorkPanel } from "./my-work-panel";
 import { NotepadPanel } from "./notepad-panel";
 import { ReminderPopover } from "./reminder-popover";
 import { ReminderTicker } from "./reminder-ticker";
@@ -46,6 +45,9 @@ import { IncomingCallWatcher } from "@/components/calls/incoming-call-watcher";
 import { RealtimeClient } from "./realtime-client";
 import { ShellShortcuts } from "./shell-shortcuts";
 import { ShortcutsOverlay } from "./shortcuts-overlay";
+import { MissionSplash } from "@/components/brand/mission-splash";
+import { isSettingsRoute, resolveCrumbFallback, resolveHub } from "@/lib/nav/route-hub";
+import { HUB_LABELS } from "@/lib/nav/labels";
 
 function CustomizeMount() {
   const { customizeOpen, setCustomizeOpen } = useOsShell();
@@ -61,79 +63,216 @@ function TemplateCenterMount() {
       kind={templateCenterOpts?.kind}
       applyContext={templateCenterOpts?.applyContext}
       onApplied={(result) => {
-        // A TASK template hands off to the create-task modal, which has
-        // its own template picker for filling the task config.
         if (result.kind === "TASK") openCreateTask();
       }}
     />
   );
 }
 
-export function OsShell({ children }: { children: React.ReactNode }) {
-  // ClickUp-style shell: compact topbar over rounded rail, sidebar, and
-  // content panels with small page-background gutters between them.
-  //
-  // Settings/account run in a dedicated full-screen "settings mode": the
-  // rail + Home sidebar + topbar step aside and the settings/account
-  // layouts supply their own SettingsShell chrome. We keep the providers
-  // mounted so settings pages still get shell-context + toasts + theme.
+/**
+ * Moves focus to <main> and announces the page on every client navigation.
+ * The announced text is the page's own name (its last declared crumb, else
+ * the ROUTE_TITLES label, else the hub), never document.title: no dashboard
+ * route sets a per-page title, so the title is the constant marketing one.
+ */
+function NavigationAnnouncer() {
   const pathname = usePathname() || "";
-  const settingsMode = pathname.startsWith("/settings") || pathname.startsWith("/account");
+  const declared = useDeclaredBreadcrumb();
+  const [announce, setAnnounce] = useState("");
+  // The path announced last. Seeded with the mount path, so a cold load is
+  // never announced and StrictMode's second effect run (which defeats a
+  // plain "first run" flag in development) is a no-op as well: only a real
+  // change of pathname moves focus and speaks.
+  const announcedPath = useRef(pathname);
+  useNavHistoryRecorder();
+  const label = declared?.[declared.length - 1]?.label ?? resolveCrumbFallback(pathname) ?? HUB_LABELS[resolveHub(pathname)];
+  const labelRef = useRef(label);
+  useEffect(() => { labelRef.current = label; }, [label]);
+  // The tab title follows the page: "Inbox · WorkwrK". No dashboard route
+  // exports its own metadata, so this is the only source of every dashboard
+  // title. Next re-applies the ROOT metadata title after the router commits,
+  // at a moment nothing here can schedule around: a setTimeout(0) loses that
+  // race and the tab keeps the marketing tagline for the rest of the session.
+  // So watch <head> and re-assert instead. Writing document.title mutates the
+  // same <title> node, which re-enters the observer once and then matches, so
+  // there is no loop.
+  const desiredTitle = label ? `${label} · WorkwrK` : null;
+  useEffect(() => {
+    if (!desiredTitle) return;
+    const apply = () => { if (document.title !== desiredTitle) document.title = desiredTitle; };
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [desiredTitle]);
+  useEffect(() => {
+    if (announcedPath.current === pathname) return;
+    announcedPath.current = pathname;
+    const main = document.getElementById(MAIN_ID);
+    if (main && !main.contains(document.activeElement)) {
+      main.focus({ preventScroll: true });
+    }
+    // A beat later, so a page that declares its crumbs has done so.
+    const t = window.setTimeout(() => setAnnounce(labelRef.current), 150);
+    return () => window.clearTimeout(t);
+  }, [pathname]);
+  return <div className="sr-only" aria-live="polite">{announce}</div>;
+}
 
+/**
+ * The tablet overlay sidebar (768 to 1023): opened from the bar's Menu
+ * button; a layer, so Esc closes it (spec-shell 1.16); closes on row click.
+ */
+function useOverlaySidebar() {
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  // Where focus was when the drawer opened (the bar's Menu button), so Esc,
+  // the scrim and the ✕ all put focus back on it rather than on nothing.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const openRef = useRef(open);
+  useEffect(() => { openRef.current = open; }, [open]);
+  const close = useCallback(() => {
+    setOpen(false);
+    const opener = openerRef.current;
+    openerRef.current = null;
+    // After the drawer unmounts: removing the focused element sends focus to
+    // <body>, so the restore has to happen on the other side of that.
+    window.setTimeout(() => {
+      if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    }, 0);
+  }, []);
+  const toggle = useCallback(() => {
+    // The opener is captured in the event handler, never inside the setOpen
+    // updater: an updater is render-phase work that React may run twice or
+    // discard, and doing it there left the first open with no opener to
+    // restore focus to (focus fell to <body> on the first close).
+    if (openRef.current) {
+      close();
+      return;
+    }
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setOpen(true);
+  }, [close]);
+  useLayer(open, { id: "sidebar-overlay", kind: "drawer", close });
+  // A row click navigates; the drawer closes right after the route commits.
+  useEffect(() => {
+    const t = window.setTimeout(() => setOpen(false), 0);
+    return () => window.clearTimeout(t);
+  }, [pathname]);
+  // Crossing up past the 1024 breakpoint hides the drawer with CSS, so its
+  // layer has to go with it: a live layer nobody can see swallows the next
+  // Escape. The same listener closes it on the way down, which is harmless.
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => { if (mq.matches) setOpen(false); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return { open, close, toggle };
+}
+
+// The frame is a grid so the DOM order is the reading and tab order the spec
+// fixes (skip links, rail, sidebar, bar, content, panel) while the bar still
+// spans the content column above the sidebar and the page:
+//
+//   col 1 rail | col 2 sidebar | col 3 main | col 4 Ask AI
+//   row 1 bar (cols 2 to 4)  ·  row 2 offline strip  ·  row 3 the rest
+//
+// The settings takeover keeps rows 1 and 2 and takes cols 2 to 4 of row 3.
+const GRID_STYLE: React.CSSProperties = {
+  gridTemplateColumns: "var(--os-rail-w) auto minmax(0, 1fr) auto",
+  gridTemplateRows: "var(--os-top-h) auto minmax(0, 1fr)",
+};
+
+// The takeover renders neither the hub sidebar nor the Ask AI panel, so cols
+// 2 and 4 are empty. They have to be pinned to 0 rather than left `auto`:
+// the takeover spans 2 to 4, an `auto` track sizes to its items' min-content,
+// and a wide settings page (Members) therefore stretched the whole span past
+// the viewport with nothing able to scroll it back. Pinned to 0 the span is
+// exactly `minmax(0, 1fr)`, so it can never exceed the viewport minus the
+// rail and wide tables scroll inside their own card (spec-shell 1.16).
+const SETTINGS_GRID_STYLE: React.CSSProperties = {
+  gridTemplateColumns: "var(--os-rail-w) 0px minmax(0, 1fr) 0px",
+  gridTemplateRows: "var(--os-top-h) auto minmax(0, 1fr)",
+};
+
+function Frame({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname() || "";
+  const settingsMode = isSettingsRoute(pathname);
+  const overlay = useOverlaySidebar();
+
+  return (
+    <div className="workwrk-os grid h-screen overflow-hidden bg-app text-ink" style={settingsMode ? SETTINGS_GRID_STYLE : GRID_STYLE}>
+      <SkipLinks settingsMode={settingsMode} />
+      <div className="col-start-1 row-span-3 row-start-1 flex min-h-0">
+        <Rail />
+      </div>
+      {!settingsMode ? (
+        <div id={SIDEBAR_ID} className="col-start-2 row-start-3 flex min-h-0 max-lg:hidden">
+          <HubSidebar />
+        </div>
+      ) : null}
+      <div className="col-span-3 col-start-2 row-start-1 flex min-w-0 flex-col">
+        <TopBar onMenu={settingsMode ? undefined : overlay.toggle} menuOpen={overlay.open} />
+      </div>
+      <div className="col-span-3 col-start-2 row-start-2 flex min-w-0 flex-col">
+        <OfflineStrip />
+      </div>
+      {settingsMode ? (
+        <div className="col-span-3 col-start-2 row-start-3 flex min-h-0 min-w-0">
+          {children}
+        </div>
+      ) : (
+        <>
+          {overlay.open ? (
+            // `contents`: the scrim and the drawer are fixed, so neither is a
+            // grid item and the wrapper never claims a cell of its own.
+            <div className="contents lg:hidden">
+              {/* The scrim starts after the rail and below the bar, so both
+                  stay visible and live while the drawer is open (1.16 keeps
+                  the rail at 64 and the bar at 48 at every width). */}
+              <button type="button" aria-label="Close sidebar" onClick={overlay.close} className="fixed bottom-0 end-0 start-[var(--os-rail-w)] top-[var(--os-top-h)] z-30 bg-[var(--os-scrim)]" />
+              <HubSidebar overlay onClose={overlay.close} />
+            </div>
+          ) : null}
+          <main id={MAIN_ID} tabIndex={-1} className="col-start-3 row-start-3 min-h-0 min-w-0 overflow-y-auto overflow-x-hidden bg-app outline-none">
+            {children}
+          </main>
+          <div className="col-start-4 row-start-3 flex min-h-0">
+            <OsSidekickPanel />
+          </div>
+        </>
+      )}
+      <NavigationAnnouncer />
+    </div>
+  );
+}
+
+export function OsShell({ children }: { children: React.ReactNode }) {
   return (
     <OsShellProvider>
       <OsToastProvider>
-        <ThemeApplier />
-        {/* Reminder firing + the persistent fire popup live ABOVE the
-            settings/non-settings fork, so due reminders still fire and pop
-            while the user is inside the full-screen Settings takeover. */}
-        <ReminderTicker />
-        {/* The call dock lives ABOVE the settings fork too — a call must
-            survive navigating into the full-screen Settings/Account takeover,
-            not just between normal pages. */}
-        <CallDock />
-        {/* Real-time incoming-call ring (few-second latency), everywhere. */}
-        <IncomingCallWatcher />
-        {/* One SSE connection per tab → instant chat / notifications / calls. */}
-        <RealtimeClient />
-        {/* The shell's ONE keyboard listener (src/lib/shortcuts.ts) and the
-            "?" overlay, above the fork so Esc and the map work inside the
-            Settings takeover too. */}
-        <ShellShortcuts />
-        <ShortcutsOverlay />
-        {settingsMode ? (
-          <div className="workwrk-os h-screen overflow-hidden bg-white text-zinc-900">
-            {children}
-          </div>
-        ) : (
-          <div className="workwrk-os h-screen flex flex-col bg-zinc-100 text-zinc-900 p-1.5 gap-1.5 overflow-hidden">
-            <ClickTopbar />
-            {/* Top-pinned favorites — their own tab-strip row below the topbar */}
-            <TopPinsStrip />
-            <div className="flex-1 flex min-h-0 relative gap-1.5 overflow-hidden">
-              <ClickAppRail />
-              <ClickSidebar />
-              <AppsMorePopover />
-              <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden bg-white rounded-xl border border-zinc-200">
-                {children}
-              </main>
-              <OsSidekickPanel />
-            </div>
-            <OsCommandPalette />
-            <OsItemDrawer />
-            <CustomizeMount />
-            <SetStatusModal />
-            <QuickCaptureHandler />
-            <CreateTaskModal />
-            <CreateListModal />
-            <CreateSprintModal />
-            <MyWorkPanel />
-            <NotepadPanel />
-            <ReminderPopover />
-            <VoiceCapturePopover />
-            <TemplateCenterMount />
-          </div>
-        )}
+        <BreadcrumbProvider>
+          <ThemeApplier />
+          <ReminderTicker />
+          <CallDock />
+          <IncomingCallWatcher />
+          <RealtimeClient />
+          <ShellShortcuts />
+          <ShortcutsOverlay />
+          <Frame>{children}</Frame>
+          <OsCommandPalette />
+          <CustomizeMount />
+          <SetStatusModal />
+          <CreateTaskModal />
+          <CreateListModal />
+          <CreateSprintModal />
+          <NotepadPanel />
+          <ReminderPopover />
+          <VoiceCapturePopover />
+          <TemplateCenterMount />
+          <MissionSplash />
+        </BreadcrumbProvider>
       </OsToastProvider>
     </OsShellProvider>
   );

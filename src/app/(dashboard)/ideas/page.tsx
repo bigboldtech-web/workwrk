@@ -15,17 +15,22 @@
  *  POST  /api/ideas/[id]/vote     toggle
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import {
-  Lightbulb, ThumbsUp, MessageSquare, Plus, X, Trophy,
-  Flame, Clock, Loader2,
+  Lightbulb,
+  ThumbsUp,
+  MessageSquare,
+  X,
+  Trophy,
+  Flame,
+  Clock,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD, PEOPLE } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type IdeaStatus = "SUBMITTED" | "UNDER_REVIEW" | "APPROVED" | "REJECTED" | "IMPLEMENTED" | "REWARDED";
 
@@ -167,28 +172,21 @@ export default function IdeasPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Ideas"
-        Icon={Lightbulb}
-        iconGradient={GRAD.yellowOrange}
-        description={ideas === null ? "Loading…" : `${total} idea${total === 1 ? "" : "s"} · ${implementedCount} implemented · you've submitted ${myCount}`}
-        people={[PEOPLE.bb, PEOPLE.sc, PEOPLE.mk]}
-        morePeople={9}
-        actions={
-          <div className="ideas__head-actions">
-            <div className="ideas__sort">
-              <button type="button" className={sort === "votes" ? "is-active" : ""} onClick={() => setSort("votes")}>
+        toolbar={{
+          left: (
+            <div className="ideas__sort" role="radiogroup" aria-label="Sort ideas">
+              <button type="button" role="radio" aria-checked={sort === "votes"} className={sort === "votes" ? "is-active" : ""} onClick={() => setSort("votes")}>
                 <Flame /> Top
               </button>
-              <button type="button" className={sort === "new" ? "is-active" : ""} onClick={() => setSort("new")}>
+              <button type="button" role="radio" aria-checked={sort === "new"} className={sort === "new" ? "is-active" : ""} onClick={() => setSort("new")}>
                 <Clock /> New
               </button>
             </div>
-            <button type="button" className="ideas__new" onClick={() => setComposer(true)}>
-              <Plus /> Share an idea
-            </button>
-          </div>
-        }
+          ),
+          primary: { label: "Share an idea", onClick: () => setComposer(true) },
+        }}
       />
 
       <div className="ideas">
@@ -217,18 +215,18 @@ export default function IdeasPage() {
             <footer className="ideas__composer-foot">
               <span>Anyone in your org can upvote and comment.</span>
               <button type="button" onClick={submit} disabled={!draft.title.trim() || submitting} className="ideas__submit">
-                {submitting ? <><Loader2 className="ideas__spin" /> Submitting…</> : <>Submit <ThumbsUp /></>}
+                {submitting ? <><Dots variant="pending" /> Submitting…</> : <>Submit <ThumbsUp /></>}
               </button>
             </footer>
           </div>
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.redPink} title="Couldn't load ideas" subtitle={`API error: ${loadError}`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load ideas" hint={`API error: ${loadError}`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : ideas === null ? (
-          <div className="ideas__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : total === 0 ? (
-          <OsEmptyView Icon={Lightbulb} iconGradient={GRAD.yellowOrange} title="No ideas yet" subtitle="Got a hunch? A fix? A what-if? Drop it in — even half-baked ones spark conversations." chips={["Product", "Process", "Culture", "Cost-cutting"]} cta="Share an idea" />
+          <OsEmptyView context="list" title="No ideas yet" hint="Drop in a hunch, a fix or a what-if." />
         ) : (
           <div className="ideas__board">
             {STATUS_ORDER.map((s) => {

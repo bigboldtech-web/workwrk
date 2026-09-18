@@ -1,931 +1,815 @@
 "use client";
 
-// OsCommandPalette — enhanced search modal modeled after ClickUp's
-// "Brain" reference (2026-06-03 screenshot).
+// Search palette (spec-shell 2.9): find anything or jump anywhere by typing.
 //
-// Layout top → bottom:
-//   header:  big search input + Ask-AI chip (opens the Sidekick panel)
-//   sources: All / WorkwrK / Gmail / Drive / SharePoint / Apps
-//   filters: Tasks / Docs / People / Commands / Actions + Filter + Sort
-//   body:    a flat ranked feed. When the query is empty we show real
-//            recents (recently-opened apps) + wired quick actions + the
-//            navigation + command shortcuts. When typing, live results
-//            from /api/search (the real Item/Board/Space/Folder/Doc graph)
-//            lead, followed by the discovery rows filtered by query.
-//   footer:  ←/→ navigate hint + Tab additional actions + settings
+//   Radix Dialog, 640 wide (the one flagged width outside the modal set),
+//   top 12vh. Header: one 44px input. Under it one chip row, single-select:
+//   All · Tasks · Docs · People · Spaces & Lists · Apps · Settings. Body:
+//   sections with 11/600 labels and 36px rows. Footer: real hints only.
 //
-// There is NO mock/demo data here anymore: every row resolves to a real
-// route or fires a real shell action. Entity results come live from the
-// server; the empty state is built from the user's own recents + actions.
+//   Empty query: RECENT (the last apps opened, localStorage ephemera),
+//   JUMP TO (Home, My work, Inbox first, then the hubs, then every folded
+//   app the viewer may open, in rail order: this is the launcher), CREATE
+//   (Task, Doc, List, Reminder, Notepad, Voice note; gated like the Create
+//   menu). Typing (2+ chars, 180ms): GET /api/search, grouped TASKS · DOCS ·
+//   PEOPLE · SPACES & LISTS · APPS (name match on the viewer's apps) ·
+//   SETTINGS (registry, Workspace pages only for Owner and Admin) · ACTIONS
+//   ("Ask AI about …" when the AI hub is visible, "Create a task").
+//
+// Removed from the old palette: the Gmail / Drive / SharePoint / Apps source
+// tabs, Filter and Sort, the gear with no handler, "Tab for actions", the
+// decorative arrows, the Ask AI header button (an ACTIONS row now) and the
+// retired labels Today, My tasks, My Priorities, AI Notetaker.
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  Search,
-  Home,
-  CheckSquare,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import {
+  AlarmClock,
+  Building2,
   CalendarDays,
-  Users2,
-  BarChart3,
-  Sparkles,
-  Store,
-  Settings,
-  Inbox,
-  Target,
+  CheckSquare,
   FileText,
-  Mail,
-  HardDrive,
-  Filter,
-  ArrowUpDown,
-  CornerDownLeft,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink as ExternalLinkIcon,
+  House,
+  Inbox,
+  ListTodo,
   Megaphone,
-  Clock,
-  Video,
-  FileSpreadsheet,
-  MoreHorizontal,
-  Activity,
-  Terminal,
-  Notebook,
-  Hash,
-  PenTool,
-  Layers,
-  Folder,
-  Check,
+  Mic,
+  NotebookPen,
+  Search,
+  Settings2,
+  Sparkles,
+  Target,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { useOsShell } from "./shell-context";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { apiFetch } from "@/lib/api-fetch";
 import { shortcutHint } from "@/lib/shortcuts";
-import { AskAiButton } from "./ask-ai-button";
-import { APPS, type AppEntry } from "./apps-catalog";
+import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
+import { isHubKey, WORK_HOME_HREF } from "@/lib/nav/route-hub";
+import {
+  filterSettingsPages,
+  settingsHrefToday,
+} from "@/lib/settings-registry";
+import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { cn } from "@/lib/utils";
+import { useOsShell } from "./shell-context";
+import { useBoot, useViewerRole } from "./boot-context";
+import { useOsToast } from "./toast";
+import type { AppEntry } from "./apps-catalog";
 
-/* ─── Item kinds: each row in the palette is one of these ─── */
+/* ─── Model ─── */
 
-type BaseItem = {
+type ChipKey = "all" | "task" | "doc" | "person" | "space" | "app" | "settings";
+
+const CHIPS: Array<{ key: ChipKey; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "task", label: "Tasks" },
+  { key: "doc", label: "Docs" },
+  { key: "person", label: "People" },
+  { key: "space", label: "Spaces & Lists" },
+  { key: "app", label: "Apps" },
+  { key: "settings", label: "Settings" },
+];
+
+type Row = {
   id: string;
   label: string;
+  /** The container path ("Sales › Q4") or a one-line hint, 13px ink-2. */
+  secondary?: string;
+  glyph: ReactNode;
   href?: string;
+  /** Runs instead of navigating; the palette closes first. */
   action?: () => void;
-};
-
-type TaskItem = BaseItem & {
-  kind: "task";
-  status: "todo" | "in_progress" | "done" | "blocked";
-  due?: string;
-  assignee: { name: string; color: string };
-};
-
-type DocItem = BaseItem & {
-  kind: "doc";
-  type: "doc" | "spreadsheet" | "whiteboard";
-  editedAt: string;
-  editor?: string;
-};
-
-type PersonItem = BaseItem & {
-  kind: "person";
-  role: string;
-  isAgent?: boolean;
-  initials: string;
-  color: string;
-};
-
-type SpaceItem = BaseItem & {
-  kind: "space";
-  Icon: LucideIcon;
-  color: string;
-  members: number;
-};
-
-type ActionItem = BaseItem & {
-  kind: "action";
-  Icon: LucideIcon;
-  color: string;
-  shortcut?: string;
-  hint?: string;
-};
-
-type NavItem = BaseItem & {
-  kind: "navigate";
-  Icon: LucideIcon;
-  color: string;
   shortcut?: string;
 };
 
-/** Commands are app-wide navigation ops with a memorable keyword alias
- *  (the "shortcut" — e.g. `mw` opens My Work). They mirror the ClickUp
- *  omnibox commands list. */
-type CommandItem = BaseItem & {
-  kind: "command";
-  Icon: LucideIcon;
-  alias?: string;
-};
-
-type Item = TaskItem | DocItem | PersonItem | SpaceItem | ActionItem | NavItem | CommandItem;
-
-/* ─── Static discovery rows (all resolve to real routes) ─── */
-
-const NAVIGATE: NavItem[] = [
-  // Hints come from the registry (src/lib/shortcuts.ts) so a row never
-  // advertises a chord nothing listens for ("G T", "G K", "G M" were dead).
-  { kind: "navigate", id: "n-today",  label: "Today",       Icon: Home,         color: "var(--os-c-orange)", href: "/today",   shortcut: shortcutHint("go-home") },
-  { kind: "navigate", id: "n-inbox",  label: "Inbox",       Icon: Inbox,        color: "var(--os-c-blue)",   href: "/inbox",   shortcut: shortcutHint("go-inbox") },
-  { kind: "navigate", id: "n-tasks",  label: "My tasks",    Icon: CheckSquare,  color: "var(--os-brand)",    href: "/tasks" },
-  { kind: "navigate", id: "n-meet",   label: "Planner",     Icon: CalendarDays, color: "var(--os-c-orange)", href: "/planner" },
-  { kind: "navigate", id: "n-okrs",   label: "Goals",       Icon: Target,       color: "var(--os-c-blue)",   href: "/okrs" },
-  { kind: "navigate", id: "n-store",  label: "Marketplace", Icon: Store,        color: "var(--os-c-blue)",   href: "/store" },
-  { kind: "navigate", id: "n-set",    label: "Settings",    Icon: Settings,     color: "var(--os-c-brown)",  href: "/settings" },
-];
-
-/** Commands — nav shortcuts with a keyword alias users can type. Every
- *  entry has a real href (routes verified to exist). */
-const COMMANDS: CommandItem[] = [
-  { kind: "command", id: "cmd-planner",    label: "Open Planner",       Icon: CalendarDays, alias: "calendar", href: "/planner" },
-  { kind: "command", id: "cmd-priorities", label: "Open My Priorities", Icon: Target,       alias: "pri",      href: "/today" },
-  { kind: "command", id: "cmd-mywork",     label: "Open My Work",       Icon: CheckSquare,  alias: "mw",       href: "/tasks" },
-  { kind: "command", id: "cmd-activity",   label: "Open My Activity",   Icon: Activity,     alias: "act",      href: "/dashboard" },
-  { kind: "command", id: "cmd-inbox",      label: "Go to Inbox",        Icon: Inbox,        alias: "inb",      href: "/inbox" },
-  { kind: "command", id: "cmd-docs",       label: "Go to Docs home",    Icon: FileText,     alias: "docs",     href: "/docs" },
-  { kind: "command", id: "cmd-goals",      label: "Go to Goals",        Icon: Target,       alias: "goals",    href: "/okrs" },
-  { kind: "command", id: "cmd-time",       label: "Go to Timesheets",   Icon: Clock,        alias: "ts",       href: "/timesheets" },
-  { kind: "command", id: "cmd-connect",    label: "Connect apps",       Icon: Store,        alias: "conn",     href: "/integrations" },
-];
-
-/* ─── Top-level filters (source tabs + type chips) ─── */
-
-const SOURCES: Array<{
+type Section = {
   key: string;
   label: string;
-  Icon?: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
-  tint?: string;
-  connectable?: boolean;
-}> = [
-  { key: "all",         label: "All" },
-  { key: "workwrk",     label: "WorkwrK",      Icon: Sparkles, tint: "var(--os-brand)" },
-  { key: "gmail",       label: "Gmail",        Icon: Mail,     tint: "#EA4335", connectable: true },
-  { key: "drive",       label: "Google Drive", Icon: HardDrive,tint: "#34A853", connectable: true },
-  { key: "sharepoint",  label: "SharePoint",   Icon: FileText, tint: "#0078D4", connectable: true },
-  { key: "apps",        label: "Apps",         Icon: Store,    tint: "#F97316" },
-];
-
-/** Type filter chip. Each defines its own predicate. Only kinds the
- *  palette actually produces get a chip; structural results (boards /
- *  spaces / folders) render inline but aren't separately filterable. */
-const TYPE_FILTERS: Array<{
-  key: string;
-  label: string;
-  Icon: LucideIcon;
-  primary?: boolean;
-  predicate: (it: Item) => boolean;
-}> = [
-  { key: "task",    label: "Tasks",    Icon: CheckSquare, primary: true, predicate: (i) => i.kind === "task" },
-  { key: "doc",     label: "Docs",     Icon: FileText,    primary: true, predicate: (i) => i.kind === "doc" },
-  { key: "person",  label: "People",   Icon: Users2,      primary: true, predicate: (i) => i.kind === "person" },
-  { key: "command", label: "Commands", Icon: Terminal,    primary: true, predicate: (i) => i.kind === "command" },
-  { key: "action",  label: "Actions",  Icon: Sparkles,                   predicate: (i) => i.kind === "action" },
-];
-
-/** Filter dropdown options. Predicate-based against the live/discovery
- *  set; kept honest (no hardcoded "me"). */
-const FILTERS: Array<{ key: string; label: string; predicate?: (it: Item) => boolean }> = [
-  { key: "any",    label: "Any" },
-  { key: "active", label: "Active tasks only", predicate: (i) => i.kind === "task" && (i as TaskItem).status !== "done" },
-  { key: "docs",   label: "Documents",         predicate: (i) => i.kind === "doc" },
-];
-
-/** Sort dropdown options. Default is "modified" which preserves the
- *  server + discovery order (most-relevant-feeling first). */
-const SORTS: Array<{ key: string; label: string; sorter?: (a: Item, b: Item) => number }> = [
-  { key: "modified", label: "Modified date (recent)" },
-  { key: "created",  label: "Created date" },
-  { key: "alpha",    label: "Name A → Z", sorter: (a, b) => a.label.localeCompare(b.label) },
-  { key: "alpha-z",  label: "Name Z → A", sorter: (a, b) => b.label.localeCompare(a.label) },
-];
-
-const STATUS_TONE: Record<TaskItem["status"], { dot: string; label: string }> = {
-  todo:        { dot: "#A1A1AA",          label: "To do" },
-  in_progress: { dot: "var(--os-c-blue)", label: "In progress" },
-  done:        { dot: "var(--os-c-green)",label: "Done" },
-  blocked:     { dot: "var(--os-c-red)",  label: "Blocked" },
+  chip: ChipKey | "any";
+  rows: Row[];
 };
 
-const DOC_TYPE_ICON: Record<DocItem["type"], LucideIcon> = {
-  doc: FileText,
-  spreadsheet: FileSpreadsheet,
-  whiteboard: BarChart3,
+type ServerHit = {
+  type: string;
+  id: string;
+  title: string;
+  subtitle?: string;
+  href?: string;
 };
 
-/** Per-type icon for live results that render as a generic navigation row
- *  (boards, spaces, folders, whiteboards, and the org/alignment surfaces). */
-const NAV_ICON: Record<string, LucideIcon> = {
-  board: Layers,
-  space: Hash,
-  folder: Folder,
-  whiteboard: PenTool,
-  department: Users2,
-  meeting: CalendarDays,
+const SEARCH_TYPES: Record<
+  string,
+  "task" | "doc" | "person" | "space" | "more"
+> = {
+  item: "task",
+  task: "task",
+  note: "doc",
+  sop: "doc",
+  whiteboard: "doc",
+  policy: "doc",
+  person: "person",
+  board: "space",
+  space: "space",
+  folder: "space",
+  okr: "more",
+  meeting: "more",
+  department: "more",
+  idea: "more",
+  announcement: "more",
+};
+
+const MORE_ICON: Record<string, LucideIcon> = {
   okr: Target,
+  meeting: CalendarDays,
+  department: Building2,
   idea: Sparkles,
-  policy: FileText,
   announcement: Megaphone,
 };
 
-/** App-key → catalog entry, for turning the shell's recent-app list into
- *  real navigation rows in the empty state. */
-const APP_BY_KEY = new Map<string, AppEntry>(APPS.map((a) => [a.key, a]));
+function Glyph({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <Icon
+      className="h-4 w-4 shrink-0 text-ink-2"
+      strokeWidth={1.5}
+      aria-hidden
+    />
+  );
+}
 
-type ServerHit = { type: string; id: string; title: string; subtitle?: string; href?: string };
+function PersonGlyph({ name }: { name: string }) {
+  const initials =
+    name
+      .split(" ")
+      .map((s) => s[0] ?? "")
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?";
+  return (
+    <span
+      className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-active text-[10px] font-medium text-ink-strong"
+      aria-hidden
+    >
+      {initials}
+    </span>
+  );
+}
+
+function hasSpeechRecognition(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as unknown as {
+    SpeechRecognition?: unknown;
+    webkitSpeechRecognition?: unknown;
+  };
+  return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
+}
 
 /* ─── Component ─── */
 
+/** The dialog. Its body mounts only while open, so every open starts clean. */
 export function OsCommandPalette() {
-  const { paletteOpen, closePalette, openSidekick, openCreateTask, recentAppKeys, hubHref } = useOsShell();
-  const router = useRouter();
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState(0);
-  const [sourceKey, setSourceKey] = useState<string>("all");
-  const [typeFilters, setTypeFilters] = useState<Set<string>>(new Set());
-  const [filterKey, setFilterKey] = useState<string>("any");
-  const [sortKey, setSortKey] = useState<string>("modified");
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [mounted, setMounted] = useState(false);
-
-  // Quick doc — mirrors ClickTopbar.createQuickDoc so the palette action
-  // and the top-bar icon behave identically.
-  const createQuickDoc = useCallback(async () => {
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled doc", content: { type: "doc", content: [{ type: "paragraph" }] } }),
-      });
-      if (!res.ok) return;
-      const d = await res.json();
-      if (d?.doc?.id) router.push(`/docs/${d.doc.id}`);
-    } catch { /* transient — ignore */ }
-  }, [router]);
-
-  // Wired quick actions — each fires a real shell action or navigates to a
-  // real route (no more decorative rows that just close the palette).
-  const quickActions = useMemo<ActionItem[]>(() => [
-    { kind: "action", id: "qa-task",     label: "Create task",         Icon: CheckSquare, color: "var(--os-c-green)",  hint: "Quick capture", action: () => openCreateTask() },
-    { kind: "action", id: "qa-doc",      label: "New doc",             Icon: FileText,    color: "var(--os-c-teal)",   action: () => void createQuickDoc() },
-    { kind: "action", id: "qa-note",     label: "New notepad",         Icon: Notebook,    color: "var(--os-brand)",    action: () => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "notepad" })) },
-    { kind: "action", id: "qa-reminder", label: "Set a reminder",      Icon: Clock,       color: "var(--os-c-orange)", action: () => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail: "reminder" })) },
-    { kind: "action", id: "qa-clip",     label: "Open AI Notetaker",   Icon: Video,       color: "var(--os-c-red)",    href: "/notetaker" },
-    { kind: "action", id: "qa-announce", label: "Post an announcement",Icon: Megaphone,   color: "var(--os-c-red)",    href: "/announcements" },
-    { kind: "action", id: "qa-time",     label: "Open Timesheets",     Icon: Clock,       color: "var(--os-c-blue)",   href: "/timesheets" },
-  ], [openCreateTask, createQuickDoc]);
-
-  // Real recents — the user's recently-opened apps, mapped to nav rows.
-  const recents = useMemo<NavItem[]>(() => {
-    return recentAppKeys
-      .map((k) => APP_BY_KEY.get(k))
-      .filter((a): a is AppEntry => !!a)
-      .slice(0, 5)
-      .map((a) => ({
-        kind: "navigate" as const,
-        id: `recent-${a.key}`,
-        label: a.label,
-        // hubHref, not the static defaultHref: the rail and the launcher both
-        // route through it, and a hub has one landing however you reach it
-        // (Talk and Settings are the two that branch).
-        href: hubHref(a.key),
-        Icon: a.Icon as LucideIcon,
-        color: "var(--os-ink-2)",
-      }));
-  }, [recentAppKeys, hubHref]);
-
-  const emptyBase = useMemo<Item[]>(
-    () => [...recents, ...quickActions, ...NAVIGATE, ...COMMANDS],
-    [recents, quickActions],
-  );
-
-  // Live results from /api/search — debounced fetch on query change.
-  // Server hits are mapped into Item shapes so they slot into the existing
-  // flatItems / keyboard-nav / sectioned-render machinery unchanged.
-  const [live, setLive] = useState<Item[]>([]);
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) { setLive([]); return; }
-    const ctrl = new AbortController();
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, { signal: ctrl.signal });
-        if (!res.ok) return;
-        const d = await res.json();
-        // /api/search returns a BARE array (jsonSuccess(results)), not a
-        // {data:[...]} envelope — reading d.data alone left every query
-        // empty, so live entity search silently returned nothing.
-        const hits = (Array.isArray(d) ? d : d?.data ?? []) as ServerHit[];
-        setLive(hits.map((h): Item | null => {
-          if (h.type === "note" || h.type === "sop") {
-            return { kind: "doc", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, type: "doc", editedAt: h.type === "sop" ? (h.subtitle ?? "SOP") : (h.subtitle ?? "") } as DocItem;
-          }
-          if (h.type === "item" || h.type === "task") {
-            return { kind: "task", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, status: "todo", due: h.subtitle, assignee: { name: "", color: "var(--os-c-blue)" } } as TaskItem;
-          }
-          if (h.type === "person") {
-            const initials = h.title.split(" ").map((s) => s[0] ?? "").join("").slice(0, 2).toUpperCase() || "?";
-            return { kind: "person", id: `live-person-${h.id}`, label: h.title, href: h.href, role: h.subtitle ?? "", initials, color: "var(--os-c-blue)" } as PersonItem;
-          }
-          // Boards / spaces / folders / whiteboards / org surfaces → a
-          // navigation row with a per-type icon.
-          return h.href
-            ? { kind: "navigate", id: `live-${h.type}-${h.id}`, label: h.title, href: h.href, Icon: NAV_ICON[h.type] ?? Search, color: "var(--os-ink-2)" } as NavItem
-            : null;
-        }).filter((x): x is Item => !!x));
-      } catch { /* abort or transient — ignore */ }
-    }, 180);
-    return () => { ctrl.abort(); clearTimeout(t); };
-  }, [query]);
-
-  useEffect(() => setMounted(true), []);
-
-  const toggleType = (key: string) => {
-    setTypeFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  /* Visible flat list. Three stacked filters:
-   *   1. query — substring match on label OR (for commands) on alias
-   *   2. type chips — predicate-OR
-   *   3. Filter dropdown — single active predicate
-   * Then `sortKey` reorders the result. When searching, live server
-   * results lead and the discovery rows follow (filtered by query). When
-   * empty, the emptyBase (recents + actions + nav + commands) shows.
-   */
-  const flatItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const activeTypes = TYPE_FILTERS.filter((f) => typeFilters.has(f.key));
-    const filterDef = FILTERS.find((f) => f.key === filterKey);
-    const sortDef = SORTS.find((s) => s.key === sortKey);
-    const matchQuery = (it: Item) => {
-      if (!q) return true;
-      if (it.label.toLowerCase().includes(q)) return true;
-      if (it.kind === "command" && (it as CommandItem).alias?.toLowerCase().includes(q)) return true;
-      return false;
-    };
-    const baseItems: Item[] = q
-      ? [...live, ...quickActions, ...NAVIGATE, ...COMMANDS]
-      : emptyBase;
-    const filtered = baseItems.filter((it) => {
-      if (!matchQuery(it)) return false;
-      if (activeTypes.length > 0 && !activeTypes.some((t) => t.predicate(it))) return false;
-      if (filterDef?.predicate && !filterDef.predicate(it)) return false;
-      return true;
-    });
-    if (sortDef?.sorter) filtered.sort(sortDef.sorter);
-    return filtered;
-  }, [query, typeFilters, filterKey, sortKey, live, quickActions, emptyBase]);
-
-  useEffect(() => {
-    if (paletteOpen) {
-      setQuery("");
-      setActive(0);
-      setSourceKey("all");
-      setTypeFilters(new Set());
-      setFilterKey("any");
-      setSortKey("modified");
-      setMoreOpen(false);
-      setFilterOpen(false);
-      setSortOpen(false);
-      setTimeout(() => inputRef.current?.focus(), 20);
-    }
-  }, [paletteOpen]);
-
-  const onItemActivate = (it: Item) => {
-    if (it.href) router.push(it.href);
-    else it.action?.();
-    closePalette();
-  };
-
-  useEffect(() => {
-    if (!paletteOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive((i) => Math.min(flatItems.length - 1, i + 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive((i) => Math.max(0, i - 1));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const item = flatItems[active];
-        if (item) onItemActivate(item);
-      } else if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        // "/" toggles commands-only view (matches the ClickUp palette
-        // hint "Press / for commands"). Only fire when the value is empty.
-        if (document.activeElement === inputRef.current && inputRef.current?.value === "") {
-          e.preventDefault();
-          setTypeFilters((prev) => {
-            const next = new Set(prev);
-            if (next.has("command") && next.size === 1) next.clear();
-            else { next.clear(); next.add("command"); }
-            return next;
-          });
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paletteOpen, flatItems, active]);
-
-  if (!paletteOpen || !mounted) return null;
-
-  /* Render helpers — one renderer per item kind. Each takes the running
-     flat index so the active-row highlight tracks keyboard nav. */
-
-  let runningIdx = -1;
-
-  const Row = ({
-    children,
-    isActive,
-    onClick,
-    onMouseEnter,
-  }: {
-    children: React.ReactNode;
-    isActive: boolean;
-    onClick: () => void;
-    onMouseEnter: () => void;
-  }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={onMouseEnter}
-	      className={`group w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
-        isActive ? "bg-zinc-50 dark:bg-white/10" : "hover:bg-zinc-50 dark:hover:bg-white/10"
-      }`}
-    >
-      {children}
-    </button>
-  );
-
-  const TrailingChips = ({ isActive, isCommand }: { isActive: boolean; isCommand: boolean }) => (
-    <span className={`flex items-center gap-1 transition-opacity ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-      {!isCommand ? (
-        <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] text-zinc-500 dark:text-zinc-400" title="Open in new tab">
-          <ExternalLinkIcon className="w-3 h-3" />
-        </span>
-      ) : null}
-      <span className="flex items-center justify-center w-6 h-6 rounded-md border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] text-zinc-500 dark:text-zinc-400" title="Open">
-        <CornerDownLeft className="w-3 h-3" />
-      </span>
-    </span>
-  );
-
-  const renderTask = (it: TaskItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    const tone = STATUS_TONE[it.status];
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#1B1F26] flex-shrink-0">
-          <CheckSquare className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          <span className="flex items-center gap-2 mt-0.5">
-            <span className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
-              <span className="w-2 h-2 rounded-full" style={{ background: tone.dot }} />
-              <span>{it.due || tone.label}</span>
-            </span>
-          </span>
-        </span>
-        <TrailingChips isActive={isActive} isCommand={false} />
-      </Row>
-    );
-  };
-
-  const renderDoc = (it: DocItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    const Icon = DOC_TYPE_ICON[it.type];
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 shadow-sm" style={{ background: "var(--os-c-teal)" }}>
-          <Icon className="w-3.5 h-3.5" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          {it.editedAt ? (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">
-              {it.editor ? `${it.editor} · ` : ""}{it.editedAt}
-            </span>
-          ) : null}
-        </span>
-        <TrailingChips isActive={isActive} isCommand={false} />
-      </Row>
-    );
-  };
-
-  const renderPerson = (it: PersonItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-full text-white flex-shrink-0 text-sm font-semibold" style={{ background: it.color }}>
-          {it.initials}
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">
-            {it.label}
-            {it.isAgent ? <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-600 dark:text-zinc-300 font-medium">AGENT</span> : null}
-          </span>
-          {it.role ? <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 block truncate">{it.role}</span> : null}
-        </span>
-        <TrailingChips isActive={isActive} isCommand={false} />
-      </Row>
-    );
-  };
-
-  const renderSpace = (it: SpaceItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 shadow-sm" style={{ background: it.color }}>
-          <it.Icon className="w-3.5 h-3.5" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label} space</span>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.members} members</span>
-        </span>
-        <TrailingChips isActive={isActive} isCommand={false} />
-      </Row>
-    );
-  };
-
-  const renderAction = (it: ActionItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 shadow-sm" style={{ background: it.color }}>
-          <it.Icon className="w-3.5 h-3.5" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          {it.hint ? <span className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 block">{it.hint}</span> : null}
-        </span>
-        {it.shortcut && !isActive ? (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
-        ) : null}
-        <TrailingChips isActive={isActive} isCommand={true} />
-      </Row>
-    );
-  };
-
-  const renderNav = (it: NavItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg text-white flex-shrink-0 shadow-sm" style={{ background: it.color }}>
-          <it.Icon className="w-3.5 h-3.5" />
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-        </span>
-        {it.shortcut && !isActive ? (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{it.shortcut}</span>
-        ) : null}
-        <TrailingChips isActive={isActive} isCommand={false} />
-      </Row>
-    );
-  };
-
-  const renderCommand = (it: CommandItem) => {
-    runningIdx += 1;
-    const idx = runningIdx;
-    const isActive = idx === active;
-    return (
-      <Row key={it.id} isActive={isActive} onClick={() => onItemActivate(it)} onMouseEnter={() => setActive(idx)}>
-        <span className="flex items-center justify-center w-7 h-7 rounded-lg flex-shrink-0 bg-zinc-100 dark:bg-white/5 text-zinc-600 dark:text-zinc-300">
-          <it.Icon className="w-3.5 h-3.5" />
-        </span>
-        <span className="flex-1 min-w-0 flex items-center gap-2">
-          <span className="text-base text-zinc-800 dark:text-zinc-200 truncate font-medium">{it.label}</span>
-          {it.alias ? (
-            <span className="text-xs text-zinc-400 dark:text-zinc-400">·</span>
-          ) : null}
-          {it.alias ? (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">{it.alias}</span>
-          ) : null}
-        </span>
-        <TrailingChips isActive={isActive} isCommand={true} />
-      </Row>
-    );
-  };
-
-  const renderItem = (it: Item) => {
-    switch (it.kind) {
-      case "task":     return renderTask(it as TaskItem);
-      case "doc":      return renderDoc(it as DocItem);
-      case "person":   return renderPerson(it as PersonItem);
-      case "space":    return renderSpace(it as SpaceItem);
-      case "action":   return renderAction(it as ActionItem);
-      case "navigate": return renderNav(it as NavItem);
-      case "command":  return renderCommand(it as CommandItem);
-    }
-  };
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-[8vh]"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) closePalette();
+  const { paletteOpen, closePalette } = useOsShell();
+  return (
+    <DialogPrimitive.Root
+      open={paletteOpen}
+      onOpenChange={(v) => {
+        if (!v) closePalette();
       }}
     >
-	      <div
-	        className="workwrk-os w-full max-w-[700px] mx-4 bg-white dark:bg-[#1B1F26] rounded-xl shadow-xl border border-zinc-200 dark:border-[#2A2F38] flex flex-col overflow-hidden"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Search"
-      >
-        {/* Header: search input + Ask AI pill (hands the current query off
-            to the Brain panel as the initial prompt). */}
-	        <div className="flex items-center gap-2.5 px-4 pt-3 pb-3">
-	          <Search className="w-4 h-4 text-zinc-400 dark:text-zinc-400 flex-shrink-0" />
-          <input
-            ref={inputRef}
-            data-palette-search
-            type="text"
-            placeholder="Search, run a command, or ask a question…"
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setActive(0); }}
-            autoComplete="off"
-	            className="flex-1 bg-transparent text-base text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 focus:outline-none"
-          />
-          <AskAiButton onClick={() => { openSidekick(query.trim() || undefined); closePalette(); }} title="Ask the Brain" />
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/10 border border-zinc-200 dark:border-[#2A2F38] font-mono">ESC</span>
-        </div>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[60] bg-[var(--os-scrim)]" />
+        <PaletteBody />
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}
 
-        {/* Source tabs. Connectable-but-not-yet-connected sources render
-            dimmed + a connect badge, and route to /integrations on click. */}
-	        <div className="flex items-center px-4 pt-1.5 pb-1" style={{ gap: 24 }}>
-          {SOURCES.map((s) => {
-            const isUnconnected = !!s.connectable;
-            return (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => {
-                  if (s.connectable) {
-                    router.push("/integrations");
-                    closePalette();
-                    return;
-                  }
-                  setSourceKey(s.key);
-                }}
-	                className={`relative flex items-center gap-1.5 h-7 text-sm font-medium flex-shrink-0 transition-colors ${
-                  isUnconnected
-                    ? "text-zinc-500 dark:text-zinc-400 hover:text-zinc-400 dark:hover:text-zinc-300"
-                    : sourceKey === s.key
-                    ? "text-zinc-900 dark:text-zinc-100"
-                    : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
-                }`}
-                title={s.connectable ? `Connect ${s.label}` : s.label}
-              >
-                {s.Icon ? (
-                  <span className="relative inline-flex w-4 h-4 items-center justify-center flex-shrink-0">
-                    <s.Icon
-                      className="w-3.5 h-3.5"
-                      style={{ color: s.tint, opacity: isUnconnected ? 0.55 : 1 }}
-                    />
-                    {s.connectable ? (
-                      <span
-                        className="absolute -bottom-1 -right-1.5 w-[11px] h-[11px] rounded-full flex items-center justify-center"
-                        style={{
-                          background: "linear-gradient(135deg, #34D399, #10B981)",
-                          boxShadow:
-                            "0 0 0 1.5px var(--os-canvas), 0 1px 2px rgba(16, 185, 129, 0.4)",
-                        }}
-                        aria-label="Connect this integration"
-                      >
-                        <svg width="6" height="6" viewBox="0 0 8 8" fill="none" aria-hidden="true">
-                          <path d="M4 1.4V6.6M1.4 4H6.6" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
-                        </svg>
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
-                <span>{s.label}</span>
-                {!isUnconnected && sourceKey === s.key ? (
-                  <span
-                    className="absolute left-0 right-0 -bottom-0.5 h-[2px] rounded-full"
-                    style={{ background: "var(--os-c-orange)" }}
-                  />
-                ) : null}
-              </button>
-            );
-          })}
-        </div>
+/** One search request's answer, kept with the query it answered. */
+type SearchState = {
+  q: string;
+  status: "loading" | "ok" | "failed";
+  hits: ServerHit[];
+};
 
-        {/* Filter chips (primary + "···" overflow) + Filter + Sort. */}
-	        <div className="relative flex items-center gap-2 px-4 py-2 border-b border-zinc-100 dark:border-[#2A2F38]">
-          {TYPE_FILTERS.filter((f) => f.primary).map((f) => {
-            const on = typeFilters.has(f.key);
-            return (
-              <button
-                key={f.key}
-                type="button"
-                onClick={() => toggleType(f.key)}
-	                className={`flex items-center gap-1.5 h-6 px-2.5 rounded-full text-xs font-medium border transition-colors ${
-                  on
-                    ? "border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)] dark:border-transparent dark:bg-[color-mix(in_srgb,var(--os-brand)_28%,#1B1F26)] dark:text-zinc-100"
-                    : "border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-                }`}
-                aria-pressed={on}
-              >
-                <f.Icon className="w-3.5 h-3.5" />
-                <span>{f.label}</span>
-              </button>
-            );
-          })}
-          {TYPE_FILTERS.filter((f) => !f.primary && typeFilters.has(f.key)).map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              onClick={() => toggleType(f.key)}
-	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-full text-xs font-medium border border-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)] text-[var(--os-brand-deep)]"
-              aria-pressed
-            >
-              <f.Icon className="w-3.5 h-3.5" />
-              <span>{f.label}</span>
-            </button>
-          ))}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setMoreOpen((v) => !v); setFilterOpen(false); setSortOpen(false); }}
-	              className="flex items-center justify-center h-6 w-6 rounded-full border border-zinc-200 dark:border-[#2A2F38] text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/10"
-              aria-label="More type filters"
-              aria-expanded={moreOpen}
-            >
-              <MoreHorizontal className="w-3.5 h-3.5" />
-            </button>
-            {moreOpen ? (
-              <div
-	                className="absolute left-0 top-8 z-10 w-52 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
-                onMouseLeave={() => setMoreOpen(false)}
-              >
-                {TYPE_FILTERS.filter((f) => !f.primary).map((f) => {
-                  const on = typeFilters.has(f.key);
-                  return (
-                    <button
-                      key={f.key}
-                      type="button"
-                      onClick={() => toggleType(f.key)}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-                    >
-                      <f.Icon className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400" />
-                      <span className="flex-1">{f.label}</span>
-                      {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+function PaletteBody() {
+  const {
+    closePalette,
+    openSidekick,
+    openCreateTask,
+    openCreateList,
+    recentAppKeys,
+    hubHref,
+    launcherApps,
+    railApps,
+  } = useOsShell();
+  const { boot } = useBoot();
+  const { isAdmin, isGuest } = useViewerRole();
+  const { openSettings } = useSettingsNav();
+  const { toast } = useOsToast();
+  const router = useRouter();
 
-          <span className="flex-1" />
+  const [query, setQueryState] = useState("");
+  const [chip, setChipState] = useState<ChipKey>("all");
+  const [active, setActive] = useState(0);
+  const [search, setSearch] = useState<SearchState | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  // The body mounts on the client only, so the check runs in the browser.
+  const [voice] = useState(() => hasSpeechRecognition());
 
-          {/* Filter dropdown */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setFilterOpen((v) => !v); setSortOpen(false); setMoreOpen(false); }}
-	              className={`flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium transition-colors ${
-                filterKey !== "any"
-                  ? "text-[var(--os-brand-deep)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]"
-                  : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-              }`}
-              aria-expanded={filterOpen}
-            >
-              <Filter className="w-3.5 h-3.5" />
-              <span>{filterKey === "any" ? "Filter" : FILTERS.find((f) => f.key === filterKey)?.label ?? "Filter"}</span>
-              {filterKey !== "any" ? <span className="ml-0.5 inline-block w-1.5 h-1.5 rounded-full bg-[var(--os-brand)]" /> : null}
-            </button>
-            {filterOpen ? (
-              <div
-	                className="absolute right-0 top-8 z-10 w-56 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
-                onMouseLeave={() => setFilterOpen(false)}
-              >
-                {FILTERS.map((f) => {
-                  const on = filterKey === f.key;
-                  return (
-                    <button
-                      key={f.key}
-                      type="button"
-                      onClick={() => { setFilterKey(f.key); setFilterOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-                    >
-                      <span className="flex-1">{f.label}</span>
-                      {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+  const q = query.trim();
+  const isMember = !isGuest;
+  const aiVisible = railApps.some((a) => a.key === "ai");
+  const setQuery = (v: string) => {
+    setQueryState(v);
+    setActive(0);
+  };
+  const setChip = (v: ChipKey) => {
+    setChipState(v);
+    setActive(0);
+  };
 
-          {/* Sort dropdown */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => { setSortOpen((v) => !v); setFilterOpen(false); setMoreOpen(false); }}
-	              className="flex items-center gap-1.5 h-6 px-2.5 rounded-md text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10 transition-colors"
-              aria-expanded={sortOpen}
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span>Sort</span>
-            </button>
-            {sortOpen ? (
-              <div
-	                className="absolute right-0 top-8 z-10 w-52 bg-white dark:bg-[#1B1F26] border border-zinc-200 dark:border-[#2A2F38] rounded-lg shadow-lg py-1"
-                onMouseLeave={() => setSortOpen(false)}
-              >
-                {SORTS.map((s) => {
-                  const on = sortKey === s.key;
-                  return (
-                    <button
-                      key={s.key}
-                      type="button"
-                      onClick={() => { setSortKey(s.key); setSortOpen(false); }}
-	                      className="w-full flex items-center gap-2 px-2.5 py-1 text-left text-sm text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/10"
-                    >
-                      <span className="flex-1">{s.label}</span>
-                      {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : null}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
-        </div>
+  // Live results: 2+ chars, 180ms debounce. The answer carries its query, so
+  // a stale one is simply not the current one; nothing is aborted, because
+  // apiFetch reads an aborted fetch as "offline" and would raise the offline
+  // strip on every keystroke.
+  useEffect(() => {
+    if (q.length < 2) return;
+    let stale = false;
+    const t = window.setTimeout(async () => {
+      setSearch({ q, status: "loading", hits: [] });
+      const r = await apiFetch<ServerHit[] | { data?: ServerHit[] }>(
+        `/api/search?q=${encodeURIComponent(q)}`,
+      );
+      if (stale) return;
+      if (!r.ok) {
+        setSearch({ q, status: "failed", hits: [] });
+        return;
+      }
+      const d = r.data;
+      setSearch({
+        q,
+        status: "ok",
+        hits: Array.isArray(d) ? d : (d?.data ?? []),
+      });
+    }, 180);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
+  }, [q, attempt]);
+  const current = search && search.q === q && q.length >= 2 ? search : null;
+  const live = current?.status === "ok" ? current.hits : [];
+  const searching =
+    q.length >= 2 && current?.status !== "ok" && current?.status !== "failed";
+  const failed = current?.status === "failed";
 
-        {/* Flat results list. */}
-	        <div className="flex-1 max-h-[400px] overflow-y-auto px-2.5 py-2.5">
-          {flatItems.length === 0 ? (
-            <div className="px-4 py-14 text-center">
-              <Search className="w-7 h-7 mx-auto text-zinc-300 dark:text-zinc-400 mb-3" />
-              <div className="text-base text-zinc-700 dark:text-zinc-200 font-medium">
-                {query ? `No matches for "${query}"` : "Nothing matches the active filters"}
-              </div>
-              <div className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                {query ? "Try a different query, or clear the type filters." : "Clear a filter to see results."}
-              </div>
-            </div>
+  const createDoc = useCallback(async () => {
+    const r = await apiFetch<{ doc?: { id?: string } }>("/api/docs", {
+      method: "POST",
+      json: {
+        title: "Untitled doc",
+        content: { type: "doc", content: [{ type: "paragraph" }] },
+      },
+    });
+    const id = r.ok ? r.data?.doc?.id : undefined;
+    if (!id) {
+      toast("Couldn't create doc. Try again");
+      return;
+    }
+    router.push(`/docs/${id}`);
+  }, [router, toast]);
+
+  const tool = useCallback((detail: "reminder" | "notepad" | "voice") => {
+    // The three capture overlays listen for this until their rewrite (2.19 to 2.21).
+    window.setTimeout(
+      () => window.dispatchEvent(new CustomEvent("workwrk:tool", { detail })),
+      0,
+    );
+  }, []);
+
+  const appRow = useCallback(
+    (a: AppEntry): Row => {
+      const hub = a.hubKey ?? (isHubKey(a.key) ? a.key : "home");
+      const label = isHubKey(a.key) ? HUB_LABELS[a.key] : a.label;
+      const Icon = a.Icon as LucideIcon;
+      return {
+        id: `app-${a.key}`,
+        label,
+        secondary: a.hubKey ? HUB_LABELS[hub] : undefined,
+        glyph: <Glyph icon={Icon} />,
+        href: hubHref(a.key),
+      };
+    },
+    [hubHref],
+  );
+
+  const createRows = useMemo<Row[]>(() => {
+    const rows: Row[] = [];
+    if (isMember)
+      rows.push({
+        id: "c-task",
+        label: "Task",
+        glyph: <Glyph icon={CheckSquare} />,
+        shortcut: shortcutHint("create-task"),
+        action: () => openCreateTask(),
+      });
+    rows.push({
+      id: "c-doc",
+      label: "Doc",
+      glyph: <Glyph icon={FileText} />,
+      action: () => {
+        void createDoc();
+      },
+    });
+    if (isMember)
+      rows.push({
+        id: "c-list",
+        label: "List",
+        glyph: <Glyph icon={ListTodo} />,
+        action: () => openCreateList(),
+      });
+    rows.push({
+      id: "c-reminder",
+      label: "Reminder",
+      glyph: <Glyph icon={AlarmClock} />,
+      action: () => tool("reminder"),
+    });
+    rows.push({
+      id: "c-notepad",
+      label: "Notepad",
+      glyph: <Glyph icon={NotebookPen} />,
+      action: () => tool("notepad"),
+    });
+    if (voice)
+      rows.push({
+        id: "c-voice",
+        label: "Voice note",
+        glyph: <Glyph icon={Mic} />,
+        action: () => tool("voice"),
+      });
+    return rows;
+  }, [isMember, voice, openCreateTask, openCreateList, createDoc, tool]);
+
+  const jumpRows = useMemo<Row[]>(() => {
+    const personal: Row[] = [
+      {
+        id: "j-home",
+        label: "Home",
+        glyph: <Glyph icon={House} />,
+        href: WORK_HOME_HREF,
+        shortcut: shortcutHint("go-home"),
+      },
+      {
+        id: "j-mywork",
+        label: "My work",
+        glyph: <Glyph icon={CheckSquare} />,
+        href: "/tasks",
+      },
+      {
+        id: "j-inbox",
+        label: SHELL_LABELS.inbox,
+        glyph: <Glyph icon={Inbox} />,
+        href: "/inbox",
+        shortcut: shortcutHint("go-inbox"),
+      },
+    ];
+    const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);
+    const folded = launcherApps.filter((a) => !isHubKey(a.key)).map(appRow);
+    return [...personal, ...hubs, ...folded];
+  }, [launcherApps, appRow]);
+
+  const recentRows = useMemo<Row[]>(() => {
+    const byKey = new Map(launcherApps.map((a) => [a.key, a]));
+    return recentAppKeys
+      .map((k) => byKey.get(k))
+      .filter((a): a is AppEntry => Boolean(a))
+      .slice(0, 5)
+      .map((a) => ({ ...appRow(a), id: `recent-${a.key}` }));
+  }, [recentAppKeys, launcherApps, appRow]);
+
+  const settingsRows = useCallback(
+    (text: string): Row[] => {
+      const pages = filterSettingsPages(text, isAdmin ? undefined : "me");
+      return pages
+        .map((p) => ({ p, href: settingsHrefToday(p) }))
+        .filter((x): x is { p: (typeof pages)[number]; href: string } =>
+          Boolean(x.href),
+        )
+        .map(({ p, href }) => ({
+          id: `set-${p.key}`,
+          label: p.label,
+          secondary:
+            p.door === "workspace"
+              ? SHELL_LABELS.workspaceSettings
+              : SHELL_LABELS.mySettings,
+          glyph: <Glyph icon={Settings2} />,
+          action: () => openSettings(href),
+        }));
+    },
+    [isAdmin, openSettings],
+  );
+
+  const sections = useMemo<Section[]>(() => {
+    const out: Section[] = [];
+    if (q.length === 0) {
+      if (chip === "all" || chip === "app") {
+        if (chip === "all" && recentRows.length > 0)
+          out.push({
+            key: "recent",
+            label: "Recent",
+            chip: "any",
+            rows: recentRows,
+          });
+        out.push({
+          key: "jump",
+          label: "Jump to",
+          chip: "app",
+          rows: jumpRows,
+        });
+      }
+      if (chip === "all")
+        out.push({
+          key: "create",
+          label: "Create",
+          chip: "any",
+          rows: createRows,
+        });
+      if (chip === "settings")
+        out.push({
+          key: "settings",
+          label: "Settings",
+          chip: "settings",
+          rows: settingsRows(""),
+        });
+      return out;
+    }
+    const lq = q.toLowerCase();
+    const groups: Record<"task" | "doc" | "person" | "space" | "more", Row[]> =
+      { task: [], doc: [], person: [], space: [], more: [] };
+    for (const h of live) {
+      const kind = SEARCH_TYPES[h.type];
+      if (!kind || !h.href) continue;
+      const row: Row = {
+        id: `live-${h.type}-${h.id}`,
+        label: h.title,
+        secondary: h.subtitle,
+        href: h.href,
+        glyph:
+          kind === "task" ? (
+            <Glyph icon={CheckSquare} />
+          ) : kind === "person" ? (
+            <PersonGlyph name={h.title} />
+          ) : kind === "more" ? (
+            <Glyph icon={MORE_ICON[h.type] ?? Search} />
           ) : (
-            <div className="flex flex-col gap-0.5">
-              {flatItems.map((it) => renderItem(it))}
-            </div>
-          )}
-        </div>
+            <EntityTile
+              size="xs"
+              name={h.title}
+              fallback={
+                h.type === "folder"
+                  ? "folder"
+                  : h.type === "board"
+                    ? "list"
+                    : h.type === "space"
+                      ? undefined
+                      : "doc"
+              }
+            />
+          ),
+      };
+      groups[kind].push(row);
+    }
+    const apps = [...jumpRows.slice(0, 3), ...launcherApps.map(appRow)].filter(
+      (r) => r.label.toLowerCase().includes(lq),
+    );
+    const settings = settingsRows(q);
+    const actions: Row[] = [];
+    if (aiVisible && isMember)
+      actions.push({
+        id: "a-ai",
+        label: `Ask AI about "${q}"`,
+        glyph: <Glyph icon={Sparkles} />,
+        shortcut: shortcutHint("ask-ai"),
+        action: () => openSidekick(q),
+      });
+    if (isMember)
+      actions.push({
+        id: "a-task",
+        label: "Create a task",
+        glyph: <Glyph icon={CheckSquare} />,
+        shortcut: shortcutHint("create-task"),
+        action: () => openCreateTask(),
+      });
+    const want = (k: ChipKey) => chip === "all" || chip === k;
+    if (want("task"))
+      out.push({
+        key: "tasks",
+        label: "Tasks",
+        chip: "task",
+        rows: groups.task,
+      });
+    if (want("doc"))
+      out.push({ key: "docs", label: "Docs", chip: "doc", rows: groups.doc });
+    if (want("person"))
+      out.push({
+        key: "people",
+        label: "People",
+        chip: "person",
+        rows: groups.person,
+      });
+    if (want("space"))
+      out.push({
+        key: "spaces",
+        label: "Spaces & Lists",
+        chip: "space",
+        rows: groups.space,
+      });
+    if (chip === "all")
+      out.push({ key: "more", label: "More", chip: "any", rows: groups.more });
+    if (want("app"))
+      out.push({ key: "apps", label: "Apps", chip: "app", rows: apps });
+    if (want("settings"))
+      out.push({
+        key: "settings",
+        label: "Settings",
+        chip: "settings",
+        rows: settings,
+      });
+    if (chip === "all")
+      out.push({
+        key: "actions",
+        label: "Actions",
+        chip: "any",
+        rows: actions,
+      });
+    return out.filter((s) => s.rows.length > 0);
+  }, [
+    q,
+    chip,
+    live,
+    recentRows,
+    jumpRows,
+    createRows,
+    settingsRows,
+    launcherApps,
+    appRow,
+    aiVisible,
+    isMember,
+    openSidekick,
+    openCreateTask,
+  ]);
 
-        {/* Footer */}
-	        <div className="flex items-center gap-2.5 px-3 py-2 border-t border-zinc-100 dark:border-[#2A2F38] text-xs text-zinc-500 dark:text-zinc-400 bg-zinc-50/50 dark:bg-white/5">
-          <div className="flex items-center gap-1.5">
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10">
-              <ChevronLeft className="w-3 h-3" />
-            </span>
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10">
-              <ChevronRight className="w-3 h-3" />
-            </span>
-          </div>
-          <span className="flex items-center gap-1.5">
-            <span>Press</span>
-            <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-xs">/</span>
-            <span>for commands ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-xs">Tab</span>
-            <span>for actions ·</span>
-            <span className="inline-flex items-center justify-center min-w-[28px] px-1.5 h-5 rounded border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-white/10 font-mono text-xs">Esc</span>
-            <span>to close</span>
-          </span>
-          <span className="flex-1" />
-          <button type="button" className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-white/10" aria-label="Search settings">
-            <Settings className="w-3.5 h-3.5" />
+  const flat = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
+  // The highlight never points past the list when results shrink under it.
+  const activeIdx = Math.min(active, Math.max(0, flat.length - 1));
+
+  const activate = useCallback(
+    (row: Row, newTab = false) => {
+      if (row.href && newTab) {
+        window.open(row.href, "_blank", "noopener");
+        return;
+      }
+      closePalette();
+      if (row.href) router.push(row.href);
+      else row.action?.();
+    },
+    [closePalette, router],
+  );
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive((i) => Math.min(flat.length - 1, i + 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive((i) => Math.max(0, i - 1));
+    } else if (e.key === "Enter") {
+      const row = flat[activeIdx];
+      if (row) {
+        e.preventDefault();
+        activate(row, e.metaKey || e.ctrlKey);
+      }
+    } else if (
+      (e.key === "ArrowLeft" || e.key === "ArrowRight") &&
+      query === ""
+    ) {
+      e.preventDefault();
+      const i = CHIPS.findIndex((c) => c.key === chip);
+      const next =
+        e.key === "ArrowRight"
+          ? (i + 1) % CHIPS.length
+          : (i - 1 + CHIPS.length) % CHIPS.length;
+      setChip(CHIPS[next].key);
+    }
+  };
+
+  // Keep the highlighted row in view while arrowing.
+  useEffect(() => {
+    const el = listRef.current?.querySelector<HTMLElement>(
+      `[data-idx="${activeIdx}"]`,
+    );
+    el?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx]);
+
+  const hint = q.length >= 2;
+  let runningIdx = -1;
+
+  return (
+    <DialogPrimitive.Content
+      aria-label={SHELL_LABELS.search}
+      aria-describedby={undefined}
+      onKeyDown={onKeyDown}
+      className="workwrk-os os-chrome fixed inset-x-0 mx-auto top-[12vh] z-[61] flex max-h-[76vh] w-[640px] max-w-[calc(100vw-24px)] flex-col overflow-hidden rounded-xl border border-line bg-raised text-ink shadow-[var(--os-shadow-modal)] outline-none"
+    >
+      <DialogPrimitive.Title className="sr-only">
+        {SHELL_LABELS.search}
+      </DialogPrimitive.Title>
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-4">
+        <Search
+          className="h-4 w-4 shrink-0 text-ink-3"
+          strokeWidth={1.5}
+          aria-hidden
+        />
+        <input
+          ref={inputRef}
+          data-palette-search
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search or type a command…"
+          aria-label={SHELL_LABELS.search}
+          autoComplete="off"
+          spellCheck={false}
+          className="min-w-0 flex-1 bg-transparent text-base text-ink placeholder:text-ink-3 focus:outline-none"
+        />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => {
+              setQuery("");
+              inputRef.current?.focus();
+            }}
+            aria-label="Clear"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-ink-3 hover:bg-hover hover:text-ink"
+          >
+            <X className="h-3.5 w-3.5" strokeWidth={1.5} />
           </button>
-        </div>
+        ) : null}
+        <kbd className="rounded border border-line bg-kbd px-1.5 font-sans text-[11px] font-medium text-ink-2">
+          esc
+        </kbd>
       </div>
-    </div>,
-    document.body,
+
+      <div
+        role="radiogroup"
+        aria-label="Search in"
+        className="flex h-11 shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-3"
+      >
+        {CHIPS.map((c) => {
+          const on = chip === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              tabIndex={-1}
+              onClick={() => {
+                setChip(c.key);
+                inputRef.current?.focus();
+              }}
+              className={cn(
+                "h-8 shrink-0 rounded-md px-3 text-sm font-medium",
+                on
+                  ? "bg-active text-ink"
+                  : "text-ink-2 hover:bg-hover hover:text-ink",
+              )}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        ref={listRef}
+        className="min-h-0 flex-1 overflow-y-auto py-1"
+        role="listbox"
+        aria-label="Results"
+      >
+        {failed ? (
+          <div className="flex h-9 items-center gap-1 px-4 text-sm text-ink-2">
+            <span>Search isn&apos;t available right now</span>
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="font-medium text-brand-deep hover:underline"
+            >
+              Try again
+            </button>
+          </div>
+        ) : null}
+        {hint && !failed && !searching && live.length === 0 ? (
+          <div className="flex h-9 items-center px-4 text-sm text-ink-2">
+            No results for &ldquo;{q}&rdquo;
+          </div>
+        ) : null}
+        {q.length > 0 && q.length < 2 ? (
+          <div className="flex h-9 items-center px-4 text-sm text-ink-2">
+            Keep typing to search
+          </div>
+        ) : null}
+        {q.length === 0 &&
+        (chip === "task" ||
+          chip === "doc" ||
+          chip === "person" ||
+          chip === "space") ? (
+          <div className="flex h-9 items-center px-4 text-sm text-ink-2">
+            Type to search{" "}
+            {CHIPS.find((c) => c.key === chip)?.label.toLowerCase()}
+          </div>
+        ) : null}
+        {sections.map((s) => (
+          <div key={s.key}>
+            <div className="px-4 pb-1 pt-2 text-micro uppercase tracking-[0.06em] text-ink-2">
+              {s.label}
+            </div>
+            {s.rows.map((row) => {
+              runningIdx += 1;
+              const idx = runningIdx;
+              const on = idx === activeIdx;
+              return (
+                <button
+                  key={row.id}
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  data-idx={idx}
+                  tabIndex={-1}
+                  onMouseEnter={() => setActive(idx)}
+                  onClick={(e) => activate(row, e.metaKey || e.ctrlKey)}
+                  className={cn(
+                    "flex h-9 w-full items-center gap-3 px-4 text-start text-base text-ink",
+                    on ? "bg-active" : "hover:bg-hover",
+                  )}
+                >
+                  <span className="inline-flex w-5 shrink-0 items-center justify-center">
+                    {row.glyph}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{row.label}</span>
+                  {row.secondary ? (
+                    <span className="min-w-0 max-w-[45%] truncate text-sm text-ink-2">
+                      {row.secondary}
+                    </span>
+                  ) : null}
+                  {row.shortcut ? (
+                    <kbd className="shrink-0 font-sans text-xs font-medium text-ink-3">
+                      {row.shortcut}
+                    </kbd>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+        {searching ? (
+          <div aria-hidden className="py-1">
+            {["60%", "40%", "80%"].map((w, i) => (
+              <div key={i} className="flex h-9 items-center gap-3 px-4">
+                <span className="h-4 w-4 shrink-0 rounded bg-skeleton os-skeleton-pulse" />
+                <span
+                  className="h-3.5 rounded bg-skeleton os-skeleton-pulse"
+                  style={{ width: w }}
+                />
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex h-9 shrink-0 items-center gap-2 border-t border-line px-4 text-xs font-medium text-ink-3">
+        <span>↑↓ move</span>
+        <span aria-hidden>·</span>
+        <span>↵ open</span>
+        <span aria-hidden>·</span>
+        <span>⌘↵ open in new tab</span>
+        <span aria-hidden>·</span>
+        <span>esc close</span>
+        <span className="flex-1" />
+        <span className="truncate">{boot.org.name}</span>
+      </div>
+    </DialogPrimitive.Content>
   );
 }

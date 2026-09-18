@@ -211,7 +211,7 @@ export async function GET(req: NextRequest) {
       ? profile.values.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim())
       : [];
     const splash: SplashPolicy =
-      typeof profile.splash === "string" && SPLASH_VALUES.has(profile.splash) ? (profile.splash as SplashPolicy) : "every-open";
+      typeof profile.splash === "string" && SPLASH_VALUES.has(profile.splash) ? (profile.splash as SplashPolicy) : "first-open-daily";
     const peopleTeam = Array.isArray(settings.access?.peopleTeam) && (settings.access!.peopleTeam as unknown[]).includes(userId);
 
     const accessLevel = user.accessLevel ?? null;

@@ -182,7 +182,7 @@ export function TablesSidebar() {
       <button
         type="button"
         onClick={() => void createSheet()}
-        className="flex w-full items-center gap-2 h-7 px-2 rounded-md text-base text-zinc-400 hover:bg-zinc-50 hover:text-zinc-600"
+        className="flex w-full items-center gap-3 h-9 px-3 rounded-lg text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
       >
         <Plus className="w-3.5 h-3.5 shrink-0" />
         <span>New sheet</span>
@@ -190,7 +190,7 @@ export function TablesSidebar() {
 
       <SectionLabel>Sheets</SectionLabel>
       {sheets === null ? (
-        <div className="px-2 py-1.5 text-xs text-zinc-400">Loading…</div>
+        <ul aria-hidden>{["60%","40%","80%"].map((w, i) => (<li key={i} className="flex h-9 items-center gap-3 px-3"><span className="h-5 w-5 shrink-0 rounded-md bg-skeleton os-skeleton-pulse" /><span className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} /></li>))}</ul>
       ) : filtered.length === 0 ? (
         <EmptyCard text={q ? "No sheets match" : "Create your first sheet"} />
       ) : (
@@ -201,12 +201,12 @@ export function TablesSidebar() {
               <li key={s.id}>
                 <Link
                   href={`/tables/${s.id}`}
-                  className={`flex items-center gap-2 h-7 px-2 rounded-md text-base ${
-                    active ? "bg-zinc-100 text-zinc-900 font-medium" : "text-zinc-700 hover:bg-zinc-50"
+                  className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
+                    active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
                   }`}
                   onContextMenu={(e) => { e.preventDefault(); setRowMenu({ id: s.id, name: s.name, x: e.clientX, y: e.clientY }); }}
                 >
-                  <Table2 className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
+                  <Table2 className="w-5 h-5 shrink-0 text-ink-2" strokeWidth={1.5} />
                   <span className="truncate flex-1">{s.name || "Untitled"}</span>
                 </Link>
               </li>
@@ -225,18 +225,18 @@ export function TablesSidebar() {
       ) : null}
 
       {/* Secondary escape hatch back to the card overview + folded Forms. */}
-      <div className="mt-3 border-t border-zinc-100 pt-2">
+      <div className="mt-3 border-t border-line pt-2">
         {TABLES_HUB_ROWS.map((r) => (
           <Link
             key={r.href}
             href={r.href}
-            className={`flex items-center gap-2 h-7 px-2 rounded-md text-sm ${
+            className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
               r.href === activeHubHref
-                ? "bg-zinc-100 text-zinc-900 font-medium"
+                ? "bg-side-pill text-ink font-medium"
                 : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-700"
             }`}
           >
-            <r.Icon className="w-3.5 h-3.5 shrink-0" />
+            <r.Icon className="w-5 h-5 shrink-0 text-ink-2" strokeWidth={1.5} />
             <span>{r.label}</span>
           </Link>
         ))}
@@ -246,14 +246,18 @@ export function TablesSidebar() {
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <div className="px-2 pt-4 pb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">{children}</div>;
+  return (
+    <div className="mb-2 mt-6 flex h-5 items-center gap-2 ps-3 pe-1 first:mt-2">
+      <span className="text-micro uppercase tracking-[0.06em] text-ink-2">{children}</span>
+      <span className="h-px flex-1 bg-line" aria-hidden />
+    </div>
+  );
 }
 
 function EmptyCard({ text }: { text: string }) {
   return (
-    <div className="mx-0.5 my-1 rounded-xl border border-zinc-200 bg-zinc-50/60 px-3 py-5 text-center">
-      <Table2 className="w-4 h-4 mx-auto text-zinc-300" />
-      <p className="mt-1.5 text-xs text-zinc-400 leading-snug">{text}</p>
+    <div className="flex h-9 items-center px-3 text-sm text-ink-2">
+      <p className="m-0 truncate">{text}</p>
     </div>
   );
 }

@@ -12,14 +12,24 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
-import { useRouter } from "next/navigation";
+
 import {
-  FormInput, Save, Globe, Lock, Link as LinkIcon, ArrowLeft,
-  Trash2, ChevronUp, ChevronDown, Inbox, FileText, Loader2, LayoutGrid,
+  FormInput,
+  Save,
+  Globe,
+  Lock,
+  Link as LinkIcon,
+  Trash2,
+  ChevronUp,
+  ChevronDown,
+  Inbox,
+  FileText,
+  LayoutGrid,
   Table as TableIcon,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
+import { BackButton } from "@/components/ui/back-button";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiStudioBoardLite = { id: string; name: string; slug: string };
 type ApiDataTableLite = { id: string; name: string };
@@ -62,7 +72,7 @@ const FIELD_LABEL: Record<FieldType, string> = {
 function newId() { return Math.random().toString(36).slice(2, 10); }
 
 export default function FormBuilderPage({ params }: { params: Promise<{ id: string }> }) {
-  const router = useRouter();
+  
   const { toast } = useOsToast();
   const [formId, setFormId] = useState<string | null>(null);
   const [form, setForm] = useState<ApiForm | null>(null);
@@ -215,12 +225,16 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
   const fieldMap = useMemo(() => new Map((form?.fields ?? []).map((f) => [f.id, f])), [form?.fields]);
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load form: {loadError}</div>;
-  if (!form) return <div className="frmb__loading"><ValueLoader size={32} /></div>;
+  if (!form) return <SkeletonRows />;
 
+  const targetBoard = form.targetBoardId ? boards.find((b) => b.id === form.targetBoardId) ?? null : null;
   return (
     <div className="frmb">
       <header className="frmb__head">
-        <button type="button" className="frmb__back" onClick={() => router.push("/forms")} aria-label="Back"><ArrowLeft /></button>
+        <BackButton
+          fallbackHref={targetBoard ? `/boards/${targetBoard.slug}` : "/forms"}
+          label={targetBoard ? targetBoard.name : "Forms"}
+        />
         <div className="frmb__title-wrap">
           <FormInput />
           <input
@@ -365,7 +379,7 @@ export default function FormBuilderPage({ params }: { params: Promise<{ id: stri
       ) : (
         <div className="frmb__subs">
           {subs === null ? (
-            <div className="frmb__empty"><Loader2 className="frmb__spin" /> Loading submissions…</div>
+            <SkeletonRows rows={4} />
           ) : subs.length === 0 ? (
             <div className="frmb__empty">
               <Inbox />

@@ -80,6 +80,13 @@ const eslintConfig = defineConfig([
   //                              the founder rules on a display size, then flip.
   //   no-banned-radius-shadow -> error at refresh step 4 (primitives)
   //   no-brand-dots           -> error now (zero hits at the token step)
+  //   no-bare-router-back     -> error now (Phase 1 frame: the last bare
+  //                              router.back() outside ui/back-button.tsx
+  //                              went with the BackButton convention)
+  //   dynamic-page-declares-breadcrumb -> warn now; flips to error as each
+  //                              hub phase declares its detail pages' crumbs
+  //                              (Phase 1 declared the six it rewired; the
+  //                              other 19 dynamic pages belong to Phases 2-8)
   {
     files: ["src/app/(dashboard)/**/*.ts", "src/app/(dashboard)/**/*.tsx", "src/components/**/*.ts", "src/components/**/*.tsx"],
     ignores: [
@@ -98,8 +105,37 @@ const eslintConfig = defineConfig([
       "workwrk-ds/no-arbitrary-text-size": "warn",
       "workwrk-ds/no-banned-radius-shadow": "warn",
       "workwrk-ds/no-brand-dots": "error",
+      "workwrk-ds/no-bare-router-back": "error",
+      "workwrk-ds/dynamic-page-declares-breadcrumb": "warn",
+      // Loader vocabulary (spec-shell 1.6): "warn" across the app while the
+      // hub phases sweep their page bodies; "error" in the shell below.
+      "workwrk-ds/no-spinner-loader": "warn",
+      "workwrk-ds/no-loading-text": "warn",
     },
   },
+  // The shell (Phase 1 "the frame"): the loader sweep is complete here, so
+  // a spinner or a "Loading..." string is an error, not a warning.
+  {
+    files: ["src/components/layout/os/**/*.ts", "src/components/layout/os/**/*.tsx", "src/components/access/**/*.tsx", "src/components/brand/**/*.tsx", "src/app/(dashboard)/layout.tsx", "src/app/(dashboard)/loading.tsx", "src/app/(dashboard)/error.tsx", "src/app/(dashboard)/not-found.tsx"],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: {
+      "workwrk-ds/no-spinner-loader": "error",
+      "workwrk-ds/no-loading-text": "error",
+    },
+  },
+  // The shell mirrors under dir="rtl" (spec-shell 1.14): physical direction
+  // utilities are an error under src/components/layout/os/** only.
+  {
+    files: ["src/components/layout/os/**/*.ts", "src/components/layout/os/**/*.tsx"],
+    plugins: { "workwrk-ds": designSystemPlugin },
+    rules: {
+      "workwrk-ds/no-physical-direction": "error",
+    },
+  },
+  // src/app/global-error.tsx replaces the root layout when it fails, so no
+  // stylesheet and no token can reach it: every colour there is a written-out
+  // literal on purpose (spec-shell 2.6) and it sits outside the product scope
+  // above by design. Do not "fix" it into tokens it cannot read.
   // The whiteboard: exempt from the grey / raw-hex rule only (its palette
   // is user content), every other design rule still applies.
   {

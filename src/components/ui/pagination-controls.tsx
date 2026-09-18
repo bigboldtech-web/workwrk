@@ -68,7 +68,7 @@ export function PaginationControls({
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
         >
-          <ChevronLeft size={14} />
+          <ChevronLeft size={14} className="rtl:rotate-180" />
         </Button>
 
         {getPageNumbers().map((p, i) =>
@@ -94,7 +94,7 @@ export function PaginationControls({
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
         >
-          <ChevronRight size={14} />
+          <ChevronRight size={14} className="rtl:rotate-180" />
         </Button>
       </div>
     </div>

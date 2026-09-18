@@ -6,7 +6,7 @@
 //   2. Recently acted (status=ACKNOWLEDGED, last 30 days)
 //      — read-only summary of what was decided
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
@@ -27,7 +27,7 @@ export default async function TeamReviewsPage() {
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
     { type: "module", name: "team/reviews" },
   );
-  if (!meets(decision, "read")) redirect("/today");
+  if (!meets(decision, "read")) notFound();
 
   const [pending, acted] = await Promise.all([
     listReviewsForManager(u.id, { status: "SUBMITTED", take: 50 }),

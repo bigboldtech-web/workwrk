@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MoreHorizontal, Plus, Calendar as CalendarIcon } from "lucide-react";
-import type { Person } from "./title-bar";
+type Person = { initials: string; color: string };
 import type { LabelColor } from "./main-table";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";

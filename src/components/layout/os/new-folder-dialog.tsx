@@ -137,20 +137,20 @@ export function NewFolderDialog({
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
                 placeholder="e.g. Project, Client, Team"
-                className={`${inputCls} pr-10`}
+                className={`${inputCls} pe-10`}
                 autoFocus
               />
               <button
                 type="button"
                 onClick={() => setColorOpen((v) => !v)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-zinc-100 flex items-center justify-center"
+                className="absolute end-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-zinc-100 flex items-center justify-center"
                 title="Folder colour"
                 aria-label="Folder colour"
               >
                 <span className="w-4 h-4 rounded-full border border-black/10" style={{ backgroundColor: color ?? "#9CA3AF" }} />
               </button>
               {colorOpen ? (
-                <div className="absolute right-0 top-[38px] z-10 p-2 rounded-lg bg-white border border-zinc-200 shadow-lg grid grid-cols-4 gap-1.5">
+                <div className="absolute end-0 top-[38px] z-10 p-2 rounded-lg bg-white border border-zinc-200 shadow-lg grid grid-cols-4 gap-1.5">
                   {FOLDER_COLORS.map((c) => (
                     <button
                       key={c}
@@ -198,7 +198,7 @@ export function NewFolderDialog({
                 <div className="text-base font-medium text-zinc-800">Statuses</div>
                 <div className="text-xs text-zinc-500">Use Space statuses</div>
               </div>
-              <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+              <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0 rtl:rotate-180" />
             </div>
           </div>
 

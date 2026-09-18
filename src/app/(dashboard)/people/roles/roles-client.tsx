@@ -14,7 +14,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -27,6 +26,7 @@ import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt, useConfirm } from "@/components/ui/dialog-provider";
 import { TeamStatTile } from "@/components/team/ui";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 // Every AccessLevel the schema knows today, plus "OTHER" — a safe bucket
 // for levels a future migration adds before this page learns about them.
@@ -308,16 +308,14 @@ export default function RolesPage() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={Briefcase} iconGradient={C.red} title="Couldn't load roles" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load roles" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : roles === null ? (
-          <div className="rls__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Briefcase}
-            iconGradient="#0073EA"
+            context="list"
             title="No roles defined yet"
-            subtitle="Roles are job titles your org uses — 'Senior Engineer', 'AE', 'Director of Ops'. Each role gets an access level that controls what its holders can see."
-            cta="New role"
+            hint="Job titles carry the access level their holders get."
           />
         ) : grouped.length === 0 ? (
           <div className="rls__empty">

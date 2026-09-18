@@ -45,14 +45,15 @@ export function isHubKey(key: string): key is HubKey {
 }
 
 /**
- * Resolution rule 1, word for word from the spec: `/settings/*` and
- * `/account/*` are the Settings takeover, whatever else would match. Exactly
- * these two, so a test can pin them. `/imports` renders in the takeover too but
- * it is a plain `ROUTE_HUB` row, not a rule-1 member: that keeps precedence
- * where the spec put it and makes the eventual `/settings/data?tab=import` 308
- * a one-row deletion instead of a two-place edit.
+ * The takeover prefixes (spec-shell 2.8). `OsShell` renders the settings frame
+ * when one of these matches, `resolveHub` rule 1 reads the same list, and
+ * `lastAppPath` excludes it. `/imports` is the one member outside the two door
+ * prefixes: it renders inside the takeover with the Data row active until it
+ * 308s into `/settings/data?tab=import`, when its entry here, its
+ * `alsoActiveOn` and its `ROUTE_HUB` row are deleted together. A test pins the
+ * array to exactly these three so a fourth can never be added by accident.
  */
-export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account"];
+export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/imports"];
 
 /**
  * Directories under `(dashboard)` that are resolved by a redirect before a hub
@@ -161,6 +162,120 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
 };
 
 /**
+ * The breadcrumb fallback (spec-shell 2.1): the canon label of every static
+ * route directory. Every `ROUTE_HUB` key has a row, and a nested static
+ * directory (`/people/departments`, `/sops/new`) has its own row under the
+ * hub row that owns it, so the fallback can print the hierarchy
+ * (`Teams › Directory › Departments`) and the last crumb equals the page
+ * title. A page that declares no `<Breadcrumb items/>` renders the trail
+ * `resolveCrumbTrail` builds; a dynamic route gets its container label only
+ * (and must declare its own object crumb). Strings and nothing else: never a
+ * role check, a count or a fetched value. Labels follow naming-canon.md and
+ * the sidebar rows in sidebar-map.md.
+ */
+export const ROUTE_TITLES: Readonly<Record<string, string>> = {
+  "/home": "Home",
+  "/my-work": "My work",
+  "/today": "Home",
+  "/tasks": "My work",
+  "/inbox": "Inbox",
+  "/everything": "Everything",
+  "/item": "Task",
+  "/spaces": "Spaces",
+  "/folders": "Folder",
+  "/boards": "List",
+  "/okrs": "Goals",
+  "/trash": "Trash",
+  "/templates": "Templates",
+  "/me/weekly-review": "Weekly review",
+  "/me/mentions": "Mentions",
+  "/assigned-comments": "Assigned comments",
+  "/activity": "Activity",
+  "/marketing": "Marketing",
+  "/planner": "Calendar",
+  "/calendar": "Calendar",
+  "/timesheets": "Timesheets",
+  "/meetings": "Meetings",
+  "/clock": "Clock in/out",
+  "/sidekick": "Ask AI",
+  "/ai": "Ask AI",
+  "/agents": "Agents",
+  "/automation": "Automation",
+  "/autopilot": "Workflows",
+  "/build": "Build apps",
+  "/store": "Marketplace",
+  "/integrations": "Integrations",
+  "/favorites": "Favorites",
+  "/tlk": "Talk",
+  "/announcements": "Announcements",
+  "/team": "My team",
+  "/people": "Directory",
+  "/organization": "Org chart",
+  "/kra-kpi": "KRAs & KPIs",
+  "/reviews": "Review cycles",
+  "/talent": "Talent",
+  "/candor": "Candor",
+  "/kudos": "Kudos",
+  "/surveys": "Surveys",
+  "/analytics": "Analytics",
+  "/tools": "Tools",
+  "/assets": "Assets",
+  "/ideas": "Ideas",
+  "/docs": "Docs",
+  "/library": "Docs",
+  "/files": "Files",
+  "/canvas": "Canvases",
+  "/notetaker": "Notetaker",
+  "/sops": "SOPs",
+  "/process-runs": "Run history",
+  "/policies": "Policies",
+  "/agreements": "Contracts",
+  "/tables": "Tables",
+  "/forms": "Forms",
+  "/settings": "Workspace settings",
+  "/account": "My settings",
+  "/imports": "Import",
+
+  // ── Nested static directories (the hierarchy under a hub row) ──────
+  "/tasks/board": "Sprint board",
+  "/tasks/backlog": "Backlog",
+  "/tasks/calendar": "Task calendar",
+  "/tasks/gantt": "Gantt",
+  "/tasks/sprint": "Sprint",
+  "/marketing/campaigns": "Campaigns",
+  "/marketing/events": "Events",
+  "/marketing/content": "Content library",
+  "/docs/trash": "Trash",
+  "/automation/workflows": "Workflows",
+  "/automation/templates": "Templates",
+  "/automation/logs": "Logs",
+  "/automation/health": "Health",
+  "/automation/usage": "Usage",
+  "/automation/connections": "Connections",
+  "/people/me": "My profile",
+  "/people/departments": "Departments",
+  "/people/roles": "Job titles",
+  "/people/skills": "Skills",
+  "/team/alignment": "Alignment",
+  "/team/reviews": "Weekly reviews",
+  "/team/kpi-reviews": "KPI reviews",
+  "/team/rollup": "Sub-teams",
+  "/team/workload": "Workload",
+  "/kra-kpi/review": "KPI reviews",
+  "/sops/new": "New SOP",
+  "/sops/my-sops": "My SOPs",
+  "/sops/compliance": "SOP compliance",
+  "/sops/manage": "Organize SOPs",
+  "/policies/compliance": "Policy compliance",
+};
+
+// Longest first, like ROUTE_HUB_PREFIXES: the crumb scan stops at the deepest
+// row that owns the path.
+const ROUTE_TITLE_PREFIXES: readonly string[] = Object.keys(ROUTE_TITLES).sort(
+  (a, b) => b.length - a.length,
+);
+
+/**
  * The 19 catalog apps that are folded into a hub: they keep their routes, their
  * rows and their searchability, but they are not their own rail icon. The hub
  * named here is where the app's rows live (spec §1.2 rule 3).
@@ -265,6 +380,35 @@ export function resolveHub(pathname: string): HubKey {
   if (isSettingsRoute(pathname)) return "settings";
   const prefix = resolveHubPrefix(pathname);
   return prefix ? ROUTE_HUB[prefix] : "home";
+}
+
+/**
+ * The crumb a page gets when it declares none: the canon title of the owning
+ * route prefix, or null when the path matches no row (the bar then shows the
+ * hub alone). Pure, so the top bar and a test read the same answer.
+ */
+export function resolveCrumbFallback(pathname: string): string | null {
+  const trail = resolveCrumbTrail(pathname);
+  return trail.length > 0 ? trail[trail.length - 1].label : null;
+}
+
+/**
+ * The fallback crumbs after the hub, outermost first: one per `ROUTE_TITLES`
+ * row that is the path or an ancestor of it, so `/people/departments` gives
+ * `[Directory (/people), Departments]` and `/docs/abc123` gives `[Docs]`.
+ * Every crumb but the last carries its href; the last is the page itself. A
+ * path no row owns gives `[]`, and the bar shows the hub alone. Pure, so the
+ * top bar and a test read the same answer.
+ */
+export function resolveCrumbTrail(pathname: string): { label: string; href?: string }[] {
+  if (!resolveHubPrefix(pathname)) return [];
+  const path = normalisePath(pathname);
+  const owned = ROUTE_TITLE_PREFIXES.filter((prefix) => prefixMatches(path, prefix)).sort(
+    (a, b) => a.length - b.length,
+  );
+  return owned.map((prefix, i) =>
+    i === owned.length - 1 ? { label: ROUTE_TITLES[prefix] } : { label: ROUTE_TITLES[prefix], href: prefix },
+  );
 }
 
 /** What a hub's landing URL may depend on. The only two branches in the table. */

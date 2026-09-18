@@ -7,20 +7,37 @@
  *  PATCH /api/tools/[id]
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Wrench, Plus, Search, Hash, ChevronRight, ExternalLink, Lock, Users,
-  Layers, Activity, Globe, Copy, Eye, EyeOff, X, KeyRound, User as UserIcon, StickyNote, Check,
-  Pencil, Loader2,
+  Wrench,
+  Search,
+  Hash,
+  ChevronRight,
+  ExternalLink,
+  Lock,
+  Users,
+  Layers,
+  Activity,
+  Globe,
+  Copy,
+  Eye,
+  EyeOff,
+  X,
+  KeyRound,
+  User as UserIcon,
+  StickyNote,
+  Check,
+  Pencil,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ToolCredentials = { username?: string; password?: string; apiKey?: string; notes?: string } & Record<string, string | undefined>;
 type ApiTool = {
@@ -137,19 +154,14 @@ export default function ToolsPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Tools"
-        Icon={Wrench}
-        iconGradient={GRAD.brownOrange}
-        description={rows === null ? "Loading…" : `${stats.total} tool${stats.total === 1 ? "" : "s"} · ${stats.categories} categor${stats.categories === 1 ? "y" : "ies"} · ${stats.withCreds} with shared creds`}
         actions={
           <div className="tls__head-actions">
-            <Link href="/settings" className="tls__nav-link"><Hash /> Settings</Link>
-            <button type="button" className="tls__btn-primary" onClick={quickAdd}>
-              <Plus /> Add tool
-            </button>
+            <Link href="/settings" className="os-head__link"><Hash /> Settings</Link>
           </div>
         }
+        primary={{ label: "Add tool", onClick: quickAdd }}
       />
 
       <div className="tls">
@@ -189,18 +201,15 @@ export default function ToolsPage() {
         )}
 
         {loadError ? (
-          <OsEmptyView Icon={Wrench} iconGradient={GRAD.redPink} title="Couldn't load tools" subtitle={loadError} cta="Retry" onCta={() => void load()} />
+          <OsEmptyView variant="error" title="Couldn't load tools" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
         ) : rows === null ? (
-          <div className="tls__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Wrench}
-            iconGradient={GRAD.brownOrange}
+            context="list"
             title="No tools yet"
-            subtitle="Build the team's tool catalog. Add Figma, Notion, GitHub — share credentials with specific people, audit access."
-            chips={["Productivity", "Design", "Engineering", "Marketing"]}
-            cta="Add tool"
-            onCta={quickAdd}
+            hint="Add the tools your team uses and share access with the right people."
+            action={{ label: "Add tool", onClick: quickAdd }}
           />
         ) : grouped.length === 0 ? (
           <div className="tls__no-match"><Search /> No tools match.</div>
@@ -340,7 +349,7 @@ function ToolDetailModal({ tool, onClose, onChanged }: { tool: ApiTool; onClose:
               <div className="flex justify-end gap-2 pt-1">
                 <button type="button" onClick={() => { setEditing(false); setErr(null); }} className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-base text-zinc-700 hover:bg-zinc-50">Cancel</button>
                 <button type="button" onClick={save} disabled={saving} className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[#0073EA] px-3 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50">
-                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />} Save
+                  {saving ? <Dots variant="pending" /> : <Check className="h-3.5 w-3.5" />} Save
                 </button>
               </div>
             </div>

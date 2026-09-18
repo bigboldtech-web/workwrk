@@ -12,12 +12,30 @@
  *   GET  /api/me/recent-docs      recently-viewed ids + timestamps
  */
 
+import { Dots } from "@/components/ui/dots";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  FileText, Plus, ChevronDown, ChevronUp, Check, MoreHorizontal, Search, ListFilter, ArrowUpDown,
-  Import as ImportIcon, Link2, Star, Pencil, Clock, User, Rocket, NotebookPen, BookOpen, Loader2,
+  FileText,
+  Plus,
+  ChevronDown,
+  ChevronUp,
+  Check,
+  MoreHorizontal,
+  Search,
+  ListFilter,
+  ArrowUpDown,
+  Import as ImportIcon,
+  Link2,
+  Star,
+  Pencil,
+  Clock,
+  User,
+  Rocket,
+  NotebookPen,
+  BookOpen,
 } from "lucide-react";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -25,6 +43,8 @@ import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu
 import { renderNoteIcon } from "@/components/docs/note-icon";
 import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile";
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
 
 type ApiDoc = {
@@ -244,31 +264,29 @@ export default function DocsPage() {
 
   return (
     <div className="flex flex-col h-full bg-white text-zinc-900">
+      {/* One label per destination (principle 16): the view's name is the h1,
+          the second crumb and the tab title, spelled the same in all three.
+          Without a declaration the bar printed a lone "Docs" and the tab title
+          disagreed with the heading. */}
+      <Breadcrumb items={[{ label: VIEW_LABEL[view] }]} />
       {/* Header */}
       <div className="px-5 pt-3.5 pb-2 flex items-center justify-between gap-3">
-        <h1 className="text-lg font-semibold text-zinc-900">{VIEW_LABEL[view]}</h1>
+        <h1 className="text-[22px] font-semibold leading-tight text-zinc-900">{VIEW_LABEL[view]}</h1>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-200 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-            onClick={() => toast("Import is coming soon")}
-          >
-            <ImportIcon className="w-3.5 h-3.5" /> Import
-          </button>
           <div className="relative">
             <div className="inline-flex items-stretch rounded-md overflow-hidden shadow-sm">
               <button
                 type="button"
                 onClick={() => void createDoc()}
                 disabled={creating}
-                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800 disabled:opacity-60"
+                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-brand text-white text-base font-medium hover:bg-brand-hover disabled:opacity-60"
               >
-                {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} New Doc
+                {creating ? <Dots variant="pending" /> : <Plus className="w-3.5 h-3.5" />} New Doc
               </button>
               <button
                 type="button"
                 onClick={() => setNewMenu((s) => !s)}
-                className="inline-flex items-center px-1.5 bg-zinc-900 text-white border-l border-white/15 hover:bg-zinc-800"
+                className="inline-flex items-center px-1.5 bg-brand text-white border-s border-white/25 hover:bg-brand-hover"
                 aria-label="New doc options"
               >
                 <ChevronDown className="w-3.5 h-3.5" />
@@ -451,9 +469,9 @@ export default function DocsPage() {
         </div>
 
         {loadError ? (
-          <div className="px-5 py-10 text-center text-base text-zinc-500">Couldn&apos;t load docs — {loadError}</div>
+          <ErrorState what="docs" onRetry={() => { setLoadError(null); void load(); }} />
         ) : rows === null ? (
-          <div className="px-5 py-10 text-center text-base text-zinc-400">Loading docs…</div>
+          <SkeletonRows />
         ) : displayed.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <FileText className="w-8 h-8 mx-auto text-zinc-300" />
@@ -467,7 +485,7 @@ export default function DocsPage() {
                 : `No docs in ${VIEW_LABEL[view]} yet.`}
             </p>
             {!search.trim() && locFilter.size === 0 && (view === "all" || view === "my") ? (
-              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md bg-zinc-900 text-white text-base font-medium hover:bg-zinc-800">
+              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-300 bg-white text-zinc-700 text-base font-medium hover:bg-zinc-50">
                 <Plus className="w-3.5 h-3.5" /> New Doc
               </button>
             ) : null}

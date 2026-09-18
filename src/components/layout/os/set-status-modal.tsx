@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { X, SmilePlus, CornerDownLeft } from "lucide-react";
 import { useLayer, useOsShell, type PresenceStatus } from "./shell-context";
+import { useBoot } from "./boot-context";
 
 type Preset = { emoji: string; label: string; expiry: string };
 
@@ -50,6 +51,7 @@ export function SetStatusModal() {
 
 function SetStatusModalInner({ onClose }: { onClose: () => void }) {
   const { setPresenceStatus, presenceStatus } = useOsShell();
+  const { boot } = useBoot();
   const [text, setText] = useState(() =>
     presenceStatus.label === "Online" ? "" : presenceStatus.label,
   );
@@ -83,7 +85,7 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center bg-black/40 pt-[16vh] px-4"
+      className="fixed inset-0 z-[60] flex items-start justify-center bg-[var(--os-scrim)] pt-[16vh] px-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
@@ -119,18 +121,18 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="What's on your mind?"
-            className="flex-1 bg-white border border-zinc-200 rounded-md px-3 py-2 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#0073EA]"
+            className="flex-1 bg-white border border-zinc-200 rounded-md px-3 py-2 text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-brand"
           />
         </div>
         <div className="px-5 pb-5">
-          <div className="text-xs uppercase tracking-wide text-zinc-400 mb-2">For Cashkr Team</div>
+          <div className="text-micro uppercase tracking-[0.06em] text-ink-2 mb-2">For {boot.org.name}</div>
           <div className="space-y-1">
             {PRESETS.map((p) => (
               <button
                 key={p.label}
                 type="button"
                 onClick={() => applyPreset(p)}
-                className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-50 text-left"
+                className="w-full flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-zinc-50 text-start"
               >
                 <span className="text-lg">{p.emoji}</span>
                 <span className="text-base font-medium text-zinc-900">{p.label}</span>
@@ -143,7 +145,7 @@ function SetStatusModalInner({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={save}
-            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-[#0073EA] hover:bg-[#0060B9] text-white text-base font-medium"
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-brand hover:bg-brand-hover text-ink-inv text-base font-medium"
           >
             Save
             <CornerDownLeft className="w-3 h-3" />

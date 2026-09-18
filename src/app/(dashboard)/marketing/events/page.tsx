@@ -6,7 +6,7 @@
  *  POST /api/marketing/events  { name }
  *
  * Layout:
- *   OsTitleBar with back + nav links + New event in actions.
+ *   OsPageHeader with back + nav links + New event in actions.
  *   Featured next-event hero card with date tile + format chip + registration ring.
  *   KPI strip: Total · Upcoming · This month · Registered.
  *   Toolbar: search + format chips.
@@ -14,17 +14,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  CalendarDays, Plus, Search, MapPin, Users as UsersIcon, ExternalLink,
-  ArrowLeft, Sparkles, Globe, Building2,
+  CalendarDays,
+  Search,
+  MapPin,
+  Users as UsersIcon,
+  ExternalLink,
+  Sparkles,
+  Globe,
+  Building2,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type Status = "PLANNING" | "PROMOTING" | "ACTIVE" | "COMPLETED" | "CANCELLED";
 
@@ -235,27 +241,16 @@ export default function EventsLibrary() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Events"
-        Icon={CalendarDays}
-        iconGradient={GRAD.indigoBlue}
-        description={items === null
-          ? "Loading events…"
-          : `${stats.total} event${stats.total === 1 ? "" : "s"} · ${stats.upcoming.length} upcoming · ${stats.totalReg.toLocaleString()} registered`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.an]}
-        morePeople={3}
+        back={{ fallbackHref: "/marketing", label: "Marketing" }}
         actions={
           <div className="evts__head-actions">
-            <button type="button" className="evts__back" onClick={() => history.back()}>
-              <ArrowLeft /> Marketing
-            </button>
-            <Link href="/marketing/campaigns" className="evts__nav-link">Campaigns</Link>
-            <Link href="/marketing/content" className="evts__nav-link">Content</Link>
-            <button type="button" className="evts__btn-primary" onClick={quickAdd}>
-              <Plus /> New event
-            </button>
+            <Link href="/marketing/campaigns" className="os-head__link">Campaigns</Link>
+            <Link href="/marketing/content" className="os-head__link">Content</Link>
           </div>
         }
+        primary={{ label: "New event", onClick: quickAdd }}
       />
 
       <div className="evts">
@@ -298,17 +293,14 @@ export default function EventsLibrary() {
 
         {/* Body */}
         {loadError ? (
-          <OsEmptyView Icon={CalendarDays} iconGradient={GRAD.redPink} title="Couldn't load events" subtitle={`API error: ${loadError}.`} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load events" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : items === null ? (
-          <div className="evts__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={CalendarDays}
-            iconGradient={GRAD.indigoBlue}
+            context="list"
             title="No events yet"
-            subtitle="Conferences, webinars, customer dinners — track them all with registration, attendance, and budget."
-            chips={["Conference", "Webinar", "Workshop", "Dinner"]}
-            cta="New event"
+            hint="Track conferences, webinars and dinners with registration, attendance and budget."
           />
         ) : grouped.length === 0 && !featured ? (
           <div className="evts__empty">

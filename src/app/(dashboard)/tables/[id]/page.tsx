@@ -26,19 +26,59 @@
  * host, undo and CSV import/export.
  */
 
+import { Dots } from "@/components/ui/dots";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
 import {
-  Table as TableIcon, ArrowLeft, Plus, Trash2, Loader2,
-  Link as LinkIcon, ChevronRight, Upload, Download, Search, Filter,
-  Globe, Lock, Unlock, Sigma, Star, Link2, Check, Tag, Table2, Sparkles,
-  Undo2, Redo2, Printer, DollarSign, Percent, ChevronDown, ChevronUp,
-  ArrowDownAZ, ArrowUpZA, X, Pencil, MoreVertical,
-  Bold, Italic, Underline, Strikethrough, Baseline, PaintBucket,
-  TextAlignStart, TextAlignCenter, TextAlignEnd,
-  ArrowUpFromLine, ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, Eraser,
-  Pin, PinOff, Palette, ListChecks,
+  Table as TableIcon,
+  Plus,
+  Trash2,
+  Link as LinkIcon,
+  ChevronRight,
+  Upload,
+  Download,
+  Search,
+  Filter,
+  Globe,
+  Lock,
+  Unlock,
+  Sigma,
+  Star,
+  Link2,
+  Check,
+  Tag,
+  Table2,
+  Sparkles,
+  Undo2,
+  Redo2,
+  Printer,
+  DollarSign,
+  Percent,
+  ChevronDown,
+  ChevronUp,
+  ArrowDownAZ,
+  ArrowUpZA,
+  X,
+  Pencil,
+  MoreVertical,
+  Bold,
+  Italic,
+  Underline,
+  Strikethrough,
+  Baseline,
+  PaintBucket,
+  TextAlignStart,
+  TextAlignCenter,
+  TextAlignEnd,
+  ArrowUpFromLine,
+  ArrowDownToLine,
+  ArrowLeftToLine,
+  ArrowRightToLine,
+  Eraser,
+  Pin,
+  PinOff,
+  Palette,
+  ListChecks,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { useConfirm, usePrompt } from "@/components/ui/dialog-provider";
@@ -68,6 +108,8 @@ import { TableTrashDialog } from "@/components/tables/table-trash-dialog";
 import { PivotDialog } from "@/components/tables/pivot-dialog";
 import { AskDataDialog } from "@/components/tables/ask-data-dialog";
 import { TableFavoriteButton } from "@/components/board-view/table-favorite-button";
+import { BackButton } from "@/components/ui/back-button";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 // The zoom steps the screenshot's Sheets zoom select offers. CSS `zoom`
 // (not transform scale) so the layout REFLOWS: the kernel's virtualizer
@@ -104,7 +146,7 @@ type ViewType = "grid" | "kanban" | "calendar" | "gallery";
 type SheetFreeze = { rows?: number; cols?: number };
 type SavedView = { id: string; name: string; type: ViewType; config?: { kanbanCol?: string; calCol?: string; sort?: { colId: string; dir: "asc" | "desc" }; filter?: { colId: string; value: string }; freeze?: SheetFreeze } };
 type TableSettings = { namedRanges?: NamedRangeDef[] };
-type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null };
+type ApiTable = { id: string; name: string; description?: string | null; columns: Column[]; views?: SavedView[]; rowCount: number; isPublic?: boolean; settings?: TableSettings | null; spaceId?: string | null };
 
 /** Named ranges out of a table's settings blob, defensively. */
 function readNamedRanges(settings: TableSettings | null | undefined): NamedRangeDef[] {
@@ -1012,6 +1054,9 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
   const titleBeforeEditRef = useRef<string | null>(null);
   // Org users (for Person columns), lazy-loaded when one exists.
   const [orgUsers, setOrgUsers] = useState<OrgUser[]>([]);
+  // The BackButton target (back-map 7): the table's Space page and name when
+  // `spaceId` is set, else /tables labelled Tables.
+  const [spaceBack, setSpaceBack] = useState<{ fallbackHref: string; label: string } | null>(null);
   // Column drag-reorder + resize.
   const [dragColId, setDragColId] = useState<string | null>(null);
   // `moved` gates the release persist: a plain click on the grip (and each
@@ -1151,6 +1196,19 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
       const t: ApiTable = td.data ?? td;
       t.columns = Array.isArray(t.columns) ? t.columns : [];
       if (gen !== loadGenRef.current) return;
+      if (t.spaceId) {
+        void fetch(`/api/spaces/${t.spaceId}`)
+          .then(async (r) => {
+            if (!r.ok) return null;
+            const d = await r.json();
+            const s = d.space as { slug?: string; name?: string } | undefined;
+            return s?.slug ? { fallbackHref: `/spaces/${s.slug}`, label: s.name || "Space" } : null;
+          })
+          .then((back) => { if (gen === loadGenRef.current) setSpaceBack(back); })
+          .catch(() => { if (gen === loadGenRef.current) setSpaceBack(null); });
+      } else {
+        setSpaceBack(null);
+      }
 
       /* THE HONESTY RULE: rows appear progressively, but the engine host is
        * rebuilt exactly ONCE, after the FINAL chunk — the formula engine is
@@ -3393,7 +3451,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     : null;
 
   if (loadError) return <div className="frmb__error">Couldn&apos;t load table: {loadError}</div>;
-  if (!table || rows === null) return <div className="frmb__loading"><ValueLoader size={32} /></div>;
+  if (!table || rows === null) return <SkeletonRows />;
 
   const filterColDef = table.columns.find((c) => c.id === filterCol);
   const activeRow = activeRowId ? rows.find((r) => r.id === activeRowId) : null;
@@ -4723,7 +4781,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
     <div className="dtbl">
       {/* ── Title row: small inline-editable name, Sheets-style ── */}
       <header className="shx__titlebar">
-        <button type="button" className="frmb__back shx__np" onClick={() => router.push("/tables")} aria-label="Back"><ArrowLeft /></button>
+        <BackButton fallbackHref={spaceBack?.fallbackHref ?? "/tables"} label={spaceBack?.label ?? "Tables"} />
         <TableIcon className="shx__title-icon" aria-hidden />
         <input
           className="shx__title-input"
@@ -5140,7 +5198,7 @@ export default function TableEditorPage({ params }: { params: Promise<{ id: stri
             title="Add 500 rows"
             aria-label="Add 500 rows"
           >
-            {addingRows ? <Loader2 className="frmb__spin" /> : <Plus />}
+            {addingRows ? <Dots variant="pending" /> : <Plus />}
           </button>
           {/* Find & Replace card (Cmd/Ctrl+F, Cmd/Ctrl+H): compact, floats
               top-right over the grid, Sheets' quick-find shape. Lives
@@ -5665,7 +5723,7 @@ function SheetTabsBar({ currentId, currentName, meta, stats }: { currentId: stri
   return (
     <footer className="shx__tabbar shx__np">
       <button type="button" className="shx__tab-add" onClick={() => void addSheet()} disabled={creating} title="New sheet" aria-label="New sheet">
-        {creating ? <Loader2 className="frmb__spin" /> : <Plus />}
+        {creating ? <Dots variant="pending" /> : <Plus />}
       </button>
       <div className="shx__tabs">
         {tabs.map((s) => (

@@ -1,7 +1,10 @@
 "use client";
 
+import { BackButton } from "@/components/ui/back-button";
+import { Dots } from "@/components/ui/dots";
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,17 +12,35 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  ArrowLeft, Star, Users, CheckCircle, BarChart3, Send, AlertTriangle,
-  UserPlus, TrendingUp, Shield, Cloud, CloudOff, Rocket, FileText, Download, Loader2,
+  ArrowLeft,
+  Star,
+  Users,
+  CheckCircle,
+  BarChart3,
+  Send,
+  AlertTriangle,
+  UserPlus,
+  TrendingUp,
+  Shield,
+  Cloud,
+  CloudOff,
+  Rocket,
+  FileText,
+  Download,
 } from "lucide-react";
 import { useAutosave } from "@/hooks/use-autosave";
+import { NotFoundView } from "@/components/access/not-found-view";
 
 /* ── API payload shapes (the fields this page actually touches) ────
  * The routes mirror deep Prisma include trees; we type the slices the
@@ -256,7 +277,7 @@ const behavioralLabels: Record<string, { label: string; anchors: string[] }> = {
 
 export default function ReviewCycleDetailPage() {
   const { id: cycleId } = useParams();
-  const router = useRouter();
+  
   const { data: session } = useSession();
   const canLaunch = MANAGER_TIER.has(session?.user?.accessLevel ?? "");
 
@@ -634,14 +655,8 @@ export default function ReviewCycleDetailPage() {
     );
   }
 
-  if (!cycle) {
-    return (
-      <div className="flex flex-col items-center justify-center h-64">
-        <p className="text-zinc-500">Review cycle not found</p>
-        <Button variant="ghost" className="mt-2" onClick={() => router.push("/reviews")}>Back to review cycles</Button>
-      </div>
-    );
-  }
+  // The in-shell 404 (spec-shell 2.4): the same view as any unknown object.
+  if (!cycle) return <NotFoundView />;
 
   const stats: CycleStats = cycle.stats ?? { total: 0, selfDone: 0, managerDone: 0, calibrated: 0, completed: 0 };
   const myReview = selfData?.review;
@@ -656,9 +671,7 @@ export default function ReviewCycleDetailPage() {
     <div className="space-y-3 animate-fade-in">
       <section className="rvwd__hero" style={{ ["--hero-c" as unknown as string]: cycleStatusColor }}>
         <span className="rvwd__hero-accent" aria-hidden="true" />
-        <button type="button" className="rvwd__hero-back" onClick={() => router.push("/reviews")}>
-          <ArrowLeft size={12} /> Review cycles
-        </button>
+        <BackButton fallbackHref="/reviews" label="Review cycles" />
         <div className="rvwd__hero-meta">
           <span className="rvwd__hero-status">{cycle.status.replace(/_/g, " ")}</span>
           <span className="rvwd__hero-type">{cycle.type.replace(/_/g, " ")}</span>
@@ -717,7 +730,7 @@ export default function ReviewCycleDetailPage() {
         {/* ===== SELF-ASSESSMENT TAB ===== */}
         <TabsContent value="self-assessment" className="mt-4 space-y-4">
           {loadingSelf ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">Loading...</CardContent></Card>
+            <Card><CardContent className="p-8"><SkeletonLines lines={4} /></CardContent></Card>
           ) : !selfData || !myReview ? (
             <Card><CardContent className="p-8 text-center text-zinc-500">No review found for you in this cycle.</CardContent></Card>
           ) : (
@@ -920,7 +933,7 @@ export default function ReviewCycleDetailPage() {
                         onClick={() => handleGenerateLetter(myReview.id)}
                         disabled={letterLoadingId === myReview.id}
                       >
-                        {letterLoadingId === myReview.id ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} />}
+                        {letterLoadingId === myReview.id ? <Dots variant="pending" /> : <FileText size={14} />}
                         Generate appraisal letter
                       </Button>
                     </div>
@@ -983,7 +996,7 @@ export default function ReviewCycleDetailPage() {
                           onClick={(e) => { e.stopPropagation(); void handleGenerateLetter(review.id); }}
                           disabled={letterLoadingId === review.id}
                         >
-                          {letterLoadingId === review.id ? <Loader2 size={14} className="animate-spin text-zinc-500" /> : <FileText size={14} className="text-zinc-500" />}
+                          {letterLoadingId === review.id ? <Dots variant="pending" /> : <FileText size={14} className="text-zinc-500" />}
                         </Button>
                       )}
                       <Button variant="ghost" size="sm" className="h-7 px-2" onClick={(e) => { e.stopPropagation(); setShowAssignPeersDialog(review); }}>
@@ -1136,7 +1149,7 @@ export default function ReviewCycleDetailPage() {
         {/* ===== PEER FEEDBACK TAB ===== */}
         <TabsContent value="peer-feedback" className="mt-4 space-y-4">
           {loadingPeer ? (
-            <Card><CardContent className="p-8 text-center text-zinc-500">Loading...</CardContent></Card>
+            <Card><CardContent className="p-8"><SkeletonLines lines={4} /></CardContent></Card>
           ) : peerRequests.length === 0 ? (
             <Card><CardContent className="p-8 text-center text-zinc-500">No peer feedback requests for you in this cycle.</CardContent></Card>
           ) : (

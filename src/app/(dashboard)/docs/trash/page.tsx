@@ -8,13 +8,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
-import Link from "next/link";
-import { Trash2, FileText, RotateCcw, ArrowLeft, Loader2, Search } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { FileText, RotateCcw, Search } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiDoc = {
   id: string;
@@ -80,12 +79,7 @@ export default function NotesTrashPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Trash"
-        Icon={Trash2}
-        iconGradient={GRAD.redPink}
-        description={rows === null ? "Loading…" : `${rows.length} archived note${rows.length === 1 ? "" : "s"} · soft-deleted, fully restorable`}
-      />
+      <OsPageHeader title="Trash" />
 
       <div className="docs__toolbar">
         <div className="docs__search">
@@ -97,17 +91,14 @@ export default function NotesTrashPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Link href="/docs" className="docs__new" style={{ background: "var(--os-surface-1)", color: "var(--os-ink)" }}>
-          <ArrowLeft /> Back to notes
-        </Link>
       </div>
 
       {error ? (
-        <OsEmptyView Icon={Trash2} iconGradient={GRAD.redPink} title="Couldn't load trash" subtitle={`API error: ${error}`} cta="Retry" />
+        <OsEmptyView variant="error" title="Couldn't load trash" hint={`API error: ${error}`} action={{ label: "Try again", onClick: () => { void load(); } }} />
       ) : rows === null ? (
-        <div className="docs__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : rows.length === 0 ? (
-        <OsEmptyView Icon={Trash2} iconGradient={GRAD.tealGreen} title="Trash is empty" subtitle="Deleted notes show up here and stay restorable. Nothing is hard-deleted." cta="Open notes" />
+        <OsEmptyView context="docs" title="Trash is empty" hint="Deleted docs stay here and can be restored." />
       ) : filtered.length === 0 ? (
         <div className="docs__loading">Nothing matches &ldquo;{search}&rdquo;.</div>
       ) : (
@@ -133,7 +124,7 @@ export default function NotesTrashPage() {
                 onClick={() => restore(d.id)}
                 disabled={restoring === d.id}
               >
-                {restoring === d.id ? <><Loader2 className="bedit__spin" /> Restoring…</> : <><RotateCcw /> Restore</>}
+                {restoring === d.id ? <><Dots variant="pending" /> Restoring…</> : <><RotateCcw /> Restore</>}
               </button>
             </li>
           ))}

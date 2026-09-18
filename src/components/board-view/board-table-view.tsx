@@ -15,7 +15,8 @@
 // reads Board.schema.fields.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, Loader2, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat } from "lucide-react";
+import { Check, Plus, Trash2, X, ChevronDown, Layers, MessageSquare, Paperclip, GripVertical, MoreHorizontal, CalendarPlus, Pencil, Network, Columns3, Search, ArrowUpDown, UserCheck, Download, ArrowUp, ArrowDown, EyeOff, ChevronsLeft, ChevronsRight, Settings2, FileText, Link2, BookOpen, Clock, Repeat } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
   PRIORITY_OPTIONS,
@@ -43,6 +44,7 @@ import { DatePlanner } from "./date-planner";
 import { BulkActionBar } from "./bulk-action-bar";
 import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 interface BoardTableViewProps {
   boardId: string;
@@ -2225,7 +2227,7 @@ function AddSubtaskRow({
               placeholder="Type a subtask and press Enter…"
               className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400"
             />
-            {busy ? <Loader2 className="w-3 h-3 animate-spin text-zinc-400 shrink-0" /> : null}
+            {busy ? <Dots variant="pending" /> : null}
             {failed ? <span className="text-xs text-red-500 shrink-0">{failed}</span> : null}
           </div>
         ) : (
@@ -2431,7 +2433,7 @@ function AddTaskInline({
           className="h-7 px-3 rounded-md text-sm font-medium text-white inline-flex items-center gap-1 disabled:opacity-50"
           style={{ background: "var(--os-brand)" }}
         >
-          {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+          {busy ? <Dots variant="pending" /> : null}
           Save <span className="opacity-80 text-base leading-none">↵</span>
         </button>
       </span>
@@ -2937,7 +2939,7 @@ function GroupHeaderMenu({
           <GHItem label="Select all" onClick={act(onSelectAll)} />
           <GHItem label="Hide status" onClick={act(onEditStatuses)} disabled={!canEditStatuses} />
           <div className="h-px bg-zinc-100 my-1" />
-          <GHItem label="Automate status" disabled />
+          <UpcomingOnly><ComingSoonRow label="Automate status" className="h-8" /></UpcomingOnly>
         </div>
       ) : null}
     </div>

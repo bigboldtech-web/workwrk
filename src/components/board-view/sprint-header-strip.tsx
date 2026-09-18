@@ -11,12 +11,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
-import { IterationCw, Pencil, TrendingDown } from "lucide-react";
+import { IterationCw, Pencil } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { computeSprintPoints, sprintDayLabel, type SprintMeta } from "@/lib/sprint";
 import { MorePortal } from "@/components/layout/os/more-portal";
 import { refreshSidebar } from "@/components/layout/os/sidebar-refresh";
 import { useOsToast } from "@/components/layout/os/toast";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 interface SprintHeaderStripProps {
   boardId: string;
@@ -123,14 +124,7 @@ export function SprintHeaderStrip({ boardId, canEdit, sprint, items, statuses }:
         <div className="h-full rounded-full bg-[#0073EA]" style={{ width: `${pct}%` }} />
       </div>
       <div className="flex-1" />
-      <button
-        type="button"
-        onClick={() => toast("Burndown & velocity charts coming soon")}
-        className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-sm text-zinc-600 border border-zinc-200 hover:bg-zinc-100"
-      >
-        <TrendingDown className="w-3.5 h-3.5" />
-        Burndown
-      </button>
+      <UpcomingOnly><ComingSoonRow label="Burndown" className="h-7" /></UpcomingOnly>
       {canEdit ? (
         <>
           <button

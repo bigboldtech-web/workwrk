@@ -19,8 +19,13 @@ import { canDeleteGoal, canEditOkrOwner } from "@/lib/alignment-scope";
 import { listGoalAssigneeEntries, resolveGoalMembersBatch, canSeeGoal } from "@/lib/goal-audience";
 import { computeGoalRollups, enrichKeyResults, goalRollupFor, KR_KPI_SELECT } from "@/lib/alignment";
 import {
-  ArrowLeft, AlertTriangle, Calendar, Clock,
-  ChevronRight, Building2, Users, User as UserIcon,
+  AlertTriangle,
+  Calendar,
+  Clock,
+  ChevronRight,
+  Building2,
+  Users,
+  User as UserIcon,
 } from "lucide-react";
 import { PersonAvatar } from "@/components/board-view/assignee-picker";
 import { OkrLinkedWork } from "./okr-linked-work";
@@ -29,6 +34,7 @@ import { GoalAssessment } from "./goal-assessment";
 import { GoalDetailMenu } from "./goal-detail-menu";
 import { GoalTargets, type TargetRowData } from "./goal-targets";
 import { OkrAudience } from "@/components/okrs/okr-audience";
+import { BackButton } from "@/components/ui/back-button";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -250,9 +256,10 @@ export default async function OkrDetailPage(
       <header className="okrd__hero">
         <div className="okrd__hero-in">
           <div className="okrd__crumbs">
-            <Link href="/okrs" className="okrd__back">
-              <ArrowLeft /> All Goals
-            </Link>
+            <BackButton
+              fallbackHref={okr.level === "COMPANY" ? "/okrs?level=company" : "/okrs"}
+              label={okr.level === "COMPANY" ? "Company goals" : "Goals"}
+            />
           </div>
           <div className="okrd__hero-grid">
             <div className="okrd__ring">

@@ -17,9 +17,11 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Search, X, Lock, Globe, Users as UsersIcon, Loader2, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2 } from "lucide-react";
+import { Search, X, Lock, Globe, Users as UsersIcon, Plus, Building2, MapPin, UserPlus, Mail, Copy, Check, Send, Trash2 } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 
 type Visibility = "PRIVATE" | "WORKSPACE" | "ORG";
 type SpaceRole = "OWNER" | "ADMIN" | "MEMBER" | "GUEST";
@@ -380,7 +382,7 @@ export function ShareSpaceDialog({
                   type="button"
                   onClick={() => setVis(opt.value)}
                   disabled={busyVis}
-                  className={`text-left rounded-lg border bg-white p-2.5 transition ${
+                  className={`text-start rounded-lg border bg-white p-2.5 transition ${
                     active ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200 hover:bg-zinc-50"
                   } disabled:opacity-60`}
                 >
@@ -419,17 +421,17 @@ export function ShareSpaceDialog({
 
           {tab === "people" ? (
             <div className="relative" ref={pickerRef}>
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="absolute start-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-zinc-400" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
                 onFocus={() => setPickerOpen(true)}
                 placeholder="Type a name or email…"
-                className="w-full h-9 pl-8 pr-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
+                className="w-full h-9 ps-8 pe-2 rounded-md border border-zinc-200 bg-white text-base focus:outline-none focus:border-zinc-400"
               />
               {pickerOpen ? (
-                <div className="absolute left-0 right-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
+                <div className="absolute start-0 end-0 top-10 z-10 rounded-md border border-zinc-200 bg-white shadow-lg max-h-[220px] overflow-y-auto">
                   {candidates.length === 0 ? (
                     <div className="px-3 py-3 text-sm text-zinc-400">
                       {query ? `No match for "${query}"` : "Start typing to find people"}
@@ -441,7 +443,7 @@ export function ShareSpaceDialog({
                         type="button"
                         onClick={() => addMember(u)}
                         disabled={busyAddId === u.id}
-                        className="w-full text-left px-2.5 py-1.5 flex items-center gap-2 hover:bg-zinc-50 disabled:opacity-60"
+                        className="w-full text-start px-2.5 py-1.5 flex items-center gap-2 hover:bg-zinc-50 disabled:opacity-60"
                       >
                         <Avatar user={u} />
                         <span className="flex-1 min-w-0">
@@ -449,7 +451,7 @@ export function ShareSpaceDialog({
                           <span className="block text-xs text-zinc-500 truncate">{u.email}</span>
                         </span>
                         {busyAddId === u.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />
+                          <Dots variant="pending" />
                         ) : (
                           <Plus className="h-3.5 w-3.5 text-zinc-400" />
                         )}
@@ -500,7 +502,7 @@ export function ShareSpaceDialog({
             {members === null ? "Members" : `Members · ${members.length}`}
           </div>
           {members === null ? (
-            <div className="text-sm text-zinc-400">Loading…</div>
+            <SkeletonLines lines={2} />
           ) : members.length === 0 ? (
             <div className="text-sm text-zinc-400">No members yet. Add someone above.</div>
           ) : (
@@ -532,7 +534,7 @@ export function ShareSpaceDialog({
                       aria-label="Remove member"
                     >
                       {busyRemoveId === m.user.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Dots variant="pending" />
                       ) : (
                         <X className="h-3.5 w-3.5" />
                       )}
@@ -718,7 +720,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
           disabled={busy || !email.trim()}
           className="h-9 px-3 rounded-md bg-[#0073EA] text-white text-base font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
         >
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Mail className="h-3.5 w-3.5" />}
+          {busy ? <Dots variant="pending" /> : <Mail className="h-3.5 w-3.5" />}
           Send invite
         </button>
       </div>
@@ -784,7 +786,7 @@ function EmailInvitePanel({ spaceId }: { spaceId: string | null }) {
                     title="Resend email"
                     aria-label="Resend email"
                   >
-                    {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                    {busy ? <Dots variant="pending" /> : <Send className="h-3 w-3" />}
                   </button>
                   <button
                     type="button"
@@ -879,7 +881,7 @@ function GroupPickerList({
               disabled={busy || g.memberCount === 0}
               className="h-7 px-2.5 rounded-md bg-[#0073EA] text-white text-xs font-medium hover:bg-[#0060B9] disabled:opacity-50 inline-flex items-center gap-1.5"
             >
-              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+              {busy ? <Dots variant="pending" /> : <Plus className="h-3 w-3" />}
               Add all
             </button>
           </li>

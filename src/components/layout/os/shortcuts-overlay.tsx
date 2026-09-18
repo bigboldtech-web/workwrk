@@ -11,6 +11,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { detectPlatform, formatKeys, useShortcutList, type ShortcutDef } from "@/lib/shortcuts";
 import { SHORTCUTS_OVERLAY_EVENT } from "./shell-shortcuts";
+import { useLayer } from "./shell-context";
 
 const GROUP_ORDER = ["On this page", "General", "Navigate", "Create", "View"];
 
@@ -25,6 +26,12 @@ export function ShortcutsOverlay() {
     window.addEventListener(SHORTCUTS_OVERLAY_EVENT, onToggle);
     return () => window.removeEventListener(SHORTCUTS_OVERLAY_EVENT, onToggle);
   }, []);
+
+  // The LayerStack is the single Esc authority (spec-shell 1.5). Without this
+  // the overlay closed on Radix's own document listener while contributing
+  // nothing to layerCount, so anything that reads the stack (the splash's
+  // "any key skips it" branch) saw no layer open above it.
+  useLayer(open, { id: "shortcuts-overlay", kind: "modal", close: () => setOpen(false) });
 
   const groups = useMemo(() => {
     const byGroup = new Map<string, ShortcutDef[]>();
@@ -52,7 +59,8 @@ export function ShortcutsOverlay() {
         <DialogPrimitive.Overlay className="fixed inset-0 z-[150] bg-black/40" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="workwrk-os fixed left-1/2 top-1/2 z-[151] max-h-[85vh] w-[560px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          className="workwrk-os fixed inset-x-0 mx-auto top-1/2 z-[151] max-h-[85vh] w-[560px] max-w-[calc(100vw-32px)] -translate-y-1/2 overflow-y-auto rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
         >
           <div className="flex items-center justify-between">
             <DialogPrimitive.Title className="text-lg font-semibold leading-tight">Keyboard shortcuts</DialogPrimitive.Title>

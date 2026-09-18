@@ -11,7 +11,7 @@
 // Gate: central access resolver (Phase 6) — module "team/alignment"
 // requires manager+. Employees / agents redirect home.
 
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { resolveAccess, meets } from "@/lib/access";
@@ -37,7 +37,7 @@ export default async function TeamAlignmentPage() {
     { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" },
     { type: "module", name: "team/alignment" },
   );
-  if (!meets(decision, "read")) redirect("/today");
+  if (!meets(decision, "read")) notFound();
 
   const data = await getTeamAlignment({ managerId: u.id, organizationId: u.organizationId });
 

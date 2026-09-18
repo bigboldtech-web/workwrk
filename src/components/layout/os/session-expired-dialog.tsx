@@ -108,13 +108,15 @@ export function SessionExpiredDialog() {
           onEscapeKeyDown={refuse}
           onPointerDownOutside={refuse}
           onInteractOutside={refuse}
-          aria-describedby="session-expired-body"
-          className="fixed left-1/2 top-1/2 z-[10001] w-[400px] max-w-[calc(100vw-32px)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
+          className="fixed inset-x-0 mx-auto top-1/2 z-[10001] w-[400px] max-w-[calc(100vw-32px)] -translate-y-1/2 rounded-xl border border-zinc-200 bg-white p-5 text-zinc-900 shadow-[0_30px_80px_-15px_rgba(0,0,0,0.35)] focus:outline-none dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
         >
           <DialogPrimitive.Title className="text-lg font-semibold leading-tight">
             You&apos;ve been signed out
           </DialogPrimitive.Title>
-          <DialogPrimitive.Description id="session-expired-body" className="mt-2 text-base leading-relaxed text-zinc-600 dark:text-zinc-300">
+          {/* Radix wires aria-describedby to this Description itself; an
+              overridden id left its generated one dangling and logged a
+              "Missing Description" warning on every open. */}
+          <DialogPrimitive.Description className="mt-2 text-base leading-relaxed text-zinc-600 dark:text-zinc-300">
             {reason === "revoked" ? "You were signed out on every device. " : ""}
             Sign in again to keep working.
             {draftKept ? " Anything you were typing has been kept on this device." : ""}
@@ -124,7 +126,9 @@ export function SessionExpiredDialog() {
             <a
               href={loginHref}
               autoFocus
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0073EA] px-4 text-base font-medium text-white hover:bg-[#0060C2] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0073EA]/40 focus-visible:ring-offset-2"
+              // design-system 4.7 focus: the dialog portals to <body>, outside
+              // .workwrk-os, so the ring is spelled out here on the tokens.
+              className="inline-flex h-9 items-center justify-center rounded-lg bg-brand px-4 text-base font-medium text-white hover:bg-brand-hover outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--os-focus)]"
             >
               Sign in again
             </a>
@@ -193,14 +197,14 @@ export function SessionIdleWarning() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 left-4 z-[9000] flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-lg dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
+      className="fixed bottom-4 start-4 z-[9000] flex items-center gap-3 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800 shadow-lg dark:border-zinc-700 dark:bg-[#14171D] dark:text-zinc-100"
     >
       <span>You&apos;ll be signed out in 2 minutes</span>
       <button
         type="button"
         onClick={() => void stay()}
         disabled={busy}
-        className="rounded-md bg-[#0073EA] px-2.5 py-1 text-sm font-medium text-white hover:bg-[#0060C2] disabled:opacity-60"
+        className="rounded-md bg-brand px-2.5 py-1 text-sm font-medium text-white hover:bg-brand-hover disabled:opacity-60"
       >
         Stay signed in
       </button>

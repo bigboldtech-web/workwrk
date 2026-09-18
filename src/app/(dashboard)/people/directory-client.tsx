@@ -14,7 +14,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Users, Search, Briefcase, MapPin,
@@ -24,6 +23,7 @@ import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { TeamStatTile, TeamAvatar } from "@/components/team/ui";
 import { useToast } from "@/components/ui/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiUser = {
   id: string;
@@ -311,7 +311,7 @@ export default function PeopleDirectoryPage() {
         {loadError ? (
           <div className="border border-zinc-200 rounded-xl px-6 py-12 text-center text-xs text-zinc-500">Couldn&rsquo;t load people — {loadError}</div>
         ) : users === null ? (
-          <div className="py-8 flex items-center justify-center"><ValueLoader size={30} /></div>
+          <SkeletonRows rows={4} />
         ) : filter === "former" ? (
           formerFiltered.length === 0 ? (
             <div className="border border-zinc-200 rounded-xl px-6 py-10 text-center text-xs text-zinc-500">

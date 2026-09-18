@@ -14,13 +14,14 @@ import {
   Bell, BellOff, BookUser, ChevronDown, ChevronRight, ExternalLink, Hash,
   LogOut, Megaphone, MessageCircle, Phone, Plus, Search, Star, Users, Video, X,
 } from "lucide-react";
-import { canAccessTier } from "./access-tiers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TeamAvatar } from "@/components/team/ui";
 import { useSidebarSearch } from "./sidebar-search-context";
 import { stripMarkup } from "@/lib/chat-markup";
 import { useOsToast } from "./toast";
+import { useViewerRole } from "./boot-context";
+import { canAccessTier } from "./access-tiers";
 import {
   conversationTitle, conversationAvatarUser, type ConversationListRow,
 } from "@/components/chat/conversation-utils";
@@ -49,8 +50,10 @@ export function ChatSidebar() {
   const { query } = useSidebarSearch();
   const [localFind, setLocalFind] = useState("");
   const { data: session } = useSession();
+  const { isGuest } = useViewerRole();
   const { toast } = useOsToast();
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
+  const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
 
   const [rows, setRows] = useState<(ConversationListRow & { activeCall?: ActiveCall })[] | null>(null);
   const [channels, setChannels] = useState<ChannelRow[]>([]);
@@ -259,18 +262,24 @@ export function ChatSidebar() {
           </button>
         )}
       </div>
-      <Link
-        href="/people"
-        className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-base text-zinc-700 hover:bg-zinc-50"
-      >
-        <BookUser className="h-4 w-4 text-zinc-500" /> Directory
-      </Link>
-      {canAccessTier("hr-admin", (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "") ? (
+      {/* /people is a manager-tier page (requireManagerPage renders the
+          in-shell 404 below it), so the row exists only for the tier that
+          can open it: a row that lands on a denial is worse than no row. */}
+      {canAccessTier("manager", accessLevel) ? (
+        <Link
+          href="/people"
+          className="flex h-9 items-center gap-3 rounded-lg px-3 text-ink hover:bg-hover"
+        >
+          <BookUser className="h-5 w-5 text-ink-2" strokeWidth={1.5} /> Directory
+        </Link>
+      ) : null}
+      {/* Every Member reads announcements (sidebar-map section 4 row 4); a Guest never. */}
+      {!isGuest ? (
         <Link
           href="/announcements"
-          className="mb-2 flex h-8 items-center gap-2 rounded-md px-2 text-base text-zinc-700 hover:bg-zinc-50"
+          className="flex h-9 items-center gap-3 rounded-lg px-3 text-ink hover:bg-hover"
         >
-          <Megaphone className="h-4 w-4 text-zinc-500" /> Announcements
+          <Megaphone className="h-5 w-5 text-ink-2" strokeWidth={1.5} /> Announcements
         </Link>
       ) : null}
       <div className="flex items-center gap-1.5 mb-2">
@@ -304,7 +313,7 @@ export function ChatSidebar() {
               <li key={`star-${row.id}`}>
                 <Link
                   href={`/tlk/${row.id}`}
-                  className={`flex h-8 items-center gap-2 rounded-md px-2 ${pathname === `/tlk/${row.id}` ? "bg-zinc-100" : "hover:bg-zinc-50"}`}
+                  className={`flex h-9 items-center gap-3 rounded-lg px-3 ${pathname === `/tlk/${row.id}` ? "bg-side-pill" : "hover:bg-hover"}`}
                 >
                   {row.type === "CHANNEL"
                     ? <Hash className="h-4 w-4 shrink-0 text-zinc-400" />
@@ -333,10 +342,10 @@ export function ChatSidebar() {
               className="inline-flex items-center gap-1 rounded px-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
               aria-expanded={!collapsed.channels}
             >
-              {collapsed.channels ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
+              {collapsed.channels ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400 rtl:rotate-180" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
               Channels
             </button>
-            <button type="button" onClick={() => setChannelModalOpen(true)} aria-label="New channel" className="mr-1 text-zinc-400 hover:text-zinc-700">
+            <button type="button" onClick={() => setChannelModalOpen(true)} aria-label="New channel" className="me-1 text-zinc-400 hover:text-zinc-700">
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -356,8 +365,8 @@ export function ChatSidebar() {
                       isGeneral: (c.name ?? "").toLowerCase() === "general",
                     })}
                     disabled={joining === c.id}
-                    className={`w-full flex items-center gap-2 h-8 px-2 rounded-md text-left ${
-                      active ? "bg-zinc-100" : "hover:bg-zinc-50"
+                    className={`w-full flex items-center gap-3 h-9 px-3 rounded-lg text-start ${
+                      active ? "bg-side-pill" : "hover:bg-hover"
                     } ${c.isMember ? "" : "opacity-70"}`}
                   >
                     <Hash className="w-4 h-4 text-zinc-400 shrink-0" />
@@ -391,10 +400,10 @@ export function ChatSidebar() {
               className="inline-flex items-center gap-1 rounded px-1 text-sm font-semibold text-zinc-600 hover:bg-zinc-50"
               aria-expanded={!collapsed.dms}
             >
-              {collapsed.dms ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
+              {collapsed.dms ? <ChevronRight className="w-3.5 h-3.5 text-zinc-400 rtl:rotate-180" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-400" />}
               Direct messages
             </button>
-            <button type="button" onClick={() => setModalOpen(true)} aria-label="New conversation" className="mr-1 text-zinc-400 hover:text-zinc-700">
+            <button type="button" onClick={() => setModalOpen(true)} aria-label="New conversation" className="me-1 text-zinc-400 hover:text-zinc-700">
               <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -433,8 +442,8 @@ export function ChatSidebar() {
                     starred: Boolean(row.myStarred), muted: row.myNotifyLevel === "mute",
                     isGeneral: row.type === "CHANNEL" && (row.name ?? "").toLowerCase() === "general",
                   })}
-                  className={`flex items-center gap-2.5 px-2 py-1.5 rounded-md ${
-                    active ? "bg-zinc-100" : "hover:bg-zinc-50"
+                  className={`flex items-center gap-3 h-9 px-3 rounded-lg ${
+                    active ? "bg-side-pill" : "hover:bg-hover"
                   }`}
                 >
                   {row.type === "DM" && avatarUser ? (
@@ -472,7 +481,7 @@ export function ChatSidebar() {
                     onClick={(e) => { e.preventDefault(); void closeConversation(row.id); }}
                     title="Close conversation — history is kept"
                     aria-label="Close conversation"
-                    className="absolute right-1.5 top-1/2 hidden -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 group-hover/dm:block"
+                    className="absolute end-1.5 top-1/2 hidden -translate-y-1/2 rounded p-0.5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700 group-hover/dm:block"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -504,7 +513,7 @@ export function ChatSidebar() {
                     <Link href={`/tlk/${hit.conversationId}`} className="block px-2 py-1.5 rounded-md hover:bg-zinc-50">
                       <span className="block truncate text-sm font-medium text-zinc-800">
                         {convTitle}
-                        {hit.inThread && <span className="ml-1 text-xs font-normal text-zinc-400">in thread</span>}
+                        {hit.inThread && <span className="ms-1 text-xs font-normal text-zinc-400">in thread</span>}
                       </span>
                       <span className="block truncate text-xs text-zinc-500">
                         {hit.author.firstName}: {hit.snippet}
@@ -704,7 +713,7 @@ function NewChatModal({ meId, onClose, onCreated }: {
         {picked.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {picked.map((p) => (
-              <span key={p.id} className="inline-flex items-center gap-1 h-6 pl-1 pr-1.5 rounded-full bg-zinc-100 text-sm text-zinc-700">
+              <span key={p.id} className="inline-flex items-center gap-1 h-6 ps-1 pe-1.5 rounded-full bg-zinc-100 text-sm text-zinc-700">
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={18} />
                 {p.firstName} {p.lastName}
                 <button type="button" onClick={() => toggle(p)} className="text-zinc-400 hover:text-zinc-700" aria-label={`Remove ${p.firstName}`}>
@@ -735,7 +744,7 @@ function NewChatModal({ meId, onClose, onCreated }: {
               <button
                 type="button"
                 onClick={() => toggle(p)}
-                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-left"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-zinc-50 text-start"
               >
                 <TeamAvatar name={`${p.firstName} ${p.lastName}`} avatar={p.avatar} size={28} />
                 <span className="flex-1 min-w-0">

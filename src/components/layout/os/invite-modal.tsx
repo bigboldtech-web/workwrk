@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
-import { Loader2, Send, X } from "lucide-react";
+import { Send, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import { ACCESS_LEVELS, type AccessLevel } from "@/lib/permissions";
 import { useOsToast } from "./toast";
+import { Dots } from "@/components/ui/dots";
 
 interface DeptOption {
   id: string;
@@ -234,7 +235,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             {emails.map((email) => (
               <span
                 key={email}
-                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 py-0.5 pl-2.5 pr-1 text-sm text-zinc-800"
+                className="inline-flex items-center gap-1 rounded-full bg-zinc-100 py-0.5 ps-2.5 pe-1 text-sm text-zinc-800"
               >
                 {email}
                 <button
@@ -386,7 +387,7 @@ export function InviteModal({ open, onOpenChange, onSent }: Props) {
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-4 text-base font-medium text-white hover:bg-[#0060B9] disabled:opacity-50"
           >
             {sending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Dots variant="pending" />
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}

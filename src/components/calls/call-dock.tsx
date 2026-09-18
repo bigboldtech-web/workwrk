@@ -163,6 +163,8 @@ export function CallDock() {
   return (
     <div
       ref={boxRef}
+      role="region"
+      aria-label="Call"
       className="fixed z-[45] flex flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl"
       style={style}
     >

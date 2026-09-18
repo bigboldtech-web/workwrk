@@ -14,15 +14,26 @@
  * card / detail page.
  */
 
+import { Dots } from "@/components/ui/dots";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Plus, Trash2, GripVertical, Loader2, AlertTriangle, Star, Gauge,
-  ToggleRight, CircleDot, ListChecks, Type as TypeIcon, Lock,
+  Plus,
+  Trash2,
+  GripVertical,
+  AlertTriangle,
+  Star,
+  Gauge,
+  ToggleRight,
+  CircleDot,
+  ListChecks,
+  Type as TypeIcon,
+  Lock,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 export type QType = "rating" | "nps" | "yes_no" | "single_choice" | "multi_choice" | "text";
 
@@ -449,12 +460,7 @@ export function SurveyBuilder({
                   </button>
                 );
               })}
-              <span
-                className="inline-flex items-center h-8 px-3 rounded-lg text-base border border-dashed border-[var(--os-line)] text-[var(--os-ink-4)] cursor-not-allowed"
-                title="Targeting named individuals is coming soon"
-              >
-                Specific people · Coming soon
-              </span>
+              <UpcomingOnly><ComingSoonRow label="Specific people" className="h-8" /></UpcomingOnly>
             </div>
 
             {audienceType === "OFFICES" ? (
@@ -533,7 +539,7 @@ export function SurveyBuilder({
             disabled={submitting}
             className="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-[var(--os-brand)] text-white text-base font-medium hover:bg-[var(--os-brand-hover)] disabled:opacity-60"
           >
-            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+            {submitting ? <Dots variant="pending" /> : null}
             {mode === "edit" ? "Save changes" : "Publish survey"}
           </button>
         </DialogFooter>

@@ -8,11 +8,22 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  Workflow, Plus, Hash, ChevronRight, Activity, CheckCircle2, Pause, Play,
-  AlertTriangle, Zap, ArrowRight, Search, Bot, MessageCircle,
+  Workflow,
+  Hash,
+  ChevronRight,
+  Activity,
+  CheckCircle2,
+  Pause,
+  Play,
+  AlertTriangle,
+  Zap,
+  ArrowRight,
+  Search,
+  Bot,
+  MessageCircle,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { C } from "@/components/layout/os/catalog";
 
 type RuleStatus = "ACTIVE" | "PAUSED" | "ERROR";
 type TriggerType = "schedule" | "event" | "webhook" | "manual";
@@ -142,18 +153,12 @@ export default function AutopilotPage() {
 
   return (
     <>
-      <OsTitleBar
+      <OsPageHeader
         title="Autopilot"
-        Icon={Workflow}
-        iconGradient={GRAD.tealGreen}
-        description={`${stats.active} active rule${stats.active === 1 ? "" : "s"} · ${stats.runs} runs this week · ~${stats.savedHrs.toFixed(1)}h saved`}
         actions={
           <div className="auto__head-actions">
-            <Link href="/agents" className="auto__nav-link"><Bot /> Agents</Link>
-            <Link href="/sidekick" className="auto__nav-link"><MessageCircle /> Sidekick</Link>
-            <button type="button" className="auto__btn-primary">
-              <Plus /> New rule
-            </button>
+            <Link href="/agents" className="os-head__link"><Bot /> Agents</Link>
+            <Link href="/sidekick" className="os-head__link"><MessageCircle /> Ask AI</Link>
           </div>
         }
       />

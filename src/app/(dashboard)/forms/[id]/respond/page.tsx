@@ -8,11 +8,12 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import { useRouter } from "next/navigation";
-import { FormInput, CheckCircle2, Loader2 } from "lucide-react";
+import { FormInput, CheckCircle2 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { useConfirm } from "@/components/ui/dialog-provider";
 import { BackButton } from "@/components/ui/back-button";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type FieldType = "short_text" | "long_text" | "number" | "email" | "url" | "date" | "select" | "multi_select" | "checkbox";
 type Field = { id: string; type: FieldType; label: string; required: boolean; options?: string[]; placeholder?: string };
@@ -87,7 +88,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
     );
   }
   if (!form) {
-    return <div className="resp"><div className="resp__loading"><ValueLoader size={32} /></div></div>;
+    return <div className="resp"><SkeletonRows /></div>;
   }
   if (submitted) {
     return (
@@ -106,7 +107,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
     <div className="resp">
       <div className="resp__card">
         <div className="mb-2">
-          <BackButton fallbackHref="/forms" label="Back" />
+          <BackButton fallbackHref="/forms" label="Forms" />
         </div>
         <header className="resp__head">
           <div className="resp__icon"><FormInput /></div>
@@ -132,7 +133,7 @@ export default function FormResponder({ params }: { params: Promise<{ id: string
 
         <footer className="resp__foot">
           <button type="button" className="resp__submit" onClick={submit} disabled={submitting || form.fields.length === 0}>
-            {submitting ? <><Loader2 className="resp__spin" /> Submitting…</> : "Submit"}
+            {submitting ? <><Dots variant="pending" /> Submitting…</> : "Submit"}
           </button>
         </footer>
       </div>

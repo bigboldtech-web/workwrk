@@ -135,11 +135,11 @@ export function VoiceCapturePopover() {
   }
 
   return (
-    <div className="fixed top-12 right-4 z-[95] w-[360px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl">
+    <div className="fixed top-12 end-4 z-[95] w-[360px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl">
       <div className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 dark:border-[#2A2F38]">
         <span className={`relative flex h-2.5 w-2.5 ${recording ? "" : "opacity-40"}`}>
-          {recording ? <span className="absolute inline-flex h-full w-full rounded-full bg-[#FB5A6F] opacity-70 animate-ping" /> : null}
-          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#FB5A6F]" />
+          {recording ? <span className="absolute inline-flex h-full w-full rounded-full bg-danger-solid opacity-70 animate-ping" /> : null}
+          <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-danger-solid" />
         </span>
         <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100 flex-1">{recording ? "Listening…" : "Voice to text"}</div>
         <button type="button" onClick={() => { stop(); setOpen(false); }} className="w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400" aria-label="Close"><X className="w-4 h-4" /></button>
@@ -152,13 +152,13 @@ export function VoiceCapturePopover() {
 
         <div className="mt-3 flex items-center gap-2">
           {recording ? (
-            <button type="button" onClick={stop} className="flex-1 h-9 rounded-md bg-[#FB5A6F] text-white text-base font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90">
+            <button type="button" onClick={stop} className="flex-1 h-9 rounded-md bg-danger-solid text-white text-base font-medium inline-flex items-center justify-center gap-1.5 hover:opacity-90">
               <Square className="w-3.5 h-3.5" /> Stop
             </button>
           ) : (
             <div className="w-full flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <button type="button" onClick={() => void saveAsNote()} disabled={!text || saving} className="flex-1 h-9 rounded-md bg-[#0073EA] text-white text-base font-medium inline-flex items-center justify-center gap-1.5 hover:bg-[#0060B9] disabled:opacity-40">
+                <button type="button" onClick={() => void saveAsNote()} disabled={!text || saving} className="flex-1 h-9 rounded-md bg-brand text-white text-base font-medium inline-flex items-center justify-center gap-1.5 hover:bg-brand-hover disabled:opacity-40">
                   <StickyNote className="w-3.5 h-3.5" /> {saving ? "Saving…" : "Save as note"}
                 </button>
                 <button type="button" onClick={() => void createTask()} disabled={!text} className="flex-1 h-9 rounded-md border border-zinc-200 dark:border-[#2A2F38] text-zinc-700 dark:text-zinc-200 text-base inline-flex items-center justify-center gap-1.5 hover:bg-zinc-50 dark:hover:bg-white/10 disabled:opacity-40">

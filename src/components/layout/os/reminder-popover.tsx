@@ -5,9 +5,10 @@
 // the chosen time (see /api/reminders + the ticker/cron).
 
 import { useEffect, useState } from "react";
-import { X, AlarmClock, Loader2 } from "lucide-react";
+import { X, AlarmClock } from "lucide-react";
 import { useOsToast } from "./toast";
 import { useLayer } from "./shell-context";
+import { Dots } from "@/components/ui/dots";
 
 function pad(n: number) { return String(n).padStart(2, "0"); }
 function toLocalInput(d: Date) {
@@ -70,7 +71,7 @@ export function ReminderPopover() {
     <div className="fixed inset-0 z-[95] flex items-start justify-center pt-[12vh] bg-black/30" onClick={() => setOpen(false)}>
       <div className="w-[400px] max-w-[92vw] rounded-xl bg-white dark:bg-[#181C22] border border-zinc-200 dark:border-[#2A2F38] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 px-4 h-12 border-b border-zinc-100 dark:border-[#2A2F38]">
-          <AlarmClock className="w-4 h-4 text-[#FB5A6F]" />
+          <AlarmClock className="w-4 h-4 text-danger-solid" />
           <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100 flex-1">New reminder</div>
           <button type="button" onClick={() => setOpen(false)} className="w-7 h-7 rounded-full hover:bg-zinc-100 dark:hover:bg-white/10 flex items-center justify-center text-zinc-500 dark:text-zinc-400" aria-label="Close"><X className="w-4 h-4" /></button>
         </div>
@@ -95,14 +96,14 @@ export function ReminderPopover() {
             className="w-full h-10 px-3 rounded-lg border border-zinc-200 dark:border-[#2A2F38] bg-white dark:bg-[#14171D] text-base text-zinc-900 dark:text-zinc-100 outline-none focus:border-zinc-400 [color-scheme:light] dark:[color-scheme:dark]"
           />
           <label className="flex items-center gap-2 text-base text-zinc-700 dark:text-zinc-200 cursor-pointer select-none">
-            <input type="checkbox" checked={email} onChange={(e) => setEmail(e.target.checked)} className="accent-[#0073EA]" />
+            <input type="checkbox" checked={email} onChange={(e) => setEmail(e.target.checked)} className="accent-brand" />
             Also email me
           </label>
         </div>
         <div className="flex justify-end gap-2 px-4 h-14 items-center border-t border-zinc-100 dark:border-[#2A2F38]">
           <button type="button" onClick={() => setOpen(false)} className="px-3 h-8 rounded-md text-base text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/10">Cancel</button>
-          <button type="button" onClick={() => void create()} disabled={!title.trim() || saving} className="px-3.5 h-8 rounded-md text-base font-medium text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-40 inline-flex items-center gap-1.5">
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Set reminder
+          <button type="button" onClick={() => void create()} disabled={!title.trim() || saving} className="px-3.5 h-8 rounded-md text-base font-medium text-white bg-brand hover:bg-brand-hover disabled:opacity-40 inline-flex items-center gap-1.5">
+            {saving ? <Dots variant="pending" /> : null} Set reminder
           </button>
         </div>
       </div>

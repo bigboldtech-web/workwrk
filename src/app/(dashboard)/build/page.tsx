@@ -7,17 +7,23 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
-  Hammer, Plus, Search, Hash, ChevronRight, Edit3, CheckCircle2, Sparkles,
-  Activity, Code2,
+  Hammer,
+  Search,
+  Hash,
+  ChevronRight,
+  Edit3,
+  CheckCircle2,
+  Activity,
+  Code2,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type AppStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
 
@@ -95,17 +101,11 @@ export default function BuildPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Build"
-        Icon={Hammer}
-        iconGradient={GRAD.purpleIndigo}
-        description={rows === null ? "Loading…" : `${stats.total} app${stats.total === 1 ? "" : "s"} · ${stats.counts.PUBLISHED} published · AI-generated`}
+      <OsPageHeader
+        title="Build apps"
         actions={
           <div className="bld__head-actions">
-            <Link href="/agents" className="bld__nav-link"><Code2 /> Agents</Link>
-            <button type="button" className="bld__btn-primary" onClick={() => toast("Use the prompt panel in Sidekick to scaffold a new app")}>
-              <Sparkles /> Generate app
-            </button>
+            <Link href="/agents" className="os-head__link"><Code2 /> Agents</Link>
           </div>
         }
       />
@@ -115,7 +115,6 @@ export default function BuildPage() {
           <KpiTile accent="var(--os-brand)" Icon={Hammer}      label="Apps"      value={`${stats.total}`}            sub="generated" />
           <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2} label="Published" value={`${stats.counts.PUBLISHED}`} sub="live in catalog" />
           <KpiTile accent="var(--os-c-darkgray)" Icon={Edit3}        label="Drafts"    value={`${stats.counts.DRAFT}`}     sub="not yet live" />
-          <KpiTile accent="var(--os-c-teal)"   Icon={Sparkles}     label="Templates" value="—"                            sub="coming soon" />
         </div>
 
         <div className="bld__toolbar">
@@ -147,17 +146,14 @@ export default function BuildPage() {
         </div>
 
         {loadError ? (
-          <OsEmptyView Icon={Hammer} iconGradient={GRAD.redPink} title="Couldn't load apps" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load apps" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : rows === null ? (
-          <div className="bld__loading"><ValueLoader size={32} /></div>
+          <SkeletonRows />
         ) : stats.total === 0 ? (
           <OsEmptyView
-            Icon={Hammer}
-            iconGradient={GRAD.purpleIndigo}
+            context="list"
             title="No custom apps yet"
-            subtitle="Describe what you want — Claude scaffolds a real board with the right columns, status enum, and sample rows. Every app gets its own route."
-            chips={["Prompt", "Schema", "Preview", "Publish"]}
-            cta="Generate app"
+            hint="Describe what you want and a board is scaffolded with columns, statuses and sample rows."
           />
         ) : filtered.length === 0 ? (
           <div className="bld__no-match"><Search /> No apps match the filter.</div>

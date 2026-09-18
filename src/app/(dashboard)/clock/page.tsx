@@ -2,7 +2,11 @@
 
 /* Clock — punch in/out hero.
  *
- *  GET  /api/time-entries?mine=true&open=true   (active punch session)
+ *  GET  /api/time-entries/punch                 the active punch session
+ *  GET  /api/time-entries?mine=true&limit=8     recent sessions (the route
+ *                                               has no GET today, so the
+ *                                               panel renders its error
+ *                                               line rather than zeros)
  *  POST /api/time-entries/punch                 toggle clock in/out
  */
 
@@ -11,9 +15,9 @@ import Link from "next/link";
 import {
   Clock, Play, Square, Coffee, ArrowRight, CheckCircle2, Activity,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { GRAD } from "@/components/layout/os/catalog";
+import { ErrorState } from "@/components/ui/error-state";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 
@@ -40,6 +44,7 @@ export default function ClockPage() {
   const [now, setNow] = useState<Date>(new Date());
   const [active, setActive] = useState<Entry | null>(null);
   const [recent, setRecent] = useState<Entry[]>([]);
+  const [recentUnavailable, setRecentUnavailable] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { rowVersion } = useOsShell();
@@ -53,18 +58,23 @@ export default function ClockPage() {
   const load = useCallback(async () => {
     try {
       const [activeRes, recentRes] = await Promise.all([
-        fetch("/api/time-entries?mine=true&open=true"),
-        fetch("/api/time-entries?mine=true&limit=8"),
+        fetch("/api/time-entries/punch", { cache: "no-store" }),
+        fetch("/api/time-entries?mine=true&limit=8", { cache: "no-store" }),
       ]);
-      if (activeRes.ok) {
-        const ad = await activeRes.json();
-        const list: Entry[] = ad.data ?? (Array.isArray(ad) ? ad : []);
-        setActive(list.find((e) => !e.endTime) ?? null);
-      }
+      // A failed read is never rendered as a healthy page (spec-shell 1.7).
+      if (!activeRes.ok) throw new Error(`HTTP ${activeRes.status}`);
+      const ad = await activeRes.json();
+      const punch = (ad.data ?? ad) as { active?: { id: string; clockedInAt?: string | null } | null };
+      const a = punch?.active ?? null;
+      setActive(a && a.clockedInAt ? { id: a.id, startTime: a.clockedInAt } : null);
       if (recentRes.ok) {
         const rd = await recentRes.json();
         const list: Entry[] = rd.data ?? (Array.isArray(rd) ? rd : []);
         setRecent(list.filter((e) => e.endTime).slice(0, 8));
+        setRecentUnavailable(false);
+      } else {
+        setRecent([]);
+        setRecentUnavailable(true);
       }
       setLoadError(null);
     } catch (e) {
@@ -100,21 +110,20 @@ export default function ClockPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Clock"
-        Icon={Clock}
-        iconGradient={isClockedIn ? GRAD.greenTeal : GRAD.indigoBlue}
-        description={isClockedIn ? "Clocked in" : "Clocked out"}
+      <OsPageHeader
+        // One label per destination (principle 16): the Planner sidebar row,
+        // the breadcrumb and the tab title all say "Clock in/out".
+        title="Clock in/out"
         actions={
           <div className="clk__head-actions">
-            <Link href="/timesheets" className="clk__nav-link"><Activity /> My timesheets</Link>
+            <Link href="/timesheets" className="os-head__link"><Activity /> My timesheets</Link>
           </div>
         }
       />
 
       <div className="clk">
         {loadError ? (
-          <OsEmptyView Icon={Clock} iconGradient={GRAD.redPink} title="Couldn't load clock" subtitle={loadError} cta="Retry" />
+          <OsEmptyView variant="error" title="Couldn't load clock" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
         ) : (
           <>
             {/* Hero — big clock face */}
@@ -145,7 +154,11 @@ export default function ClockPage() {
               )}
             </section>
 
-            {/* Today summary + recent sessions */}
+            {/* Today summary + recent sessions. When the sessions read fails
+                the two panels are the error line, never "0 h logged". */}
+            {recentUnavailable ? (
+              <ErrorState what="recent sessions" onRetry={() => { void load(); }} compact />
+            ) : (
             <div className="clk__grid">
               <section className="clk__panel">
                 <header className="clk__panel-head">
@@ -189,6 +202,7 @@ export default function ClockPage() {
                 )}
               </section>
             </div>
+            )}
           </>
         )}
       </div>

@@ -4,9 +4,9 @@
 // CreateAction rows the active app declared (AppEntry.createActions) on
 // the shared MenuList/MenuItem/MorePortal primitives so no app hand-rolls
 // its own menu. Apps with exactly ONE visible action never see this —
-// click-sidebar fires the action directly. Apps with none render no "+".
+// hub-sidebar fires the action directly. Apps with none render no "+".
 //
-// Also exports the two pieces click-sidebar needs for the single-action
+// Also exports the two pieces hub-sidebar needs for the single-action
 // path: useCreateActionContext (shell helpers) and runCreateAction (the
 // onSelect > href > event resolution order).
 

@@ -1,11 +1,12 @@
 "use client";
 
-// My Wrk — ClickUp parity (Phase A, 2026-06-06).
+// My work — ClickUp parity (Phase A, 2026-06-06).
 // Greeting + draggable/resizable card grid powered by react-grid-layout.
 // Layout persists per-user in UserPreference.home.taskCardLayout. Cards:
 //   recents · agenda · personal-list · assigned-to-me · reminders ·
 //   assigned-comments · ai-standup · priorities · my-work
 
+import { SkeletonLines } from "@/components/ui/skeleton";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import Link from "next/link";
@@ -20,6 +21,7 @@ import { Responsive, WidthProvider, type Layout } from "react-grid-layout";
 import { STATUS_LOOKUP } from "@/lib/board-items-shared";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
@@ -274,15 +276,19 @@ export default function MyTasksPage() {
   return (
     <div className="flex flex-col h-full bg-[#FAFAFA]">
       {/* Top header row */}
-      <header className="flex h-10 shrink-0 items-center justify-between border-b border-zinc-200 bg-white !px-4 z-10">
+      {/* 48px title row with the page title at 22 (principle 6). It read
+          "My Wrk" at 13px, smaller than everything else on screen and a
+          fourth spelling of a destination the sidebar, the crumb and the tab
+          title all call "My work" (principle 16). */}
+      <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-200 bg-white !px-4 z-10">
         <div className="flex min-w-0 items-center gap-1.5 whitespace-nowrap text-sm font-normal leading-5 text-zinc-500">
-          <h1 className="truncate font-semibold text-zinc-900" style={{ fontSize: "13px" }}>My Wrk</h1>
+          <h1 className="truncate text-[22px] font-semibold leading-tight text-zinc-900">My work</h1>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-sm bg-zinc-900 text-white hover:bg-zinc-800 font-medium transition-colors"
+            className="inline-flex items-center gap-1.5 h-7 !px-3 rounded-md text-sm border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50 font-medium transition-colors"
           >
             Manage cards
           </button>
@@ -415,8 +421,13 @@ function AgendaCard() {
           Connect your calendar to view upcoming events and join your next call
         </p>
         <div className="w-full space-y-2 max-w-[340px]">
-          <CalendarConnect provider="Google Calendar" tone="multicolor" />
-          <CalendarConnect provider="Microsoft Outlook" tone="blue" />
+          {/* The OAuth route needs a full-page navigation, not next/link. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/api/integrations/google-calendar/connect" className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-base text-ink hover:bg-hover">
+            <span>Google Calendar</span>
+            <span className="text-xs font-medium text-brand-deep">Connect</span>
+          </a>
+          <UpcomingOnly><ComingSoonRow label="Microsoft Outlook" className="border border-line" /></UpcomingOnly>
         </div>
       </div>
     </DashCard>
@@ -717,7 +728,7 @@ function KrasKpisCard({ kras }: { kras: ApiMyKra[] | null }) {
 function MyWorkCard() {
   const [tab, setTab] = useState<"todo" | "done" | "delegated">("todo");
   return (
-    <DashCard title="My Work">
+    <DashCard title="My tasks">
       {/* ClickUp's signature To Do / Done / Delegated underline tabs. */}
       <div className="flex items-center gap-4 border-b border-zinc-100 -mx-3 px-3 mb-2">
         {([["todo", "To Do"], ["done", "Done"], ["delegated", "Delegated"]] as const).map(([key, label]) => (
@@ -811,7 +822,7 @@ function CardEyebrow() {
 }
 
 function CardLoading() {
-  return <div className="text-sm text-zinc-400 py-3 text-center">Loading…</div>;
+  return <div className="py-3"><SkeletonLines lines={2} /></div>;
 }
 
 function CardEmpty({ children }: { children: React.ReactNode }) {
@@ -826,7 +837,7 @@ const CARD_CATALOG: Array<{ key: string; label: string; description: string; ico
   { key: "okrs",              label: "OKRs / Goals",      description: "Keep track of your active OKRs and goals.", icon: Target },
   { key: "kras",              label: "KRAs & KPIs",       description: "View the KRAs and KPIs assigned to your role.", icon: Activity },
   { key: "agenda",            label: "Agenda",            description: "Visualize tasks and events on your different calendars in one place.", icon: CalendarIcon },
-  { key: "my-work",           label: "My Wrk",            description: "A list for all of your assigned tasks and reminders.", icon: CheckSquare },
+  { key: "my-work",           label: "My tasks",          description: "A list for all of your assigned tasks and reminders.", icon: CheckSquare },
   { key: "assigned-to-me",    label: "Assigned to me",    description: "Consolidate your tasks across different lists that you have as an assignee.", icon: UserCheck },
   { key: "personal-list",     label: "Personal List",     description: "Keep track of your personal tasks in a list that is only visible to you.", icon: ListIcon },
   { key: "assigned-comments", label: "Assigned Comments", description: "Resolve and view any comment that has been assigned to you.", icon: MessageSquare },
@@ -920,25 +931,3 @@ function ManageCardsModal({
   );
 }
 
-function CalendarConnect({ provider, tone }: { provider: string; tone: "multicolor" | "blue" }) {
-  const dot =
-    tone === "multicolor"
-      ? "bg-gradient-to-br from-red-400 via-yellow-400 to-green-500"
-      : "bg-blue-600";
-  return (
-    <div className="flex items-center justify-between px-3 py-2 rounded-md border border-zinc-200">
-      <span className="flex items-center gap-2 min-w-0">
-        <span className={`w-4 h-4 rounded-sm ${dot} shrink-0`} aria-hidden />
-        <span className="text-base text-zinc-800 truncate">{provider}</span>
-      </span>
-      <button
-        type="button"
-        disabled
-        title="Coming soon"
-        className="text-xs font-medium text-[#0073EA] hover:underline disabled:opacity-60"
-      >
-        Connect
-      </button>
-    </div>
-  );
-}

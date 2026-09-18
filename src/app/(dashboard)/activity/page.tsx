@@ -11,17 +11,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ValueLoader } from "@/components/brand/value-loader";
 import Link from "next/link";
 import {
   Activity, FormInput, Table as TableIcon, LayoutGrid, FileText, HardDrive,
   CheckSquare, Users, Sparkles, Target, BookOpen, ClipboardList,
   type LucideIcon,
 } from "lucide-react";
-import { OsTitleBar } from "@/components/layout/os/title-bar";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { ViewTab } from "@/components/ui/view-tabs";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { C, GRAD, PEOPLE } from "@/components/layout/os/catalog";
+import { C } from "@/components/layout/os/catalog";
 import { useOsShell } from "@/components/layout/os/shell-context";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type ApiActivity = {
   id: string;
@@ -145,39 +146,25 @@ export default function ActivityPage() {
 
   return (
     <>
-      <OsTitleBar
-        title="Activity feed"
-        Icon={Activity}
-        iconGradient={GRAD.orangePink}
-        description={rows === null ? "Loading…" : `${rows.length} event${rows.length === 1 ? "" : "s"}${todayCount > 0 ? ` · ${todayCount} today` : ""} · live-synced`}
-        people={[PEOPLE.bb, PEOPLE.mk, PEOPLE.sc]}
-        morePeople={8}
+      <OsPageHeader
+        title="Activity"
+        views={(["my", "team", "all"] as Scope[]).map((s) => (
+          <ViewTab
+            key={s}
+            label={s === "my" ? "Just me" : s === "team" ? "My team" : "Whole org"}
+            active={scope === s}
+            onClick={() => setScope(s)}
+          />
+        ))}
+        viewsTrailing={<div className="actfeed__live"><span className="actfeed__live-dot" /> Live</div>}
       />
 
-      <div className="actfeed__scope">
-        <div className="actfeed__scope-pills" role="tablist" aria-label="Activity scope">
-          {(["my", "team", "all"] as Scope[]).map((s) => (
-            <button
-              key={s}
-              type="button"
-              role="tab"
-              aria-selected={scope === s}
-              className={scope === s ? "is-active" : ""}
-              onClick={() => setScope(s)}
-            >
-              {s === "my" ? "Just me" : s === "team" ? "My team" : "Whole org"}
-            </button>
-          ))}
-        </div>
-        <div className="actfeed__live"><span className="actfeed__live-dot" /> Live</div>
-      </div>
-
       {loadError ? (
-        <OsEmptyView Icon={Activity} iconGradient={GRAD.redPink} title="Couldn't load activity" subtitle={`API error: ${loadError}.`} cta="Retry" onCta={() => void load()} />
+        <OsEmptyView variant="error" title="Couldn't load activity" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => void load() }} />
       ) : rows === null ? (
-        <div className="actfeed__loading"><ValueLoader size={32} /></div>
+        <SkeletonRows />
       ) : rows.length === 0 ? (
-        <OsEmptyView Icon={Activity} iconGradient={GRAD.orangePink} title="No activity yet" subtitle="As your team uses WorkwrK — creating tasks, posting updates, moving deals — every action shows up here in real time." chips={["Tasks", "Deals", "Tickets", "Onboarding"]} cta="Explore modules" />
+        <OsEmptyView context="list" title="No activity yet" hint="Actions across the workspace show up here as they happen." />
       ) : (
         <div className="actfeed">
           {grouped.map((bucket) => (

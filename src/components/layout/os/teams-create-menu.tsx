@@ -7,7 +7,7 @@
 
 import { useRef, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus, Briefcase, Target, Gauge, FileText, ClipboardCheck, type LucideIcon } from "lucide-react";
+import { UserPlus, Briefcase, Target, FileText, ClipboardCheck, type LucideIcon } from "lucide-react";
 import { MorePortal } from "./more-portal";
 import { MenuList, MenuItem, MenuSectionLabel } from "@/components/ui/menu";
 import { TAUPE } from "@/components/ui/accent";
@@ -19,14 +19,15 @@ const SECTIONS: { label: string; rows: Row[] }[] = [
     label: "People",
     rows: [
       { label: "Invite person", description: "Add someone + set access & manager", icon: UserPlus, href: "/settings/members?invite=1", iconColor: "#0073EA" },
-      { label: "New role", description: "Define a role (owns, KRAs, KPIs, SOPs)", icon: Briefcase, href: "/people/roles?new=1", iconColor: "#F59E0B" },
+      { label: "New job title", description: "Define a job title (owns, KRAs, KPIs, SOPs)", icon: Briefcase, href: "/people/roles?new=1", iconColor: "#F59E0B" },
     ],
   },
   {
     label: "Alignment",
     rows: [
-      { label: "New KRA", description: "A key result area", icon: Target, href: "/kra-kpi?new=1", iconColor: TAUPE.soft },
-      { label: "New KPI", description: "A metric under a KRA", icon: Gauge, href: "/kra-kpi", iconColor: "#16a34a" },
+      // A KPI is created inside its KRA on /kra-kpi (the sidebar row); a "+"
+      // row that only opened the list was a link dressed as a create.
+      { label: "New KRA", description: "A key result area (KPIs live inside it)", icon: Target, href: "/kra-kpi?new=1", iconColor: TAUPE.soft },
       { label: "New SOP", description: "A procedure attached to a role", icon: FileText, href: "/sops/new", iconColor: "#3b82f6" },
     ],
   },

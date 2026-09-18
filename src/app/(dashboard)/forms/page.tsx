@@ -1,16 +1,23 @@
 "use client";
 
-/* Forms — list of forms in the org.
+/* Forms: the org's forms (Tables hub; the directory layout renders ModuleOff
+ * when the Tables module is off).
  *
- * Card grid with name, public/private chip, submission count, last
- * edited. Click a card to edit; secondary CTA to view submissions.
- * Quick-add via prompt creates a blank form, routes to the builder.
+ * The one page pattern (design-system 4.4): OsPageHeader with the one blue
+ * "New form" primary and "AI generate" as a ghost action, SkeletonRows while
+ * loading, ErrorState with Try again on a failed read, the quiet OsEmptyView
+ * when there are none, and the card grid otherwise. Click a card to open the
+ * builder. ?new=1 (the hub "+") opens the name prompt once on arrival.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { FormInput, Plus, Globe, Lock, Inbox, ChevronRight, Sparkles, Loader2 } from "lucide-react";
+import { Plus, Globe, Lock, Inbox, ChevronRight, Sparkles } from "lucide-react";
+import { OsPageHeader, HeaderAction } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { ErrorState } from "@/components/ui/error-state";
+import { SkeletonRows } from "@/components/ui/skeleton";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
 import { usePrompt } from "@/components/ui/dialog-provider";
@@ -25,9 +32,9 @@ type ApiForm = {
 export default function FormsPage() {
   const router = useRouter();
   const search = useSearchParams();
-  // Armed latch for ?new=1 — disarms on fire, re-arms when the param
-  // leaves the URL (via router.replace, which a plain history.replaceState
-  // cannot do since Next's searchParams never sees it).
+  // Armed latch for ?new=1: disarms on fire, re-arms when the param leaves
+  // the URL (via router.replace, which a plain history.replaceState cannot
+  // do since Next's searchParams never sees it).
   const newArmed = useRef(true);
   const [forms, setForms] = useState<ApiForm[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -41,6 +48,7 @@ export default function FormsPage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
       setForms(d.data ?? (Array.isArray(d) ? d : []));
+      setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "load failed");
     }
@@ -64,9 +72,9 @@ export default function FormsPage() {
     } catch { toast("Couldn't create form"); }
   }
 
-  // The Forms app's sidebar "+" routes here with ?new=1 → open quick-add and
-  // strip the param via the router, re-arming the latch — so the "+" works
-  // every time, including after the user cancels the name prompt.
+  // The hub "+" routes here with ?new=1: open quick-add and strip the param
+  // via the router, re-arming the latch, so the "+" works every time,
+  // including after the person cancels the name prompt.
   useEffect(() => {
     if (search?.get("new") !== "1") { newArmed.current = true; return; }
     if (!newArmed.current) return;
@@ -78,6 +86,7 @@ export default function FormsPage() {
 
   const [generating, setGenerating] = useState(false);
   async function aiGenerate() {
+    if (generating) return;
     const prompt = (await promptDialog({ title: "Describe the form you want (e.g. 'Customer support ticket', 'Event RSVP', 'Vendor onboarding'):" }))?.trim();
     if (!prompt) return;
     setGenerating(true);
@@ -89,7 +98,7 @@ export default function FormsPage() {
       if (!gen.ok) { const err = await gen.json().catch(() => ({ error: `HTTP ${gen.status}` })); toast(`AI failed: ${err.error}`); return; }
       const g = await gen.json();
       const spec = g.data ?? g;
-      // Assign IDs to each field (API expects unique IDs on each field).
+      // Assign IDs to each field (the API expects unique IDs on each field).
       const fields = (spec.fields ?? []).map((f: Record<string, unknown>) => ({ ...f, id: Math.random().toString(36).slice(2, 10) }));
       const create = await fetch("/api/forms", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -105,61 +114,49 @@ export default function FormsPage() {
   }
 
   const total = forms?.length ?? 0;
-  const publicCount = (forms ?? []).filter((f) => f.isPublic).length;
-  const totalSubs = (forms ?? []).reduce((acc, f) => acc + (f.submissionCount ?? 0), 0);
 
   return (
-    <div className="frmlist">
-      <header className="frmlist__head">
-        <div className="frmlist__head-l">
-          <div className="frmlist__icon"><FormInput /></div>
-          <div>
-            <h1 className="frmlist__title">Forms</h1>
-            <div className="frmlist__sub">
-              {forms === null ? "Loading…" : `${total} form${total === 1 ? "" : "s"} · ${publicCount} public · ${totalSubs} submission${totalSubs === 1 ? "" : "s"}`}
-            </div>
-          </div>
-        </div>
-        <div className="frmlist__actions">
-          <button type="button" className="frmlist__btn frmlist__btn--ai" onClick={aiGenerate} disabled={generating}>
-            {generating ? <><Loader2 className="frmlist__spin" /> Generating…</> : <><Sparkles /> AI generate</>}
-          </button>
-          <button type="button" className="frmlist__new" onClick={quickAdd}><Plus /> New form</button>
-        </div>
-      </header>
+    <>
+      <OsPageHeader
+        title="Forms"
+        actions={
+          <HeaderAction
+            icon={Sparkles}
+            label={generating ? "Generating…" : "AI generate"}
+            disabled={generating}
+            onClick={() => { void aiGenerate(); }}
+          />
+        }
+        primary={{ label: "New form", icon: Plus, onClick: () => { void quickAdd(); } }}
+      />
 
-      {loadError ? (
-        <div className="frmlist__error">{loadError}</div>
-      ) : forms === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)", fontSize: 13 }}>Loading…</div>
-      ) : total === 0 ? (
-        <div className="frmlist__empty">
-          <FormInput />
-          <div>
-            <h3>No forms yet</h3>
-            <p>Build forms to collect any kind of data — feedback, requests, signups, inspections. Embed a form into any doc with the Form block.</p>
-            <button type="button" className="frmlist__new" onClick={quickAdd} style={{ marginTop: 12 }}><Plus /> Create your first form</button>
+      <div className="px-6 py-5">
+        {loadError ? (
+          <ErrorState what="forms" onRetry={() => { setLoadError(null); void load(); }} />
+        ) : forms === null ? (
+          <SkeletonRows />
+        ) : total === 0 ? (
+          <OsEmptyView context="list" title="No forms yet" />
+        ) : (
+          <div className="frmlist__grid">
+            {forms.map((f) => (
+              <Link key={f.id} href={`/forms/${f.id}`} className="frmcard">
+                <header>
+                  <h3>{f.name}</h3>
+                  <span className={`frmcard__chip ${f.isPublic ? "is-public" : "is-private"}`}>
+                    {f.isPublic ? <><Globe /> Public</> : <><Lock /> Org</>}
+                  </span>
+                </header>
+                {f.description && <p className="frmcard__desc">{f.description.length > 80 ? f.description.slice(0, 80) + "…" : f.description}</p>}
+                <footer>
+                  <span className="frmcard__subs"><Inbox /> {f.submissionCount} submission{f.submissionCount === 1 ? "" : "s"}</span>
+                  <span className="frmcard__open">Edit <ChevronRight /></span>
+                </footer>
+              </Link>
+            ))}
           </div>
-        </div>
-      ) : (
-        <div className="frmlist__grid">
-          {forms.map((f) => (
-            <Link key={f.id} href={`/forms/${f.id}`} className="frmcard">
-              <header>
-                <h3>{f.name}</h3>
-                <span className={`frmcard__chip ${f.isPublic ? "is-public" : "is-private"}`}>
-                  {f.isPublic ? <><Globe /> Public</> : <><Lock /> Org</>}
-                </span>
-              </header>
-              {f.description && <p className="frmcard__desc">{f.description.length > 80 ? f.description.slice(0, 80) + "…" : f.description}</p>}
-              <footer>
-                <span className="frmcard__subs"><Inbox /> {f.submissionCount} submission{f.submissionCount === 1 ? "" : "s"}</span>
-                <span className="frmcard__open">Edit <ChevronRight /></span>
-              </footer>
-            </Link>
-          ))}
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }

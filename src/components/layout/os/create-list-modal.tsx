@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, ChevronDown, Check, Loader2, Boxes } from "lucide-react";
+import { X, ChevronDown, Check, Boxes } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { useOsShell } from "./shell-context";
 import { useRouter } from "next/navigation";
+import { Dots } from "@/components/ui/dots";
 
 type SpaceRow = { id: string; slug?: string; name: string; icon: string | null; color: string | null };
 
@@ -160,7 +161,7 @@ export function CreateListModal() {
                 <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" />
               </button>
               {spaceMenuOpen ? (
-                <div className="absolute z-10 mt-1 left-0 right-0 max-h-[240px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1">
+                <div className="absolute z-10 mt-1 start-0 end-0 max-h-[240px] overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg py-1">
                   {spaces.length === 0 ? (
                     <div className="px-3 py-2 text-sm text-zinc-400">No Spaces yet.</div>
                   ) : (
@@ -169,7 +170,7 @@ export function CreateListModal() {
                         key={s.id}
                         type="button"
                         onClick={() => { setSpaceId(s.id); setSpaceMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-50"
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-start hover:bg-zinc-50"
                       >
                         <SpaceGlyph space={s} />
                         <span className="flex-1 text-base text-zinc-800 truncate">{s.name}</span>
@@ -198,7 +199,7 @@ export function CreateListModal() {
             Use Templates
           </button>
           <button type="button" onClick={() => void handleCreate()} disabled={!canCreate} className="px-4 h-8 text-base font-medium rounded-md inline-flex items-center gap-1.5 text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50">
-            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null} Create
+            {busy ? <Dots variant="pending" /> : null} Create
           </button>
         </div>
       </div>
