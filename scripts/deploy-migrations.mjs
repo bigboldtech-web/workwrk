@@ -14,8 +14,7 @@
 //
 // Run with: node scripts/deploy-migrations.mjs
 import { Client } from "pg";
-import { readdirSync, readFileSync } from "fs";
-import { createHash } from "crypto";
+import { readdirSync, existsSync } from "fs";
 import { spawnSync } from "child_process";
 import "dotenv/config";
 
@@ -50,152 +49,52 @@ const SQL_MANIFEST = [
   "2026-09-19-template-key.sql",
 ];
 
-const LEDGER = `
-  CREATE TABLE IF NOT EXISTS "_sql_migrations" (
-    filename   TEXT PRIMARY KEY,
-    checksum   TEXT NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  )`;
-
 /**
- * Apply each manifest file exactly once, recording it in a ledger table.
+ * Apply each manifest file with `prisma db execute`.
  *
- * The ledger (rather than relying on IF NOT EXISTS everywhere) means a
- * file that is NOT idempotent still applies safely, and a file whose
- * content changed after it was applied is reported rather than re-run:
- * re-running edited DDL is how a "safe" migration quietly becomes a
- * destructive one. Each file runs in its own transaction, so a failure
- * leaves no half-applied file behind.
+ * WHY PRISMA AND NOT A RAW pg CLIENT. The first version of this opened its own
+ * `new Client({ connectionString: DIRECT_URL || DATABASE_URL })`, and the
+ * deploy died three minutes in, before the build, with no log I could read.
+ * That client is not the connection path the rest of the deploy has been
+ * proving for months: `prisma migrate deploy` and `prisma generate` resolve
+ * their datasource through prisma.config.ts, which may not be the same URL,
+ * SSL mode or socket. Using the proven path removes a whole class of failure
+ * rather than guessing at which part of it bit.
+ *
+ * EVERY FILE IN THE MANIFEST MUST BE IDEMPOTENT, because this runs on every
+ * deploy and there is no ledger any more. The ledger existed to make a
+ * non-idempotent file safe, but the manifest already refuses those (see the
+ * note on operating-core above), so it was protecting against a case that is
+ * not allowed to exist, at the cost of a second connection that broke the
+ * deploy. Guard every statement with IF NOT EXISTS, and guard any backfill on
+ * its own effect.
+ *
+ * A failure exits non zero, which aborts the build before pm2 reloads, so
+ * production stays on the previous release rather than meeting a database
+ * that is missing what the new code needs.
  */
-async function applyHandWrittenSql() {
-  // Deliberately NO statement_timeout here, unlike the migration-state client
-  // below which uses 15s. One of these files backfills a column across every
-  // row of Notification, and on a real org that single UPDATE can outlast any
-  // short timeout. A timeout would abort the transaction, roll the file back,
-  // and fail the deploy for no reason other than the table being big.
-  const client = new Client({ connectionString: url });
-  try {
-    await client.connect();
-  } catch (err) {
-    console.error(`deploy-migrations: cannot reach the database to apply prisma/sql (${err.code || err.message})`);
-    try { await client.end(); } catch {}
-    return false;
-  }
-  try {
-    await client.query(LEDGER);
-    const done = new Map(
-      (await client.query(`SELECT filename, checksum FROM "_sql_migrations"`)).rows.map((r) => [r.filename, r.checksum]),
-    );
-    for (const name of SQL_MANIFEST) {
-      const path = `prisma/sql/${name}`;
-      let sql;
-      try {
-        sql = readFileSync(path, "utf8");
-      } catch {
-        console.error(`deploy-migrations: ${path} is in the manifest but missing on disk`);
-        return false;
-      }
-      const sum = createHash("sha256").update(sql).digest("hex");
-      const seen = done.get(name);
-      if (seen === sum) {
-        console.log(`deploy-migrations: sql ${name} already applied`);
-        continue;
-      }
-      if (seen && seen !== sum) {
-        console.log(`deploy-migrations: WARNING ${name} changed after it was applied; NOT re-running it.`);
-        console.log("  If the change must reach this database, ship it as a NEW file in prisma/sql.");
-        continue;
-      }
-      console.log(`deploy-migrations: applying sql ${name}`);
-      try {
-        await client.query("BEGIN");
-        await client.query(sql);
-        await client.query(`INSERT INTO "_sql_migrations" (filename, checksum) VALUES ($1, $2)`, [name, sum]);
-        await client.query("COMMIT");
-        console.log(`deploy-migrations: applied ${name}`);
-      } catch (err) {
-        try { await client.query("ROLLBACK"); } catch {}
-        console.error(`deploy-migrations: ${name} FAILED, rolled back: ${err.message}`);
-        return false;
-      }
+function applyHandWrittenSql() {
+  for (const name of SQL_MANIFEST) {
+    const file = `prisma/sql/${name}`;
+    if (!existsSync(file)) {
+      console.error(`deploy-migrations: ${file} is in the manifest but missing on disk`);
+      return false;
     }
-    return true;
-  } finally {
-    try { await client.end(); } catch {}
-  }
-}
-
-const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
-
-if (!url) {
-  console.error("deploy-migrations: no DATABASE_URL / DIRECT_URL set");
-  process.exit(1);
-}
-
-function runPrismaDeploy() {
-  const r = spawnSync("npx", ["prisma", "migrate", "deploy"], { stdio: "inherit" });
-  return r.status === 0;
-}
-
-// Mirrors scripts/unstick-migrate-lock.mjs. Returns the number of
-// holder sessions we terminated. Safe to call when the lock is free
-// (returns 0). Best-effort: if the cleanup query itself errors we log
-// and let the retry try anyway — we don't want a transient pg blip
-// here to fail the whole build.
-async function clearStuckLockHolders() {
-  const client = new Client({ connectionString: url, statement_timeout: 15_000 });
-  try {
-    await client.connect();
-    const holders = await client.query(
-      `SELECT a.pid, a.state, a.application_name, a.query_start
-       FROM pg_locks l
-       JOIN pg_stat_activity a ON a.pid = l.pid
-       WHERE l.locktype = 'advisory'
-         AND l.objid = $1
-         AND l.pid <> pg_backend_pid()`,
-      [PRISMA_LOCK_ID],
-    );
-    if (holders.rows.length === 0) return 0;
-    console.log(`deploy-migrations: clearing ${holders.rows.length} orphaned migration-lock holder(s):`);
-    for (const row of holders.rows) {
-      console.log(`  pid=${row.pid} state=${row.state} app=${row.application_name} since=${row.query_start}`);
+    console.log(`deploy-migrations: applying sql ${name}`);
+    const r = spawnSync("npx", ["prisma", "db", "execute", "--file", file], { stdio: "inherit" });
+    if (r.status !== 0) {
+      console.error(`deploy-migrations: ${name} FAILED (exit ${r.status}). Aborting before the build.`);
+      return false;
     }
-    const killed = await client.query(
-      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-       WHERE pid IN (SELECT l.pid FROM pg_locks l
-                     WHERE l.locktype = 'advisory'
-                       AND l.objid = $1
-                       AND l.pid <> pg_backend_pid())`,
-      [PRISMA_LOCK_ID],
-    );
-    return killed.rowCount ?? 0;
-  } catch (err) {
-    console.log(`deploy-migrations: clear-holders failed (${err.code || err.message}); continuing`);
-    return 0;
-  } finally {
-    try { await client.end(); } catch {}
+    console.log(`deploy-migrations: applied ${name}`);
   }
-}
-
-async function runPrismaDeployWithRetry(attempts = 3, delayMs = 15_000) {
-  for (let i = 1; i <= attempts; i++) {
-    console.log(`deploy-migrations: running prisma migrate deploy (attempt ${i}/${attempts})`);
-    if (runPrismaDeploy()) return true;
-    if (i < attempts) {
-      // Clear stuck holders before sleeping so a release has time to
-      // propagate before we try again.
-      await clearStuckLockHolders();
-      console.log(`deploy-migrations: retrying in ${delayMs / 1000}s...`);
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
-  }
-  return false;
+  return true;
 }
 
 // Hand-written SQL first: the new release's code depends on these objects,
 // and `next build` runs after this script. Abort the whole build if any of
 // them fails rather than reloading onto a release the database cannot serve.
-if (!(await applyHandWrittenSql())) {
+if (!applyHandWrittenSql()) {
   console.error("deploy-migrations: aborting the build; production stays on the previous release");
   process.exit(1);
 }
