@@ -113,10 +113,21 @@ jobs:
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
             echo "==> Restoring ownership to www"
-            chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
+            chown -R www:www "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}" > /tmp/wd-chown.log 2>&1 || fail "chown" /tmp/wd-chown.log
 
             echo "==> Reloading PM2 process"
-            pm2 reload workwrk --update-env
+            pm2 reload workwrk --update-env > /tmp/wd-pm2.log 2>&1 || fail "pm2 reload" /tmp/wd-pm2.log
+
+            # If the build was killed by the kernel rather than exiting, the
+            # `fail` handler above never runs and the whole session can die
+            # with it, which is what "exit code 1 and no annotations" looked
+            # like. Leave a breadcrumb the next run can read either way.
+            echo "::notice::post-build free: $(free -m 2>/dev/null | sed -n 2p | tr -s ' ' || echo n/a)"
+            if dmesg 2>/dev/null | tail -40 | grep -qiE "out of memory|oom-killer|killed process"; then
+              echo "::error::the kernel OOM killer fired during this deploy; see dmesg on the box"
+              dmesg 2>/dev/null | grep -iE "out of memory|oom-killer|killed process" | tail -5 \
+                | while IFS= read -r l; do echo "::error::| $l"; done
+            fi
 
             echo "==> Deploy complete"
         env:

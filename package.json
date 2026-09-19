@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "prisma generate",
     "dev": "next dev",
-    "build": "node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=4096 next build",
+    "build": "node scripts/deploy-migrations.mjs && prisma generate && NODE_OPTIONS=--max-old-space-size=3072 next build",
     "db:unstick": "node scripts/unstick-migrate-lock.mjs",
     "db:fix-task-calendar": "node scripts/apply-task-calendar-migration.mjs",
     "db:audit-migrations": "node scripts/audit-baselined-migrations.mjs",
