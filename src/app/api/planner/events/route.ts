@@ -38,48 +38,52 @@ export async function GET(req: Request) {
 
   const events: PlannerEvent[] = [];
 
-  // ── Scheduled Tasks (personal events + Google-synced) ───────────
-  const tasks = await prisma.task.findMany({
-    where: {
-      organizationId: u.organizationId,
-      assigneeId: u.id,
-      OR: [
-        { date: { gte: from, lte: to } },
-        { startAt: { gte: from, lte: to } },
-        { AND: [{ startAt: { lte: to } }, { OR: [{ endAt: null }, { endAt: { gte: from } }] }] },
-      ],
-    },
-    select: { id: true, title: true, date: true, startAt: true, endAt: true, allDay: true, status: true, externalSource: true },
-    take: 500,
-  });
-  for (const t of tasks) {
-    const start = t.startAt ?? t.date;
-    if (!start) continue;
-    const end = t.endAt ?? new Date(start.getTime() + (t.allDay ? 0 : 60 * 60 * 1000));
-    events.push({
-      id: `task:${t.id}`, source: "task", external: t.externalSource === "GCAL",
-      title: t.title, start: start.toISOString(), end: end.toISOString(),
-      allDay: t.allDay, status: t.status, url: null,
-    });
-  }
-
-  // ── Work Items with a date ──────────────────────────────────────
+  // ── Tasks with a date ───────────────────────────────────────────
+  //
+  // Phase 2 W4. This handler used to run TWO queries side by side, one over
+  // the legacy `Task` table and one over `Item`, and prefix their ids to keep
+  // them apart. That was the clearest evidence in the codebase that there were
+  // two task models: a task created in the planner went to one table and a
+  // task created on a board went to the other, and neither surface could see
+  // the other's rows. The legacy rows are Items now
+  // (scripts/migrate-legacy-tasks.ts), so there is one query.
+  //
+  // `source: "task"` is kept as the event kind, because that is what these
+  // events ARE to the planner and to every client reading this payload; only
+  // the table behind it changed.
+  //
+  // Two fixes ride along, both of which were bugs rather than model details:
+  //   - it matched `ownerId` alone, so a task assigned to you by somebody else
+  //     never appeared on your own planner. It now matches the assignee set.
+  //   - legacy events carried `url: null` and so were unclickable. Every row
+  //     has a task URL now.
   const items = await prisma.item.findMany({
     where: {
-      organizationId: u.organizationId, ownerId: u.id, archivedAt: null,
-      OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }],
+      organizationId: u.organizationId,
+      archivedAt: null,
+      OR: [{ ownerId: u.id }, { assigneeIds: { has: u.id } }],
+      AND: [{ OR: [{ dueAt: { gte: from, lte: to } }, { startAt: { gte: from, lte: to } }] }],
     },
-    select: { id: true, title: true, status: true, startAt: true, dueAt: true, boardId: true, board: { select: { slug: true } } },
+    select: { id: true, title: true, status: true, startAt: true, dueAt: true, metadata: true },
     take: 500,
   });
   for (const it of items) {
     const start = it.startAt ?? it.dueAt!;
     const end = it.dueAt && it.startAt ? it.dueAt : new Date(start.getTime() + 60 * 60 * 1000);
+    // A Google-synced legacy task keeps its provenance under the remainder the
+    // migration preserved, so the "external" pill on the planner still tells
+    // the truth about rows that came from a calendar.
+    const legacy = (it.metadata as { legacyTask?: { externalSource?: string } } | null)?.legacyTask;
     events.push({
-      id: `item:${it.id}`, source: "item", external: false,
-      title: it.title, start: start.toISOString(), end: end.toISOString(),
-      allDay: false, status: it.status,
-      url: `/boards/${it.board?.slug ?? it.boardId}?item=${it.id}`,
+      id: `item:${it.id}`,
+      source: "task",
+      external: legacy?.externalSource === "GCAL",
+      title: it.title,
+      start: start.toISOString(),
+      end: end.toISOString(),
+      allDay: false,
+      status: it.status,
+      url: `/item/${it.id}`,
     });
   }
 

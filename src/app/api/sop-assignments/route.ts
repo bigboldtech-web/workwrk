@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
   const notifications = resolvedUserIds.map((uid: string) => ({
     title: "SOP Assigned",
     message: `You have been assigned "${sop.title}". ${dueDate ? `Due by ${new Date(dueDate).toLocaleDateString()}.` : ""}`,
-    type: "SOP",
+    type: "sop",
     link: `/sops/my-sops`,
     userId: uid,
   }));

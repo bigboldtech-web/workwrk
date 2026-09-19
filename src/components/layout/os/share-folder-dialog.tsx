@@ -5,9 +5,17 @@
 // folder (and its subtree of boards/docs) and nothing else; the Space shows as
 // a bare container around it.
 //
-// Deliberately leaner than ShareSpaceDialog: no visibility tri-state and no
-// department/office/email bulk pickers — a folder share is a targeted "share
-// with these people" action. All mutations hit /api/folders/[id]/members.
+// Leaner than ShareSpaceDialog: no department/office/email bulk pickers, a
+// folder share is a targeted "share with these people" action. Member
+// mutations hit /api/folders/[id]/members.
+//
+// THE RESTRICTED SWITCH (access-model Broken #10). Folder visibility used to be
+// write-once: `POST /api/folders` set it at creation, this dialog had no
+// control, the "…" menu had no row, and `PATCH /api/folders/[id]` did not even
+// accept the field. So a Folder ticked "Make private" in the create dialog was
+// private forever, and the only way back was to make a new folder and move
+// everything. The switch is here because this is where a person looks when they
+// want to change who can see something.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -43,6 +51,10 @@ interface Props {
   onOpenChange: (v: boolean) => void;
   folderId: string | null;
   folderName: string;
+  /** PRIVATE renders as "Restricted"; WORKSPACE as "Inherits from the Space". */
+  initialVisibility?: "PRIVATE" | "WORKSPACE" | "ORG";
+  /** The Space this Folder inherits from, named in the inherit row. */
+  parentSpaceName?: string | null;
   onChanged?: () => void;
 }
 
@@ -67,9 +79,14 @@ function Avatar({ user }: { user: UserOption }) {
   );
 }
 
-export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, onChanged }: Props) {
+export function ShareFolderDialog({
+  open, onOpenChange, folderId, folderName,
+  initialVisibility = "WORKSPACE", parentSpaceName, onChanged,
+}: Props) {
   const { toast } = useOsToast();
   const confirm = useConfirm();
+  const [visibility, setVisibility] = useState<"PRIVATE" | "WORKSPACE" | "ORG">(initialVisibility);
+  const [busyVis, setBusyVis] = useState(false);
   const [members, setMembers] = useState<Member[] | null>(null);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [query, setQuery] = useState("");
@@ -79,6 +96,12 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
   const [busyRoleId, setBusyRoleId] = useState<string | null>(null);
   const [busyRemoveId, setBusyRemoveId] = useState<string | null>(null);
   const [busyAddId, setBusyAddId] = useState<string | null>(null);
+
+  // Re-open with the folder's CURRENT visibility, not the one this component
+  // was first mounted with: the menu keeps the dialog mounted across opens.
+  useEffect(() => {
+    if (open) setVisibility(initialVisibility);
+  }, [open, initialVisibility]);
 
   const reset = useCallback(() => {
     setMembers(null);
@@ -210,8 +233,58 @@ export function ShareFolderDialog({ open, onOpenChange, folderId, folderName, on
             <FolderTree className="h-4 w-4 text-zinc-500" /> Share {folderName}
           </DialogTitle>
           <DialogDescription className="mt-1">
-            People you add reach this folder and its contents only — not the rest of the Space.
+            People you add reach this folder and its contents only, not the rest of the Space.
           </DialogDescription>
+        </div>
+
+        {/* Restricted, both directions (access-model Broken #10). */}
+        <div className="px-6 pb-4">
+          <div className="rounded-lg border border-zinc-200 p-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+                checked={visibility === "PRIVATE"}
+                disabled={busyVis}
+                onChange={async (e) => {
+                  const next = e.target.checked ? "PRIVATE" : "WORKSPACE";
+                  const prev = visibility;
+                  setVisibility(next);
+                  setBusyVis(true);
+                  try {
+                    const res = await fetch(`/api/folders/${folderId}`, {
+                      method: "PATCH",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ visibility: next }),
+                    });
+                    if (!res.ok) {
+                      const d = await res.json().catch(() => ({}));
+                      toast(d?.error ?? "Couldn't change who can see this folder");
+                      setVisibility(prev);
+                      return;
+                    }
+                    onChanged?.();
+                  } catch {
+                    toast("Couldn't change who can see this folder");
+                    setVisibility(prev);
+                  } finally {
+                    setBusyVis(false);
+                  }
+                }}
+              />
+              <span className="min-w-0">
+                <span className="block text-base font-medium text-zinc-900">Restricted</span>
+                <span className="block text-sm text-zinc-500">
+                  {visibility === "PRIVATE"
+                    ? "Only the people listed below and org admins can open this folder."
+                    : parentSpaceName
+                      ? `Inherits from the Space ${parentSpaceName}. Turn this on to limit it to the people below.`
+                      : "Inherits from the Space. Turn this on to limit it to the people below."}
+                </span>
+              </span>
+              {busyVis ? <Dots variant="pending" /> : null}
+            </label>
+          </div>
         </div>
 
         {/* Add people */}

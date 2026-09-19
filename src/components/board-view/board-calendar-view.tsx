@@ -116,6 +116,13 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     [buckets],
   );
 
+  // The List's own first Active status, falling back to its first status of
+  // any group, then to the canonical default. Never a literal.
+  const firstActiveStatus = useMemo(() => {
+    const active = statuses.find((s) => s.group === "ACTIVE");
+    return active?.value ?? statuses[0]?.value ?? "TO_DO";
+  }, [statuses]);
+
   const addOnDay = useCallback(async (key: string) => {
     if (!canEdit || busyDay) return;
     setBusyDay(key);
@@ -124,7 +131,11 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "New item", status: "TO_DO", dueAt: localMidnightIso(key) }),
+        // audit spaces-boards Medium #25: this hardcoded "TO_DO", a status a
+        // List with its own set does not have, so the day "+" created a task
+        // whose status did not exist on its own List and rendered as a grey
+        // orphan. The List's first ACTIVE status is what "new here" means.
+        body: JSON.stringify({ title: "New item", status: firstActiveStatus, dueAt: localMidnightIso(key) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -138,7 +149,7 @@ export function BoardCalendarView({ boardId, viewId, viewConfig, initialItems, i
     } finally {
       setBusyDay(null);
     }
-  }, [boardId, canEdit, busyDay, onItemCreated, onOpenItem]);
+  }, [boardId, canEdit, busyDay, firstActiveStatus, onItemCreated, onOpenItem]);
 
   // Drop handler — PATCH dueAt to the target day, then sync the parent
   // canvas with the server's row (calendar re-buckets from props).

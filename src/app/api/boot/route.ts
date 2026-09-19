@@ -20,6 +20,7 @@ import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { getEffectivePreferences, type EffectivePreferences } from "@/lib/preferences";
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
 import { APP_ACCESS } from "@/lib/app-access";
@@ -85,10 +86,11 @@ const SPLASH_VALUES: ReadonlySet<string> = new Set(["every-open", "first-open-da
 async function counts(userId: string): Promise<BootCounts> {
   const now = new Date();
   const [inboxUnread, remindersDue, talkRows] = await Promise.all([
-    // Same filter as /api/inbox/count so the bell and this never disagree.
-    prisma.notification.count({
-      where: { userId, read: false, OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }] },
-    }),
+    // The SAME clause as /api/inbox/count and as the Inbox's Primary + Other
+    // tabs, from src/lib/inbox-query.ts. Three files used to run this query
+    // by hand, which is how the sidebar badge and the Inbox tabs came to
+    // disagree the moment somebody had more than fifty unread rows.
+    withClearedAtFallback(() => prisma.notification.count({ where: unreadWhere(userId, now) })),
     prisma.reminder.count({ where: { userId, status: "FIRED" } }),
     // Same query as /api/conversations, collapsed to "conversations with unread".
     prisma.$queryRaw<{ n: bigint }[]>`
@@ -123,7 +125,7 @@ async function activeTimer(userId: string, orgId: string): Promise<ActiveTimer |
     });
     if (item) {
       title = item.title;
-      url = `/boards/${item.board?.slug ?? item.boardId}?item=${item.id}`;
+      url = `/item/${item.id}`;
     }
   }
   return {

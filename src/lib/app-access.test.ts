@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_ACCESS } from "./app-access";
 import { visibleRailApps } from "./rail-apps";
+import { WORK_HOME_HREF } from "./nav/route-hub";
 
 // rail-apps.ts imports the client catalog for its APPS default; that module's
 // alias graph does not load in vitest (see rail-apps.test.ts). The resolver
@@ -31,7 +32,17 @@ function catalogFromSource() {
   return chunks.map((chunk) => {
     const key = chunk.match(/^\{\s*key:\s*"([^"]+)"/)![1];
     const label = chunk.match(/label:\s*"([^"]*)"/)![1];
-    const defaultHref = chunk.match(/defaultHref:\s*"([^"]*)"/)![1];
+    // `defaultHref` is a literal on every entry but Work, which reads the one
+    // WORK_HOME_HREF constant so the Work landing flips in a single place
+    // (Phase 2 W0). Resolve the identifier against the real export, so this
+    // test still compares the catalog against the mirror rather than against
+    // a string that is now spelled two ways.
+    const literal = chunk.match(/defaultHref:\s*"([^"]*)"/)?.[1];
+    const ident = chunk.match(/defaultHref:\s*([A-Z_][A-Z0-9_]*)\s*,/)?.[1];
+    if (literal === undefined && ident !== "WORK_HOME_HREF") {
+      throw new Error(`apps-catalog entry "${key}" has a defaultHref this test cannot read`);
+    }
+    const defaultHref = literal ?? WORK_HOME_HREF;
     // The entry's own requiredAccess: the first one that appears before any
     // createActions block (create actions carry their own tier).
     const head = chunk.split("createActions")[0];

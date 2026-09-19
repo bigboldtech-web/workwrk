@@ -7,11 +7,12 @@ import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createSpace, listSpacesForUser } from "@/lib/space";
 import { createBoard } from "@/lib/board";
+import { SPACE_CREATE_LEVELS } from "@/lib/template-center";
 
-const MANAGER_LEVELS = new Set([
-  "SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR",
-  "MANAGER", "TEAM_LEAD",
-]);
+// One definition, read from src/lib/template-center.ts, because applying a
+// Space TEMPLATE creates a Space too and has to answer with the same floor.
+// Two private copies is how the two doors end up disagreeing.
+const MANAGER_LEVELS = SPACE_CREATE_LEVELS;
 
 async function ctx() {
   const session = await getServerSession(authOptions);

@@ -45,21 +45,48 @@ function Crumbs({ items }: { items: BreadcrumbItem[] }) {
           const last = i === collapsed.length - 1;
           const hidden = c.hidden;
           return (
-            <li key={`${c.label}-${i}`} className={cn("flex min-w-0 items-center gap-1", i < collapsed.length - 2 && "max-lg:hidden")}>
+            // THE HUB CRUMB NEVER TRUNCATES. Every crumb used to be
+            // `min-w-0` with the same 160 cap, so flexbox shrank them all
+            // equally and a four-deep trail rendered the app's own first
+            // crumb as "W..." next to "Design ...", "Dashboard R..." and
+            // "Ship the Q4 prici...". Principle 16 asks for one label per
+            // destination, spelled the same everywhere; "W..." is not a
+            // label. The hub label is one short word by construction (Work,
+            // Docs, Teams, Planner, Settings), so it is the crumb that can
+            // afford to keep all of its letters, and the deepest crumbs are
+            // the ones that give way.
+            <li
+              key={`${c.label}-${i}`}
+              className={cn(
+                "flex items-center gap-1",
+                i === 0 ? "shrink-0" : "min-w-0",
+                i < collapsed.length - 2 && "max-lg:hidden",
+              )}
+            >
               {i > 0 ? (
-                <span className={cn("inline-block text-chrome-fg-2 opacity-50 rtl:rotate-180", i === collapsed.length - 2 && "max-lg:hidden")} aria-hidden>›</span>
+                <span className={cn("inline-block shrink-0 text-chrome-fg-2 opacity-50 rtl:rotate-180", i === collapsed.length - 2 && "max-lg:hidden")} aria-hidden>›</span>
               ) : null}
               {hidden ? (
-                <span className="text-chrome-fg-2" title={hidden.map((h) => h.label).join(" › ")}>…</span>
+                <span className="shrink-0 text-chrome-fg-2" title={hidden.map((h) => h.label).join(" › ")}>…</span>
               ) : last || !c.href ? (
-                <span className="flex min-w-0 items-center gap-1.5 truncate font-medium text-chrome-fg" aria-current={last ? "page" : undefined} style={{ maxWidth: 160 }}>
+                <span
+                  className="flex min-w-0 items-center gap-1.5 truncate font-medium text-chrome-fg"
+                  aria-current={last ? "page" : undefined}
+                  style={i === 0 ? undefined : { maxWidth: 160 }}
+                  title={c.label}
+                >
                   {c.tile ? <EntityTile size="xs" {...c.tile} /> : null}
-                  <span className="truncate">{c.label}</span>
+                  <span className={i === 0 ? "whitespace-nowrap" : "truncate"}>{c.label}</span>
                 </span>
               ) : (
-                <Link href={c.href} className="flex min-w-0 items-center gap-1.5 truncate rounded px-0.5 text-chrome-fg-2 hover:text-chrome-fg" style={{ maxWidth: 160 }}>
+                <Link
+                  href={c.href}
+                  className="flex min-w-0 items-center gap-1.5 truncate rounded px-0.5 text-chrome-fg-2 hover:text-chrome-fg"
+                  style={i === 0 ? undefined : { maxWidth: 160 }}
+                  title={c.label}
+                >
                   {c.tile ? <EntityTile size="xs" {...c.tile} /> : null}
-                  <span className="truncate">{c.label}</span>
+                  <span className={i === 0 ? "whitespace-nowrap" : "truncate"}>{c.label}</span>
                 </Link>
               )}
             </li>

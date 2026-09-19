@@ -30,6 +30,7 @@ import {
   Sparkles,
   ArrowRight,
 } from "lucide-react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 const STEPS = [
   { id: "business", label: "Business Profile", icon: Building2 },
@@ -131,7 +132,7 @@ export default function SetupPage() {
       .then((res) => res.json())
       .then((data) => {
         if (data.setupCompleted) {
-          router.push("/dashboard");
+          router.push(WORK_HOME_HREF);
         }
       })
       .catch(() => {});
@@ -640,7 +641,7 @@ export default function SetupPage() {
             <Button
               className="mt-10 gap-2 px-8"
               size="lg"
-              onClick={() => router.push("/dashboard")}
+              onClick={() => router.push(WORK_HOME_HREF)}
             >
               Go to Dashboard <ArrowRight size={18} />
             </Button>

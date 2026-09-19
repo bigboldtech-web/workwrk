@@ -269,6 +269,8 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
 
   function composeStart() { const [h, m] = startT.split(":").map(Number); const d = new Date(date); d.setHours(h, m, 0, 0); return d; }
   function composeEnd() { const [h, m] = endT.split(":").map(Number); const d = new Date(date); d.setHours(h, m, 0, 0); return d; }
+  function startOfDay(v: string) { const d = new Date(v); d.setHours(0, 0, 0, 0); return d; }
+  function endOfDay(v: string) { const d = new Date(v); d.setHours(23, 59, 0, 0); return d; }
   const durMin = Math.max(0, (composeEnd().getTime() - composeStart().getTime()) / 60000);
   const durLabel = durMin >= 60 ? `${(durMin / 60).toFixed(durMin % 60 ? 1 : 0)}h` : `${durMin}m`;
 
@@ -287,16 +289,23 @@ function CreateEventPopover({ draft, onClose, onCreated }: { draft: { start: Dat
     const finalTitle = title.trim() || placeholder;
     if (saving) return;
     setSaving(true);
-    const start = composeStart(), end = composeEnd();
+    // "All day" means the whole of the chosen day, local time. The legacy
+    // table had an `allDay` column for this and Item does not, so the flag is
+    // expressed in the timestamps instead of being dropped: without this the
+    // checkbox would still hide the time inputs and then save whatever times
+    // happened to be in them, which is a control that does nothing.
+    const start = allDay ? startOfDay(date) : composeStart();
+    const end = allDay ? endOfDay(date) : composeEnd();
     try {
-      const res = await fetch("/api/tasks", {
+      // Phase 2 W4: this popover wrote to the legacy `Task` table, so an
+      // event created on the week grid was invisible everywhere else in the
+      // product. It creates a real task on the viewer's Personal list now.
+      const res = await fetch("/api/me/work", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: finalTitle,
           startAt: start.toISOString(),
           endAt: end.toISOString(),
-          allDay,
-          date: start.toISOString(),
           ...(description.trim() ? { description: description.trim() } : {}),
         }),
       });

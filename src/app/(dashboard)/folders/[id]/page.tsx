@@ -1,10 +1,27 @@
-// Folder detail — a folder opens as its own page, mirroring the Space page
-// chrome (breadcrumb, title row, view tabs). This is what lets you click a
-// folder (from the Space Overview card or the sidebar) and see WHAT'S INSIDE:
-// its Lists with live status/progress, its child folders, and its docs.
+// /folders/[id]. A Folder is a shelf in a Space: what is on it, and the
+// controls to manage the shelf itself.
 //
-// Overview + List views are functional. Boards inside the folder (and any
-// nested child folders) are aggregated for the List view and progress bars.
+// Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2, `/folders/[id]`.
+//
+// WHAT THIS PAGE DID NOT HAVE, and now does:
+//   * a BackButton (audit spaces-boards High #7). It had a hand-rolled
+//     "Spaces / {Space}" text breadcrumb and nothing that went back one level;
+//   * a Share control or a working "…" (audit Medium #13). The title row's
+//     ChevronDown had no onClick at all, so the affordance was a decoration;
+//   * a Canvas row. The Folder's own "New" menu creates Canvases and they were
+//     invisible here (see prisma/sql/2026-09-19-canvas-folder.sql);
+//   * a readable description. `NewFolderDialog` captures one at creation; the
+//     page's `findFirst` did not even select the column
+//     (audit section 12, the Folder gap). It is in the About modal now;
+//   * per-List statuses on the Tasks tab. It rendered the SPACE wizard palette
+//     for every row (audit High #3), so a List with its own statuses showed the
+//     wrong word in the wrong colour and the in-row picker offered statuses
+//     that List does not have;
+//   * an Owner column with an owner in it (audit Medium #11).
+//
+// The two tabs are `?tab=contents|tasks`. The old `?view=overview|list` still
+// resolves (it is one release of back-compat, not a redirect chain), so a
+// bookmark and a Favorites link both land where they always did.
 
 import { notFound, redirect } from "next/navigation";
 import { FolderFilesCard } from "@/components/spaces/folder-files-card";
@@ -13,40 +30,34 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
-import {
-  Folder as FolderIcon, FileText, Zap, ChevronDown, Lock,
-  List as ListIcon,
-} from "lucide-react";
+import { FileText, Brush, Lock } from "lucide-react";
 import { EntityTile } from "@/components/ui/entity-tile";
+import { BackButton } from "@/components/ui/back-button";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { folderVisibleTo } from "@/lib/folder";
+import { canEditSpace } from "@/lib/space";
 import { resolveAccess, meets, type ViewerContext } from "@/lib/access";
-import { FolderViewTabs } from "./folder-view-tabs";
-import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
-import { ShareBoardButton } from "@/components/layout/os/share-board-button";
-import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
-import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
-import { FolderCardCreate, ListCardCreate } from "@/components/layout/os/space-overview-create";
+import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
+import { ShareButton } from "@/components/access/share-button";
+import { FolderTabs } from "./folder-tabs";
+import { NewListGhostRow, NewFolderGhostRow } from "./new-in-folder";
 import { SpaceListItemsTable } from "../../spaces/[slug]/space-list-items";
-import type { StatusOption } from "@/lib/board-items-shared";
+import { getBoardStatuses, isDoneStatus, type StatusOption } from "@/lib/board-items-shared";
 
 export const dynamic = "force-dynamic";
 
-type WorkflowStatus = { key: string; label: string; color: string; group: string };
-function readWorkflowStatuses(settings: unknown): WorkflowStatus[] {
-  if (!settings || typeof settings !== "object") return [];
-  const w = (settings as Record<string, unknown>).workflow;
-  if (!w || typeof w !== "object") return [];
-  const s = (w as Record<string, unknown>).statuses;
-  return Array.isArray(s) ? (s as WorkflowStatus[]) : [];
-}
+type FolderTab = "contents" | "tasks";
 
 export default async function FolderPage(props: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ tab?: string; view?: string }>;
 }) {
   const { id } = await props.params;
   const sp = await props.searchParams;
-  const view = sp.view === "list" ? "list" : "overview";
+  // `?view=list` was the Tasks tab and `?view=overview` was Contents. Both keep
+  // working for one release rather than 404ing a bookmark.
+  const tab: FolderTab =
+    sp.tab === "tasks" || sp.view === "list" ? "tasks" : "contents";
 
   const session = await getServerSession(authOptions);
   if (!session?.user) redirect("/login");
@@ -58,22 +69,41 @@ export default async function FolderPage(props: {
     select: {
       id: true, name: true, icon: true, color: true, spaceId: true,
       visibility: true, ownerId: true,
+      // The description NewFolderDialog has always captured and nothing ever
+      // showed. The About modal reads and writes it (audit section 12).
+      description: true, createdAt: true, parentFolderId: true,
+      parentFolder: { select: { id: true, name: true } },
       space: { select: { id: true, slug: true, name: true, icon: true, color: true, visibility: true, settings: true } },
     },
   });
   if (!folder) notFound();
 
-  // Gate through the central resolver: space members (and org admins) read via
-  // the Space; a folder-only grantee reads via their FolderMember row even
-  // without Space membership; PRIVATE folders need an explicit grant. Edit =
-  // folder owner/admin, the parent Space's admins, or an org admin.
   const viewer: ViewerContext = { userId: u.id, organizationId: u.organizationId, accessLevel: u.accessLevel ?? "EMPLOYEE" };
   const decision = await resolveAccess(viewer, { type: "folder", id: folder.id });
   if (decision.permission === "none") notFound();
   const canEdit = meets(decision, "edit");
+  const canManage = meets(decision, "admin");
 
-  // Descendant folder set: everything nested under this folder, so "what's
-  // inside" includes lists in sub-folders too (BFS over the space's folders).
+  // WHAT A FOLDER GRANT ACTUALLY BUYS, TODAY.
+  //
+  // The Share dialog's "Can edit the contents" on a Folder writes a
+  // FolderMember row, and `resolveFolder` above honours it, so `canEdit` is
+  // true for a folder grantee. No WRITE gate anywhere else consults
+  // FolderMember: `POST /api/boards` and `POST /api/folders` both answer to
+  // `canEditSpace` (org admin, Space OWNER, Space ADMIN). So the two create
+  // rows at the foot of the Contents table were offered to exactly the people
+  // the server refuses.
+  //
+  // Until the contribute path learns about FolderMember (tracked separately;
+  // it is an access-engine change, not a screen change), the honest thing is
+  // to render those two rows only to people the create endpoints accept, and
+  // to say plainly why they are absent. Files are NOT in this bucket: `POST
+  // /api/files` scopes by org and never asks about the folder, so the drop
+  // zone below keeps working for a grantee and stays on `canEdit`.
+  const canCreateInFolder = await canEditSpace(folder.spaceId, u.id, u.accessLevel ?? "EMPLOYEE");
+
+  // Everything nested under this folder, so the Tasks tab covers the shelf and
+  // every shelf below it.
   const allFolders = await prisma.folder.findMany({
     where: { spaceId: folder.spaceId, archivedAt: null },
     select: { id: true, parentFolderId: true },
@@ -93,209 +123,298 @@ export default async function FolderPage(props: {
     }
   }
 
-  // Direct child folders (one level) for the Folders card, with their counts.
   const childFolders = await prisma.folder.findMany({
     where: { spaceId: folder.spaceId, parentFolderId: folder.id, archivedAt: null },
     orderBy: [{ position: "asc" }, { name: "asc" }],
     select: {
-      id: true, name: true, icon: true, color: true, visibility: true, ownerId: true,
+      id: true, name: true, icon: true, color: true, visibility: true, ownerId: true, updatedAt: true,
       _count: { select: { boards: true, childFolders: true } },
     },
   });
   const visibleChildFolders = childFolders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));
 
-  // Boards under this folder + descendants. PRIVATE boards the viewer can't
-  // read are dropped from the aggregate (same leak class the Space page closes).
   const isAdmin = u.accessLevel === "SUPER_ADMIN" || u.accessLevel === "COMPANY_ADMIN";
   const rawBoards = await prisma.board.findMany({
     where: { folderId: { in: Array.from(descendantIds) }, archivedAt: null },
     orderBy: { name: "asc" },
     select: {
       id: true, slug: true, name: true, icon: true, color: true,
-      visibility: true, ownerId: true, folderId: true,
+      visibility: true, ownerId: true, folderId: true, updatedAt: true, statuses: true,
     },
   });
   const boards = rawBoards.filter((b) => isAdmin || canEdit || b.visibility !== "PRIVATE" || b.ownerId === u.id);
   const directBoards = boards.filter((b) => b.folderId === folder.id);
   const boardIds = boards.map((b) => b.id);
 
-  const workflowStatuses = readWorkflowStatuses(folder.space?.settings);
-  const statusOptions: StatusOption[] = workflowStatuses.map((s) => ({
-    value: s.key, label: s.label, color: s.color, group: s.group as StatusOption["group"],
-  }));
-  const doneKeys = new Set(workflowStatuses.filter((s) => s.group === "DONE").map((s) => s.key).concat(["DONE"]));
+  // audit High #3: every row's statuses come from that row's own List. A
+  // Space-wide palette was the wrong answer for any List that sets its own.
+  const statusesByList: Record<string, StatusOption[]> = Object.fromEntries(
+    boards.map((b) => [b.slug, getBoardStatuses(b)]),
+  );
+  // The fallback for a row whose List is somehow absent from the map.
+  const fallbackStatuses: StatusOption[] = getBoardStatuses(null);
 
-  // Per-board progress (done / total) + folder docs, in parallel.
-  const [totalByBoard, doneCount, docs] = await Promise.all([
+  const [statusCounts, docs, canvases, ownerRows, listItems] = await Promise.all([
     boardIds.length
-      ? prisma.item.groupBy({ by: ["boardId"], where: { boardId: { in: boardIds }, archivedAt: null }, _count: { _all: true } })
-      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
-    boardIds.length
-      ? prisma.item.groupBy({ by: ["boardId"], where: { boardId: { in: boardIds }, archivedAt: null, status: { in: Array.from(doneKeys) } }, _count: { _all: true } })
-      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
+      ? prisma.item.groupBy({
+          by: ["boardId", "status"],
+          where: { boardId: { in: boardIds }, archivedAt: null },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as { boardId: string; status: string | null; _count: { _all: number } }[]),
     prisma.doc.findMany({
       where: { organizationId: u.organizationId, entityType: "FOLDER", entityId: folder.id, archivedAt: null },
-      orderBy: { updatedAt: "desc" }, take: 8,
-      select: { id: true, title: true },
+      orderBy: { updatedAt: "desc" }, take: 20,
+      select: { id: true, title: true, updatedAt: true, createdById: true },
     }),
-  ]);
-  const totalMap = new Map(totalByBoard.map((r) => [r.boardId, r._count._all]));
-  const doneMap = new Map(doneCount.map((r) => [r.boardId, r._count._all]));
-
-  // List-view items: cross-board pull scoped to this folder (recency, capped).
-  const listItems = view === "list" && boardIds.length
-    ? await prisma.item.findMany({
-        where: { boardId: { in: boardIds }, archivedAt: null },
-        orderBy: { updatedAt: "desc" }, take: 200,
-        select: {
-          id: true, title: true, status: true, updatedAt: true, ownerId: true, parentItemId: true,
-          board: { select: { slug: true, name: true } },
-        },
+    // One release of tolerance: `Whiteboard.folderId` is new
+    // (prisma/sql/2026-09-19-canvas-folder.sql). A database that has not had
+    // the file applied loses the Canvas rows, never the page.
+    prisma.whiteboard
+      .findMany({
+        where: { organizationId: u.organizationId, folderId: folder.id, archivedAt: null },
+        orderBy: { updatedAt: "desc" }, take: 20,
+        select: { id: true, name: true, updatedAt: true, ownerId: true },
       })
-    : [];
+      .catch(() => [] as Array<{ id: string; name: string; updatedAt: Date; ownerId: string | null }>),
+    (async () => {
+      const ids = Array.from(new Set([
+        ...visibleChildFolders.map((f) => f.ownerId),
+        ...directBoards.map((b) => b.ownerId),
+        folder.ownerId,
+      ].filter((x): x is string => Boolean(x))));
+      if (!ids.length) return [] as { id: string; firstName: string | null; lastName: string | null }[];
+      return prisma.user.findMany({
+        where: { id: { in: ids }, organizationId: u.organizationId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+    })(),
+    tab === "tasks" && boardIds.length
+      ? prisma.item.findMany({
+          where: { boardId: { in: boardIds }, archivedAt: null },
+          orderBy: { updatedAt: "desc" }, take: 200,
+          select: {
+            id: true, title: true, status: true, updatedAt: true, ownerId: true, parentItemId: true,
+            board: { select: { slug: true, name: true } },
+          },
+        })
+      : Promise.resolve([] as never[]),
+  ]);
+
+  const ownerById = new Map(
+    ownerRows.map((o) => [o.id, `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || "Unknown"]),
+  );
+  const tasksByList = new Map<string, { open: number; done: number }>();
+  for (const row of statusCounts) {
+    const bucket = tasksByList.get(row.boardId) ?? { open: 0, done: 0 };
+    const opts = boards.find((b) => b.id === row.boardId);
+    if (isDoneStatus(opts ? getBoardStatuses(opts) : fallbackStatuses, row.status)) bucket.done += row._count._all;
+    else bucket.open += row._count._all;
+    tasksByList.set(row.boardId, bucket);
+  }
 
   const space = folder.space!;
+  // back-map: the crumb immediately to the left, so a nested Folder goes to its
+  // parent Folder and never skips a level.
+  const backHref = folder.parentFolder ? `/folders/${folder.parentFolder.id}` : `/spaces/${space.slug}`;
+  const backLabel = folder.parentFolder?.name ?? space.name;
+  const isRestricted = folder.visibility === "PRIVATE";
+
+  const rowCount = visibleChildFolders.length + directBoards.length + docs.length + canvases.length;
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      {/* Breadcrumb + title row — Space / Folder */}
-      <div className="px-6 pt-4 pb-3">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500 mb-2">
-          <Link href="/spaces" className="hover:text-zinc-900">Spaces</Link>
-          <span className="text-zinc-300">/</span>
-          <Link href={`/spaces/${space.slug}`} className="hover:text-zinc-900 inline-flex items-center gap-1.5">
-            <EntityTile size="xs" icon={space.icon} color={space.color} name={space.name} />
-            {space.name}
-          </Link>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-zinc-100">
-            <FolderIcon className="w-4 h-4 text-amber-500" style={folder.color ? { color: folder.color } : undefined} />
-          </span>
-          <h1 className="text-base font-semibold text-zinc-900 flex items-center gap-1.5 min-w-0">
-            <span className="truncate" title={folder.name}>{folder.name}</span>
-            <button type="button" aria-label="Folder menu" title="Folder menu" className="p-0.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
-              <ChevronDown className="w-3.5 h-3.5" />
-            </button>
-            {folder.visibility === "PRIVATE" ? <Lock className="w-3.5 h-3.5 text-zinc-400" /> : null}
-            {/* The former title-row filter icon was inert (folders have no
-                cross-board filter surface of their own), so it's removed
-                rather than faked. */}
-          </h1>
-          <div className="flex-1" />
-          <Link href="/automation/workflows" className="text-xs text-zinc-700 hover:text-zinc-900 flex items-center gap-1.5 px-2 py-1 rounded hover:bg-zinc-100" title="Automations">
-            <Zap className="w-3.5 h-3.5 text-amber-500" />
-            Automate
-          </Link>
-          <AskSidekickButton prompt={`Help me with the ${folder.name} folder.`} />
-        </div>
+    <div className="flex flex-col h-full bg-app">
+      <Breadcrumb
+        items={[
+          { label: space.name, href: `/spaces/${space.slug}`, tile: { icon: space.icon, color: space.color, name: space.name } },
+          ...(folder.parentFolder ? [{ label: folder.parentFolder.name, href: `/folders/${folder.parentFolder.id}` }] : []),
+          { label: folder.name },
+        ]}
+      />
+
+      {/* Title row (48): back · tile · name · lock · Share · "…" */}
+      <div className="flex h-12 items-center gap-2 px-6">
+        <BackButton fallbackHref={backHref} label={backLabel} className="me-0.5" />
+        <EntityTile size="lg" icon={folder.icon} color={folder.color} name={folder.name} fallback="folder" />
+        <h1 className="min-w-0 flex items-center gap-1.5 text-xl font-semibold text-ink">
+          <span className="truncate" title={folder.name}>{folder.name}</span>
+          {isRestricted ? (
+            <Lock className="w-3.5 h-3.5 text-ink-3 shrink-0" aria-label="Restricted" />
+          ) : null}
+        </h1>
+        <div className="flex-1" />
+        <ShareButton
+          target={{
+            kind: "folder", id: folder.id, name: folder.name,
+            visibility: folder.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+            parentSpaceName: space.name,
+          }}
+          canManage={canManage}
+        />
+        <ContainerMenuTrigger
+          container={{
+            kind: "folder",
+            id: folder.id,
+            name: folder.name,
+            icon: folder.icon,
+            color: folder.color,
+            visibility: folder.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+            description: folder.description,
+            createdAt: folder.createdAt.toISOString(),
+            owner: folder.ownerId ? { id: folder.ownerId, name: ownerById.get(folder.ownerId) ?? "Unknown" } : null,
+            spaceId: space.id,
+            spaceSlug: space.slug,
+            spaceName: space.name,
+            contents: `${directBoards.length} lists · ${visibleChildFolders.length} folders · ${docs.length} docs`,
+          }}
+          role={canManage ? "full" : canEdit ? "edit" : "view"}
+        />
       </div>
 
-      <FolderViewTabs view={view} folderId={folder.id} />
+      <FolderTabs tab={tab} folderId={folder.id} taskCount={boardIds.length} />
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
-        <FileDropZone spaceFolderId={folder.id} disabled={!canEdit} label={`"${folder.name}"`} />
-        {view === "list" ? (
+        {tab === "tasks" ? (
           boards.length === 0 ? (
-            <p className="text-xs text-zinc-500 py-8 text-center">No lists in this folder yet.</p>
+            <p className="text-base text-ink-2 py-8 text-center">
+              Nothing to show until this folder has a list.
+            </p>
           ) : (
-            <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-              <SpaceListItemsTable items={listItems} statuses={statusOptions} canEdit={canEdit} currentUserId={u.id} />
+            <div className="rounded-xl border border-line bg-raised overflow-hidden">
+              <SpaceListItemsTable
+                items={listItems}
+                statuses={fallbackStatuses}
+                statusesByList={statusesByList}
+              />
               {listItems.length === 200 ? (
-                <div className="px-3 py-2 text-xs text-zinc-400 bg-zinc-50 border-t border-zinc-100">
-                  Showing 200 most-recently-updated items. Open a List for the full set.
+                <div className="px-3 py-2 text-xs text-ink-3 bg-subtle border-t border-line-soft">
+                  Showing the 200 most recently updated tasks. Open a List for the full set.
                 </div>
               ) : null}
             </div>
           )
         ) : (
-          <div className="space-y-6 max-w-5xl mx-auto">
-            {/* Child folders */}
-            {visibleChildFolders.length > 0 ? (
-              <Card title="Folders" action={canEdit ? <FolderCardCreate spaceId={space.id} parentFolderId={folder.id} /> : undefined}>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          <div className="space-y-6 max-w-5xl">
+            {/* Contents: one table, every kind, in the spec's order. */}
+            <section className="rounded-xl border border-line bg-raised overflow-hidden">
+              <div className="grid grid-cols-[1fr_90px_180px_150px_44px] items-center px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
+                <span>Name</span>
+                <span>Type</span>
+                <span>Tasks</span>
+                <span>Owner</span>
+                <span className="sr-only">Actions</span>
+              </div>
+              {rowCount === 0 ? (
+                <p className="px-3 py-4 text-base text-ink-2">
+                  Nothing here yet{canCreateInFolder ? " · Create a list below." : "."}
+                </p>
+              ) : (
+                <ul>
                   {visibleChildFolders.map((f) => (
-                    <li key={f.id} className="group/folder relative">
-                      <Link
-                        href={`/folders/${f.id}`}
-                        className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition-colors"
-                      >
-                        <FolderIcon className="w-4 h-4 text-zinc-500 shrink-0" style={f.color ? { color: f.color } : undefined} />
-                        <span className="text-xs text-zinc-900 truncate flex-1">{f.name}</span>
-                      </Link>
-                      <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                        <FolderMoreTrigger folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }} spaceId={space.id} />
-                      </span>
-                    </li>
+                    <ContentsRow
+                      key={f.id}
+                      href={`/folders/${f.id}`}
+                      glyph={<EntityTile size="sm" icon={f.icon} color={f.color} name={f.name} fallback="folder" />}
+                      name={f.name}
+                      type="Folder"
+                      tasks={`${f._count.boards} list${f._count.boards === 1 ? "" : "s"}`}
+                      owner={f.ownerId ? ownerById.get(f.ownerId) ?? null : null}
+                      menu={
+                        <ContainerMenuTrigger
+                          container={{
+                            kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
+                            visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                            spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                          }}
+                          role={canManage ? "full" : canEdit ? "edit" : "view"}
+                        />
+                      }
+                    />
                   ))}
-                </ul>
-              </Card>
-            ) : null}
-
-            {/* Lists — the boards inside this folder, with live progress. */}
-            <Card title="Lists" action={canEdit ? <ListCardCreate spaceId={space.id} folderId={folder.id} /> : undefined}>
-              {directBoards.length === 0 ? (
-                <p className="text-xs text-zinc-500 px-2 py-3">No lists yet.</p>
-              ) : (
-                <div className="rounded-lg border border-zinc-200 overflow-hidden">
-                  <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-xs uppercase tracking-wide text-zinc-500">
-                    <span>Name</span><span>Color</span><span>Progress</span><span>Owner</span>
-                  </div>
-                  <ul>
-                    {directBoards.map((b) => {
-                      const total = totalMap.get(b.id) ?? 0;
-                      const done = doneMap.get(b.id) ?? 0;
-                      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-                      return (
-                        <li key={b.id} className="group/board grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors">
-                          <Link href={`/boards/${b.slug}`} className="flex items-center gap-2 min-w-0">
-                            <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                            <span className="text-base text-zinc-900 truncate">{b.name}</span>
-                          </Link>
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-3 h-3 rounded-sm" style={{ background: b.color ?? "#A1A1AA" }} aria-hidden />
-                            <span className="text-xs text-zinc-500">{b.color ?? "—"}</span>
-                          </span>
-                          <span className="flex items-center gap-2">
-                            <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
-                              <span className="block h-full bg-emerald-400" style={{ width: `${pct}%` }} />
-                            </span>
-                            <span className="text-xs text-zinc-500 tabular-nums shrink-0">{done}/{total}</span>
-                          </span>
-                          <span className="inline-flex items-center gap-2">
-                            <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
-                              <ShareBoardButton boardId={b.id} boardName={b.name} visibility={b.visibility} parentSpaceName={space.name} />
-                              <BoardMoreTrigger board={{ id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color }} />
-                            </span>
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-            </Card>
-
-            {/* Docs anchored to this folder */}
-            <Card title="Docs">
-              {docs.length === 0 ? (
-                <p className="text-xs text-zinc-500 px-2 py-3">No docs in this folder yet.</p>
-              ) : (
-                <ul className="-mx-2">
+                  {directBoards.map((b) => {
+                    const t = tasksByList.get(b.id) ?? { open: 0, done: 0 };
+                    return (
+                      <ContentsRow
+                        key={b.id}
+                        href={`/boards/${b.slug}`}
+                        glyph={<EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} fallback="list" />}
+                        name={b.name}
+                        type="List"
+                        tasks={t.open === 0 && t.done === 0 ? "No tasks" : `${t.open} open · ${t.done} done`}
+                        owner={b.ownerId ? ownerById.get(b.ownerId) ?? null : null}
+                        menu={
+                          <ContainerMenuTrigger
+                            container={{
+                              kind: "list", id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color,
+                              visibility: b.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                              folderId: folder.id, folderName: folder.name,
+                            }}
+                            role={canManage ? "full" : canEdit ? "edit" : "view"}
+                          />
+                        }
+                      />
+                    );
+                  })}
                   {docs.map((d) => (
-                    <li key={d.id}>
-                      <Link href={`/docs/${d.id}`} className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-base">
-                        <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                        <span className="text-zinc-900 truncate">{d.title || "Untitled"}</span>
-                      </Link>
-                    </li>
+                    <ContentsRow
+                      key={d.id}
+                      href={`/docs/${d.id}`}
+                      glyph={<FileText className="w-4 h-4 text-ink-2 shrink-0" />}
+                      name={d.title || "Untitled"}
+                      type="Doc"
+                      tasks=""
+                      owner={d.createdById ? ownerById.get(d.createdById) ?? null : null}
+                    />
+                  ))}
+                  {canvases.map((c) => (
+                    <ContentsRow
+                      key={c.id}
+                      href={`/canvas/${c.id}`}
+                      glyph={<Brush className="w-4 h-4 text-ink-2 shrink-0" />}
+                      name={c.name || "Untitled canvas"}
+                      type="Canvas"
+                      tasks=""
+                      owner={c.ownerId ? ownerById.get(c.ownerId) ?? null : null}
+                    />
                   ))}
                 </ul>
               )}
-            </Card>
+              {canCreateInFolder ? (
+                // Ghost rows with words, not two bare "+" glyphs: a person
+                // reading an empty shelf should be told what they can put on it.
+                <div className="flex items-center gap-1 px-2 py-1.5 border-t border-line-soft">
+                  <NewListGhostRow spaceId={space.id} folderId={folder.id} />
+                  <NewFolderGhostRow spaceId={space.id} parentFolderId={folder.id} />
+                </div>
+              ) : canEdit ? (
+                // A refusal has to be readable. This person was shared into the
+                // folder and can work inside the lists on it, but creating a
+                // list or a sub-folder is a Space-level right today, so name
+                // the right and name who grants it instead of showing a button
+                // that answers 403.
+                <p className="px-3 py-2 border-t border-line-soft text-xs text-ink-3">
+                  You can work in this folder, but adding a list or a sub-folder
+                  needs Full access on the {space.name} space. Ask a space admin.
+                </p>
+              ) : null}
+              {boardIds.length > 0 ? (
+                <div className="px-3 py-2 border-t border-line-soft">
+                  <Link href={`/folders/${folder.id}?tab=tasks`} className="text-base text-brand-deep hover:underline">
+                    All tasks in this folder
+                  </Link>
+                </div>
+              ) : null}
+            </section>
 
-            {/* Files uploaded into this folder — also visible in Library → Files */}
-            <FolderFilesCard folderId={folder.id} canEdit={canEdit} />
+            {/* Files, with the drop zone INSIDE the card. It used to sit above
+                the whole page on every tab (audit section 3, the oddity). */}
+            <section className="space-y-3">
+              {canEdit ? (
+                <FileDropZone spaceFolderId={folder.id} disabled={false} label={`"${folder.name}"`} />
+              ) : null}
+              <FolderFilesCard folderId={folder.id} canEdit={canEdit} />
+            </section>
           </div>
         )}
       </div>
@@ -303,14 +422,29 @@ export default async function FolderPage(props: {
   );
 }
 
-function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
+function ContentsRow({
+  href, glyph, name, type, tasks, owner, menu,
+}: {
+  href: string;
+  glyph: React.ReactNode;
+  name: string;
+  type: string;
+  tasks: string;
+  owner: string | null;
+  menu?: React.ReactNode;
+}) {
   return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-semibold text-zinc-900">{title}</h2>
-        {action}
-      </div>
-      {children}
-    </section>
+    <li className="group/row grid grid-cols-[1fr_90px_180px_150px_44px] items-center px-3 py-2 border-b border-line-soft last:border-b-0 hover:bg-hover transition-colors">
+      <Link href={href} className="flex items-center gap-2 min-w-0">
+        {glyph}
+        <span className="text-base text-ink truncate">{name}</span>
+      </Link>
+      <span className="text-xs text-ink-2">{type}</span>
+      <span className="text-xs text-ink-2 tabular-nums">{tasks}</span>
+      <span className="text-xs text-ink-2 truncate">{owner ?? "No owner"}</span>
+      <span className="inline-flex items-center justify-end opacity-0 group-hover/row:opacity-100 transition-opacity">
+        {menu}
+      </span>
+    </li>
   );
 }

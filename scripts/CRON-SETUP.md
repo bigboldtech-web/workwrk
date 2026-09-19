@@ -24,12 +24,32 @@ Editing rules:
 
 The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 
+## Removed: Task SLA check
+
+`*/15 * * * * curl ... /api/tasks/run-sla-check`: **delete this row from the
+crontab.** Phase 2 W4 (docs/plans/ui-refresh/spec-work-home.md section 4)
+retired `/api/tasks/run-sla-check`; it answers 410 now, so the cron logs a
+failure every fifteen minutes until the row is gone.
+
+Nothing replaces it, and that is a deliberate loss rather than an oversight:
+SLA hours, the escalation timestamp and the escalation target were columns on
+the legacy `Task` table only. The `Item` model this product runs on has no
+equivalent, so there is no escalation to run. The columns themselves are not
+deleted (every migrated task keeps `slaHours`, `escalatedAt` and
+`escalatedToId` under `Item.metadata.legacyTask`), so a future SLA feature can
+read the old settings back rather than starting from nothing.
+
+Two things this also fixed, worth recording because both were live:
+the endpoint was **completely unauthenticated whenever `CRON_SECRET` was
+unset** while writing notifications, mutating tasks and firing Slack webhooks;
+and it ran against a table the product's task surfaces no longer read, so its
+escalations pointed at work nobody could see.
+
 | What it does | Schedule (aaPanel) | Script |
 |---|---|---|
 | Drain queued emails | `* * * * *` (every minute) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/email-queue` |
 | Sync Google Calendar | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/calendar-sync` |
 | Retry failed webhooks | `*/5 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/webhook-retry` |
-| Task SLA check | `*/15 * * * *` | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/tasks/run-sla-check` |
 | Rate-limit cleanup | `0 3 * * *` (3 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/ratelimit-cleanup` |
 | Surveys rotate keys | `0 4 * * *` (4 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/surveys-rotate` |
 | OKR reminders | `0 9 * * 1-5` (9 AM weekdays) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/okr-reminders` |
@@ -45,6 +65,99 @@ The `vercel.json` in the repo root is reference-only (not used on aaPanel).
 
 `-fsS` = fail silently on HTTP errors but still print errors. So a 403
 or 500 lands in the cron log.
+
+## Inbox auto-clear (NOT INSTALLED: the founder adds this row)
+
+`POST /api/cron/inbox-auto-clear` sweeps CLEARED notifications for the people
+who asked for it in Inbox options > "Auto-clear read notifications". It is the
+one cron in this file that deletes user data, so it is listed separately and is
+not in the table above: adding the row is a deliberate decision, not a default.
+
+**It is fail-closed.** With `CRON_SECRET` empty or unset the route answers 503
+and sweeps nothing, because a delete job that runs for anybody who can reach
+the URL is worse than a job that never runs. Set `CRON_SECRET` in `.env` before
+adding the row, and check the 503 is gone by running the dry run below.
+
+**Cleared, not merely read.** Since 2026-09-18 "read" and "cleared" are two
+states (`prisma/sql/2026-09-18-notification-cleared-at.sql`). A row you have
+read still sits in your Primary tab where you can see it, so the sweep takes
+only rows you filed away with Clear. On a database that still predates the
+`clearedAt` column the route falls back to `read = true`, which was the same
+set of rows under the old semantics, so applying the SQL file late changes
+nothing about what gets deleted.
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Auto-clear read notifications | `15 4 * * *` (4:15 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/inbox-auto-clear` |
+
+What it will and will not delete, all four of which are in the route:
+
+* **Opt-in per person.** `home.notifications.inboxView.autoClearDays` defaults
+  to `null`, which is "Never". Somebody with no stored value is never swept.
+* **Cleared rows only.** A row is swept only once its owner cleared it. Unread
+  rows, and rows merely read, are never swept.
+* **Older than the number of days they chose**, and only 7, 14 or 30 — the
+  three the popover offers. Any other number is ignored rather than honoured.
+* **Their rows only.** One `deleteMany` per person, scoped to that userId.
+
+Without this row nothing breaks: the setting simply never takes effect, and
+"Never" stays true for everyone.
+
+**Dry run first, always.** `?dry=1` counts exactly what it would delete and
+deletes nothing:
+
+```
+curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
+  "https://workwrk.com/api/cron/inbox-auto-clear?dry=1"
+```
+
+Read the JSON (`peopleWithPreference`, `peopleSwept`, `deleted`, `detail`) and
+only then add the schedule.
+
+## Trash retention purge (NOT INSTALLED: the founder adds this row)
+
+`POST /api/cron/trash-purge` permanently deletes `TrashItem` snapshots past
+each org's retention window. It is the second cron in this file that deletes
+user data, so it is listed separately and is not in the table above.
+
+**Why it exists at all.** Until 2026-09-19 the purge ran inside
+`GET /api/trash`: opening the Trash page destroyed expired rows, two people
+opening it at once destroyed them twice, and a workspace nobody visited kept
+deleted rows forever because the clock only ticked when somebody looked. A read
+must not delete, so the read stopped deleting and this row is what carries the
+retention promise instead. **Until this row is installed nothing is ever purged
+and the 60-day promise on the page is not kept** — that is the one thing to
+know before deciding whether to add it.
+
+**It is fail-closed.** With `CRON_SECRET` empty or unset the route answers 503
+and purges nothing.
+
+| What it does | Schedule (aaPanel) | Script |
+|---|---|---|
+| Purge Trash past each org's retention window | `50 3 * * *` (3:50 AM nightly) | `curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" https://workwrk.com/api/cron/trash-purge` |
+
+What it will and will not delete:
+
+* **Deleted rows only.** `TrashItem` snapshots, which is what a hard delete
+  captures. Archived Spaces, Folders, Lists, tasks, Docs, Canvases and
+  Contracts are never touched: an archive is something somebody put away, and
+  the Archived tab has no clock on it.
+* **Past that org's own window.** `settings.retention.trashDays`, defaulting to
+  60 when it is unset or nonsense, and floored at one day so a stored zero can
+  never purge something on the day it was deleted.
+* **Blobs first.** A trashed file's storage is freed before the row naming it
+  goes, so nothing is orphaned.
+
+**Dry run first, always.** `?dry=1` counts exactly what it would delete per org
+and deletes nothing:
+
+```
+curl -fsS -X POST -H "x-cron-secret: $CRON_SECRET" \
+  "https://workwrk.com/api/cron/trash-purge?dry=1"
+```
+
+Read the JSON (`orgs`, `orgsPurged`, `totalDeleted`, `purged`) and only then add
+the schedule.
 
 ## Access parity job (NOT INSTALLED: the founder adds this row)
 

@@ -67,6 +67,10 @@ const patchSchema = z.object({
     })
     .refine((s) => s.endDate >= s.startDate, { message: "endDate must be on/after startDate" })
     .optional(),
+  // The List's default task type, written by the "…" menu's submenu (spec
+  // spaces-lists section 1, List row 10). Merged into settings, never a
+  // wholesale settings replace.
+  defaultItemTypeId: z.string().min(1).max(64).nullable().optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -103,6 +107,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     await moveToTrash("board", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
     return NextResponse.json({ ok: true });
   }
-  const archived = await archiveBoard(id);
+  const archived = await archiveBoard(id, c.userId);
   return NextResponse.json({ board: archived });
 }

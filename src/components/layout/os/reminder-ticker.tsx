@@ -27,6 +27,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { AlarmClock, Clock, X, ArrowUpRight, ChevronDown, CheckSquare } from "lucide-react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 type Fired = {
   id: string;
@@ -119,7 +120,7 @@ export function ReminderTicker() {
   // Open the linked task (or /today for a personal reminder) and mark the
   // reminder acted-on — opening it is acting on it.
   const openReminder = useCallback((r: Fired) => {
-    const link = r.entityType === "BOARD_ITEM" && r.entityId ? `/item/${r.entityId}` : "/today";
+    const link = r.entityType === "BOARD_ITEM" && r.entityId ? `/item/${r.entityId}` : WORK_HOME_HREF;
     void act(r.id, {});
     router.push(link);
   }, [act, router]);

@@ -27,6 +27,21 @@ export type CallEndedEvent = { type: "call.ended"; conversationId?: string; meet
 export type AccessChangedEvent = { type: "access.changed"; objectType: string; objectId: string };
 export type PrefsChangedEvent = { type: "prefs.changed" };
 export type SessionIdleEvent = { type: "session.idle"; idleUntil: string | null };
+/**
+ * One task changed (spec-task-detail section 2, Realtime). Emitted by the item
+ * PATCH and DELETE, by comment write/edit/delete, by reactions and by restore.
+ * TRIGGER-ONLY like every other member: the open task re-fetches
+ * `GET /api/items/[id]` and its thread, so a mis-scoped emit leaks nothing.
+ * `boardId` lets a host list decide whether the change is even on screen.
+ */
+export type ItemChangedEvent = { type: "item"; itemId: string; boardId: string | null };
+
+/**
+ * The same event dispatched by THIS tab about its own write (see
+ * `emitItemChanged`). `local` tells the editor that caused it to ignore it;
+ * `gone` tells a host list to drop the row rather than re-read it.
+ */
+export type LocalItemChangedEvent = ItemChangedEvent & { local?: boolean; gone?: boolean };
 
 export type ShellRealtimeEvent =
   | NotifChangedEvent
@@ -38,7 +53,8 @@ export type ShellRealtimeEvent =
   | CallEndedEvent
   | AccessChangedEvent
   | PrefsChangedEvent
-  | SessionIdleEvent;
+  | SessionIdleEvent
+  | ItemChangedEvent;
 
 export type RealtimeEvent = LegacyRealtimeEvent | ShellRealtimeEvent;
 export type RealtimeEventName = RealtimeEvent["type"];
@@ -69,6 +85,7 @@ export const REALTIME_EVENT_NAMES: readonly RealtimeEventName[] = [
   "access.changed",
   "prefs.changed",
   "session.idle",
+  "item",
 ];
 
 const NAME_SET: ReadonlySet<string> = new Set(REALTIME_EVENT_NAMES);
@@ -94,6 +111,8 @@ export const WINDOW_EVENTS = {
   callIncoming: "workwrk:call-incoming",
   remindersChanged: "workwrk:reminders-changed",
   prefsChanged: "workwrk:prefs-changed",
+  /** One task changed; `detail: { itemId, boardId }`. */
+  itemChanged: "workwrk:item-changed",
   timerChanged: "workwrk:timer-changed",
   accessChanged: "workwrk:access-changed",
   sessionIdle: "workwrk:session-idle",
@@ -103,6 +122,31 @@ export const WINDOW_EVENTS = {
 
 export function convoEventName(conversationId: string): string {
   return `${WINDOW_EVENTS.convoPrefix}${conversationId}`;
+}
+
+/**
+ * Tell this tab that one task changed.
+ *
+ * The SSE producer deliberately skips the actor (`publishItemChanged` excludes
+ * `actorId`), and the task drawer is rendered by a different App Router slot
+ * from the list underneath it, so props cannot carry the news across. One
+ * window event does, and it is the SAME event the SSE stream fans out, so a
+ * host list needs exactly one listener for "somebody changed a row" whether
+ * that somebody is a colleague or the person at this keyboard.
+ *
+ * `gone` means archived or deleted: the host drops the row instead of
+ * refetching it. `local: true` marks the event as this tab telling itself, so
+ * the editor that caused it does not re-read what it already holds.
+ */
+export function emitItemChanged(itemId: string, boardId: string | null, gone = false): void {
+  if (typeof window === "undefined") return;
+  const detail: LocalItemChangedEvent = { type: "item", itemId, boardId, local: true, ...(gone ? { gone: true } : {}) };
+  try {
+    window.dispatchEvent(new CustomEvent(WINDOW_EVENTS.realtime, { detail }));
+  } catch {
+    // A tab that refuses CustomEvent is a tab with bigger problems; the host
+    // list's own poll still catches up.
+  }
 }
 
 /**
@@ -134,6 +178,8 @@ export function legacyWindowEventsFor(ev: RealtimeEvent): string[] {
       return [WINDOW_EVENTS.prefsChanged];
     case "session.idle":
       return [WINDOW_EVENTS.sessionIdle];
+    case "item":
+      return [WINDOW_EVENTS.itemChanged];
   }
 }
 

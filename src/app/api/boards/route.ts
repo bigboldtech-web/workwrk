@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
+import { canContributeBoard, createBoard, listBoardsInFolder, listBoardsInSpace } from "@/lib/board";
 import { canEditSpace, getSpaceForReader, listSpacesForUser } from "@/lib/space";
 import { canRead, type ViewerContext } from "@/lib/access";
 import { prisma } from "@/lib/prisma";
@@ -35,6 +35,63 @@ export async function GET(req: Request) {
   const spaceId = url.searchParams.get("spaceId");
   const folderId = url.searchParams.get("folderId");
   const includeArchived = url.searchParams.get("includeArchived") === "1";
+
+  // ?editable=1: every List the viewer may WRITE to, grouped by Space.
+  //
+  // This is the source for the create-task modal's location picker and for
+  // "Move to list…" (spec-task-detail section 4 step 1). It exists because
+  // ?all=1 answers "what can I read", and offering a person a destination they
+  // cannot write to produces a picker row that 403s on click. The Personal
+  // list rides along: it is space-less, so it comes back under a null spaceId
+  // and the picker renders it first, as "My work › Personal list".
+  //
+  // `productSlug` rides along too, because the two callers do NOT want the same
+  // set: creating a task in your own Personal list is valid, moving another
+  // List's task into it is refused by PATCH /api/items/[id] with 403. The route
+  // stays the superset and answers enough for a caller to filter, rather than
+  // narrowing for one caller and breaking the other.
+  if (url.searchParams.get("editable") === "1") {
+    const spaces = await listSpacesForUser(c.userId, c.organizationId, { accessLevel: c.accessLevel });
+    const spaceIds = spaces.map((s) => s.id);
+    const candidates = await prisma.board.findMany({
+      where: {
+        organizationId: c.organizationId,
+        ...(includeArchived ? {} : { archivedAt: null }),
+        OR: [
+          ...(spaceIds.length ? [{ spaceId: { in: spaceIds } }] : []),
+          // Space-less boards the viewer owns: the Personal list.
+          { spaceId: null, ownerId: c.userId },
+          // A direct List grant, which does not need Space membership.
+          { members: { some: { userId: c.userId } } },
+        ],
+      },
+      select: { id: true, slug: true, name: true, icon: true, color: true, spaceId: true, folderId: true, productSlug: true },
+      orderBy: { name: "asc" },
+    });
+    // One write check per candidate. The list is per-viewer and small (a
+    // person is on tens of Lists, not thousands), and offering a row that
+    // 403s would be worse than the checks.
+    const allowed = await Promise.all(
+      candidates.map(async (b) => ((await canContributeBoard(b.id, c.userId, c.accessLevel)) ? b : null)),
+    );
+    const boards = allowed.filter((b): b is NonNullable<typeof b> => b !== null);
+    // Only the Spaces that still have a List under them after the write check.
+    // `spaces` is everything the viewer can READ, so a Space they can open but
+    // write to nowhere inside came back with no boards beneath it, and the
+    // picker drew an empty Space header. This route exists precisely so a
+    // picker never offers a row that leads nowhere; a header with nothing under
+    // it is the same broken promise one level up.
+    const usedSpaceIds = new Set(boards.map((b) => b.spaceId).filter((id): id is string => !!id));
+    const spaceById = new Map(
+      spaces
+        .filter((s) => usedSpaceIds.has(s.id))
+        .map((s) => [s.id, { id: s.id, name: s.name, icon: s.icon ?? null }] as const),
+    );
+    return NextResponse.json({
+      boards,
+      spaces: [...spaceById.values()],
+    });
+  }
 
   // Flat org-wide listing across every Space the viewer can read. Used
   // by cross-entity pickers (e.g. linking Boards to an OKR) where the

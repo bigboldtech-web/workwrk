@@ -3,15 +3,16 @@
 // SpaceListItemsTable — the interactive rows for the Space "List" tab. Brings
 // the cross-board aggregate to parity with the board List: the progress status
 // circle before the title, a row that opens the item in the big centered popup
-// (BoardItemDrawer) instead of navigating away, and hover actions.
+// (the @drawer route over this page) instead of navigating away, and hover
+// actions.
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { StatusGlyph } from "@/components/board-view/status-glyph";
-import { BoardItemDrawer } from "@/components/board-view/board-item-drawer";
 import type { StatusOption } from "@/lib/board-items-shared";
+import { openTask } from "@/lib/nav/open-task";
 
 export interface SpaceListRow {
   id: string;
@@ -39,22 +40,40 @@ function timeAgo(d: string | Date): string {
 export function SpaceListItemsTable({
   items,
   statuses,
-  canEdit,
-  currentUserId,
+  statusesByList,
 }: {
   items: SpaceListRow[];
+  /**
+   * The fallback palette, used only for a row whose List is not in
+   * `statusesByList` (a List created between the server render and this one).
+   */
   statuses: StatusOption[];
-  canEdit: boolean;
-  currentUserId: string | null;
+  /**
+   * audit spaces-boards High #3: EVERY cross-List surface used to render the
+   * SPACE wizard's palette (`Space.settings.workflow.statuses`) for every row,
+   * so a List with its own statuses showed the wrong word in the wrong colour,
+   * and the in-row picker offered statuses that List does not have. Statuses
+   * belong to a List, so they arrive keyed by List slug and each row resolves
+   * its own. `/everything` has always done it this way; now the Space and
+   * Folder surfaces do too.
+   */
+  statusesByList?: Record<string, StatusOption[]>;
+  // `canEdit` and `currentUserId` used to ride along for the BoardItemDrawer
+  // this table mounted. The drawer is the intercepted /item/<id> now, so both
+  // props had no reader left: a prop nothing reads is a claim nothing keeps.
 }) {
   const router = useRouter();
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
   // Start expanded so subtasks are immediately visible nested under their
   // parent (the caret collapses them). Seeds from the parents present on mount.
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(items.filter((i) => i.parentItemId).map((i) => i.parentItemId as string)),
   );
-  const byValue = new Map(statuses.map((s) => [s.value, s]));
+  const fallbackByValue = new Map(statuses.map((s) => [s.value, s]));
+  const statusesFor = (listSlug: string): StatusOption[] => statusesByList?.[listSlug] ?? statuses;
+  const lookupFor = (listSlug: string): Map<string, StatusOption> => {
+    const own = statusesByList?.[listSlug];
+    return own ? new Map(own.map((s) => [s.value, s])) : fallbackByValue;
+  };
 
   // Nest subtasks under their parent. A subtask whose parent isn't in this set
   // (e.g. filtered out) is promoted to top-level so it's never lost. Collapsed
@@ -83,8 +102,11 @@ export function SpaceListItemsTable({
     });
 
   const renderRow = (it: SpaceListRow, depth: number): ReactNode[] => {
-    const current = it.status ? byValue.get(it.status) ?? null : null;
-    const statusColor = current?.color ?? "#A1A1AA";
+    const rowStatuses = statusesFor(it.board.slug);
+    const current = it.status ? lookupFor(it.board.slug).get(it.status) ?? null : null;
+    // `color-mix` rather than an "1a" hex suffix so a status colour may be a
+    // token (`var(--os-c-*)`), which a string concat would silently break.
+    const statusColor = current?.color ?? "var(--os-ink-3)";
     const statusLabel = current?.label ?? (it.status ?? "—");
     const kids = childrenByParent.get(it.id) ?? [];
     const isOpen = expanded.has(it.id);
@@ -108,11 +130,11 @@ export function SpaceListItemsTable({
             )}
             <button
               type="button"
-              onClick={() => setOpenItemId(it.id)}
+              onClick={() => openTask(router, it.id)}
               className="flex items-center gap-2 min-w-0 flex-1 text-left"
               title={it.title}
             >
-              <StatusGlyph current={current} statuses={statuses} />
+              <StatusGlyph current={current} statuses={rowStatuses} />
               <span className={`truncate hover:text-[var(--os-brand)] transition-colors ${depth > 0 ? "text-base text-zinc-700" : "text-base font-medium text-zinc-900"}`}>
                 {it.title}
               </span>
@@ -122,10 +144,16 @@ export function SpaceListItemsTable({
                 </span>
               ) : null}
             </button>
+            {/* Its List, with this task open. `?item=` is a one-release
+                back-compat door that board-canvas 308s to /item/<id>, so
+                EMITTING it here made this surface produce the very URL the
+                redirect exists to retire, and cost the reader a bounce. The
+                link points at the task's own route, which opens as the drawer
+                over whatever list they were reading. */}
             <Link
-              href={`/boards/${it.board.slug}?item=${it.id}`}
+              href={`/item/${it.id}`}
               className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center justify-center w-6 h-6 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 shrink-0"
-              title="Open in its board"
+              title="Open in its list"
             >
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
@@ -134,7 +162,7 @@ export function SpaceListItemsTable({
         <td className="px-3 py-2">
           <span
             className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium"
-            style={{ backgroundColor: `${statusColor}1a`, color: statusColor }}
+            style={{ backgroundColor: `color-mix(in srgb, ${statusColor} 12%, transparent)`, color: statusColor }}
           >
             {statusLabel}
           </span>
@@ -165,7 +193,8 @@ export function SpaceListItemsTable({
           <tr className="text-left text-micro uppercase tracking-wide text-zinc-500">
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Status</th>
-            <th className="px-3 py-2 font-medium hidden sm:table-cell">Board</th>
+            {/* Naming canon: List, never Board. */}
+            <th className="px-3 py-2 font-medium hidden sm:table-cell">List</th>
             <th className="px-3 py-2 font-medium text-right tabular-nums">Updated</th>
           </tr>
         </thead>
@@ -174,17 +203,6 @@ export function SpaceListItemsTable({
         </tbody>
       </table>
 
-      <BoardItemDrawer
-        itemId={openItemId}
-        canEdit={canEdit}
-        currentUserId={currentUserId}
-        statuses={statuses}
-        onClose={() => setOpenItemId(null)}
-        onItemChanged={() => router.refresh()}
-        onItemArchived={() => { setOpenItemId(null); router.refresh(); }}
-        // Let subtasks (and their subtasks) open in-place within the drawer.
-        onOpenItem={(id) => setOpenItemId(id)}
-      />
     </>
   );
 }

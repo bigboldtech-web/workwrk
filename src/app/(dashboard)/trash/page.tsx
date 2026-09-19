@@ -1,140 +1,43 @@
-"use client";
+// /trash: get back anything you deleted or archived, before it is gone.
+//
+// Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2 (/trash).
+//
+// FOUR TRASH SURFACES BECOME ONE (critic #3). Each keeps a door:
+//   /trash                  this page
+//   /docs/trash             308 -> /trash?type=doc      (next.config.ts)
+//   /docs?view=archived     308 -> /trash?type=doc      (next.config.ts)
+//   /agreements?view=trash  308 -> /trash?type=contract (next.config.ts)
+// The Tables toolbar's deleted tables and forms land here with ?type=table and
+// ?type=form. Deleted ROWS inside a table are not app Trash and stay in that
+// table's own Data > Trash dialog: a row has no name, no page and no location
+// outside its table, so it could not be given a Name, Location or Restore
+// target on this table.
+//
+// The page is a Member's page now. It used to answer `isManager`, so somebody
+// who deleted their own list read "Trash is for managers" and had to find a
+// manager (work-tasks #11). The gate is the `trash` app key; what a person can
+// see inside is decided per row by the route.
 
-/* System-wide Trash — org recycle bin. Deleted documents (SOPs, Tables, Files,
- * Policies …) are recoverable here for 60 days, then auto-purged. Managers only.
- *   GET    /api/trash
- *   POST   /api/trash/[id]/restore
- *   DELETE /api/trash/[id]
- */
+import { gatePage } from "@/lib/access/gate";
+import { tabFromParam, typeFromParam } from "@/lib/trash-view";
+import { TrashClient } from "./trash-client";
 
-import { Dots } from "@/components/ui/dots";
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useState } from "react";
-import {
-  Trash2,
-  RotateCcw,
-  BookCopy,
-  ShieldCheck,
-  FileText,
-  Table as TableIcon,
-  Paperclip,
-  PenLine,
-  FileSignature,
-  Boxes,
-  Folder,
-  ListChecks,
-  CheckSquare,
-} from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { OsEmptyView } from "@/components/layout/os/empty-view";
-import { useOsToast } from "@/components/layout/os/toast";
-import { useConfirm } from "@/components/ui/dialog-provider";
+export const dynamic = "force-dynamic";
 
-type Item = { id: string; entityType: string; entityId: string; label: string; deletedByName: string | null; deletedAt: string };
-
-const TYPE_META: Record<string, { label: string; Icon: typeof FileText }> = {
-  note: { label: "Note", Icon: PenLine },
-  sop: { label: "SOP", Icon: BookCopy },
-  whiteboard: { label: "Canvas", Icon: FileText },
-  table: { label: "Table", Icon: TableIcon },
-  file: { label: "File", Icon: Paperclip },
-  policy: { label: "Policy", Icon: ShieldCheck },
-  contract: { label: "Contract", Icon: FileSignature },
-  template: { label: "Contract template", Icon: FileSignature },
-  space: { label: "Space", Icon: Boxes },
-  folder: { label: "Folder", Icon: Folder },
-  board: { label: "List", Icon: ListChecks },
-  item: { label: "Task", Icon: CheckSquare },
-};
-
-function daysLeft(deletedAt: string): number {
-  const elapsed = (Date.now() - new Date(deletedAt).getTime()) / 86_400_000;
-  return Math.max(0, Math.ceil(60 - elapsed));
-}
-
-export default function TrashPage() {
-  const { toast } = useOsToast();
-  const confirm = useConfirm();
-  const [items, setItems] = useState<Item[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [denied, setDenied] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/trash");
-      if (res.status === 403) { setDenied(true); setErr(null); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      setItems(((d.data ?? d).items) ?? []);
-      setErr(null);
-    } catch (e) { setErr(e instanceof Error ? e.message : "load failed"); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
-  async function restore(it: Item) {
-    setBusy(it.id);
-    try {
-      const res = await fetch(`/api/trash/${encodeURIComponent(it.id)}/restore`, { method: "POST" });
-      if (res.ok) { toast(`Restored ${TYPE_META[it.entityType]?.label ?? "item"}`); await load(); }
-      else toast((await res.json().catch(() => ({})))?.error || "Couldn't restore");
-    } catch { toast("Couldn't restore"); } finally { setBusy(null); }
-  }
-  async function deleteForever(it: Item) {
-    if (!(await confirm({ title: "Delete permanently", description: `Permanently delete “${it.label}”? This cannot be undone.`, destructive: true, confirmLabel: "Delete" }))) return;
-    setBusy(it.id);
-    try {
-      const res = await fetch(`/api/trash/${encodeURIComponent(it.id)}`, { method: "DELETE" });
-      if (res.ok) { toast("Deleted permanently"); await load(); } else toast("Couldn't delete");
-    } catch { toast("Couldn't delete"); } finally { setBusy(null); }
-  }
+export default async function TrashPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; type?: string; q?: string }>;
+}) {
+  const { viewer } = await gatePage("view", { type: "app", key: "trash" }, { callbackUrl: "/trash" });
+  const sp = await searchParams;
 
   return (
-    <>
-      <OsPageHeader title="Trash" />
-
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        {denied ? (
-          <OsEmptyView context="docs" title="Trash is for managers" hint="Ask your manager if something of yours needs restoring." />
-        ) : err ? (
-          <OsEmptyView variant="error" title="Couldn't load Trash" hint={err} action={{ label: "Try again", onClick: () => void load() }} />
-        ) : items === null ? (
-          <SkeletonRows />
-        ) : items.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-200 p-10 text-center">
-            <Trash2 className="mx-auto h-8 w-8 text-zinc-300" />
-            <div className="mt-3 text-xs font-medium text-zinc-700">Trash is empty</div>
-            <div className="mt-1 text-base text-zinc-500">Deleted Spaces, Lists, Tasks and documents (SOPs, Tables, Files …) appear here and are recoverable for 60 days.</div>
-          </div>
-        ) : (
-          <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white">
-            <ul className="divide-y divide-zinc-100">
-              {items.map((it) => {
-                const meta = TYPE_META[it.entityType] ?? { label: it.entityType, Icon: FileText };
-                const left = daysLeft(it.deletedAt);
-                return (
-                  <li key={it.id} className="flex items-center gap-3 px-4 py-3">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500"><meta.Icon className="h-4 w-4" /></span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-base font-medium text-zinc-900">{it.label}</div>
-                      <div className="truncate text-xs text-zinc-400">
-                        {meta.label} · deleted {new Date(it.deletedAt).toLocaleDateString()}{it.deletedByName ? ` by ${it.deletedByName}` : ""}
-                      </div>
-                    </div>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${left <= 7 ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-700"}`}>{left}d left</span>
-                    <button type="button" disabled={busy === it.id} onClick={() => restore(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
-                      {busy === it.id ? <Dots variant="pending" /> : <RotateCcw className="h-3.5 w-3.5" />} Restore
-                    </button>
-                    <button type="button" disabled={busy === it.id} onClick={() => deleteForever(it)} className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-red-600 hover:bg-red-50 disabled:opacity-50">
-                      <Trash2 className="h-3.5 w-3.5" /> Delete
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        )}
-      </div>
-    </>
+    <TrashClient
+      initialTab={tabFromParam(sp.tab)}
+      initialType={typeFromParam(sp.type)}
+      initialQuery={sp.q ?? ""}
+      canPurge={viewer.orgRole === "OWNER" || viewer.orgRole === "ADMIN"}
+    />
   );
 }

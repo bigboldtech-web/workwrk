@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { WORK_HOME_HREF } from "./nav/route-hub";
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] ?? c));
@@ -31,10 +32,10 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
   if (claim.count !== 1) return false;
 
   // Task reminders deep-link to the task and surface its title + due time;
-  // personal reminders keep their own title and open /today.
+  // personal reminders keep their own title and open the Work landing.
   let title = "Reminder";
   let message = r.title;
-  let link = "/today";
+  let link: string = WORK_HOME_HREF;
   if (r.entityType === "BOARD_ITEM" && r.entityId) {
     const item = await prisma.item.findUnique({
       where: { id: r.entityId },
@@ -42,8 +43,8 @@ export async function fireReminder(r: DueReminder): Promise<boolean> {
     });
     // Only deep-link to a LIVE task. A missing (hard-deleted) or archived
     // (trashed) item would dead-end on /item/[id] as "Task not found", so
-    // the reminder degrades to a personal one that opens /today instead of
-    // a broken link. NB: the link is set INSIDE this guard — it used to be
+    // the reminder degrades to a personal one that opens the Work landing
+    // instead of a broken link. NB: the link is set INSIDE this guard, it used to be
     // set unconditionally above the lookup, which is exactly what stranded
     // fired reminders on deleted tasks.
     if (item && !item.archivedAt) {

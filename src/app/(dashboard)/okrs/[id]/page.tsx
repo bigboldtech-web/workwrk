@@ -257,7 +257,7 @@ export default async function OkrDetailPage(
         <div className="okrd__hero-in">
           <div className="okrd__crumbs">
             <BackButton
-              fallbackHref={okr.level === "COMPANY" ? "/okrs?level=company" : "/okrs"}
+              fallbackHref={okr.level === "COMPANY" ? "/okrs?view=company" : "/okrs"}
               label={okr.level === "COMPANY" ? "Company goals" : "Goals"}
             />
           </div>

@@ -9,6 +9,7 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { getSpaceForReader } from "@/lib/space";
 import { recordSnapshot } from "@/lib/snapshots";
+import { withArchivedBy } from "@/lib/archived-by";
 
 async function checkSpaceVisible(spaceId: string | null, userId: string, accessLevel: string | null | undefined): Promise<boolean> {
   if (!spaceId) return true;
@@ -93,6 +94,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
-  await prisma.whiteboard.update({ where: { id }, data: { archivedAt: new Date() } });
+  await withArchivedBy(ctx.userId, (extra) =>
+    prisma.whiteboard.update({ where: { id }, data: { archivedAt: new Date(), ...extra } }),
+  );
   return NextResponse.json({ ok: true });
 }

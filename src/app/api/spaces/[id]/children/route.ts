@@ -19,6 +19,10 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { folderAccessForSpace, folderVisibleTo } from "@/lib/folder";
+import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
+import {
+  spaceContainerRole, listContainerRole, type ContainerRole,
+} from "@/lib/work/container-menu";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -34,7 +38,7 @@ async function ctx() {
 
 const BOARD_SELECT = {
   id: true, slug: true, name: true, icon: true, color: true,
-  visibility: true,
+  visibility: true, ownerId: true,
   // Board.settings carries sprint identity (settings.sprint) so the sidebar
   // tree can render sprint Lists with their own glyph.
   settings: true,
@@ -65,6 +69,35 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (access.mode === "none") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
+
+  // THE ROLE EVERY TREE ROW'S "…" NEEDS. `ContainerMenu` hides the rows a
+  // viewer cannot use, and the sidebar had no way to tell it who was looking:
+  // a Can view member was offered Rename, Move, Duplicate, Archive and Delete
+  // on every row, and each one answered 403. One membership read here answers
+  // it for the whole subtree, which is what the sidebar can afford (an async
+  // access call per row is dozens of round trips per expand).
+  const isOrgAdmin = legacyIsAdminLevel(c.accessLevel);
+  const ownMembership = isOrgAdmin
+    ? null
+    : await prisma.spaceMember.findUnique({
+        where: { spaceId_userId: { spaceId: id, userId: c.userId } },
+        select: { role: true },
+      });
+  const spaceRole: ContainerRole = spaceContainerRole({
+    isOrgAdmin,
+    memberRole: ownMembership?.role ?? null,
+  });
+  // Deliberately conservative for a PRIVATE List: without the viewer's own
+  // BoardMember row (which this listing does not read, one query per row) an
+  // ADMIN grant on a private List resolves to "view" here. An absent row costs
+  // a trip to the List's own page; a present one costs a 403.
+  const roleForBoard = (b: { visibility: string | null; ownerId: string | null }): ContainerRole =>
+    listContainerRole({
+      isOrgAdmin,
+      spaceRole,
+      visibility: b.visibility,
+      isOwner: b.ownerId === c.userId,
+    });
   // A folder-only grantee sees the Space as a bare container: ONLY their
   // granted folders (rooted here regardless of real nesting) and their
   // subtree — nothing else at the space root.
@@ -161,7 +194,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     visibility: "PRIVATE" | "WORKSPACE" | "ORG";
     ownerId: string | null;
     _count: { boards: number; childFolders: number };
-    boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG"; settings: unknown }>;
+    boards: Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: "PRIVATE" | "WORKSPACE" | "ORG"; ownerId: string | null; settings: unknown }>;
     childFolders?: FolderShape[];
   };
 
@@ -217,14 +250,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   function annotate(nodes: FolderShape[]): unknown[] {
     return nodes.map((n) => ({
       ...n,
+      // A Folder's management gate IS its Space's (canEditSpace), so it carries
+      // the Space role unchanged.
+      role: spaceRole,
       docs: docsByFolder.get(n.id) ?? [],
+      boards: n.boards.map((b) => ({ ...b, role: roleForBoard(b) })),
       childFolders: n.childFolders ? annotate(n.childFolders) : [],
     }));
   }
 
   return NextResponse.json({
+    spaceRole,
     folders: annotate(folders as FolderShape[]),
-    boards: rootBoardsR.status === "fulfilled" ? rootBoardsR.value : [],
+    boards: (rootBoardsR.status === "fulfilled" ? rootBoardsR.value : []).map((b) => ({
+      ...b,
+      role: roleForBoard(b),
+    })),
     tables: tablesR.status === "fulfilled" ? tablesR.value : [],
     docs: docsR.status === "fulfilled" ? docsR.value : [],
     whiteboards: whiteboardsR.status === "fulfilled" ? whiteboardsR.value : [],

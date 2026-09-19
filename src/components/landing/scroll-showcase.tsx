@@ -145,14 +145,18 @@ export function ScrollShowcase() {
     >
       <div className="sticky top-0 h-screen flex items-center overflow-hidden">
         <div className="max-w-7xl mx-auto px-6 lg:px-10 w-full">
-          <div className="grid lg:grid-cols-[1fr_1.35fr] gap-12 lg:gap-16 items-center">
+          {/* grid-cols-1: an implicit `auto` track sizes to the max-content
+              of its widest item, which is the product mock, so the heading
+              beside it was laid out 423px wide inside a 342px phone column
+              and clipped mid-word. minmax(0, 1fr) is the track. */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.35fr] gap-12 lg:gap-16 items-center">
             {/* ── Left rail ───────────────────────────────────────── */}
             <div>
               <p
                 className="text-[12px] font-bold uppercase tracking-[0.22em]"
                 style={{ color: "var(--brand-red)" }}
               >
-                One platform · seven surfaces
+                One platform · one data model
               </p>
 
               <h2
@@ -163,7 +167,7 @@ export function ScrollShowcase() {
                   lineHeight: 1.04,
                 }}
               >
-                Every workflow your business runs &mdash; <br />
+                Every workflow your business runs,{" "}<br />
                 <span style={{ color: active.hue }}>under one roof.</span>
               </h2>
 
@@ -171,9 +175,10 @@ export function ScrollShowcase() {
                 className="mt-5 text-lg lg:text-lg leading-relaxed max-w-md"
                 style={{ color: "var(--m-text-muted)" }}
               >
-                Scroll. Each hub is a fully-featured product on its own.
-                Together they replace 15+ tools and share a single data
-                model &mdash; so every signal connects to everything else.
+                Scroll. Each block is a product on its own. Together they
+                replace the stack a company usually buys one tool at a time,
+                on one data model, so every signal connects to everything
+                else.
               </p>
 
               {/* Hub list */}

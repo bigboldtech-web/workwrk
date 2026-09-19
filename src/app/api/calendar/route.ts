@@ -172,7 +172,7 @@ export async function GET(req: Request) {
       priority: it.priority,
       loggedMs: it.ownerId ? userTaskMs.get(`${it.ownerId}|${it.id}`) ?? 0 : 0,
       spaceId: it.board?.spaceId ?? null,
-      url: `/boards/${it.board?.slug ?? it.boardId}?item=${it.id}`,
+      url: `/item/${it.id}`,
     };
   });
 
@@ -266,7 +266,7 @@ export async function GET(req: Request) {
         board: it.board?.name ?? null,
         dueAt: it.dueAt ? it.dueAt.toISOString() : null,
         loggedMs: userTaskMs.get(`${it.ownerId}|${it.id}`) ?? 0,
-        url: `/boards/${it.board?.slug ?? it.boardId}?item=${it.id}`,
+        url: `/item/${it.id}`,
       };
       if (norm === "done") {
         if (it.updatedAt >= weekStart) b.doneThisWeek.push(card);

@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2, ArrowRight, ShieldCheck } from "lucide-react";
 import { resetSessionExpired } from "@/lib/session-expiry";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 // Map an authorize() error to what the person should read. Our authorize
 // throws curated, safe messages (lockout countdown, account/workspace status),
@@ -26,7 +27,7 @@ function friendlyError(err: string): string {
 export default function LoginPage() {
   const router = useRouter();
   const sp = useSearchParams();
-  const callbackUrl = sp.get("callbackUrl") || "/dashboard";
+  const callbackUrl = sp.get("callbackUrl") || WORK_HOME_HREF;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mfaRequired, setMfaRequired] = useState(false);

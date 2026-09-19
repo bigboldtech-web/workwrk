@@ -13,12 +13,12 @@
 // Pure resolution (`resolveCloseTarget`) is separate from the storage-backed
 // wrappers so the vitest suite proves the rule without a DOM.
 
-import { SETTINGS_ROUTES } from "./nav/route-hub";
+import { SETTINGS_ROUTES, WORK_HOME_HREF } from "./nav/route-hub";
 
 export const SETTINGS_RETURN_KEY = "workwrk:settings:return";
 export const LAST_APP_PATH_KEY = "workwrk:shell:last-app-path";
 /** The last-resort exit. Settings chrome never names it directly. */
-export const SETTINGS_FALLBACK_HREF = "/today";
+export const SETTINGS_FALLBACK_HREF: string = WORK_HOME_HREF;
 
 /** A return entry older than this is stale (a tab left open overnight). */
 export const SETTINGS_RETURN_TTL_MS = 12 * 60 * 60 * 1000;

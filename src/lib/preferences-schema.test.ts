@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  RESERVED_SURFACE_KEYS,
   deepMergePatch,
   describeIssues,
   preferencesPatchSchema,
@@ -234,5 +235,117 @@ describe("deepMergePatch", () => {
     const existing = { cards: ["a"], order: ["a"] };
     const patch = { order: ["b"] };
     expect(deepMergePatch(existing, patch)).toEqual({ ...existing, ...patch });
+  });
+});
+
+// ── Phase 2 additions (spec-task-detail section 4 step 1, spec-work-home W0) ──
+//
+// Every key a later Phase-2 stage writes has to be named here first, because
+// the schema is strict: an unlisted key is a 400 that names it, and a surface
+// whose PATCH 400s is a setting that silently never persists (critic #7).
+
+describe("Phase 2 preference keys", () => {
+  it("home.work.itemFields persists the task-detail field set per List", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { work: { itemFields: { list_abc: ["status", "assignees", "dueAt", "priority"] } } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.work.itemFields rejects a non-string-array value", () => {
+    const r = preferencesPatchSchema.safeParse({ home: { work: { itemFields: { list_abc: [1, 2] } } } });
+    expect(r.success).toBe(false);
+  });
+
+  it("home.work.drawerWidth accepts the design system's 480 to 720 band", () => {
+    for (const width of [480, 520, 720]) {
+      expect(preferencesPatchSchema.safeParse({ home: { work: { drawerWidth: width } } }).success).toBe(true);
+    }
+    for (const width of [479, 721, 520.5]) {
+      expect(preferencesPatchSchema.safeParse({ home: { work: { drawerWidth: width } } }).success).toBe(false);
+    }
+  });
+
+  it("home.work.viewOverrides persists one viewer's sort of a shared view", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { work: { viewOverrides: { view_1: { sortKey: "dueAt", sortDir: "asc" } } } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.work.surface takes both a reserved surface name and a view id", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: {
+        work: {
+          surface: {
+            "my-work": { viewOptions: { group: "due" } },
+            view_ck1: { columns: ["title", "status"] },
+          },
+        },
+      },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("every reserved surface key is a legal surface name", () => {
+    for (const key of RESERVED_SURFACE_KEYS) {
+      const r = preferencesPatchSchema.safeParse({ home: { work: { surface: { [key]: {} } } } });
+      expect(r.success).toBe(true);
+    }
+  });
+
+  it("home.work.savedFilters and pinnedViews were already there and stay there", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { work: { savedFilters: [{ id: "f1" }], pinnedViews: ["view_1"] } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.work.everythingFilters is accepted: /everything's own saved views", () => {
+    // A strict schema 400s an unlisted key, so the page's "Save as view"
+    // footer would have failed silently without this row.
+    const r = preferencesPatchSchema.safeParse({
+      home: { work: { everythingFilters: [{ id: "ev_1", name: "Urgent", filters: { priorities: ["URGENT"] } }] } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.work.everythingFilters is SEPARATE from savedFilters, not an alias", () => {
+    const both = preferencesPatchSchema.safeParse({
+      home: { work: { savedFilters: [{ id: "f1" }], everythingFilters: [{ id: "ev_1" }] } },
+    });
+    expect(both.success).toBe(true);
+  });
+
+  it("home.notifications.inboxView is accepted (the key /inbox already writes)", () => {
+    const r = preferencesPatchSchema.safeParse({
+      home: { notifications: { inboxView: { showAll: true, groupByDate: false, sortNewest: true, mode: "inline" } } },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("home.cards is accepted (the Work sidebar's optional-row key)", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { cards: ["spaces", "everything"] } }).success).toBe(true);
+  });
+
+  it("sidebar.expanded and sidebar.hiddenSpaceIds persist the Spaces tree", () => {
+    const r = preferencesPatchSchema.safeParse({
+      sidebar: { expanded: ["space_1", "folder_2"], hiddenSpaceIds: ["space_9"] },
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it("a typo in the new namespace is still a 400 that names the key", () => {
+    const r = preferencesPatchSchema.safeParse({ home: { work: { itemField: {} } } });
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      expect(describeIssues(r.error.issues).map((i) => i.path)).toContain("home.work.itemField");
+    }
+  });
+
+  it("the additions are widening: none of them is required", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { work: {} } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ sidebar: {} }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({}).success).toBe(true);
   });
 });

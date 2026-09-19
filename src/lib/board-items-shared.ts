@@ -28,10 +28,29 @@ export interface StatusOption {
   group: StatusGroup;
 }
 
+/**
+ * The three statuses a List has before anybody edits them.
+ *
+ * These are DATA, not styling: a List owner picks a hex per status and it is
+ * stored on `Board.statuses`, so the renderers have to take a colour value
+ * here rather than a class name. What they may not be is a colour vocabulary
+ * of their own. The three defaults were #94a3b8 / #3b82f6 / #10b981, which is
+ * Tailwind's slate, blue and emerald: a blue that is not the product's blue
+ * (#0073EA) and a green that is not the product's green, arriving on rows
+ * beside chips that use the real tokens. They are now the token values, so
+ * the seeded product ships one palette.
+ *
+ * Renderers still owe the other half of the rule: the pill is PALE (a tint of
+ * this colour behind the colour as text), never a solid block, because a
+ * saturated fill on a row makes a status shout louder than the task.
+ */
 export const DEFAULT_STATUS_OPTIONS: readonly StatusOption[] = [
-  { value: "TO_DO",       label: "To Do",        color: "#94a3b8", group: "ACTIVE" },
-  { value: "IN_PROGRESS", label: "In Progress",  color: "#3b82f6", group: "ACTIVE" },
-  { value: "DONE",        label: "Done",         color: "#10b981", group: "DONE" },
+  // --os-ink-3: not started is quiet.
+  { value: "TO_DO",       label: "To Do",        color: "#98A2B3", group: "ACTIVE" },
+  // --os-brand: the one blue, and the only status that carries it.
+  { value: "IN_PROGRESS", label: "In Progress",  color: "#0073EA", group: "ACTIVE" },
+  // --os-success-solid.
+  { value: "DONE",        label: "Done",         color: "#15803D", group: "DONE" },
 ] as const;
 
 const STATUS_GROUPS = new Set<string>(["ACTIVE", "DONE", "CLOSED"]);
@@ -102,16 +121,44 @@ export function isDoneStatus(statuses: readonly StatusOption[], value: string | 
   return opt ? opt.group !== "ACTIVE" : isDoneStatusName(value);
 }
 
-// Task-system phase 2 — first-class priority. Order matters: it's the
-// URGENT→LOW display + group-by bucket order (ClickUp flag palette).
+// First-class priority. Order matters: it is the URGENT to LOW display order
+// and the group-by bucket order.
+//
+// `color` exists for the CHARTS (board-chart-view, board-pivot-view,
+// board-dashboard-view), where a series genuinely needs a colour value and a
+// class name is no use. It is the token palette, not a rainbow: the blue is
+// the product's blue and the red and amber are the semantic trio's.
 export const PRIORITY_OPTIONS = [
-  { value: "URGENT", label: "Urgent", color: "#ef4444" },
-  { value: "HIGH",   label: "High",   color: "#f59e0b" },
-  { value: "NORMAL", label: "Normal", color: "#3b82f6" },
-  { value: "LOW",    label: "Low",    color: "#9ca3af" },
+  { value: "URGENT", label: "Urgent", color: "#D92D20" },
+  { value: "HIGH",   label: "High",   color: "#854D0E" },
+  { value: "NORMAL", label: "Normal", color: "#5C6779" },
+  { value: "LOW",    label: "Low",    color: "#98A2B3" },
 ] as const;
 
 export type PriorityValue = (typeof PRIORITY_OPTIONS)[number]["value"];
+
+/**
+ * How a priority READS on a task row, which is not the same question as what
+ * colour a chart draws it in.
+ *
+ * Principle 1 keeps blue off icons at rest and principle 7 says colour never
+ * travels alone, so only the semantic trio carries red, amber and green. A
+ * red, amber and blue set of flags with no word beside them broke both: it
+ * asked the reader to learn a colour code, and it spent the product's accent
+ * on a field that is not an action.
+ *
+ * So there is exactly one hue in the whole scale, on the one value that is an
+ * alarm, and the rest separate by weight: filled for high, outline for the
+ * two below it. The WORD is always rendered next to the flag, which is what
+ * actually makes the field readable, and what makes it read the same on
+ * /everything, /my-work and a List.
+ */
+export const PRIORITY_TONE: Readonly<Record<string, { text: string; filled: boolean }>> = {
+  URGENT: { text: "text-danger-text", filled: true },
+  HIGH:   { text: "text-ink",         filled: true },
+  NORMAL: { text: "text-ink-2",       filled: false },
+  LOW:    { text: "text-ink-3",       filled: false },
+};
 
 // Pre-built value→option lookups so consumers stop re-running
 // Object.fromEntries(DEFAULT_STATUS_OPTIONS.map(...)) in every view.
@@ -125,6 +172,41 @@ export interface ItemTag {
   id: string;
   name: string;
   color: string | null;
+}
+
+// ── Adding a subtask ────────────────────────────────────────────────────────
+//
+// Type-first, everywhere. A view that POSTs a placeholder title and then drops
+// the new row into rename writes that placeholder to the database the moment
+// anything interrupts the rename (a click elsewhere, a reload, a dropped
+// request), and the List is left holding a task called "New subtask". One
+// builder, so no surface can invent a title again: the user's own text is the
+// only thing that ever becomes one.
+export interface SubtaskCreateBody {
+  title: string;
+  status: string | null;
+  parentItemId: string;
+}
+
+/**
+ * The POST body for a new subtask, or null when there is nothing to save.
+ *
+ * `null` for an empty (or whitespace-only) title is the point: the caller must
+ * not fall back to a placeholder, it must keep the cursor in the input.
+ */
+export function buildSubtaskBody(args: {
+  title: string;
+  parentId: string;
+  parentStatus?: string | null;
+  fallbackStatus?: string | null;
+}): SubtaskCreateBody | null {
+  const title = args.title.trim();
+  if (!title) return null;
+  return {
+    title,
+    status: args.parentStatus ?? args.fallbackStatus ?? null,
+    parentItemId: args.parentId,
+  };
 }
 
 // ── Bulk fan-out helpers (2026-08-12) ───────────────────────────────────────
@@ -229,4 +311,76 @@ export interface BoardItemRow {
   /** Resolved assignees (primary first), when the fetch path provides them.
    *  ownerId/owner is always assignees[0]. */
   assignees?: { id: string; firstName: string; lastName: string; avatar: string | null; email?: string | null }[];
+}
+
+// ── Owner-only assignee patches (data-loss fix) ────────────────────
+//
+// A PATCH that carries ownerId and NOT assigneeIds used to run through
+// resolveAssignees(undefined, ownerId), which returns [ownerId]. So changing
+// the owner from a list row replaced the whole assignee set with one person:
+// a task with three assignees silently lost two. This helper is the rule that
+// replaces it, and it never drops anyone.
+//
+//   ownerId = a person → that person is the owner and moves to the FRONT of
+//                        the existing set; everybody else keeps their order.
+//   ownerId = null     → the CURRENT owner leaves the set and the next
+//                        assignee is promoted. The rest survive.
+//
+// Clearing everyone is still possible, but only through an explicit
+// `assigneeIds: []` patch, which says so out loud.
+export function applyOwnerOnlyPatch(
+  existingAssigneeIds: readonly string[] | null | undefined,
+  existingOwnerId: string | null | undefined,
+  nextOwnerId: string | null,
+): { assigneeIds: string[]; ownerId: string | null } {
+  const base = Array.from(
+    new Set(
+      (existingAssigneeIds ?? []).filter(
+        // `.length > 0` let a whitespace-only id through and, under the merge
+        // rule below, made it permanent. Nothing that is not a real id may be
+        // carried forward.
+        (x): x is string => typeof x === "string" && x.trim().length > 0,
+      ),
+    ),
+  );
+  // Legacy rows predate assigneeIds, so the stored owner can be missing from
+  // the set. Treat it as the first assignee rather than losing it.
+  if (existingOwnerId && !base.includes(existingOwnerId)) base.unshift(existingOwnerId);
+
+  if (nextOwnerId === null) {
+    // No stored owner means there is nobody to remove; promoting base[0]
+    // repairs the row instead of deleting a real assignee.
+    const next = existingOwnerId ? base.filter((id) => id !== existingOwnerId) : base;
+    return { assigneeIds: next, ownerId: next[0] ?? null };
+  }
+
+  const next = [nextOwnerId, ...base.filter((id) => id !== nextOwnerId)];
+  return { assigneeIds: next, ownerId: nextOwnerId };
+}
+
+/**
+ * The assignee set a task should carry after an OFFBOARDING HANDOVER.
+ *
+ * The handover route used to write `ownerId` alone, which broke the one
+ * invariant every other writer holds and applyOwnerOnlyPatch now depends on:
+ * `ownerId === assigneeIds[0]`. A row left with the offboarded person still at
+ * the front of its assignee set reads as a "legacy row", and the repair runs
+ * the wrong way: the next unassign drops the RECIPIENT and promotes the leaver
+ * back to owner, silently reverting the handover.
+ *
+ * So the set is rewritten alongside the owner. The recipient goes to the
+ * front, the leaver comes out (they are being offboarded; leaving them on open
+ * work is what the handover exists to undo), and every OTHER assignee stays
+ * exactly where they were. Nobody who was working on this task loses it.
+ */
+export function applyHandoverAssignees(
+  existingAssigneeIds: readonly string[] | null | undefined,
+  leaverId: string,
+  recipientId: string,
+): string[] {
+  const rest = (existingAssigneeIds ?? []).filter(
+    (x): x is string =>
+      typeof x === "string" && x.trim().length > 0 && x !== leaverId && x !== recipientId,
+  );
+  return Array.from(new Set([recipientId, ...rest]));
 }

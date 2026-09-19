@@ -17,6 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
+import { createPersonalTask } from "@/lib/work/personal-task";
 
 const ALLOWED_TYPES = ["DAILY_STANDUP", "WEEKLY_REVIEW", "ONE_ON_ONE", "QUARTERLY_REVIEW", "ANNUAL_PLANNING", "ADHOC"] as const;
 
@@ -167,18 +168,22 @@ export async function POST(req: Request) {
     createdActionItems.push(created);
 
     if (parsed.data.spawnTasks) {
-      await prisma.task.create({
-        data: {
-          organizationId: user.organizationId,
-          title: ai.title,
-          description: `From meeting: ${meeting.title}`,
-          priority: "NORMAL",
-          date: deadline ?? new Date(),
-          assigneeId,
-          source: "MANUAL",
-        },
-      });
-      tasksSpawned++;
+      // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in
+      // this release, so "+ N tasks spawned" named work nobody could open. The
+      // task lands on the assignee's Personal list now, which is what /my-work
+      // reads. A failure here must not lose the action items already written
+      // above, so it is caught and reflected in the count the caller is shown.
+      const spawned = await createPersonalTask({
+        organizationId: user.organizationId,
+        assigneeId,
+        title: ai.title,
+        description: `From meeting: ${meeting.title}`,
+        priority: "NORMAL",
+        dueAt: deadline ?? new Date(),
+        legacy: { source: "MEETING", sourceRef: meeting.id },
+        actorId: user.id,
+      }).catch(() => null);
+      if (spawned) tasksSpawned++;
     }
   }
 

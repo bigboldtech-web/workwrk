@@ -66,22 +66,30 @@ export interface StatusChipProps
   label: string;
 }
 
-/** A Chip-shaped status badge: leading dot + uppercase label, tinted from
- *  a single semantic color. Shares the Chip silhouette for row alignment. */
+/**
+ * A Chip-shaped status badge: a 6px dot and the status word, tinted from one
+ * colour.
+ *
+ * design-system 5.9: the pale fill is the DEFAULT and "the uppercase 13px
+ * label is dropped", a status is a word somebody chose, and shouting it is
+ * both harder to read and a lie about how important it is. The solid fill
+ * survives only as the opt-in status column of a table, which is not this
+ * component.
+ */
 const StatusChip = React.forwardRef<HTMLButtonElement, StatusChipProps>(
   ({ className, color, label, ...props }, ref) => (
     <button
       ref={ref}
       type="button"
       className={cn(
-        "inline-flex items-center gap-1.5 h-[30px] px-2.5 rounded-lg text-sm font-semibold uppercase tracking-wide transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-zinc-300/60 disabled:opacity-50",
+        "inline-flex items-center gap-1.5 h-[26px] px-2 rounded-md text-xs font-medium transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--os-focus)]/60 disabled:opacity-50",
         className,
       )}
-      style={{ backgroundColor: `${color}14`, color, border: `1px solid ${color}33` }}
+      style={{ backgroundColor: `${color}1F`, color, border: `1px solid ${color}33` }}
       {...props}
     >
-      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-      {label.toUpperCase()}
+      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      {label}
     </button>
   ),
 );

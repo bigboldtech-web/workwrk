@@ -60,6 +60,23 @@ export default function MentionsInboxPage() {
     <>
       <OsPageHeader title="Mentions" />
 
+      {/* Where this page is going, said plainly on the page itself.
+          spec-work-home section 0 retires /me/mentions in favour of the
+          Inbox's Mentions tab, which reads `mention` notifications. The
+          redirect is NOT live yet and this page is NOT deleted, because doc
+          and SOP mentions only become notifications when
+          scripts/backfill-mentions.ts has run in production (scripts/
+          MIGRATIONS.md): until then this is the only place these rows
+          exist, and a 308 would be a delete. This strip is the other half of
+          that honesty: a person who lands here can see the destination, and a
+          person who finds the Inbox tab half-empty knows why. */}
+      <div className="os-row flex h-9 shrink-0 items-center gap-2 border-b border-line bg-subtle px-6 text-ink-2">
+        Mentions are moving to your Inbox.
+        <Link href="/inbox?tab=mentions" className="font-medium text-brand-deep hover:underline">
+          Open the Mentions tab
+        </Link>
+      </div>
+
       {error ? (
         <OsEmptyView variant="error" title="Couldn't load mentions" hint={`API error: ${error}`} action={{ label: "Try again", onClick: () => { setError(null); setHits(null); setReloadKey((k) => k + 1); } }} />
       ) : hits === null ? (

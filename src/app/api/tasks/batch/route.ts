@@ -1,57 +1,26 @@
-import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import crypto from "crypto";
+// /api/tasks/batch, RETIRED (410 Gone).
+//
+// Phase 2 W4, docs/plans/ui-refresh/spec-work-home.md section 4. Every task in
+// this product is an `Item`. This route served the legacy `Task` table, whose
+// rows were copied onto Items by scripts/migrate-legacy-tasks.ts; the table
+// itself is kept readable for one release and is NOT deleted here.
+//
+// It answers 410 with a body naming its replacement for one release, so any
+// caller outside this repo is told where to go rather than being handed the
+// App Router's 404 HTML. The file comes out in the release after this one.
 
-export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
+import { gone, RETIRED_TASK_ROUTES } from "@/lib/work/legacy-task-api";
 
-  const orgId = getOrgId(session);
-  const currentUserId = getUserId(session);
-  const body = await req.json();
-  const { tasks } = body;
+const ROUTE = "/api/tasks/batch";
+const R = RETIRED_TASK_ROUTES[ROUTE];
 
-  if (!Array.isArray(tasks) || tasks.length === 0) {
-    return jsonError("tasks array is required");
-  }
-
-  if (tasks.length > 400) {
-    return jsonError("Maximum 400 tasks per batch");
-  }
-
-  // All tasks in a batch share the same recurringGroupId
-  const groupId = crypto.randomBytes(8).toString("hex");
-
-  const data = tasks.map((t: any) => ({
-    title: t.title?.trim() || "Untitled",
-    description: t.description?.trim() || null,
-    date: new Date(t.date),
-    hoursSpent: t.hoursSpent != null ? Number(t.hoursSpent) : null,
-    category: t.category || null,
-    status: t.status || "PLANNED",
-    recurringGroupId: groupId,
-    assigneeId: t.assigneeId || currentUserId,
-    kraId: t.kraId || null,
-    organizationId: orgId,
-  }));
-
-  const result = await prisma.task.createMany({ data });
-
-  // If recurring tasks were assigned to someone else, send one notification
-  const assignedTo = data[0]?.assigneeId;
-  const firstTitle = data[0]?.title;
-  if (assignedTo && assignedTo !== currentUserId) {
-    await prisma.notification.create({
-      data: {
-        userId: assignedTo,
-        type: "task_assigned",
-        title: "Recurring Task Assigned",
-        message: `${firstTitle} — ${result.count} occurrences`,
-        link: "/tasks",
-      },
-    }).catch((err) => console.error("[Task batch] Notification failed:", err));
-  }
-
-  return jsonSuccess({ created: result.count, groupId }, 201);
+function retired() {
+  return gone(ROUTE, R.replacement, R.detail);
 }
+
+export const dynamic = "force-dynamic";
+
+export async function POST() {
+  return retired();
+}
+

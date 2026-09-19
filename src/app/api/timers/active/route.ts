@@ -30,7 +30,7 @@ export async function GET() {
     });
     if (item) {
       title = item.title;
-      url = `/boards/${item.board?.slug ?? item.boardId}?item=${item.id}`;
+      url = `/item/${item.id}`;
     }
   }
 

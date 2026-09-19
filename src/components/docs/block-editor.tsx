@@ -1987,7 +1987,7 @@ function InlineMentionPicker({ query, anchorRect, onPick, onClose }: {
         safe(fetch("/api/users").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/me/kras").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/sops?limit=50").then((r) => r.ok ? r.json() : null)),
-        safe(fetch(`/api/tasks?limit=50`).then((r) => r.ok ? r.json() : null)),
+        safe(fetch("/api/me/items?status=open").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/studio/boards").then((r) => r.ok ? r.json() : null)),
       ]);
       extractArray(usersRes).slice(0, 30).forEach((u) => {
@@ -2000,7 +2000,7 @@ function InlineMentionPicker({ query, anchorRect, onPick, onClose }: {
         if (typeof s.id === "string") all.push({ kind: "sop", id: s.id as string, label: (s.title as string) || "SOP", subtitle: (s.category as string) || "SOP", href: `/sops/${s.id}` });
       });
       extractArray(tasksRes).slice(0, 50).forEach((t) => {
-        if (typeof t.id === "string") all.push({ kind: "task", id: t.id as string, label: (t.title as string) || "Task", subtitle: t.date ? new Date(t.date as string).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Task", href: `/tasks` });
+        if (typeof t.id === "string") all.push({ kind: "task", id: t.id as string, label: (t.title as string) || "Task", subtitle: t.dueAt ? new Date(t.dueAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Task", href: `/item/${t.id as string}` });
       });
       extractArray(boardsRes).slice(0, 30).forEach((b) => {
         if (typeof b.id === "string") all.push({ kind: "board", id: b.id as string, label: (b.name as string) || "Board", subtitle: ((b.layout as string) || "").toLowerCase() || "Board", href: `/studio/boards/${b.id}` });
@@ -2496,14 +2496,21 @@ function TasksViewBlock({ block, readonly, onUpdate }: { block: Extract<Block, {
     let cancelled = false;
     (async () => {
       try {
-        const MS = 86_400_000;
-        const from = new Date(Date.now() - 14 * MS).toISOString().slice(0, 10);
-        const to   = new Date(Date.now() + 30 * MS).toISOString().slice(0, 10);
-        const res = await fetch(`/api/tasks?startDate=${from}&endDate=${to}`);
+        // Phase 2 W4. This read the legacy `Task` table over a date range, so
+        // the embed showed a different set of work from every other surface in
+        // the product. It reads the viewer's real open tasks now; the window
+        // filter below does the date work it always did, client side.
+        const res = await fetch("/api/me/items?status=open");
         if (!res.ok) return;
         const d = await res.json();
         if (cancelled) return;
-        setTasks(Array.isArray(d) ? d : (d.data ?? []));
+        const rows: Array<{ id: string; title: string; status?: string | null; dueAt?: string | null; priority?: string | null }> =
+          d.items ?? (Array.isArray(d) ? d : []);
+        setTasks(
+          rows
+            .filter((r) => r.dueAt)
+            .map((r) => ({ id: r.id, title: r.title, date: r.dueAt as string, status: r.status ?? "", priority: r.priority ?? "NORMAL" })),
+        );
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -2531,7 +2538,7 @@ function TasksViewBlock({ block, readonly, onUpdate }: { block: Extract<Block, {
             <option value="overdue">Overdue</option>
           </select>
         )}
-        <Link href="/tasks" className="bembed__open">Open <ChevronRight /></Link>
+        <Link href="/my-work" className="bembed__open">Open <ChevronRight /></Link>
       </header>
       {tasks === null ? (
         <div className="bembed__loading">Loading…</div>
@@ -2945,7 +2952,7 @@ function MentionPicker({ query, onPick, onClose }: { query: string; onPick: (r: 
         safe(fetch("/api/users").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/me/kras").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/sops?limit=50").then((r) => r.ok ? r.json() : null)),
-        safe(fetch(`/api/tasks?limit=50`).then((r) => r.ok ? r.json() : null)),
+        safe(fetch("/api/me/items?status=open").then((r) => r.ok ? r.json() : null)),
         safe(fetch("/api/studio/boards").then((r) => r.ok ? r.json() : null)),
       ]);
 
@@ -2984,8 +2991,8 @@ function MentionPicker({ query, onPick, onClose }: { query: string; onPick: (r: 
           all.push({
             kind: "task", id: t.id as string,
             label: (t.title as string) || "Task",
-            subtitle: t.date ? new Date(t.date as string).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Task",
-            href: `/tasks`,
+            subtitle: t.dueAt ? new Date(t.dueAt as string).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Task",
+            href: `/item/${t.id as string}`,
           });
         }
       });
@@ -3440,10 +3447,26 @@ function TaskCardBlock({ block, readonly, onUpdate, onRemove }: {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`/api/tasks/${block.taskId}`);
+        // Phase 2 W4. This asked GET /api/tasks/<id>, a route that has never
+        // existed, so an embedded task block has always sat on "Loading…"
+        // forever. It reads the one task API now, which also resolves a
+        // pre-migration task id through its forwarding address
+        // (src/lib/item-gate.ts), so blocks embedded before the Task -> Item
+        // migration hydrate for the first time rather than staying broken.
+        const res = await fetch(`/api/items/${block.taskId}`);
         if (!res.ok) return;
         const d = await res.json();
-        if (!cancelled) setMeta(d.data ?? d);
+        const it = d.item ?? d;
+        if (!cancelled && it?.id) {
+          setMeta({
+            id: it.id,
+            title: it.title,
+            status: it.status ?? undefined,
+            priority: it.priority ?? undefined,
+            date: it.dueAt ?? it.startAt ?? undefined,
+            ownerName: it.owner ? [it.owner.firstName, it.owner.lastName].filter(Boolean).join(" ") : undefined,
+          });
+        }
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -3454,11 +3477,15 @@ function TaskCardBlock({ block, readonly, onUpdate, onRemove }: {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/tasks?limit=100");
+        // The viewer's own tasks, on the Item model. /api/tasks is gone.
+        const res = await fetch("/api/me/items?status=open");
         if (!res.ok) return;
         const d = await res.json();
-        const items: ApiTaskCard[] = Array.isArray(d) ? d : (d.data ?? d.items ?? []);
-        if (!cancelled) setList(items);
+        const rows: Array<{ id: string; title: string; status?: string | null; dueAt?: string | null }> =
+          d.items ?? (Array.isArray(d) ? d : []);
+        if (!cancelled) {
+          setList(rows.map((r) => ({ id: r.id, title: r.title, status: r.status ?? undefined, date: r.dueAt ?? undefined })));
+        }
       } catch { /* ignore */ }
     })();
     return () => { cancelled = true; };
@@ -3525,7 +3552,7 @@ function TaskCardBlock({ block, readonly, onUpdate, onRemove }: {
         {!readonly && (
           <button type="button" className="bcard__alt" onClick={() => setPicking(true)}>Change</button>
         )}
-        <Link href={`/tasks/${block.taskId}`} className="bcard__open">Open <ChevronRight /></Link>
+        <Link href={meta?.id ? `/item/${meta.id}` : `/tasks/${block.taskId}`} className="bcard__open">Open <ChevronRight /></Link>
         {!readonly && (
           <button type="button" className="bcard__x" onClick={onRemove} aria-label="Remove"><X /></button>
         )}

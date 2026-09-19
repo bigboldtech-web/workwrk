@@ -6,8 +6,9 @@
 // each row carries its task title chip → opens the drawer.
 
 import { useCallback, useEffect, useState } from "react";
-import { Activity as ActivityIcon, Loader2 } from "lucide-react";
+import { Activity as ActivityIcon } from "lucide-react";
 import type { StatusOption } from "@/lib/board-items-shared";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface FeedRow {
   id: string;
@@ -77,8 +78,8 @@ export function BoardActivityView({ boardId, statuses, onOpenItem }: BoardActivi
 
   if (rows === null) {
     return (
-      <div className="rounded-lg border border-zinc-200 bg-white px-4 py-12 flex items-center justify-center gap-2 text-xs text-zinc-500">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading activity…
+      <div className="rounded-lg border border-line bg-raised p-2">
+        <SkeletonRows rows={5} />
       </div>
     );
   }

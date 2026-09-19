@@ -118,7 +118,7 @@ export function FolderFilesCard({ folderId, canEdit }: { folderId: string; canEd
         <div className="flex items-center gap-2 py-4 text-sm text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
       ) : files.length === 0 ? (
         <p className="py-3 text-sm text-zinc-400">
-          No files yet.{canEdit ? " Drag files anywhere on this page to upload — they also appear in Library → Files." : ""}
+          No files yet.{canEdit ? " Drag files anywhere on this page to upload." : ""}
         </p>
       ) : (
         <ul className="divide-y divide-zinc-100">

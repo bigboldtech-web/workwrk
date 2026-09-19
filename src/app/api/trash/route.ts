@@ -1,54 +1,52 @@
-import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { purgeExpiredTrash } from "@/lib/trash";
+// GET /api/trash?tab=deleted|archived&type=&q=&deletedBy=&spaceId=&expiring=1&sort=&cursor=
+//
+// `?type=` accepts one key or a comma list, so the Filter panel's checkboxes
+// narrow the whole set rather than the page the browser is holding.
+//
+// Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2 (/trash).
+//
+// THE READ NO LONGER DELETES. The old handler called purgeExpiredTrash plus
+// three deleteMany calls before it answered, so every page load destroyed
+// expired rows and two concurrent callers destroyed them twice. The purge is a
+// cron row now (scripts/CRON-SETUP.md, POST /api/cron/trash-purge), which is
+// also the only way a retention window can be honoured when nobody happens to
+// open the page.
+//
+// THE GATE MOVED. It was `isManager`, so a Member who deleted their own list
+// was told "Trash is for managers" (work-tasks #11). It is the `trash` app key
+// plus per-source `accessibleIds(type, FULL)` now, with "rows you deleted
+// yourself" as the floor, and Owner and Admin over the org.
 
-const SIXTY_DAYS = 60 * 24 * 60 * 60 * 1000;
+import { NextRequest } from "next/server";
+import { AccessError, requireCan } from "@/lib/access/gate";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { readTrash } from "@/lib/trash-server";
+import { idsFromParam, sortFromParam, tabFromParam, typesFromParam } from "@/lib/trash-view";
 
-// GET: the org recycle bin (manager-gated). Aggregates two sources:
-//   1. TrashItem snapshots (SOPs, Tables, Files, Policies — hard-deleted)
-//   2. Archived Docs + Whiteboards (archivedAt = their "trash")
-// Items older than 60 days are purged first.
-export async function GET() {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
+const MAX_LIMIT = 200;
 
-  const orgId = getOrgId(session);
-  const cutoff = new Date(Date.now() - SIXTY_DAYS);
+export async function GET(req: NextRequest) {
+  try {
+    const { viewer } = await requireCan("view", { type: "app", key: "trash" });
+    const sp = new URL(req.url).searchParams;
+    const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(sp.get("limit") ?? "40", 10) || 40));
+    const cursor = Math.max(0, parseInt(sp.get("cursor") ?? "0", 10) || 0);
 
-  // Purge expired across all sources.
-  await purgeExpiredTrash(orgId);
-  await prisma.doc.deleteMany({ where: { organizationId: orgId, archivedAt: { lt: cutoff } } });
-  await prisma.whiteboard.deleteMany({ where: { organizationId: orgId, archivedAt: { lt: cutoff } } });
-  await prisma.agreement.deleteMany({ where: { organizationId: orgId, archivedAt: { lt: cutoff } } });
+    const page = await readTrash(viewer, {
+      tab: tabFromParam(sp.get("tab")),
+      types: typesFromParam(sp.get("type")),
+      q: sp.get("q"),
+      deletedBy: idsFromParam(sp.get("deletedBy")),
+      spaceId: idsFromParam(sp.get("spaceId")),
+      expiringSoon: sp.get("expiring") === "1",
+      sort: sortFromParam(sp.get("sort")),
+      cursor,
+      limit,
+    });
 
-  const [snaps, docs, whiteboards, contracts] = await Promise.all([
-    prisma.trashItem.findMany({
-      where: { organizationId: orgId },
-      orderBy: { deletedAt: "desc" },
-      select: { id: true, entityType: true, entityId: true, label: true, deletedByName: true, deletedAt: true },
-    }),
-    prisma.doc.findMany({
-      where: { organizationId: orgId, archivedAt: { not: null } },
-      select: { id: true, title: true, archivedAt: true },
-    }),
-    prisma.whiteboard.findMany({
-      where: { organizationId: orgId, archivedAt: { not: null } },
-      select: { id: true, name: true, archivedAt: true },
-    }),
-    prisma.agreement.findMany({
-      where: { organizationId: orgId, archivedAt: { not: null } },
-      select: { id: true, title: true, isTemplate: true, archivedAt: true },
-    }),
-  ]);
-
-  // Virtual items use a prefixed id so restore/delete can route by source.
-  const items = [
-    ...snaps,
-    ...docs.map((d) => ({ id: `doc:${d.id}`, entityType: "note", entityId: d.id, label: d.title || "Untitled note", deletedByName: null, deletedAt: d.archivedAt })),
-    ...whiteboards.map((w) => ({ id: `wb:${w.id}`, entityType: "whiteboard", entityId: w.id, label: w.name || "Untitled canvas", deletedByName: null, deletedAt: w.archivedAt })),
-    ...contracts.map((c) => ({ id: `agr:${c.id}`, entityType: c.isTemplate ? "template" : "contract", entityId: c.id, label: c.title || "Untitled contract", deletedByName: null, deletedAt: c.archivedAt })),
-  ].sort((a, b) => new Date(b.deletedAt!).getTime() - new Date(a.deletedAt!).getTime());
-
-  return jsonSuccess({ items });
+    return jsonSuccess(page, 200, { "Cache-Control": "no-store" });
+  } catch (e) {
+    if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);
+    throw e;
+  }
 }

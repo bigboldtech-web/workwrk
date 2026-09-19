@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Ban, Flag } from "lucide-react";
-import { PRIORITY_OPTIONS } from "@/lib/board-items-shared";
+import { PRIORITY_OPTIONS, PRIORITY_TONE } from "@/lib/board-items-shared";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
 
@@ -14,15 +14,35 @@ export { PRIORITY_OPTIONS };
 
 const BY_VALUE = new Map(PRIORITY_OPTIONS.map((p) => [p.value as string, p]));
 
-export function PriorityFlag({ value, showLabel = false }: { value: string | null; showLabel?: boolean }) {
+/**
+ * The flag AND the word, always.
+ *
+ * `showLabel` used to default to false, so the dense table cells rendered a
+ * red, amber or blue flag on its own and asked the reader to know the code.
+ * The same field then read three different ways in one product: word plus
+ * flag on /everything, flag plus a tooltip on /my-work, and a bare flag on a
+ * List. One anatomy now, from PRIORITY_TONE: one hue on Urgent, weight for
+ * the rest, and the word beside it everywhere.
+ *
+ * `showLabel` is kept so a caller with genuinely no room can still drop the
+ * word, and then the flag carries an accessible name instead of nothing.
+ */
+export function PriorityFlag({ value, showLabel = true }: { value: string | null; showLabel?: boolean }) {
   const opt = value ? BY_VALUE.get(value.toUpperCase()) : null;
-  // Empty → a flag affordance (ClickUp style) instead of a bare "—", so the cell
-  // reads as "set priority" and stays visually aligned with set rows.
-  if (!opt) return <Flag className="w-4 h-4 text-zinc-400" />;
+  // Empty renders a flag affordance rather than a bare dash, so the cell reads
+  // as "set priority" and stays aligned with the rows that have one.
+  if (!opt) return <Flag className="w-4 h-4 text-ink-3" strokeWidth={1.5} aria-label="No priority" />;
+  const tone = PRIORITY_TONE[opt.value] ?? PRIORITY_TONE.NORMAL;
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <Flag className="w-3.5 h-3.5" style={{ color: opt.color }} fill={opt.color} />
-      {showLabel ? <span className="text-xs" style={{ color: opt.color }}>{opt.label}</span> : null}
+    <span className={`inline-flex items-center gap-1.5 ${tone.text}`}>
+      <Flag
+        className="w-3.5 h-3.5 shrink-0"
+        strokeWidth={1.5}
+        fill={tone.filled ? "currentColor" : "none"}
+        aria-hidden={showLabel ? true : undefined}
+        aria-label={showLabel ? undefined : `Priority ${opt.label}`}
+      />
+      {showLabel ? <span className="text-xs">{opt.label}</span> : null}
     </span>
   );
 }
@@ -49,7 +69,9 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const display = <PriorityFlag value={value} showLabel={!compact} />;
+  // `compact` is about PADDING, not about hiding the word: a flag with no
+  // word is a colour code, which is the thing this field stopped being.
+  const display = <PriorityFlag value={value} />;
   if (!canEdit) return display;
 
   return (
@@ -57,7 +79,7 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 -mx-1 hover:bg-zinc-100 transition-colors"
+        className={`inline-flex items-center gap-1 rounded-md hover:bg-hover transition-colors ${compact ? "px-0.5 py-0" : "px-1 py-0.5 -mx-1"}`}
         aria-label="Set priority"
       >
         {display}
@@ -65,7 +87,7 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
       {open && menuPos ? (
         <div
           style={{ position: "fixed", left: menuPos.left, width: 170, ...(menuPos.top != null ? { top: menuPos.top } : { bottom: menuPos.bottom }), maxHeight: menuPos.maxHeight, overflowY: "auto" as const }}
-          className="z-[200] rounded-xl border border-zinc-200 bg-white shadow-2xl py-1.5"
+          className="z-[200] rounded-lg border border-line bg-raised shadow-[var(--os-shadow-pop)] py-1.5"
           onClick={(e) => e.stopPropagation()}
         >
           {PRIORITY_OPTIONS.map((p) => {
@@ -73,7 +95,10 @@ export function PriorityPicker({ value, canEdit, compact = false, onChange }: Pr
             return (
               <MenuItem
                 key={p.value}
-                leading={<Flag className="w-3.5 h-3.5 shrink-0" style={{ color: p.color }} fill={p.color} />}
+                leading={(() => {
+                  const tone = PRIORITY_TONE[p.value] ?? PRIORITY_TONE.NORMAL;
+                  return <Flag className={`w-3.5 h-3.5 shrink-0 ${tone.text}`} strokeWidth={1.5} fill={tone.filled ? "currentColor" : "none"} />;
+                })()}
                 label={p.label}
                 selected={active}
                 onClick={() => { onChange(p.value); setOpen(false); }}

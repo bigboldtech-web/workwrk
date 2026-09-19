@@ -60,6 +60,35 @@ jobs:
             echo "==> Building (includes DB migrations)"
             npm run build 2>&1 | tee /www/wwwroot/workwrk.com/deploy-build.log
 
+            # Legacy Task -> Item data migration.
+            #
+            # WHY IT RUNS HERE. The release above deletes the seven /tasks/*
+            # pages, which were the only interface over the legacy Task table.
+            # Until this runs, those rows still exist but cannot be reached in
+            # the product. Running it between a successful build and the pm2
+            # reload closes that window: the build has already proved itself,
+            # and nothing is serving the new code yet.
+            #
+            # WHY IT IS SAFE TO RUN ON EVERY DEPLOY. The script is dry-run by
+            # default, so --write is deliberate. It works per organization in a
+            # transaction with row-count assertions, it is idempotent (guarded
+            # on LegacyRedirect plus metadata.legacyTaskId, so a second run
+            # reports "already migrated, 0 to write"), and it NEVER deletes or
+            # mutates a source row. Task and TaskComment stay readable.
+            #
+            # The dry run is printed first so the log always shows what the
+            # write was about to do, next to what it did.
+            #
+            # A failure here does NOT abort the deploy: the product is fully
+            # functional without it and only legacy rows stay unreachable,
+            # which is recoverable by re-running. Losing the reload over it
+            # would be the worse outcome, so it is `|| true` with a loud
+            # marker to grep for.
+            echo "==> Legacy task migration (dry run first)"
+            npx tsx scripts/migrate-legacy-tasks.ts 2>&1 | tee /www/wwwroot/workwrk.com/legacy-tasks-dryrun.log || echo "MIGRATION-DRYRUN-FAILED"
+            echo "==> Legacy task migration (write)"
+            npx tsx scripts/migrate-legacy-tasks.ts --write 2>&1 | tee /www/wwwroot/workwrk.com/legacy-tasks-write.log || echo "MIGRATION-WRITE-FAILED"
+
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
             echo "==> Restoring ownership to www"

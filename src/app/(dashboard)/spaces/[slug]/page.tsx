@@ -10,7 +10,8 @@ import { notFound, redirect } from "next/navigation";
 import { SpaceFilesCard } from "@/components/spaces/space-files-card";
 import { SpaceBookmarks, type SpaceBookmark } from "@/components/spaces/space-bookmarks";
 import { AskSidekickButton } from "@/components/layout/os/ask-sidekick-button";
-import { SpaceMoreTrigger } from "@/components/layout/os/space-more-menu";
+import { ContainerMenuTrigger } from "@/components/layout/os/container-menu";
+import { BackButton } from "@/components/ui/back-button";
 import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
@@ -29,14 +30,11 @@ import { SpaceQuickStart } from "@/components/layout/os/space-quick-start";
 import { SpaceShareButton } from "@/components/layout/os/space-share-button";
 import { ListCsvExport } from "@/components/board-view/list-csv-export";
 import { getEffectivePreferences } from "@/lib/preferences";
-import { ShareBoardButton } from "@/components/layout/os/share-board-button";
-import { BoardMoreTrigger } from "@/components/layout/os/board-more-menu";
-import { FolderMoreTrigger } from "@/components/layout/os/folder-more-menu";
 import { folderVisibleTo } from "@/lib/folder";
 import { EntityTile } from "@/components/ui/entity-tile";
 import { SpaceViewTabs } from "./space-view-tabs";
 import { SpaceListItemsTable } from "./space-list-items";
-import type { StatusOption } from "@/lib/board-items-shared";
+import { getBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
 import { hasModule } from "@/lib/space-modules";
 import { OverviewCustomizeBanner, OverviewToolbar } from "@/components/layout/os/overview-customize";
 import { SpaceOverviewGrid } from "@/components/layout/os/space-overview-grid";
@@ -230,14 +228,32 @@ export default async function SpacePage(props: {
   const isSpaceOwner = membership?.role === "OWNER";
   // Drop PRIVATE folders (and their boards) the viewer can't see.
   const visibleFolders = space.folders.filter((f) => folderVisibleTo(f, u.id, u.accessLevel));
-  // Optimistic edit-rights for the in-place item popup on the List tab — the
-  // item PATCH is still gated per-board on the server, so this only governs the
-  // editor UI.
-  const spaceCanEdit = isAdmin || isSpaceOwner || !!membership;
+  // Content write-rights for the in-place item popup and the Files card on
+  // this page. The item PATCH is still gated per-board on the server, so this
+  // only governs the editor UI.
+  //
+  // `|| !!membership` counted a GUEST as an editor. "View only" is exactly the
+  // grant a GUEST row records, so a person shared in as Can view was handed
+  // the editing controls on this page and every one of them answered 403. The
+  // contribute ladder is any NON-GUEST member (it matches canContributeSpace),
+  // which is the same ladder `spaceRole` below already used.
+  const spaceCanEdit =
+    isAdmin || isSpaceOwner || (!!membership && membership.role !== "GUEST");
   // Bookmarks add/remove matches the API's canEditSpace (OWNER/ADMIN/org-admin),
   // NOT the broader spaceCanEdit, so a plain member never sees a control the
   // server would 403.
   const bookmarksCanEdit = isAdmin || membership?.role === "OWNER" || membership?.role === "ADMIN";
+  // `POST /api/folders` and `POST /api/boards` both gate on canEditSpace, the
+  // same ladder bookmarks use, so the "+" on the Folders and Lists cards
+  // belongs to exactly these people. Both were rendered unconditionally, so a
+  // Can view member was handed two "+" controls that answer 403.
+  const spaceCanCreate = bookmarksCanEdit;
+  // The object role the container "…" and the Share button both read. Same
+  // ladder as canEditSpace (org admin / OWNER / ADMIN) and canContributeSpace
+  // (any non-GUEST member), so a row is never offered to someone the API
+  // answers 403.
+  const spaceRole: "full" | "edit" | "view" =
+    bookmarksCanEdit ? "full" : membership && membership.role !== "GUEST" ? "edit" : "view";
   const spaceBookmarks = readBookmarks(space.settings);
 
   const workflow = readWorkflow(space.settings);
@@ -328,6 +344,52 @@ export default async function SpacePage(props: {
       : Promise.resolve([] as { status: string | null; _count: { _all: number } }[]),
     getEffectivePreferences(u.id, u.organizationId),
   ]);
+
+  // audit spaces-boards Medium #11: the Lists card printed a progress bar
+  // hardcoded to width 0% with the label "0/, ", a Color column containing the
+  // raw hex string, and an Owner column containing no owner. All three are
+  // real now, from two group-bys and one user lookup.
+  const doneStatusKeys = new Set<string>(
+    (workflow?.statuses ?? []).filter((st) => st.group === "DONE").map((st) => st.key).concat(["DONE", "done"]),
+  );
+  const [listTotals, listDone, listOwners] = await Promise.all([
+    boardIds.length > 0
+      ? prisma.item.groupBy({ by: ["boardId"], where: { boardId: { in: boardIds }, archivedAt: null }, _count: { _all: true } })
+      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
+    boardIds.length > 0
+      ? prisma.item.groupBy({
+          by: ["boardId"],
+          where: { boardId: { in: boardIds }, archivedAt: null, status: { in: Array.from(doneStatusKeys) } },
+          _count: { _all: true },
+        })
+      : Promise.resolve([] as { boardId: string; _count: { _all: number } }[]),
+    (async () => {
+      const ids = Array.from(new Set(allBoards.map((b) => b.ownerId).filter((x): x is string => Boolean(x))));
+      if (ids.length === 0) return [] as { id: string; firstName: string | null; lastName: string | null }[];
+      return prisma.user.findMany({
+        where: { id: { in: ids }, organizationId: u.organizationId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+    })(),
+  ]);
+  // audit spaces-boards High #3: every cross-List tab on this page rendered
+  // `Space.settings.workflow.statuses` for every row. Statuses belong to a
+  // List, so each List's own set travels with the rows, keyed by slug.
+  const listStatusRows = boardIds.length > 0
+    ? await prisma.board.findMany({
+        where: { id: { in: boardIds } },
+        select: { slug: true, statuses: true },
+      })
+    : [];
+  const statusesByList: Record<string, StatusOption[]> = Object.fromEntries(
+    listStatusRows.map((b) => [b.slug, getBoardStatuses(b)]),
+  );
+
+  const listTotalMap = new Map(listTotals.map((r) => [r.boardId, r._count._all]));
+  const listDoneMap = new Map(listDone.map((r) => [r.boardId, r._count._all]));
+  const listOwnerMap = new Map(
+    listOwners.map((o) => [o.id, `${o.firstName ?? ""} ${o.lastName ?? ""}`.trim() || "Unknown"]),
+  );
 
   const hasContent =
     visibleFolders.length > 0 ||
@@ -583,8 +645,12 @@ export default async function SpacePage(props: {
           here: a dynamic route is the one place no static table knows the
           object's name. */}
       <Breadcrumb items={[{ label: "Spaces", href: "/spaces" }, { label: space.name }]} />
+      {/* Title row: back-map line 38 and spec section 1 both say the Space page
+          carries a BackButton to /spaces, always rendered. /folders/[id] and
+          /boards/[slug] have had one since this stage; this page did not. */}
       <div className="px-6 pt-4 pb-3">
         <div className="flex items-center gap-3">
+          <BackButton fallbackHref="/spaces" label="Spaces" className="me-0.5" />
           <EntityTile size="lg" icon={space.icon} color={space.color} name={space.name} />
           <h1 className="text-[22px] font-semibold leading-tight text-zinc-900 flex items-center gap-1.5 min-w-0">
             <span className="truncate" title={space.description || space.name}>{space.name}</span>
@@ -597,8 +663,15 @@ export default async function SpacePage(props: {
           </h1>
           {/* Was a ChevronDown with no onClick and no menu. Same affordance,
               now the real Space menu the sidebar row uses. */}
-          <SpaceMoreTrigger
-            space={{ id: space.id, slug: space.slug, name: space.name, icon: space.icon, color: space.color, visibility: space.visibility }}
+          <ContainerMenuTrigger
+            container={{
+              kind: "space", id: space.id, slug: space.slug, name: space.name,
+              icon: space.icon, color: space.color, visibility: space.visibility,
+              description: space.description, createdAt: space.createdAt.toISOString(),
+              spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+              contents: `${space._count.boards} lists · ${space._count.folders} folders · ${space._count.members} members`,
+            }}
+            role={spaceRole}
           />
           <div className="flex-1" />
           <Link
@@ -642,7 +715,7 @@ export default async function SpacePage(props: {
             }}
             viewerId={u.id}
             spaceSlug={space.slug}
-            canEdit={spaceCanEdit}
+            statusesByList={statusesByList}
           />
         ) : null}
         {view === "board" ? (
@@ -650,6 +723,7 @@ export default async function SpacePage(props: {
             items={crossBoardItems}
             workflowStatuses={workflow?.statuses ?? []}
             statusPalette={statusPalette}
+            statusesByList={statusesByList}
             accent={accent}
           />
         ) : null}
@@ -658,6 +732,7 @@ export default async function SpacePage(props: {
             items={crossBoardItems}
             ownerFacets={ownerFacets}
             statusPalette={statusPalette}
+            statusesByList={statusesByList}
             accent={accent}
             spaceSlug={space.slug}
           />
@@ -668,6 +743,7 @@ export default async function SpacePage(props: {
             monthStart={monthStart}
             spaceSlug={space.slug}
             statusPalette={statusPalette}
+            statusesByList={statusesByList}
             accent={accent}
           />
         ) : null}
@@ -678,6 +754,7 @@ export default async function SpacePage(props: {
             weekCount={ganttWeekCount}
             spaceSlug={space.slug}
             statusPalette={statusPalette}
+            statusesByList={statusesByList}
             accent={accent}
           />
         ) : null}
@@ -700,7 +777,7 @@ export default async function SpacePage(props: {
                         {recentItems.map((it) => (
                           <li key={it.id}>
                             <Link
-                              href={`/boards/${it.board.slug}?item=${it.id}`}
+                              href={`/item/${it.id}`}
                               className="flex items-center gap-2 px-2 py-1.5 hover:bg-zinc-50 transition-colors rounded text-base"
                             >
                               <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -747,9 +824,9 @@ export default async function SpacePage(props: {
                   </OverviewCard>
                 ),
                 folders: (
-                  <OverviewCard title="Folders" action={<FolderCardCreate spaceId={space.id} />}>
+                  <OverviewCard title="Folders" action={spaceCanCreate ? <FolderCardCreate spaceId={space.id} /> : null}>
                     {visibleFolders.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">No folders yet.</p>
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No folders yet." : "No folders yet. Creating one needs Full access on this space."}</p>
                     ) : (
                       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                         {visibleFolders.map((f) => (
@@ -762,9 +839,13 @@ export default async function SpacePage(props: {
                               <span className="text-xs text-zinc-900 truncate flex-1">{f.name}</span>
                             </Link>
                             <span className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/folder:opacity-100 transition-opacity">
-                              <FolderMoreTrigger
-                                folder={{ id: f.id, name: f.name, icon: f.icon, color: f.color }}
-                                spaceId={space.id}
+                              <ContainerMenuTrigger
+                                container={{
+                                  kind: "folder", id: f.id, name: f.name, icon: f.icon, color: f.color,
+                                  visibility: f.visibility as "PRIVATE" | "WORKSPACE" | "ORG",
+                                  spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                                }}
+                                role={spaceRole}
                               />
                             </span>
                           </li>
@@ -774,56 +855,54 @@ export default async function SpacePage(props: {
                   </OverviewCard>
                 ),
                 lists: (
-                  <OverviewCard title="Lists" action={<ListCardCreate spaceId={space.id} />}>
+                  <OverviewCard title="Lists" action={spaceCanCreate ? <ListCardCreate spaceId={space.id} /> : null}>
                     {allBoards.length === 0 ? (
-                      <p className="text-xs text-zinc-500 px-2 py-3">No lists yet.</p>
+                      <p className="text-xs text-zinc-500 px-2 py-3">{spaceCanCreate ? "No lists yet." : "No lists yet. Creating one needs Full access on this space."}</p>
                     ) : (
-                      <div className="rounded-lg border border-zinc-200 overflow-hidden">
-                        <div className="grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 text-xs uppercase tracking-wide text-zinc-500">
+                      <div className="rounded-lg border border-line overflow-hidden">
+                        <div className="grid grid-cols-[minmax(0,1fr)_210px_170px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft text-xs uppercase tracking-wide text-ink-2">
                           <span>Name</span>
-                          <span>Color</span>
-                          <span>Progress</span>
+                          <span>Tasks</span>
                           <span>Owner</span>
+                          <span className="sr-only">Actions</span>
                         </div>
                         <ul>
-                          {allBoards.map((b) => (
+                          {allBoards.map((b) => {
+                            const total = listTotalMap.get(b.id) ?? 0;
+                            const done = listDoneMap.get(b.id) ?? 0;
+                            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+                            const owner = b.ownerId ? listOwnerMap.get(b.ownerId) ?? null : null;
+                            return (
                             <li
                               key={b.id}
-                              className="group/board grid grid-cols-[1fr_120px_160px_120px] items-center px-3 py-2 border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 transition-colors"
+                              className="group/board grid grid-cols-[minmax(0,1fr)_210px_170px_44px] items-center gap-3 px-3 py-2 border-b border-line-soft last:border-b-0 hover:bg-hover transition-colors"
                             >
                               <Link href={`/boards/${b.slug}`} className="flex items-center gap-2 min-w-0">
-                                <ListIcon className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                                <span className="text-base text-zinc-900 truncate">{b.name}</span>
+                                <EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} fallback="list" />
+                                <span className="text-base text-ink truncate">{b.name}</span>
                               </Link>
-                              <span className="flex items-center gap-1.5">
-                                <span
-                                  className="w-3 h-3 rounded-sm"
-                                  style={{ background: b.color ?? "#A1A1AA" }}
-                                  aria-hidden
+                              <span className="flex items-center gap-2 min-w-0">
+                                <span className="h-1 w-16 shrink-0 rounded-full bg-subtle overflow-hidden">
+                                  <span className="block h-full bg-brand" style={{ width: `${pct}%` }} />
+                                </span>
+                                <span className="text-xs text-ink-2 tabular-nums truncate">
+                                  {total === 0 ? "No tasks" : `${done} of ${total} done`}
+                                </span>
+                              </span>
+                              <span className="text-xs text-ink-2 truncate">{owner ?? "No owner"}</span>
+                              <span className="inline-flex items-center justify-end opacity-0 group-hover/board:opacity-100 transition-opacity">
+                                <ContainerMenuTrigger
+                                  container={{
+                                    kind: "list", id: b.id, name: b.name, slug: b.slug,
+                                    icon: b.icon, color: b.color, visibility: b.visibility,
+                                    spaceId: space.id, spaceSlug: space.slug, spaceName: space.name,
+                                  }}
+                                  role={b.visibility === "PRIVATE" && b.ownerId !== u.id && !isAdmin ? "view" : spaceRole}
                                 />
-                                <span className="text-xs text-zinc-500">{b.color ?? "—"}</span>
-                              </span>
-                              <span className="flex items-center gap-2">
-                                <span className="h-1.5 flex-1 rounded-full bg-zinc-100 overflow-hidden">
-                                  <span className="block h-full bg-zinc-300" style={{ width: "0%" }} />
-                                </span>
-                                <span className="text-xs text-zinc-500 tabular-nums shrink-0">0/—</span>
-                              </span>
-                              <span className="inline-flex items-center gap-2">
-                                <span className="opacity-0 group-hover/board:opacity-100 transition-opacity inline-flex items-center gap-0.5">
-                                  <ShareBoardButton
-                                    boardId={b.id}
-                                    boardName={b.name}
-                                    visibility={b.visibility}
-                                    parentSpaceName={space.name}
-                                  />
-                                  <BoardMoreTrigger
-                                    board={{ id: b.id, name: b.name, slug: b.slug, icon: b.icon, color: b.color }}
-                                  />
-                                </span>
                               </span>
                             </li>
-                          ))}
+                            );
+                          })}
                         </ul>
                       </div>
                     )}
@@ -882,12 +961,82 @@ interface GanttItem {
   board: { slug: string; name: string };
 }
 
+// ── Cross-List status, resolved from the row's OWN List ──────────────
+//
+// audit spaces-boards High #3. Every cross-List tab on this page used to draw
+// `Space.settings.workflow.statuses`, the wizard palette, for every row. A
+// status belongs to a LIST, not to a Space, so on the Board view every single
+// item fell into the "Unset" column (its value, "To Do", is not in the Space
+// palette's {APPROVED, SUBMITTED, TO_DO, DONE, IN_PROGRESS}) and the Team view
+// printed raw enum values as labels. The List view was fixed by handing it
+// `statusesByList`; these three resolve through the same map.
+//
+// Resolution order, first hit wins:
+//   1. the row's own List's status set, keyed by slug;
+//   2. the Space wizard palette, for a List with no set of its own;
+//   3. the value itself, rendered as words rather than a raw enum, so a
+//      status the page cannot resolve still reads as "In progress" rather
+//      than "IN_PROGRESS" (naming-canon.md).
+//
+// The key is the LOWERCASED LABEL, not the value: two Lists spelling "Done" as
+// `DONE` and `done_2` belong in one column, and one column per stored value
+// would shatter a Space of ten Lists into thirty columns.
+
+interface StatusChip { key: string; label: string; color: string }
+
+function prettyStatusLabel(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function statusChipFor(
+  statusesByList: Record<string, StatusOption[]>,
+  statusPalette: Map<string, { label: string; color: string; group: string }>,
+  listSlug: string | undefined,
+  value: string | null | undefined,
+): StatusChip | null {
+  if (!value) return null;
+  const own = listSlug ? statusesByList[listSlug] : undefined;
+  const hit = own?.find((o) => o.value === value);
+  if (hit) return { key: hit.label.trim().toLowerCase(), label: hit.label, color: hit.color };
+  const fromSpace = statusPalette.get(value);
+  if (fromSpace) return { key: fromSpace.label.trim().toLowerCase(), label: fromSpace.label, color: fromSpace.color };
+  const label = prettyStatusLabel(value);
+  return { key: label.toLowerCase(), label, color: "#A1A1AA" };
+}
+
+/**
+ * The columns a cross-List Board view should draw: every status of every List
+ * that has a row here, in List order, de-duplicated by label. The Space wizard
+ * palette leads when it has one, so a Space that defined a workflow still sees
+ * its own column order first.
+ */
+function crossListStatusColumns(
+  statusesByList: Record<string, StatusOption[]>,
+  workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>,
+  listSlugs: readonly string[],
+): StatusChip[] {
+  const out = new Map<string, StatusChip>();
+  for (const w of workflowStatuses) {
+    const key = w.label.trim().toLowerCase();
+    if (!out.has(key)) out.set(key, { key, label: w.label, color: w.color });
+  }
+  for (const slug of listSlugs) {
+    for (const o of statusesByList[slug] ?? []) {
+      const key = o.label.trim().toLowerCase();
+      if (!out.has(key)) out.set(key, { key, label: o.label, color: o.color });
+    }
+  }
+  return Array.from(out.values());
+}
+
 function SpaceGanttSection({
   items,
   weekStart,
   weekCount,
   spaceSlug,
   statusPalette,
+  statusesByList,
   accent,
 }: {
   items: GanttItem[];
@@ -895,6 +1044,7 @@ function SpaceGanttSection({
   weekCount: number;
   spaceSlug: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
+  statusesByList: Record<string, StatusOption[]>;
   accent: string;
 }) {
   const prevAnchor = new Date(weekStart.getFullYear(), weekStart.getMonth() - 1, weekStart.getDate());
@@ -1009,6 +1159,7 @@ function SpaceGanttSection({
                 weekCount={weekCount}
                 items={itemsByBoard.get(b.id) ?? []}
                 statusPalette={statusPalette}
+                statusesByList={statusesByList}
                 accent={accent}
               />
             ))}
@@ -1025,6 +1176,7 @@ function BoardRow({
   weekCount,
   items,
   statusPalette,
+  statusesByList,
   accent,
 }: {
   board: { id: string; slug: string; name: string };
@@ -1032,6 +1184,7 @@ function BoardRow({
   weekCount: number;
   items: GanttItem[];
   statusPalette: Map<string, { label: string; color: string; group: string }>;
+  statusesByList: Record<string, StatusOption[]>;
   accent: string;
 }) {
   const totalDays = weekCount * 7;
@@ -1081,12 +1234,14 @@ function BoardRow({
         {bars.map(({ item, startCol, spanCols, lane }) => {
           const leftPct = (startCol / totalDays) * 100;
           const widthPct = (spanCols / totalDays) * 100;
-          const palette = item.status ? statusPalette.get(item.status) : null;
+          // The row's OWN List decides the colour: the Space wizard palette
+          // does not hold a List's status values (statusChipFor).
+          const palette = statusChipFor(statusesByList, statusPalette, item.board.slug, item.status);
           const color = palette?.color ?? accent;
           return (
             <Link
               key={item.id}
-              href={`/boards/${item.board.slug}?item=${item.id}`}
+              href={`/item/${item.id}`}
               title={`${item.title} — ${item.startDate.toLocaleDateString()}${
                 item.startDate.getTime() !== item.endDate.getTime() ? ` → ${item.endDate.toLocaleDateString()}` : ""
               }`}
@@ -1112,6 +1267,7 @@ function SpaceCalendarSection({
   monthStart,
   spaceSlug,
   statusPalette,
+  statusesByList,
   accent,
 }: {
   items: Array<{
@@ -1124,6 +1280,7 @@ function SpaceCalendarSection({
   monthStart: Date;
   spaceSlug: string;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
+  statusesByList: Record<string, StatusOption[]>;
   accent: string;
 }) {
   const monthLabel = monthStart.toLocaleString("default", { month: "long", year: "numeric" });
@@ -1244,12 +1401,12 @@ function SpaceCalendarSection({
                 ) : null}
                 <ul className="space-y-0.5">
                   {dayItems.slice(0, 3).map((it) => {
-                    const palette = it.status ? statusPalette.get(it.status) : null;
+                    const palette = statusChipFor(statusesByList, statusPalette, it.board.slug, it.status);
                     const dot = palette?.color ?? "#A1A1AA";
                     return (
                       <li key={it.id}>
                         <Link
-                          href={`/boards/${it.board.slug}?item=${it.id}`}
+                          href={`/item/${it.id}`}
                           className="flex items-center gap-1.5 px-1 py-0.5 rounded text-xs text-zinc-700 hover:bg-zinc-50 truncate"
                         >
                           <span
@@ -1279,6 +1436,7 @@ function SpaceTeamSection({
   items,
   ownerFacets,
   statusPalette,
+  statusesByList,
   accent,
   spaceSlug,
 }: {
@@ -1293,6 +1451,7 @@ function SpaceTeamSection({
   }>;
   ownerFacets: Array<{ id: string; name: string; avatar: string | null; count: number }>;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
+  statusesByList: Record<string, StatusOption[]>;
   accent: string;
   spaceSlug: string;
 }) {
@@ -1333,24 +1492,27 @@ function SpaceTeamSection({
   // Per-person status breakdown for the mini-bar in each column header.
   // Mirrors the Space-wide Workload card from Phase 42e but scoped to
   // a single owner's items.
+  // Each row's chip comes from its OWN List (see statusChipFor): reading the
+  // Space wizard palette here printed raw enum values as labels and filed
+  // every row under "Unset".
   function statusSegmentsFor(ownerItems: typeof items) {
-    const counts = new Map<string, number>();
+    const counts = new Map<string, { chip: StatusChip | null; count: number }>();
     for (const it of ownerItems) {
-      const key = it.status && statusPalette.has(it.status) ? it.status : "__unset__";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      const chip = statusChipFor(statusesByList, statusPalette, it.board.slug, it.status);
+      const key = chip?.key ?? "__unset__";
+      const cur = counts.get(key);
+      if (cur) cur.count += 1;
+      else counts.set(key, { chip, count: 1 });
     }
     const total = ownerItems.length;
     return Array.from(counts.entries())
-      .map(([key, count]) => {
-        const palette = key === "__unset__" ? null : statusPalette.get(key);
-        return {
-          key,
-          label: palette?.label ?? "Unset",
-          color: palette?.color ?? "#A1A1AA",
-          count,
-          pct: total > 0 ? (count / total) * 100 : 0,
-        };
-      })
+      .map(([key, { chip, count }]) => ({
+        key,
+        label: chip?.label ?? "Unset",
+        color: chip?.color ?? "#A1A1AA",
+        count,
+        pct: total > 0 ? (count / total) * 100 : 0,
+      }))
       .sort((a, b) => b.count - a.count);
   }
 
@@ -1417,12 +1579,12 @@ function SpaceTeamSection({
                   <li className="text-xs text-zinc-400 px-1.5 py-1">No items</li>
                 ) : (
                   cards.map((it) => {
-                    const palette = it.status ? statusPalette.get(it.status) : null;
+                    const palette = statusChipFor(statusesByList, statusPalette, it.board.slug, it.status);
                     const dot = palette?.color ?? "#A1A1AA";
                     return (
                       <li key={it.id}>
                         <Link
-                          href={`/boards/${it.board.slug}?item=${it.id}`}
+                          href={`/item/${it.id}`}
                           className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                           style={{ borderLeft: `3px solid ${accent}` }}
                         >
@@ -1463,6 +1625,7 @@ function SpaceBoardSection({
   items,
   workflowStatuses,
   statusPalette,
+  statusesByList,
   accent,
 }: {
   items: Array<{
@@ -1476,6 +1639,7 @@ function SpaceBoardSection({
   }>;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
   statusPalette: Map<string, { label: string; color: string; group: string }>;
+  statusesByList: Record<string, StatusOption[]>;
   accent: string;
 }) {
   if (items.length === 0) {
@@ -1489,18 +1653,36 @@ function SpaceBoardSection({
     );
   }
 
-  // Column order = workflow palette order, plus any unknown statuses
-  // (including null) bucketed into an "Unset" column at the end.
-  const columnKeys: string[] = workflowStatuses.length > 0
-    ? workflowStatuses.map((s) => s.key)
-    : Array.from(new Set(items.map((i) => i.status ?? "__unset__")));
-  const hasUnsetBucket = items.some((i) => !i.status || !statusPalette.has(i.status));
-  if (hasUnsetBucket && !columnKeys.includes("__unset__")) columnKeys.push("__unset__");
+  // Columns come from the Lists that actually have rows here, resolved through
+  // statusChipFor. Reading the Space wizard palette alone put every row in this
+  // Space into the "Unset" column, because a row's status is its LIST's, not
+  // the Space's.
+  const chipByItem = new Map<string, StatusChip | null>(
+    items.map((it) => [it.id, statusChipFor(statusesByList, statusPalette, it.board.slug, it.status)]),
+  );
+  const columns = crossListStatusColumns(
+    statusesByList,
+    workflowStatuses,
+    Array.from(new Set(items.map((i) => i.board.slug))),
+  );
+  const columnKeys: string[] = columns.map((c) => c.key);
+  const chipByKey = new Map(columns.map((c) => [c.key, c]));
+  // A status a List carries but the column walk missed (a row whose List has
+  // no status set at all) still gets its own column rather than being hidden.
+  for (const it of items) {
+    const chip = chipByItem.get(it.id);
+    if (chip && !chipByKey.has(chip.key)) {
+      chipByKey.set(chip.key, chip);
+      columnKeys.push(chip.key);
+    }
+  }
+  const hasUnsetBucket = items.some((i) => !chipByItem.get(i.id));
+  if (hasUnsetBucket) columnKeys.push("__unset__");
 
   const grouped = new Map<string, typeof items>();
   for (const k of columnKeys) grouped.set(k, []);
   for (const it of items) {
-    const bucket = it.status && statusPalette.has(it.status) ? it.status : "__unset__";
+    const bucket = chipByItem.get(it.id)?.key ?? "__unset__";
     const arr = grouped.get(bucket) ?? grouped.set(bucket, []).get(bucket)!;
     arr.push(it);
   }
@@ -1514,7 +1696,7 @@ function SpaceBoardSection({
         {columnKeys.map((key) => {
           const palette = key === "__unset__"
             ? { label: "Unset", color: "#A1A1AA" }
-            : statusPalette.get(key) ?? { label: key, color: "#A1A1AA" };
+            : chipByKey.get(key) ?? { label: prettyStatusLabel(key), color: "#A1A1AA" };
           const cards = grouped.get(key) ?? [];
           return (
             <div
@@ -1539,7 +1721,7 @@ function SpaceBoardSection({
                   cards.map((it) => (
                     <li key={it.id}>
                       <Link
-                        href={`/boards/${it.board.slug}?item=${it.id}`}
+                        href={`/item/${it.id}`}
                         className="block rounded-md bg-white border border-zinc-200 hover:border-zinc-300 hover:shadow-sm p-2.5 transition-colors"
                         style={{ borderLeft: `3px solid ${accent}` }}
                       >
@@ -1957,7 +2139,7 @@ function SpaceListSection({
   opts,
   viewerId,
   spaceSlug,
-  canEdit,
+  statusesByList,
 }: {
   items: Array<{
     id: string;
@@ -1974,7 +2156,8 @@ function SpaceListSection({
   opts: ListUrlOpts;
   viewerId: string;
   spaceSlug: string;
-  canEdit: boolean;
+  /** Each List's own statuses, by slug (audit High #3). */
+  statusesByList: Record<string, StatusOption[]>;
 }) {
   // The Space workflow palette, as the StatusOption[] both the progress circle
   // and the item popup's status picker expect.
@@ -2037,7 +2220,7 @@ function SpaceListSection({
           filename={`${spaceSlug}-items-${new Date().toISOString().slice(0, 10)}.csv`}
           rows={items.map((it) => ({
             title: it.title,
-            status: it.status ? statusPalette.get(it.status)?.label ?? it.status : "",
+            status: statusChipFor(statusesByList, statusPalette, it.board.slug, it.status)?.label ?? "",
             boardName: it.board.name,
             ownerName: it.ownerId ? (ownerFacets.find((o) => o.id === it.ownerId)?.name ?? "") : "",
             updatedAt: it.updatedAt instanceof Date ? it.updatedAt.toISOString() : String(it.updatedAt),
@@ -2067,8 +2250,7 @@ function SpaceListSection({
           groupBy={opts.groupBy}
           workflowStatuses={workflowStatuses}
           statusOptions={statusOptions}
-          canEdit={canEdit}
-          currentUserId={viewerId}
+          statusesByList={statusesByList}
         />
       )}
     </section>
@@ -2082,8 +2264,7 @@ function ListBody({
   groupBy,
   workflowStatuses,
   statusOptions,
-  canEdit,
-  currentUserId,
+  statusesByList,
 }: {
   items: Array<{
     id: string;
@@ -2099,16 +2280,16 @@ function ListBody({
   groupBy: ListGroupBy;
   workflowStatuses: Array<{ key: string; label: string; color: string; group: string }>;
   statusOptions: StatusOption[];
-  canEdit: boolean;
-  currentUserId: string;
+  /** Each List's own statuses, by slug (audit High #3). */
+  statusesByList: Record<string, StatusOption[]>;
 }) {
   if (groupBy === "none") {
     return (
       <div className="rounded-xl border border-zinc-200 bg-white overflow-hidden">
-        <SpaceListItemsTable items={items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
+        <SpaceListItemsTable items={items} statuses={statusOptions} statusesByList={statusesByList} />
         {items.length === 200 ? (
           <div className="px-3 py-2 text-xs text-zinc-400 bg-zinc-50 border-t border-zinc-100">
-            Showing 200 most-recently-updated items. Open a Board for the full set.
+            Showing the 200 most recently updated tasks. Open a List for the full set.
           </div>
         ) : null}
       </div>
@@ -2195,7 +2376,7 @@ function ListBody({
               <span className="text-sm font-semibold text-zinc-800 flex-1 truncate">{g.label}</span>
               <span className="text-xs text-zinc-500 tabular-nums">{g.items.length}</span>
             </summary>
-            <SpaceListItemsTable items={g.items} statuses={statusOptions} canEdit={canEdit} currentUserId={currentUserId} />
+            <SpaceListItemsTable items={g.items} statuses={statusOptions} statusesByList={statusesByList} />
           </details>
         ))}
       {items.length === 200 ? (

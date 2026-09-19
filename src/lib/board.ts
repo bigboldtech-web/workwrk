@@ -19,6 +19,8 @@ import type { SpaceRole, Visibility, ViewType } from "@/generated/prisma";
 import { legacyAllows } from "@/lib/access/parity";
 import { loadBoardInputs } from "@/lib/access/legacy-facts";
 import { parseBoardStatuses, type StatusOption } from "@/lib/board-items-shared";
+import { withArchivedBy } from "@/lib/archived-by";
+import { accessibleFolderIds } from "@/lib/folder";
 import {
   parseSprintMeta,
   sprintBoardName,
@@ -161,15 +163,36 @@ export async function ensureCoreListViews(boardId: string, ownerId: string): Pro
  * UI has somewhere to write to.
  */
 // Find-or-create the viewer's personal, space-less List board. This backs
-// /tasks/personal-list so it renders through the very same board-table-view as
+// /my-work/personal so it renders through the very same board-table-view as
 // every other List — one component, one Item-backed model. Marked by
-// productSlug="personal-list" + ownerId; visibility PRIVATE so only the owner
-// sees it.
+// productSlug="personal-list" + ownerId.
+//
+// VISIBILITY IS "PRIVATE", WHICH IS NOT THE SAME AS "ONLY THE OWNER". The one
+// rule is the PRIVATE branch of canViewBoard further down this file: members,
+// the board owner, the OWNER of its Space (a Personal list has no Space, so
+// nobody) and WORKSPACE ADMINS. A company admin can therefore read anybody's
+// Personal list. That is deliberate and long-standing, but this comment used
+// to say "only the owner sees it", which is the sentence somebody quotes when
+// deciding what to put on a Personal list, and it was wrong.
+// scripts/MIGRATIONS.md repeats it, because the legacy-task migration moves
+// people's tasks and comments onto this board.
 export async function getOrCreatePersonalBoard(organizationId: string, userId: string) {
   const existing = await prisma.board.findFirst({
     where: { organizationId, ownerId: userId, productSlug: "personal-list" },
   });
-  if (existing) return existing;
+  if (existing) {
+    // Self-healing rename, once, for the ONE auto-generated name this product
+    // wrote before naming-canon fixed the case. It is the only name in the
+    // product nobody chose, so correcting it takes nothing from anybody; a
+    // board its owner renamed does not match the string and is left alone.
+    if (existing.name === "Personal List") {
+      const renamed = await prisma.board
+        .update({ where: { id: existing.id }, data: { name: "Personal list" } })
+        .catch(() => existing);
+      return renamed;
+    }
+    return existing;
+  }
   const slug = `personal-${userId}`;
   try {
     return await prisma.$transaction(async (tx) => {
@@ -178,7 +201,9 @@ export async function getOrCreatePersonalBoard(organizationId: string, userId: s
           organizationId,
           spaceId: null,
           slug,
-          name: "Personal List",
+          // naming-canon.md: "Personal list", sentence case, one label.
+          // Boards created before this are corrected above, on read.
+          name: "Personal list",
           itemType: "studio-item",
           productSlug: "personal-list",
           ownerId: userId,
@@ -427,6 +452,9 @@ export interface UpdateBoardInput {
   /** Sprint date edit — only valid on boards that already carry
    *  settings.sprint (read-merge-write; other settings keys untouched). */
   sprint?: { startDate: string; endDate: string };
+  /** The List's default task type (`settings.defaultItemTypeId`), written by
+   *  the container menu's "Default task type" submenu. Read-merge-write. */
+  defaultItemTypeId?: string | null;
 }
 
 export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
@@ -467,14 +495,28 @@ export async function updateBoard(boardId: string, patch: UpdateBoardInput) {
       data.name = sprintBoardName(meta.sprintNumber, patch.sprint.startDate, patch.sprint.endDate);
     }
   }
+  if (patch.defaultItemTypeId !== undefined) {
+    // Merge onto whatever the sprint branch above may already have staged, so
+    // the two never clobber each other's settings keys.
+    let base: Record<string, unknown>;
+    if (data.settings && typeof data.settings === "object") {
+      base = data.settings as Record<string, unknown>;
+    } else {
+      const existing = await prisma.board.findUnique({ where: { id: boardId }, select: { settings: true } });
+      base =
+        existing?.settings && typeof existing.settings === "object" && !Array.isArray(existing.settings)
+          ? (existing.settings as Record<string, unknown>)
+          : {};
+    }
+    data.settings = { ...base, defaultItemTypeId: patch.defaultItemTypeId } as Prisma.InputJsonValue;
+  }
   return prisma.board.update({ where: { id: boardId }, data });
 }
 
-export async function archiveBoard(boardId: string) {
-  return prisma.board.update({
-    where: { id: boardId },
-    data: { archivedAt: new Date() },
-  });
+export async function archiveBoard(boardId: string, actorId: string | null = null) {
+  return withArchivedBy(actorId, (extra) =>
+    prisma.board.update({ where: { id: boardId }, data: { archivedAt: new Date(), ...extra } }),
+  );
 }
 
 /**
@@ -491,7 +533,13 @@ export async function duplicateBoard(
   sourceId: string,
   actorId: string,
   organizationId: string,
+  // spec-spaces-lists section 1 (List menu row 17): the Duplicate confirm has
+  // one checkbox, "Include tasks", and it is OFF. The default here is TRUE so
+  // that a caller that sends nothing keeps the behaviour it had before the
+  // checkbox existed; the dialog sends the answer explicitly either way.
+  opts: { includeTasks?: boolean } = {},
 ): Promise<{ id: string; slug: string; name: string }> {
+  const includeTasks = opts.includeTasks !== false;
   const src = await prisma.board.findFirst({ where: { id: sourceId, organizationId } });
   if (!src) throw new Error("Board not found");
   // itemId==id holds only for the studio-item flavor; an entity-bound board
@@ -501,7 +549,9 @@ export async function duplicateBoard(
   }
 
   const [items, views] = await Promise.all([
-    prisma.item.findMany({ where: { boardId: sourceId, archivedAt: null } }),
+    includeTasks
+      ? prisma.item.findMany({ where: { boardId: sourceId, archivedAt: null } })
+      : Promise.resolve([]),
     prisma.view.findMany({ where: { boardId: sourceId } }),
   ]);
 
@@ -626,6 +676,43 @@ export async function getBoardForReader(
     { folderDepth: "shallow" },
   );
   return legacyAllows(inputs, "getBoardForReader") ? board : null;
+}
+
+/**
+ * getBoardForReader PLUS the one reader it deliberately does not know about:
+ * a FOLDER GRANTEE.
+ *
+ * `getBoardForReader`'s folder branch consults `folder.ownerId` and never
+ * `FolderMember` (its own comment says so), so a person holding a granular
+ * folder grant and no Space membership fails it. Granular folder access is a
+ * shipped feature that is ADDITIVE and INHERITED downward, and the rest of the
+ * product honours it: `folderAccessForSpace` ships every board in a granted
+ * folder to the sidebar tree, and the Folder page goes out of its way to keep
+ * a grantee working. Reading the board through the strict predicate alone
+ * therefore left the grantee with live links into a notFound() page: a dead
+ * end with no explanation, on a destination that used to work.
+ *
+ * Kept as its own function rather than folded into `getBoardForReader`,
+ * because that one is transcribed in the frozen parity engine and every API
+ * route is pinned to its exact answers. Use this on SURFACES that a grantee is
+ * linked to.
+ */
+export async function getBoardForReaderOrFolderGrantee(
+  boardId: string,
+  userId: string,
+  accessLevel: string | null | undefined,
+) {
+  const board = await getBoardForReader(boardId, userId, accessLevel);
+  if (board) return board;
+  const row = await prisma.board.findUnique({
+    where: { id: boardId },
+    select: { id: true, spaceId: true, visibility: true, ownerId: true, organizationId: true, folderId: true },
+  });
+  if (!row?.folderId) return null;
+  // A grant cascades to sub-folders, which is why this is the descendant-aware
+  // set and not a single FolderMember lookup.
+  const granted = await accessibleFolderIds(userId);
+  return granted.has(row.folderId) ? row : null;
 }
 
 /**

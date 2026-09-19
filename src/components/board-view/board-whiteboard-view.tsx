@@ -9,8 +9,10 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Brush, Cloud, ExternalLink, Loader2, RefreshCcw } from "lucide-react";
+import { Brush, Cloud, ExternalLink, RefreshCcw } from "lucide-react";
 import "@excalidraw/excalidraw/index.css";
+import { Dots } from "@/components/ui/dots";
+import { Skeleton, SkeletonLines } from "@/components/ui/skeleton";
 
 const Excalidraw = dynamic(
   async () => (await import("@excalidraw/excalidraw")).Excalidraw,
@@ -154,11 +156,11 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
       const res = await fetch("/api/whiteboards", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Board whiteboard" }),
+        body: JSON.stringify({ name: "List canvas" }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError((data as { error?: string })?.error ?? "Couldn't create whiteboard");
+        setError((data as { error?: string })?.error ?? "Couldn't create the canvas");
         return;
       }
       const id = (data as { whiteboard?: { id?: string } })?.whiteboard?.id;
@@ -173,35 +175,35 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
 
   if (!whiteboardId || picking) {
     return (
-      <div className="rounded-lg border border-zinc-200 bg-white px-8 py-12">
+      <div className="rounded-lg border border-line bg-raised px-8 py-12">
         <div className="max-w-md mx-auto text-center">
-          <Brush className="w-8 h-8 mx-auto text-amber-400 mb-3" />
-          <h3 className="text-base font-semibold text-zinc-900 mb-1">
-            {picking ? "Change the embedded whiteboard" : "Add a Whiteboard to this List"}
+          <Brush className="w-8 h-8 mx-auto text-ink-3 mb-3" strokeWidth={1.5} />
+          <h3 className="text-base font-semibold text-ink mb-1">
+            {picking ? "Change the embedded canvas" : "Add a Canvas to this List"}
           </h3>
-          <p className="text-base text-zinc-500 mb-5">
-            A freeform canvas tab — diagrams, brainstorms, mind maps. Create a fresh
-            canvas, or embed one you already drew.
+          <p className="text-base text-ink-2 mb-5">
+            A freeform canvas: diagrams, brainstorms, mind maps. Create a fresh
+            one, or embed a canvas you already drew.
           </p>
-          {error ? <p className="text-sm text-red-500 mb-3">{error}</p> : null}
+          {error ? <p className="text-sm text-danger-text mb-3">{error}</p> : null}
           {canEdit ? (
             <div className="flex items-center justify-center gap-2 flex-wrap">
               <button
                 type="button"
                 onClick={() => void createWhiteboard()}
                 disabled={busy}
-                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-base font-medium text-white bg-zinc-900 transition-colors hover:bg-zinc-800 disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-base font-medium text-on-brand bg-brand transition-colors hover:bg-brand-deep disabled:opacity-50"
               >
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                Create whiteboard
+                {busy ? <Dots variant="pending" /> : null}
+                Create canvas
               </button>
               {list === null ? (
-                <span className="text-sm text-zinc-400">Loading whiteboards…</span>
+                <SkeletonLines lines={1} className="w-[140px]" />
               ) : list.length > 0 ? (
                 <select
                   defaultValue=""
                   onChange={(e) => { if (e.target.value) { persistWhiteboardId(e.target.value); setPicking(false); } }}
-                  className="h-8 max-w-[240px] rounded-lg border border-zinc-200 bg-white px-2 text-base text-zinc-700 outline-none focus:border-zinc-400"
+                  className="h-8 max-w-[240px] rounded-lg border border-line bg-raised px-2 text-base text-ink outline-none focus:border-ink-3"
                 >
                   <option value="" disabled>Embed existing…</option>
                   {list.map((w) => (
@@ -213,14 +215,14 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
                 <button
                   type="button"
                   onClick={() => setPicking(false)}
-                  className="h-8 px-3 rounded-lg text-base text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-700"
+                  className="h-8 px-3 rounded-lg text-base text-ink-2 transition-colors hover:bg-hover hover:text-ink"
                 >
                   Cancel
                 </button>
               ) : null}
             </div>
           ) : (
-            <p className="text-sm text-zinc-400">Ask a List editor to add a whiteboard.</p>
+            <p className="text-sm text-ink-2">Ask a List editor to add a canvas.</p>
           )}
         </div>
       </div>
@@ -258,7 +260,7 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
             type="button"
             onClick={() => { setPicking(true); setList(null); }}
             className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-zinc-200 bg-white text-xs font-medium text-zinc-600 transition-colors hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-800"
-            title="Embed a different whiteboard"
+            title="Embed a different canvas"
           >
             <RefreshCcw className="w-3 h-3" />
             Change
@@ -281,9 +283,12 @@ export function BoardWhiteboardView({ boardId, viewId, viewConfig, canEdit }: Bo
 }
 
 function CanvasLoading() {
+  // A skeleton of the thing that is coming, not a spinner and not the word
+  // "Loading": spec-shell 1.6 made both a lint rule, and a shape that matches
+  // the canvas reads as the canvas arriving rather than as the page stalling.
   return (
-    <div className="h-full min-h-[480px] flex items-center justify-center gap-2 text-base text-zinc-400">
-      <Loader2 className="w-4 h-4 animate-spin" /> Loading canvas…
+    <div className="h-full min-h-[480px] p-4">
+      <Skeleton className="h-full w-full rounded-lg" />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { dispatchEvent } from "@/services/webhookDispatcher";
 import { triggerRecalculation } from "@/services/performanceScoreService";
+import { createPersonalTask } from "@/lib/work/personal-task";
 
 /**
  * Generic webhook ingest — /api/integrations/ingest
@@ -162,19 +163,25 @@ async function handleTaskCreate(orgId: string, data: Record<string, unknown>) {
   });
   if (!assignee) return Response.json({ error: "Assignee not in org" }, { status: 404 });
 
-  const task = await prisma.task.create({
-    data: {
-      title: title.slice(0, 200),
-      description: (data.description as string | undefined)?.slice(0, 2000) ?? null,
-      date: date ? new Date(date) : new Date(),
-      assigneeId,
-      slaHours: slaHours && slaHours > 0 ? slaHours : null,
+  // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in this
+  // release, so an ingested task was content with no surface. It lands on the
+  // assignee's Personal list now. The response keys are unchanged, so an
+  // integration reading `task.id` / `task.date` / `task.slaHours` still works;
+  // `task.id` is now an Item id, which is the id that opens at /item/<id>.
+  const created = await createPersonalTask({
+    organizationId: orgId,
+    assigneeId,
+    title: title.slice(0, 200),
+    description: (data.description as string | undefined)?.slice(0, 2000) ?? null,
+    dueAt: date ? new Date(date) : new Date(),
+    legacy: {
       source: "AI",
       sourceRef: "ingest",
-      organizationId: orgId,
+      slaHours: slaHours && slaHours > 0 ? slaHours : null,
     },
-    select: { id: true, title: true, date: true, slaHours: true },
+    actorId: null,
   });
+  const task = { id: created.id, title: created.title, date: created.dueAt, slaHours: slaHours && slaHours > 0 ? slaHours : null };
   dispatchEvent({ organizationId: orgId, event: "task.created", payload: task }).catch(() => {});
   return Response.json({ ok: true, task }, { status: 201 });
 }

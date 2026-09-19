@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { archiveFolder, updateFolder } from "@/lib/folder";
+import { archiveFolder, updateFolder, folderReadable } from "@/lib/folder";
 import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { moveToTrash } from "@/lib/trash";
 import { prisma } from "@/lib/prisma";
@@ -22,12 +22,20 @@ async function ctx() {
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId, userName: u.name ?? null };
 }
 
+// READ THE FOLDER, THEN THE SPACE. Gated on the Space alone, a Space ADMIN
+// denied a PRIVATE folder could still rename it, read its description back in
+// the 200 body, and (once `visibility` joined the schema) flip it to WORKSPACE
+// and expose the whole subtree in one call, while /folders/[id] answered the
+// same person with the in-shell 404.
 async function loadFolderAndGate(folderId: string, c: { userId: string; accessLevel: string; organizationId: string }) {
   const folder = await prisma.folder.findUnique({
     where: { id: folderId },
     select: { id: true, spaceId: true, organizationId: true },
   });
   if (!folder || folder.organizationId !== c.organizationId) {
+    return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
+  }
+  if (!(await folderReadable(folderId, c.userId, c.accessLevel))) {
     return { error: NextResponse.json({ error: "Not found" }, { status: 404 }) };
   }
   const space = await getSpaceForReader(folder.spaceId, c.userId, c.accessLevel);
@@ -45,6 +53,9 @@ const patchSchema = z.object({
   spaceId: z.string().min(1).optional(),
   parentFolderId: z.string().min(1).nullable().optional(),
   position: z.number().finite().optional(),
+  // access-model Broken #10: the one-way Restricted switch. PRIVATE is
+  // "Restricted" in the share dialog, WORKSPACE is "Inherits from the Space".
+  visibility: z.enum(["PRIVATE", "WORKSPACE", "ORG"]).optional(),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -81,6 +92,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     await moveToTrash("folder", id, { organizationId: c.organizationId, userId: c.userId, userName: c.userName });
     return NextResponse.json({ ok: true });
   }
-  const archived = await archiveFolder(id);
+  const archived = await archiveFolder(id, c.userId);
   return NextResponse.json({ folder: archived });
 }

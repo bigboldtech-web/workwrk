@@ -23,6 +23,7 @@ import {
   listLinksTo,
 } from "@/lib/entity-link";
 import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
+import { logActivity } from "@/lib/item-thread";
 import { visibleSpaceIds } from "@/lib/space";
 import type { EntityLinkType, EntityLinkRelation } from "@/generated/prisma";
 
@@ -33,7 +34,19 @@ const ENTITY_TYPES = [
   "ANNOUNCEMENT", "KUDOS", "CANDOR", "SURVEY", "CONTRACT", "CANDIDATE", "JOB",
 ] as const;
 
-const RELATION_KINDS = ["LINKED", "EMBEDDED", "REQUIRED_READING", "REFERENCES"] as const;
+// BLOCKS and WAITING_ON are Phase 2's task-dependency kinds (spec-task-detail
+// section 2, Related). They are accepted here from the day the enum has them,
+// so the Related section can write a dependency; the "Waiting on" / "Blocking"
+// groups render only where a reader knows about them, and every reader that
+// does not simply lists the link like any other.
+const RELATION_KINDS = [
+  "LINKED",
+  "EMBEDDED",
+  "REQUIRED_READING",
+  "REFERENCES",
+  "BLOCKS",
+  "WAITING_ON",
+] as const;
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -302,6 +315,24 @@ export async function POST(req: Request) {
     context: parsed.data.context,
     createdById: c.userId,
   });
+
+  // A link on a task is a change to the task, so the Activity tab records it.
+  // ATTACHMENT_ADDED and LINK_ADDED were both declared in the action
+  // vocabulary and written by nothing, which made `?kind=attachments` a filter
+  // that could only ever return an empty list.
+  if (parsed.data.source.type === "BOARD_ITEM") {
+    await logActivity({
+      organizationId: c.organizationId,
+      itemId: parsed.data.source.id,
+      actorId: c.userId,
+      action: parsed.data.target.type === "FILE" ? "ATTACHMENT_ADDED" : "LINK_ADDED",
+      meta: {
+        targetType: parsed.data.target.type,
+        targetId: parsed.data.target.id,
+        relationKind: parsed.data.relationKind ?? "LINKED",
+      },
+    });
+  }
 
   return NextResponse.json({ link }, { status: 201 });
 }

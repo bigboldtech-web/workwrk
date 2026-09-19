@@ -9,8 +9,9 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Download, File as FileIcon, FileArchive, FileAudio, FileImage,
-  FileSpreadsheet, FileText, FileVideo, Loader2, Paperclip,
+  FileSpreadsheet, FileText, FileVideo, Paperclip,
 } from "lucide-react";
+import { SkeletonGrid } from "@/components/ui/skeleton";
 
 interface ApiFile {
   id: string;
@@ -63,8 +64,8 @@ export function BoardFileGalleryView({ boardId, onOpenItem }: BoardFileGalleryVi
 
   if (files === null) {
     return (
-      <div className="rounded-lg border border-zinc-200 bg-white px-4 py-12 flex items-center justify-center gap-2 text-xs text-zinc-500">
-        <Loader2 className="w-4 h-4 animate-spin" /> Loading files…
+      <div className="rounded-lg border border-line bg-raised p-4">
+        <SkeletonGrid count={6} />
       </div>
     );
   }

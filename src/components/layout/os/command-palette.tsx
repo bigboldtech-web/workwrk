@@ -32,6 +32,7 @@ import {
 } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
+  Activity,
   AlarmClock,
   Building2,
   CalendarDays,
@@ -39,6 +40,7 @@ import {
   FileText,
   House,
   Inbox,
+  Layers,
   ListTodo,
   Megaphone,
   Mic,
@@ -46,6 +48,7 @@ import {
   Search,
   Settings2,
   Sparkles,
+  Star,
   Target,
   X,
   type LucideIcon,
@@ -374,7 +377,8 @@ function PaletteBody() {
         id: "j-mywork",
         label: "My work",
         glyph: <Glyph icon={CheckSquare} />,
-        href: "/tasks",
+        href: "/my-work",
+        shortcut: shortcutHint("go-my-work"),
       },
       {
         id: "j-inbox",
@@ -384,10 +388,21 @@ function PaletteBody() {
         shortcut: shortcutHint("go-inbox"),
       },
     ];
+    // The three Work-hub pages that have no rail app of their own, so without
+    // a row here the palette cannot reach them. spec-work-home section 2 names
+    // the palette as an entry point for each. None of them exist for a Guest,
+    // whose access row grants My work and Inbox and nothing else.
+    if (isMember) {
+      personal.push(
+        { id: "j-everything", label: "Everything", glyph: <Glyph icon={Layers} />, href: "/everything" },
+        { id: "j-favorites", label: "Favorites", glyph: <Glyph icon={Star} />, href: "/favorites" },
+        { id: "j-activity", label: "Activity", glyph: <Glyph icon={Activity} />, href: "/activity" },
+      );
+    }
     const hubs = launcherApps.filter((a) => isHubKey(a.key)).map(appRow);
     const folded = launcherApps.filter((a) => !isHubKey(a.key)).map(appRow);
     return [...personal, ...hubs, ...folded];
-  }, [launcherApps, appRow]);
+  }, [launcherApps, appRow, isMember]);
 
   const recentRows = useMemo<Row[]>(() => {
     const byKey = new Map(launcherApps.map((a) => [a.key, a]));

@@ -20,10 +20,13 @@
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/item-thread";
+import { changedMetadataKeys, sameIdList, sameTime, sameValue } from "@/lib/item-diff";
 import { parseRecurrence } from "@/lib/recurrence";
+import { withArchivedBy, clearArchivedBy } from "@/lib/archived-by";
 import {
   DEFAULT_STATUS_OPTIONS,
   PRIORITY_OPTIONS,
+  applyOwnerOnlyPatch,
   getBoardStatuses,
   isDoneStatus,
   makeStatusLookup,
@@ -33,6 +36,7 @@ import {
   type StatusGroup,
   type StatusOption,
 } from "@/lib/board-items-shared";
+import { remapDescendantStatuses } from "@/lib/item-move";
 
 // Re-export the client-safe pieces so existing server code (API routes,
 // page server components) keeps working with `from "@/lib/board-items"`.
@@ -41,6 +45,7 @@ import {
 export {
   DEFAULT_STATUS_OPTIONS,
   PRIORITY_OPTIONS,
+  applyOwnerOnlyPatch,
   getBoardStatuses,
   isDoneStatus,
   makeStatusLookup,
@@ -198,7 +203,17 @@ async function enrichItemRows(
   } = {},
 ): Promise<BoardItemRow[]> {
   const itemIds = rows.map((r) => r.id);
-  const ownerIds = Array.from(new Set(rows.map((r) => r.ownerId).filter((x): x is string => !!x)));
+  // EVERY assignee, not just the primary. The list row now renders the same
+  // multi-assignee control the opened task does, and it can only show the
+  // people it is given: resolving ownerId alone made a three-person task look
+  // like a one-person task on the board. Same single batched query.
+  const ownerIds = Array.from(
+    new Set(
+      rows
+        .flatMap((r) => [r.ownerId, ...(r.assigneeIds ?? [])])
+        .filter((x): x is string => !!x),
+    ),
+  );
 
   // Parallel batches — owners + comment counts + links (by type) + tags +
   // time-tracked sum + creator activity (+ subtask counts when the caller
@@ -303,6 +318,12 @@ async function enrichItemRows(
     base.linkedDocCount = linkedDocById.get(r.id) ?? 0;
     base.linkedTaskCount = linkedTaskById.get(r.id) ?? 0;
     base.linkedSopCount = linkedSopById.get(r.id) ?? 0;
+    // Assignees, primary first, so ownerId stays assignees[0]. A legacy row
+    // with an ownerId and no assigneeIds still yields the one person.
+    const people = (base.assigneeIds ?? [])
+      .map((id) => ownerById.get(id))
+      .filter((p): p is { id: string; firstName: string; lastName: string; avatar: string | null } => !!p);
+    base.assignees = people.length ? people : base.owner ? [base.owner] : [];
     const cid = creatorIdByItem.get(r.id);
     base.createdBy = cid ? creatorUserById.get(cid) ?? null : null;
     return base;
@@ -328,6 +349,15 @@ export async function listBoardItems(boardId: string, opts: { includeArchived?: 
   }
 
   return enrichItemRows(rows, { subtaskCountByParent });
+}
+
+/**
+ * Enrich an already-fetched set of Item rows (GET /api/items/[id]/subtasks).
+ * Same decoration as listBoardItems, so a subtask row and a List row can never
+ * drift apart.
+ */
+export async function listBoardItemRows(rows: ItemSource[]): Promise<BoardItemRow[]> {
+  return enrichItemRows(rows);
 }
 
 /**
@@ -379,15 +409,24 @@ export interface CreateBoardItemInput {
  * Normalize an assignee set: dedupe + drop empties, and keep ownerId (the
  * primary/DRI) in sync as the FIRST assignee. If assigneeIds isn't given we
  * fall back to the legacy single ownerId, so old callers still work.
+ *
+ * An EXPLICIT ownerId sent alongside assigneeIds is obeyed rather than
+ * ignored. It used to be dropped on the floor whenever the array was
+ * non-empty, so `{ assigneeIds: ["b","c"], ownerId: "c" }` answered 200 and
+ * quietly made "b" the DRI. /api/items/bulk forwards both fields together, so
+ * that shape reaches the writer for real. The named owner moves to the front
+ * of the set; if they are not in it they are ADDED, never swapped in for
+ * somebody, so no assignee the caller listed is lost either way.
  */
 export function resolveAssignees(
   assigneeIds: string[] | undefined,
   ownerId: string | null | undefined,
 ): { assigneeIds: string[]; ownerId: string | null } {
-  let ids = Array.isArray(assigneeIds)
-    ? assigneeIds.filter((x): x is string => typeof x === "string" && x.length > 0)
-    : undefined;
-  if (ids === undefined) ids = ownerId ? [ownerId] : [];
+  const clean = (xs: string[]) =>
+    xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  let ids = Array.isArray(assigneeIds) ? clean(assigneeIds) : undefined;
+  if (ids === undefined) ids = ownerId ? clean([ownerId]) : [];
+  if (ownerId && ids.length > 0) ids = [ownerId, ...ids];
   ids = Array.from(new Set(ids));
   return { assigneeIds: ids, ownerId: ids[0] ?? null };
 }
@@ -470,6 +509,19 @@ export async function createBoardItem(input: CreateBoardItemInput): Promise<Boar
     meta: { title: trimmed, status: created.status },
   });
 
+  // A subtask is an event on its PARENT too, and the parent's Activity tab is
+  // where a reader looks for it. SUBTASK_ADDED was in the action vocabulary
+  // from the start of Phase 2 and nothing wrote it.
+  if (input.parentItemId) {
+    await logActivity({
+      organizationId: input.organizationId,
+      itemId: input.parentItemId,
+      actorId: input.actorId ?? null,
+      action: "SUBTASK_ADDED",
+      meta: { subtaskId: created.id, title: trimmed },
+    });
+  }
+
   return rowFrom(created, owner, tags, created.board.spaceId);
 }
 
@@ -505,9 +557,25 @@ export async function updateBoardItem(
   actorId: string | null = null,
 ): Promise<BoardItemRow> {
   // Capture the pre-edit values so we can diff for the activity log.
+  // Phase 2 (spec-task-detail section 4 step 1): the diff now covers
+  // assignees, dates, type, recurrence and the metadata KEY NAMES, so the
+  // Activity tab can say what changed instead of filing every save under an
+  // identical, unreadable "updated fields" row.
   const before = await prisma.item.findUnique({
     where: { id: itemId },
-    select: { organizationId: true, title: true, status: true, ownerId: true, priority: true },
+    select: {
+      organizationId: true,
+      title: true,
+      status: true,
+      ownerId: true,
+      priority: true,
+      assigneeIds: true,
+      startAt: true,
+      dueAt: true,
+      itemTypeId: true,
+      recurRule: true,
+      metadata: true,
+    },
   });
 
   const data: Record<string, unknown> = {};
@@ -523,7 +591,11 @@ export async function updateBoardItem(
     data.assigneeIds = a.assigneeIds;
     data.ownerId = a.ownerId;
   } else if (patch.ownerId !== undefined) {
-    const a = resolveAssignees(undefined, patch.ownerId);
+    // ownerId ALONE never replaces the assignee set. See applyOwnerOnlyPatch:
+    // the new owner moves to the front of the people already on the task, and
+    // an unassign drops only the outgoing owner. `before` already selected
+    // assigneeIds/ownerId above, so this costs no extra query.
+    const a = applyOwnerOnlyPatch(before?.assigneeIds, before?.ownerId, patch.ownerId);
     data.assigneeIds = a.assigneeIds;
     data.ownerId = a.ownerId;
   }
@@ -549,6 +621,12 @@ export async function updateBoardItem(
       })
     : null;
 
+  // The tag set BEFORE the sync, so the activity row below can tell a real
+  // re-tag apart from a client re-sending the tags the task already had.
+  const priorTagIds =
+    patch.tagIds !== undefined
+      ? ((await tagsForItems([itemId])).get(itemId) ?? []).map((t) => t.id)
+      : [];
   const tags = patch.tagIds !== undefined
     ? await syncItemTags(updated.organizationId, itemId, patch.tagIds, actorId)
     : (await tagsForItems([itemId])).get(itemId) ?? [];
@@ -590,14 +668,81 @@ export async function updateBoardItem(
         meta: { from: before.priority, to: updated.priority },
       });
     }
-    if (patch.metadata !== undefined) {
+    if (patch.assigneeIds !== undefined && !sameIdList(before.assigneeIds, updated.assigneeIds)) {
       await logActivity({
         organizationId: before.organizationId,
         itemId,
         actorId,
-        action: "FIELDS_UPDATED",
-        meta: {},
+        action: "ASSIGNEES_CHANGED",
+        meta: {
+          added: updated.assigneeIds.filter((id) => !before.assigneeIds.includes(id)),
+          removed: before.assigneeIds.filter((id) => !updated.assigneeIds.includes(id)),
+        },
       });
+    }
+    if (patch.dueAt !== undefined && !sameTime(before.dueAt, updated.dueAt)) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: "DUE_CHANGED",
+        meta: { from: before.dueAt?.toISOString() ?? null, to: updated.dueAt?.toISOString() ?? null },
+      });
+    }
+    if (patch.startAt !== undefined && !sameTime(before.startAt, updated.startAt)) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: "START_CHANGED",
+        meta: { from: before.startAt?.toISOString() ?? null, to: updated.startAt?.toISOString() ?? null },
+      });
+    }
+    if (patch.itemTypeId !== undefined && before.itemTypeId !== updated.itemTypeId) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: "TYPE_CHANGED",
+        meta: { from: before.itemTypeId, to: updated.itemTypeId },
+      });
+    }
+    // Both of these log only when the value actually MOVED. Logging on mere
+    // presence of the key filed a row every time a client re-sent the tags it
+    // already had, or re-saved the same recurrence rule.
+    if (patch.tagIds !== undefined && !sameIdList(priorTagIds, patch.tagIds)) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: "TAGS_CHANGED",
+        meta: { to: tags.map((t) => t.name) },
+      });
+    }
+    if (patch.recurRule !== undefined && !sameValue(before.recurRule, patch.recurRule ?? null)) {
+      await logActivity({
+        organizationId: before.organizationId,
+        itemId,
+        actorId,
+        action: patch.recurRule ? "RECUR_SET" : "RECUR_CLEARED",
+        meta: patch.recurRule ? { rule: patch.recurRule } : {},
+      });
+    }
+    if (patch.metadata !== undefined) {
+      // Name the keys that actually moved. An autosaving description would
+      // otherwise fill the tab with identical rows nobody can read (the
+      // empty-meta FIELDS_UPDATED row this replaces). When nothing moved, 
+      // a re-save of the same blob, no row is written at all.
+      const changed = changedMetadataKeys(before.metadata, patch.metadata);
+      if (changed.length > 0) {
+        await logActivity({
+          organizationId: before.organizationId,
+          itemId,
+          actorId,
+          action: "FIELDS_UPDATED",
+          meta: { fields: changed },
+        });
+      }
     }
   }
 
@@ -605,11 +750,13 @@ export async function updateBoardItem(
 }
 
 export async function archiveBoardItem(itemId: string, actorId: string | null = null): Promise<BoardItemRow> {
-  const updated = await prisma.item.update({
-    where: { id: itemId },
-    data: { archivedAt: new Date() },
-    include: { board: { select: { spaceId: true } } },
-  });
+  const updated = await withArchivedBy(actorId, (extra) =>
+    prisma.item.update({
+      where: { id: itemId },
+      data: { archivedAt: new Date(), ...extra },
+      include: { board: { select: { spaceId: true } } },
+    }),
+  );
   await logActivity({
     organizationId: updated.organizationId,
     itemId,
@@ -622,6 +769,178 @@ export async function archiveBoardItem(itemId: string, actorId: string | null = 
 
 export async function deleteBoardItem(itemId: string): Promise<void> {
   await prisma.item.delete({ where: { id: itemId } });
+}
+
+/**
+ * Un-archive a task (spec-task-detail: the Archived banner's Restore, so a
+ * Member never has to find the Trash page to undo their own archive).
+ *
+ * Idempotent: restoring a live task is a no-op that still returns the row.
+ */
+export async function restoreBoardItem(itemId: string, actorId: string | null = null): Promise<BoardItemRow> {
+  const before = await prisma.item.findUnique({
+    where: { id: itemId },
+    select: { archivedAt: true },
+  });
+  // The archiver is cleared with the date. Leaving it behind records someone
+  // as having archived a live row.
+  const updated = await clearArchivedBy((extra) =>
+    prisma.item.update({
+      where: { id: itemId },
+      data: { archivedAt: null, ...extra },
+      include: { board: { select: { spaceId: true } } },
+    }),
+  );
+  // Only a real un-archive is worth a row. A double-click, a retry or a stale
+  // tab used to file a permanent "restored this task" entry for an event that
+  // never happened, in a log anyone with Can view reads.
+  if (before?.archivedAt) {
+    await logActivity({
+      organizationId: updated.organizationId,
+      itemId,
+      actorId,
+      action: "RESTORED",
+      meta: {},
+    });
+  }
+  const owner = updated.ownerId
+    ? await prisma.user.findUnique({
+        where: { id: updated.ownerId },
+        select: { id: true, firstName: true, lastName: true, avatar: true },
+      })
+    : null;
+  const tags = (await tagsForItems([itemId])).get(itemId) ?? [];
+  return rowFrom(updated, owner, tags, updated.board.spaceId);
+}
+
+/**
+ * Move a task to another List (spec-task-detail section 4 step 1,
+ * `PATCH /api/items/[id] { boardId }`).
+ *
+ * The caller has already gated Can edit on BOTH Lists and has already picked
+ * the remapped status through `remapStatusOnMove`, the status is passed in
+ * rather than computed here so the route can report it and a test can pin the
+ * mapping without a database.
+ *
+ * `position` goes to the end of the target List, and `groupKey` follows the
+ * new status so the row lands in a group that exists there. One `MOVED`
+ * activity row records both Lists.
+ *
+ * SUBTASKS COME WITH IT. A subtask belongs to its parent, not to the List the
+ * parent happened to be in: leaving the children behind split one task across
+ * two Lists, showed them on the source List as top-level-looking rows whose
+ * parent was elsewhere, rendered them against the wrong status palette, and
+ * meant archiving the source List took the children while the parent lived on.
+ * The whole tree moves in one transaction, so it can never move halfway.
+ */
+export async function moveBoardItem(args: {
+  itemId: string;
+  toBoardId: string;
+  status: string | null;
+  actorId: string | null;
+  /** The SOURCE and TARGET status sets, so every descendant gets the same
+   *  remap the parent got. Optional: a caller that omits them keeps the old
+   *  behaviour (children carry their stored status across untouched). */
+  fromStatuses?: readonly StatusOption[];
+  toStatuses?: readonly StatusOption[];
+}): Promise<BoardItemRow> {
+  const before = await prisma.item.findUnique({
+    where: { id: args.itemId },
+    select: { boardId: true, organizationId: true, status: true, groupKey: true },
+  });
+  if (!before) throw new Error("Task not found");
+
+  const last = await prisma.item.findFirst({
+    where: { boardId: args.toBoardId },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+  const position = (last?.position ?? 0) + 1000;
+
+  // The whole subtask tree, breadth-first from the row being moved. Bounded by
+  // DESCENDANT_SWEEPS so a cycle written by an older release cannot loop here.
+  const DESCENDANT_SWEEPS = 6;
+  const descendants: { id: string; status: string | null }[] = [];
+  let frontier = [args.itemId];
+  for (let depth = 0; depth < DESCENDANT_SWEEPS && frontier.length > 0; depth += 1) {
+    const kids = await prisma.item.findMany({
+      where: { parentItemId: { in: frontier }, boardId: before.boardId },
+      select: { id: true, status: true },
+    });
+    const fresh = kids.filter(
+      (k) => k.id !== args.itemId && !descendants.some((d) => d.id === k.id),
+    );
+    frontier = fresh.map((k) => k.id);
+    descendants.push(...fresh);
+  }
+  const descendantIds = descendants.map((d) => d.id);
+
+  // A CHILD's status is remapped exactly like its parent's, for the reason
+  // item-move.ts states: a row carrying a status the target List does not
+  // declare drops out of every group-by, which looks exactly like a lost task.
+  // Kanban happens to bucket an unknown status into its first column; a grouped
+  // List view does not, so the child simply vanished. Grouped by REMAPPED
+  // value, so the whole tree costs at most one updateMany per distinct status.
+  const childStatusGroups = args.toStatuses
+    ? remapDescendantStatuses(descendants, args.fromStatuses ?? [], args.toStatuses)
+    : new Map<string | null, string[]>();
+
+  const [updated] = await prisma.$transaction([
+    prisma.item.update({
+      where: { id: args.itemId },
+      data: {
+        boardId: args.toBoardId,
+        status: args.status,
+        // The old groupKey named a group in the OLD List. Following the status
+        // is what keeps the row visible after the move; a groupKey that names
+        // nothing is how a moved task "disappears" from a grouped board.
+        groupKey: before.groupKey === before.status ? args.status : null,
+        position,
+      },
+      include: { board: { select: { spaceId: true } } },
+    }),
+    // Subtasks follow the parent, carrying a status the target List actually
+    // declares. The groupKey is cleared either way, so a row can never point at
+    // a group that does not exist in the target List.
+    ...(descendantIds.length > 0
+      ? childStatusGroups.size > 0
+        ? [...childStatusGroups.entries()].map(([status, ids]) =>
+            prisma.item.updateMany({
+              where: { id: { in: ids } },
+              data: { boardId: args.toBoardId, groupKey: null, status },
+            }),
+          )
+        : [
+            prisma.item.updateMany({
+              where: { id: { in: descendantIds } },
+              data: { boardId: args.toBoardId, groupKey: null },
+            }),
+          ]
+      : []),
+  ]);
+
+  await logActivity({
+    organizationId: before.organizationId,
+    itemId: args.itemId,
+    actorId: args.actorId,
+    action: "MOVED",
+    meta: {
+      fromBoardId: before.boardId,
+      toBoardId: args.toBoardId,
+      fromStatus: before.status,
+      toStatus: args.status,
+      subtasksMoved: descendantIds.length,
+    },
+  });
+
+  const owner = updated.ownerId
+    ? await prisma.user.findUnique({
+        where: { id: updated.ownerId },
+        select: { id: true, firstName: true, lastName: true, avatar: true },
+      })
+    : null;
+  const tags = (await tagsForItems([args.itemId])).get(args.itemId) ?? [];
+  return rowFrom(updated, owner, tags, updated.board.spaceId);
 }
 
 // ── Internal: cuid (Prisma's cuid v1 algorithm without the dep) ──

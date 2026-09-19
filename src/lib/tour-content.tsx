@@ -4,6 +4,7 @@ import {
   Lightbulb, Crosshair, Settings, User, TrendingUp,
 } from "lucide-react";
 import type { TourStep } from "@/components/product-tour";
+import { WORK_HOME_HREF } from "./nav/route-hub";
 
 // ========================================
 // ADMIN TOUR — for the person who set up the org
@@ -95,11 +96,11 @@ export const EMPLOYEE_TOUR_STEPS: TourStep[] = [
     icon: <Sparkles size={24} />,
   },
   {
-    title: "Your Dashboard",
-    description: "The dashboard is your home. You'll see announcements from your team, your tasks, your KRAs, recent kudos, and quick stats. Anything important shows up here first.",
+    title: "Home",
+    description: "Home is where your day starts. Your work for today, what arrived in your Inbox, your reminders and your goals, on one quiet screen.",
     icon: <BarChart3 size={24} />,
-    navigateTo: "/dashboard",
-    actionLabel: "Open Dashboard",
+    navigateTo: WORK_HOME_HREF,
+    actionLabel: "Open Home",
   },
   {
     title: "Your KRAs & KPIs",
@@ -110,11 +111,11 @@ export const EMPLOYEE_TOUR_STEPS: TourStep[] = [
     highlight: "Update your KPIs regularly — they feed into your composite performance score.",
   },
   {
-    title: "Your Tasks & Calendar",
-    description: "Manage your day-to-day work. Create tasks, set priorities, mark them done. The calendar view shows what's due when. Tasks tie into KRAs and OKRs.",
+    title: "My work",
+    description: "Every task assigned to you, across every Space, as one list you can sort, group and tick off. The board and calendar views show the same tasks a different way.",
     icon: <CheckSquare size={24} />,
-    navigateTo: "/tasks",
-    actionLabel: "Open Tasks",
+    navigateTo: "/my-work",
+    actionLabel: "Open My work",
   },
   {
     title: "SOPs assigned to you",

@@ -68,7 +68,9 @@ export async function POST(req: NextRequest) {
     type: "template.applied",
     actorId: userId,
     organizationId: orgId,
-    description: `Applied "${t.name}" template — seeded a doc, form, and table`,
+    // No em dash: naming-canon H.10 forbids one in any string a person
+    // reads, and this string is read on /activity.
+    description: `Applied "${t.name}" template: seeded a doc, form, and table`,
     metadata: {
       template: t.id,
       docId: doc.id,

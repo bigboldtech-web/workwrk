@@ -1,44 +1,27 @@
+// DELETE /api/trash/[id]: delete permanently.
+//
+// Owner and Admin only (spec-spaces-lists section 2 /trash): "Delete
+// permanently" is the only red action on the page and it lives inside the "…"
+// menu, never as a row button, so a Member restoring their own work can never
+// hit the one thing that cannot be undone.
+
 import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, isManager, jsonError, jsonSuccess } from "@/lib/api-helpers";
-import { freeTrashStorage } from "@/lib/trash";
+import { AccessError, requireCan } from "@/lib/access/gate";
+import { jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { purgeTrashRow } from "@/lib/trash-server";
 
-// DELETE: permanently delete a trashed item (manager-gated).
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
-
-  const { id } = await params;
-  const orgId = getOrgId(session);
-
-  // Archived Docs / Whiteboards: delete-forever = hard delete the row.
-  if (id.startsWith("doc:")) {
-    const docId = id.slice(4);
-    const found = await prisma.doc.findFirst({ where: { id: docId, organizationId: orgId }, select: { id: true } });
-    if (!found) return jsonError("Not found", 404);
-    await prisma.doc.delete({ where: { id: docId } });
+  try {
+    const { viewer } = await requireCan("view", { type: "app", key: "trash" });
+    if (viewer.orgRole !== "OWNER" && viewer.orgRole !== "ADMIN") {
+      return jsonError("Only an Admin or the Owner can delete permanently.", 403);
+    }
+    const { id } = await params;
+    const res = await purgeTrashRow(viewer, id);
+    if (!res.ok) return jsonError(res.message, res.status);
     return jsonSuccess({ deleted: true });
+  } catch (e) {
+    if (e instanceof AccessError) return jsonError(String(e.body.error), e.status);
+    throw e;
   }
-  if (id.startsWith("wb:")) {
-    const wbId = id.slice(3);
-    const found = await prisma.whiteboard.findFirst({ where: { id: wbId, organizationId: orgId }, select: { id: true } });
-    if (!found) return jsonError("Not found", 404);
-    await prisma.whiteboard.delete({ where: { id: wbId } });
-    return jsonSuccess({ deleted: true });
-  }
-  if (id.startsWith("agr:")) {
-    const agrId = id.slice(4);
-    const found = await prisma.agreement.findFirst({ where: { id: agrId, organizationId: orgId }, select: { id: true } });
-    if (!found) return jsonError("Not found", 404);
-    await prisma.agreement.delete({ where: { id: agrId } });
-    return jsonSuccess({ deleted: true });
-  }
-
-  const item = await prisma.trashItem.findFirst({ where: { id, organizationId: orgId }, select: { id: true, entityType: true, snapshot: true } });
-  if (!item) return jsonError("Not found", 404);
-
-  await freeTrashStorage(item.entityType, item.snapshot); // reclaim file blob, if any
-  await prisma.trashItem.delete({ where: { id } });
-  return jsonSuccess({ deleted: true });
 }

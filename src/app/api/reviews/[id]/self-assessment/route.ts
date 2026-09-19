@@ -178,7 +178,7 @@ export async function PATCH(
       data: {
         title: "Self-Assessment Submitted",
         message: `${(session.user as { name?: string | null } | undefined)?.name || "An employee"} has submitted their self-assessment. Please complete the manager review.`,
-        type: "REVIEW",
+        type: "review",
         link: `/reviews/${cycleId}`,
         userId: review.reviewerId,
       },

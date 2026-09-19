@@ -59,11 +59,19 @@ export const PRODUCT_CATALOG: CatalogProduct[] = [
     defaultEnabled: true,
     displayOrder: 10,
     legacyModuleKey: "tasks",
-    // pathPrefix stays /tasks so the legacy calendar still resolves
-    // to this product in nav matching. landingHref points users at
-    // the new monday-style board surface by default.
-    pathPrefix: "/tasks",
-    landingHref: "/tasks/board",
+    // Phase 2 W4: the legacy /tasks/* grid is gone and every task is an
+    // Item. The prefix follows the surface that replaced it, so nav matching
+    // lands on the page people actually open.
+    //
+    // THIS CONSTANT IS A SEED, NOT THE LIVE VALUE. `pathPrefix` is a column on
+    // the `Product` table, and GET /api/products and
+    // GET /api/products/installations serve what is STORED, not what is
+    // written here. A workspace provisioned before this edit keeps advertising
+    // the dead "/tasks" prefix until the product rows are re-seeded, so the
+    // seed step is a line in scripts/MIGRATIONS.md rather than something this
+    // file can fix on its own.
+    pathPrefix: "/my-work",
+    landingHref: "/my-work",
     seededTemplates: ["personal-todo", "team-sprint", "project-tracker"],
   },
   // SOPs / Goals / Meetings / Whiteboards / Culture are part of every

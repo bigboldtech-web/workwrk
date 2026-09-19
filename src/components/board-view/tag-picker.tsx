@@ -10,6 +10,7 @@ import { Plus, Search, Tag as TagIcon, X } from "lucide-react";
 import type { ItemTag } from "@/lib/board-items-shared";
 import { MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { useAnchorPos } from "./use-anchor-pos";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 const FALLBACK_COLOR = "#94a3b8";
 
@@ -162,7 +163,7 @@ export function TagPicker({ value, canEdit, compact = false, onChange }: TagPick
           </div>
           <div className="max-h-[220px] overflow-y-auto py-1.5">
             {all === null ? (
-              <div className="px-3 py-4 text-sm text-zinc-400">Loading…</div>
+              <div className="px-2 py-2"><SkeletonRows rows={3} rowHeight="28px" /></div>
             ) : (
               <>
                 {filtered.map((t) => {

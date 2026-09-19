@@ -1,38 +1,27 @@
-// GET /api/items/[id]/activity — list activity rows for a Board Item
-// (status / title / owner changes + comment hooks).
+// GET /api/items/[id]/activity: the task's activity log.
+//
+// `?kind=status|assignees|dates|fields|comments|attachments|lifecycle` filters
+// it (src/lib/item-activity-kinds.ts owns the mapping and its completeness
+// test). An unknown kind means "no filter", never a 400: an Activity tab that
+// errors on a stale bookmark is worse than one that shows everything.
+//
+// Gated on the ITEM ref, like every other item route. Until Phase 2 this route
+// resolved a Space first, so it 404'd for an assignee outside the Space and for
+// every personal-list task (the personal board has no spaceId at all).
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { getSpaceForReader } from "@/lib/space";
 import { listActivity } from "@/lib/item-thread";
-import { prisma } from "@/lib/prisma";
+import { parseActivityKind } from "@/lib/item-activity-kinds";
+import { gateItem, itemCtx } from "@/lib/item-gate";
 
-async function ctx() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
-  if (!u.id || !u.organizationId) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
-}
-
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const c = await ctx();
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const c = await itemCtx();
   if ("error" in c) return c.error;
   const { id } = await params;
-  const item = await prisma.item.findUnique({
-    where: { id },
-    include: { board: { select: { spaceId: true, organizationId: true } } },
-  });
-  if (!item || item.organizationId !== c.organizationId || !item.board.spaceId) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  const space = await getSpaceForReader(item.board.spaceId, c.userId, c.accessLevel);
-  if (!space) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const activity = await listActivity(id);
-  return NextResponse.json({ activity });
+  const gate = await gateItem(id, c, "view");
+  if ("error" in gate) return gate.error;
+
+  const kind = parseActivityKind(new URL(req.url).searchParams.get("kind"));
+  const activity = await listActivity(id, { kind });
+  return NextResponse.json({ activity, kind });
 }

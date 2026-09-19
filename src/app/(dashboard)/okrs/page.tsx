@@ -6,9 +6,17 @@
 // rule per goal via requireGoalPage, so a guessed URL never leaks a goal.
 //
 // Query params (both linked from the profile hero + sidebar):
-//   ?new=1  — auto-open the create-goal modal on load
-//   ?mine=1 — only goals the viewer carries (owner or resolved member);
-//             enforced server-side by GET /api/okrs?mine=1
+//   ?new=1         auto-open the create-goal modal on load
+//   ?view=team     the manager's report tree (sidebar row "Team goals")
+//   ?view=company  COMPANY-level goals (sidebar row "Company goals")
+//   ?mine=1        only goals the viewer carries (owner or resolved member),
+//                  enforced server-side by GET /api/okrs?mine=1
+//
+// `?view=` is the canon form spec-goals section 1 prints; `?team=1` and
+// `?level=company` are the retired forms, still READ here so stored links and
+// old bookmarks keep landing on the cut they named. They are never printed.
+// Until this mapping existed the two sidebar rows that are the only doors to
+// Team goals and Company goals both rendered the unfiltered list, silently.
 
 import { requireGoalsPage } from "@/lib/page-gates";
 import OkrsClient from "./okrs-client";
@@ -22,6 +30,9 @@ export default async function OkrsPage({
 }) {
   await requireGoalsPage();
   const sp = await searchParams;
-  const level = typeof sp.level === "string" ? sp.level : undefined;
-  return <OkrsClient initialNew={sp.new === "1"} mine={sp.mine === "1"} team={sp.team === "1"} level={level} />;
+  const view = typeof sp.view === "string" ? sp.view : undefined;
+  const legacyLevel = typeof sp.level === "string" ? sp.level : undefined;
+  const level = view === "company" ? "company" : legacyLevel;
+  const team = view === "team" || sp.team === "1";
+  return <OkrsClient initialNew={sp.new === "1"} mine={sp.mine === "1"} team={team} level={level} />;
 }

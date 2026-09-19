@@ -12,6 +12,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { docAccessible } from "@/lib/doc-access";
+// The scanner is shared with scripts/backfill-mentions.ts so the notifications
+// that backfill writes anchor at exactly the blocks this page links to.
+import { findMentionBlocks } from "@/lib/doc-mentions";
 
 type Hit = {
   source: "doc" | "sop";
@@ -93,37 +96,4 @@ export async function GET() {
   hits.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 
   return NextResponse.json({ hits });
-}
-
-function findMentionBlocks(content: unknown, me: string): Array<{ blockId: string; excerpt: string }> {
-  const out: Array<{ blockId: string; excerpt: string }> = [];
-  if (!content || typeof content !== "object") return out;
-  const c = content as { blocks?: unknown[] };
-  if (!Array.isArray(c.blocks)) return out;
-  const target = `data-id="${me}"`;
-  for (const b of c.blocks) {
-    if (!b || typeof b !== "object") continue;
-    const block = b as Record<string, unknown>;
-    const text = typeof block.text === "string" ? block.text : "";
-    const body = typeof block.body === "string" ? block.body : "";
-    if (!text.includes(target) && !body.includes(target)) continue;
-    const combined = `${text} ${body}`;
-    const blockId = String(block.id ?? "");
-    if (!blockId) continue;
-    out.push({ blockId, excerpt: htmlToPlainExcerpt(combined, 220) });
-  }
-  return out;
-}
-
-function htmlToPlainExcerpt(html: string, max: number): string {
-  const plain = html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
-  return plain.length > max ? plain.slice(0, max) + "…" : plain;
 }

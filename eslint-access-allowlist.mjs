@@ -18,6 +18,28 @@
 // never grow it. A new file that needs one of these reads is a sign it should
 // be calling can() / accessibleIds() / requireCan() instead.
 
+// Phase 2 Stage A (2026-09-18) NET SHRINK of three. The four /api/items/[id]*
+// routes each resolved their own gate and each read accessLevel to do it. They
+// now all gate through src/lib/item-gate.ts, so three of them
+// (updates, updates/[updateId], activity) leave this list entirely. What was
+// added: item-gate.ts itself (the ONE place the item world reads the legacy
+// signals, until access steps 0 and 1 make the wrappers delegate to can(), at
+// which point this single entry goes too), /api/items/[id]/duplicate (one
+// canContributeBoard check on the destination List) and /api/me/favorites
+// (the aggregate, which gates per kind exactly as its seven per-kind siblings
+// already on this list do) and src/lib/file-access.ts (the /api/files read rule,
+// extracted so the comment-attachment path stops skipping it). Net: minus three,
+// plus three, and three ROUTES became zero routes.
+// Phase 2 Stage D (2026-09-19) adds five NEW routes, and says why. This stage's
+// brief is explicit that the access pivot stays inert here: the three container
+// detail routes and their APIs keep calling the existing helpers
+// (`canEditSpace`, `getSpaceForReader`, `canEditBoard`), which read accessLevel,
+// and nothing is flipped to `can()`. Four of the five are the routes the spec
+// asks for and that did not exist at all (`folders/[id]/move`,
+// `folders/[id]/duplicate`, `folders/[id]/contents`, `spaces/[id]/duplicate`),
+// and the fifth (`boards/[id]/views/order`) replaces one PATCH per view with
+// one request. Each one gates exactly like the sibling route already on this
+// list, so they leave it in the same batch those siblings do, at access step 6.
 export const ACCESS_LEGACY_ALLOWLIST = [
   // Phase 0 step 2b: GET /api/boot folds the shell's four boot calls into one
   // and has to run the SAME legacy rail resolver the client runs today
@@ -105,6 +127,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/boards/\\[id\\]/move/route.ts",
   "src/app/api/boards/\\[id\\]/route.ts",
   "src/app/api/boards/\\[id\\]/views/\\[viewId\\]/route.ts",
+  "src/app/api/boards/\\[id\\]/views/order/route.ts",
   "src/app/api/boards/\\[id\\]/views/route.ts",
   "src/app/api/boards/route.ts",
   "src/app/api/budget-plans/\\[id\\]/route.ts",
@@ -145,7 +168,10 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/files/route.ts",
   "src/app/api/financial-reports/route.ts",
   "src/app/api/fiscal-years/route.ts",
+  "src/app/api/folders/\\[id\\]/contents/route.ts",
+  "src/app/api/folders/\\[id\\]/duplicate/route.ts",
   "src/app/api/folders/\\[id\\]/members/route.ts",
+  "src/app/api/folders/\\[id\\]/move/route.ts",
   "src/app/api/folders/\\[id\\]/route.ts",
   "src/app/api/folders/reorder/route.ts",
   "src/app/api/folders/route.ts",
@@ -164,10 +190,8 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/invoices/\\[id\\]/route.ts",
   "src/app/api/invoices/route.ts",
   "src/app/api/item-activity/route.ts",
-  "src/app/api/items/\\[id\\]/activity/route.ts",
   "src/app/api/items/\\[id\\]/route.ts",
-  "src/app/api/items/\\[id\\]/updates/\\[updateId\\]/route.ts",
-  "src/app/api/items/\\[id\\]/updates/route.ts",
+  "src/app/api/items/\\[id\\]/duplicate/route.ts",
   "src/app/api/journal-entries/\\[id\\]/route.ts",
   "src/app/api/journal-entries/route.ts",
   "src/app/api/keys/route.ts",
@@ -180,9 +204,19 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/kras/orphans/route.ts",
   "src/app/api/kras/route.ts",
   "src/app/api/labels/route.ts",
+  "src/app/api/notifications/route.ts",
   "src/app/api/me/access/route.ts",
   "src/app/api/me/everything/route.ts",
   "src/app/api/me/export/route.ts",
+  "src/app/api/me/favorites/route.ts",
+  // Phase 2 Stage C, two entries, both for the SAME one reason: they hand an
+  // accessLevel to `docAccessible` (already on this list), which is the gate
+  // the Docs pages use, so that a Recent-docs row and an Inbox mention pane
+  // can never show a doc /docs/[id] itself would refuse. The alternative was
+  // passing null, which defaults to EMPLOYEE and would quietly hide an
+  // admin's own documents from them. Both entries go when the wrappers
+  // delegate to can().
+  "src/app/api/me/home/route.ts",
   "src/app/api/me/favorites/boards/route.ts",
   "src/app/api/me/favorites/docs/route.ts",
   "src/app/api/me/favorites/files/route.ts",
@@ -265,6 +299,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/sops/route.ts",
   "src/app/api/spaces/\\[id\\]/bookmarks/route.ts",
   "src/app/api/spaces/\\[id\\]/children/route.ts",
+  "src/app/api/spaces/\\[id\\]/duplicate/route.ts",
   "src/app/api/spaces/\\[id\\]/invitations/\\[inviteId\\]/resend/route.ts",
   "src/app/api/spaces/\\[id\\]/invitations/\\[inviteId\\]/route.ts",
   "src/app/api/spaces/\\[id\\]/invitations/route.ts",
@@ -315,6 +350,12 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/whiteboards/\\[id\\]/versions/\\[versionId\\]/restore/route.ts",
   "src/app/api/whiteboards/\\[id\\]/versions/route.ts",
   "src/app/api/whiteboards/route.ts",
+  // Stage D follow-up (2026-09-19): GET /api/work/locate answers "which Space
+  // and which folders is this object under", so the sidebar tree can open the
+  // branch a deep link lands in. It gates with `folderReadable` / `canRead`,
+  // the same helpers its sibling container routes on this list use, and leaves
+  // in the same batch they do at access step 6.
+  "src/app/api/work/locate/route.ts",
   "src/app/api/workflow-runs/route.ts",
   "src/app/api/workflows/route.ts",
   "src/app/api/workspaces/\\[id\\]/members/route.ts",
@@ -357,6 +398,12 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/email-templates/invitation.ts",
   "src/lib/entity-link-authz.ts",
   "src/lib/everything.ts",
+  // The "who may read this file" rule, lifted verbatim out of
+  // src/app/api/files/route.ts (still on this list, two entries above) so the
+  // comment-attachment path can run the SAME check instead of skipping it. It
+  // reads no signal /api/files did not already read; it leaves this list on the
+  // same day the two /api/files entries do.
+  "src/lib/file-access.ts",
   "src/lib/folder.ts",
   "src/lib/goal-audience.ts",
   "src/lib/hr-segment.ts",
@@ -364,6 +411,7 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/lib/page-gates.ts",
   "src/lib/permissions.ts",
   "src/lib/platform-admin.ts",
+  "src/lib/item-gate.ts",
   "src/lib/rail-apps.test.ts",
   "src/lib/rail-apps.ts",
   "src/lib/role-defaults.ts",

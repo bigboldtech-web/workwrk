@@ -20,6 +20,7 @@ import { Dots } from "@/components/ui/dots";
 import { buildRecurrenceSummary } from "@/lib/recurrence";
 import {
   PRIORITY_OPTIONS,
+  buildSubtaskBody,
   isDoneStatus,
   splitBulkResults,
   bulkFailureMessage,
@@ -29,7 +30,8 @@ import {
 } from "@/lib/board-items-shared";
 import { isBuiltinShown, FIELD_TYPE_BY_KEY, BUILTIN_COLUMN_BY_KEY, type FieldDef } from "@/lib/field-catalog";
 import type { LucideIcon } from "lucide-react";
-import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
+import { AssigneePicker, MultiAssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
+import { rowAssigneeIds } from "./board-filter-bar";
 import { FieldValue } from "./field-value";
 import { PriorityPicker } from "./priority-picker";
 import { TagPicker } from "./tag-picker";
@@ -39,9 +41,11 @@ import { StatusGlyph } from "./status-glyph";
 import { itemTypeIcon } from "@/lib/item-type-icons";
 import type { FieldChoice } from "@/lib/field-catalog";
 import { useConfirm } from "@/components/ui/dialog-provider";
-import { ItemRowMoreMenu } from "./item-row-more-menu";
+import { ItemMoreMenu } from "./item-more-menu";
+import { accessMessage } from "@/lib/access-message";
 import { DatePlanner } from "./date-planner";
 import { BulkActionBar } from "./bulk-action-bar";
+import { localDayIso } from "@/lib/item-date";
 import { MorePortal, type ContextMenuHandle } from "@/components/layout/os/more-portal";
 import { MenuList, MenuItem, MenuSeparator } from "@/components/ui/menu";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
@@ -58,6 +62,10 @@ interface BoardTableViewProps {
   /** Per-List statuses (backbone #1) — the board's own set. */
   statuses: StatusOption[];
   canEdit: boolean;
+  /** Full access on the List. Only gates the row menu's Delete row, which is
+   *  not an edit: it wants full access OR the task's own creator, so rendering
+   *  it on `canEdit` gave every Member a control that always 403'd. */
+  canDeleteTasks?: boolean;
   /** When set, clicking a row's title opens the row drawer. The
    *  parent owns drawer state; we just emit the id. */
   onOpenItem?: (itemId: string) => void;
@@ -112,7 +120,36 @@ interface BoardTableViewProps {
 /** Patch shape rows can emit. `owner`/`tags` only update the local
  *  optimistic row — the API's zod schema strips unknown keys; `tagIds`
  *  is what the server persists. */
-type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "priority" | "tags" | "startAt" | "dueAt" | "itemTypeId" | "recurRule">> & { tagIds?: string[]; metadata?: Record<string, unknown> };
+type RowPatch = Partial<Pick<BoardItemRow, "title" | "status" | "ownerId" | "owner" | "assigneeIds" | "assignees" | "priority" | "tags" | "startAt" | "dueAt" | "itemTypeId" | "recurRule">> & {
+  tagIds?: string[];
+  metadata?: Record<string, unknown>;
+  /**
+   * One key of `metadata`, changed without touching the rest of it.
+   *
+   * `metadata` is a WHOLESALE replace (src/app/api/items/[id]/route.ts:243).
+   * A cell that spreads this page's cached copy of the blob and sends the
+   * whole thing reverts `metadata.description`, the task body, plus
+   * `metadata.legacyTask` and `metadata.legacyTaskId`, the migration's own
+   * markers, to whatever they were when this page loaded. `metadataPatch` is
+   * merged over the STORED blob inside the request, so a stale page can only
+   * change the key it means to. An empty value means "remove this key", which
+   * the server reads as `null`.
+   */
+  metadataPatch?: Record<string, unknown>;
+};
+
+/** The optimistic twin of the server-side metadataPatch merge. */
+function mergeMetadata(
+  current: Record<string, unknown> | undefined,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...(current ?? {}) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete next[k];
+    else next[k] = v;
+  }
+  return next;
+}
 
 // Toolbar sort (ported from the Personal List).
 type SortKey = "none" | "title" | "due" | "created" | "priority";
@@ -224,7 +261,7 @@ function csvCell(v: unknown): string {
 const LEADING_W = 34;
 const ACTIONS_MIN_W = 44;
 
-export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
+export function BoardTableView({ boardId, viewId, viewConfig, initialItems, initialFields, statuses, canEdit, canDeleteTasks, onOpenItem, onEditStatuses, onOpenFields, currentUserId, toolbarActions, filterSlot, hiddenBuiltins, extraColumns, onHideField, onFieldsChanged, onItemCreated, onItemPatched, onItemRemoved, onItemsRefreshed, timeTrackingEnabled = true, gridStyle = "list", renderTitleSuffix }: BoardTableViewProps) {
   const confirm = useConfirm();
   const monday = gridStyle === "table";
   // Custom-field columns, ordered by their saved `position` (matches the Fields
@@ -331,6 +368,16 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   });
   const colWidthsRef = useRef(colWidths);
   useEffect(() => { colWidthsRef.current = colWidths; }, [colWidths]);
+  // Which widths a PERSON actually dragged. The Name column's width is also
+  // written into this map automatically (it is the fill column, and freezing it
+  // is what stops a meta-column resize from silently stealing from it), and
+  // that auto value used to be persisted alongside the dragged one: a first
+  // paint measured while the container was still narrow froze Name at its 220
+  // floor, and the next drag of ANY column wrote that 220 into the saved view
+  // for everybody, for good. Only a dragged width is saved now.
+  const userSizedRef = useRef<Set<string>>(new Set(Object.keys(
+    ((viewConfig as { colWidths?: Record<string, number> } | null)?.colWidths) ?? {},
+  )));
   // Measured width of the scroll container — used to give Name a sensible
   // "fill" default and to clamp drags so the columns always fit (the actions
   // column keeps at least ACTIONS_MIN, so nothing can be squeezed to zero).
@@ -487,7 +534,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         )
       : top;
     if (mineOnly && currentUserId) {
-      topFiltered = topFiltered.filter((r) => r.ownerId === currentUserId);
+      // "Me" means "I am ON this task", not "I am the primary". Matching
+      // ownerId alone hid every task where somebody else was primary and the
+      // viewer was a secondary assignee.
+      topFiltered = topFiltered.filter((r) => rowAssigneeIds(r).includes(currentUserId));
     }
     const topSorted = sortCol
       ? [...topFiltered].sort((a, b) => {
@@ -531,33 +581,26 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     });
   }, []);
 
+  // One endpoint owns what a copy carries (POST /api/items/[id]/duplicate).
+  // The hand-rolled body this used to send dropped assigneeIds, tagIds, the
+  // dates and the priority, so a duplicated task lost its people and its tags.
   const handleDuplicate = useCallback(async (row: BoardItemRow) => {
     if (!canEdit) return;
     try {
-      const res = await fetch(`/api/boards/${boardId}/items`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: `${row.title} (copy)`,
-          status: row.status ?? firstStatus,
-          ownerId: row.ownerId,
-          metadata: row.metadata,
-          parentItemId: row.parentItemId ?? null,
-        }),
-      });
+      const res = await fetch(`/api/items/${row.id}/duplicate`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError("Failed to duplicate");
+        setError(accessMessage(data, "Couldn't duplicate this task."));
         return;
       }
-      const data = await res.json();
       if (data?.item) {
         setItems((prev) => [...prev, data.item]);
         reportCreated(data.item as BoardItemRow);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to duplicate");
+      setError(e instanceof Error ? e.message : "Couldn't duplicate this task.");
     }
-  }, [boardId, canEdit, firstStatus, reportCreated]);
+  }, [canEdit, reportCreated]);
 
   // Type-first: the inline subtask row passes the title the user typed — no
   // "New subtask" placeholder to rename afterward. Returns {ok,error} so the
@@ -568,23 +611,24 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     title: string,
   ): Promise<{ ok: boolean; error?: string }> => {
     if (!canEdit) return { ok: false, error: "You don't have edit access to this list" };
-    const trimmed = title.trim();
-    if (!trimmed) return { ok: false };
+    // Shared with the Kanban card's inline composer, so neither surface can
+    // drift back to POSTing a placeholder title.
+    const body = buildSubtaskBody({ title, parentId, parentStatus, fallbackStatus: firstStatus });
+    if (!body) return { ok: false };
     setAdding(true);
     setError(null);
     try {
       const res = await fetch(`/api/boards/${boardId}/items`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: trimmed,
-          status: parentStatus ?? firstStatus,
-          parentItemId: parentId,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data?.error ?? `Save failed (HTTP ${res.status})`;
+        // accessMessage, not data.error: the item routes answer refusals as
+        // machine codes ("Forbidden", "no_access" + a reason) on purpose, and
+        // printing one is how a user came to read the literal word "Forbidden".
+        const msg = accessMessage(data, `Save failed (HTTP ${res.status})`);
         setError(msg);
         return { ok: false, error: msg };
       }
@@ -796,7 +840,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // error banner so the user can retry.
   const bulkArchive = useCallback(async () => {
     if (selected.size === 0) return;
-    if (!(await confirm({ title: "Archive rows", description: `Archive ${selected.size} row${selected.size === 1 ? "" : "s"}?`, destructive: true, confirmLabel: "Archive" }))) return;
+    if (!(await confirm({ title: "Archive tasks", description: `Archive ${selected.size} task${selected.size === 1 ? "" : "s"}? You can restore them from Trash.`, destructive: true, confirmLabel: "Archive" }))) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
     const { succeeded, failed } = await splitBulkResults(ids, (id) => fetch(`/api/items/${id}`, { method: "DELETE" }));
@@ -857,17 +901,35 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
   // Shared bulk-PATCH runner: `body` goes to the API, `local` is the display
   // patch merged into rows whose request succeeded.
+  //
+  // ONE REQUEST, not one per row (spec-spaces-lists section 2, the bulk bar).
+  // This used to fan out one `PATCH /api/items/[id]` per selected id, so forty
+  // tasks meant forty requests and forty gates, and a selection that spanned a
+  // List the viewer can only read looked like it had worked. `/api/items/bulk`
+  // gates each row on its own and returns a per-id report, which is what lets
+  // the failed ids stay selected with an honest message.
   const bulkPatch = useCallback(async (body: Record<string, unknown>, local: Partial<BoardItemRow>) => {
     if (selected.size === 0) return;
     setBulkBusy(true);
     const ids = Array.from(selected);
-    const { succeeded, failed } = await splitBulkResults(ids, (id) =>
-      fetch(`/api/items/${id}`, {
-        method: "PATCH",
+    let succeeded: string[] = [];
+    let failed: string[] = ids;
+    try {
+      const res = await fetch("/api/items/bulk", {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-    );
+        body: JSON.stringify({ ids, patch: body }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { results?: Array<{ id: string; ok: boolean }> }
+        | null;
+      if (res.ok && Array.isArray(data?.results)) {
+        succeeded = data.results.filter((r) => r.ok).map((r) => r.id);
+        failed = data.results.filter((r) => !r.ok).map((r) => r.id);
+      }
+    } catch {
+      // Network failure: nothing applied, everything stays selected.
+    }
     setError(failed.length > 0 ? bulkFailureMessage("update", failed, ids.length, items) : null);
     const ok = new Set(succeeded);
     setItems((prev) => prev.map((r) => (ok.has(r.id) ? { ...r, ...local } : r)));
@@ -877,7 +939,30 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   }, [selected, onItemPatched, items]);
 
   const bulkStatus = useCallback((status: string) => bulkPatch({ status }, { status }), [bulkPatch]);
-  const bulkOwner = useCallback((ownerId: string | null) => bulkPatch({ ownerId }, { ownerId }), [bulkPatch]);
+  // "Set owner" and "Clear assignees" are two different writes, because an
+  // ownerId-only patch MERGES on the server: it moves the named person to the
+  // front of whoever is already on the task, and a null merely drops the
+  // outgoing owner and promotes the next assignee. That is right for "set the
+  // owner" and wrong for "nobody is assigned", which is why clearing sends an
+  // explicit empty set instead. And because the merged result cannot be
+  // computed here, an owner change re-reads the board rather than painting a
+  // local row that disagrees with what was just written (the assignee filter
+  // reads that row).
+  const bulkOwner = useCallback(
+    async (ownerId: string | null) => {
+      if (ownerId === null) {
+        await bulkPatch(
+          { assigneeIds: [] },
+          { ownerId: null, owner: null, assigneeIds: [], assignees: [] },
+        );
+        return;
+      }
+      await bulkPatch({ ownerId }, { ownerId });
+      const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
+      if (fresh?.items) reportRefreshed(fresh.items);
+    },
+    [bulkPatch, boardId, reportRefreshed],
+  );
   const bulkDueAt = useCallback((iso: string | null) => bulkPatch({ dueAt: iso }, { dueAt: iso }), [bulkPatch]);
   const bulkPriority = useCallback((priority: string | null) => bulkPatch({ priority }, { priority }), [bulkPatch]);
 
@@ -919,7 +1004,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const msg = data?.error ?? `Save failed (HTTP ${res.status})`;
+        // accessMessage, not data.error: the item routes answer refusals as
+        // machine codes ("Forbidden", "no_access" + a reason) on purpose, and
+        // printing one is how a user came to read the literal word "Forbidden".
+        const msg = accessMessage(data, `Save failed (HTTP ${res.status})`);
         setError(msg);
         return { ok: false, error: msg };
       }
@@ -940,8 +1028,24 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     if (!canEdit) return;
     // Optimistic (zod on the API strips unknown keys like `owner`,
     // which only exists for the local optimistic row).
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-    onItemPatched?.(id, patch);
+    //
+    // `metadataPatch` is a SERVER-side merge instruction, not a row field, so
+    // spreading it onto the row would park a `metadataPatch` key on the local
+    // copy and leave `metadata` showing the old value until the next refetch.
+    // It is applied to `metadata` here instead, by the same rule the server
+    // uses, and dropped from what goes into local state.
+    const { metadataPatch: mdPatch, ...rowFields } = patch;
+    setItems((prev) =>
+      prev.map((r) =>
+        r.id === id
+          ? { ...r, ...rowFields, ...(mdPatch ? { metadata: mergeMetadata(r.metadata, mdPatch) } : {}) }
+          : r,
+      ),
+    );
+    // The host list is told only about the row FIELDS. It holds its own copy
+    // of `metadata` and merging a patch into somebody else's copy from here
+    // would be the stale-blob bug again, one level up.
+    onItemPatched?.(id, rowFields);
     try {
       const res = await fetch(`/api/items/${id}`, {
         method: "PATCH",
@@ -950,7 +1054,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data?.error ?? "Failed to save change");
+        setError(accessMessage(data, "Couldn't save that change."));
         // Refetch on failure to revert optimistic state.
         const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
         if (fresh?.items) reportRefreshed(fresh.items);
@@ -969,13 +1073,13 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
   const handleArchive = useCallback(async (id: string) => {
     if (!canEdit) return;
-    if (!(await confirm({ title: "Archive row", description: "Archive this row? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
+    if (!(await confirm({ title: "Archive task", description: "Archive this task? You can restore it later from Trash.", destructive: true, confirmLabel: "Archive" }))) return;
     setItems((prev) => prev.filter((r) => r.id !== id));
     reportRemoved(id);
     try {
       const res = await fetch(`/api/items/${id}`, { method: "DELETE" });
       if (!res.ok) {
-        setError("Failed to archive — refreshing");
+        setError("Couldn't archive. Refreshing");
         const fresh = await fetch(`/api/boards/${boardId}/items`).then((r) => r.json()).catch(() => null);
         if (fresh?.items) reportRefreshed(fresh.items);
       }
@@ -1034,11 +1138,17 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
   // Once the container is measured, freeze Name at its fill width so it becomes
   // a real fixed column (otherwise it's the "remainder" and growing a meta
   // column silently steals from Name instead of widening + scrolling the row).
+  // Re-derived whenever the container or the meta columns change, UNLESS the
+  // person has dragged Name themselves. It used to run once and never again, so
+  // a width frozen from a transient narrow measurement (or restored from a
+  // stale saved view) left a third of every row empty and every title cut to
+  // three words at 1440.
   useEffect(() => {
     if (containerW <= 0) return;
+    if (userSizedRef.current.has("name")) return;
     setColWidths((prev) => {
-      if (prev.name != null) return prev;
       const fill = Math.max(220, containerW - LEADING_W - metaSumW - ACTIONS_MIN_W);
+      if (prev.name === fill) return prev;
       return { ...prev, name: fill };
     });
   }, [containerW, metaSumW]);
@@ -1053,6 +1163,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
     const startX = e.clientX;
     const onMove = (ev: PointerEvent) => {
       const next = Math.max(60, Math.round(startW + (ev.clientX - startX)));
+      userSizedRef.current.add(key);
       setColWidths((prev) => ({ ...prev, [key]: next }));
     };
     const onUp = () => {
@@ -1060,7 +1171,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       window.removeEventListener("pointerup", onUp);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
-      persistView({ colWidths: colWidthsRef.current });
+      const saved: Record<string, number> = {};
+      for (const k of userSizedRef.current) {
+        const w = colWidthsRef.current[k];
+        if (typeof w === "number") saved[k] = w;
+      }
+      persistView({ colWidths: saved });
     };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -1164,6 +1280,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
       <Row
         key={row.id}
         row={row}
+        boardId={boardId}
         customFields={customFields}
         statuses={statuses}
         itemTypeMap={itemTypeMap}
@@ -1185,6 +1302,12 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         showLinked={showLinked}
         showSops={showSops}
         canEdit={canEdit}
+        currentUserId={currentUserId ?? null}
+        canDelete={
+          canDeleteTasks === undefined
+            ? undefined
+            : canDeleteTasks || (!!currentUserId && row.createdBy?.id === currentUserId)
+        }
         monday={monday}
         selected={selected.has(row.id)}
         onToggleSelect={toggleRow}
@@ -1443,6 +1566,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                                 defaultStatus={groupBy === "status" ? b.key : firstStatus}
                                 itemTypes={itemTypeList}
                                 defaultTypeId={defaultItemType?.id ?? null}
+                                boardId={boardId}
                                 onCreate={handleAddRich}
                               />
                             </td>
@@ -1474,6 +1598,7 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
                     defaultStatus={firstStatus}
                     itemTypes={itemTypeList}
                     defaultTypeId={defaultItemType?.id ?? null}
+                    boardId={boardId}
                     onCreate={handleAddRich}
                   />
                 </td>
@@ -1481,6 +1606,32 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
             ) : null}
             {items.length === 0 && !canEdit ? (
               <tr><td colSpan={colCount} className="px-4 py-8 text-center text-xs text-zinc-500">No items yet.</td></tr>
+            ) : null}
+            {/* A FILTER THAT EMPTIES THE BOARD SAYS SO, and offers the way
+                back. Without this the whole canvas went blank: no group
+                header, no sentence, and the only sign a filter was on was a
+                tinted 28px toolbar icon. The filter PANEL already writes a
+                sentence when it has nothing ("No filters. Add one to narrow
+                the list."); the filtered RESULT did not. */}
+            {items.length > 0 && topLevel.length === 0 ? (
+              <tr>
+                <td colSpan={colCount} className="px-4 py-8 text-center">
+                  <p className="text-sm text-ink-2">
+                    {mineOnly && query.trim()
+                      ? "No tasks assigned to you match that search."
+                      : mineOnly
+                        ? "No tasks here are assigned to you."
+                        : "No tasks match this search."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { setMineOnly(false); setQuery(""); }}
+                    className="mt-1 text-base font-medium text-brand-deep hover:underline"
+                  >
+                    Clear filters
+                  </button>
+                </td>
+              </tr>
             ) : null}
           </tbody>
         </table>
@@ -1494,9 +1645,10 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
         onArchive={bulkArchive}
         onStatus={bulkStatus}
         onDueAt={bulkDueAt}
-        onOwner={bulkOwner}
+        onOwner={(ownerId) => void bulkOwner(ownerId)}
         onPriority={bulkPriority}
         onTrash={bulkTrash}
+        boardId={boardId}
       />
     </div>
   );
@@ -1504,8 +1656,15 @@ export function BoardTableView({ boardId, viewId, viewConfig, initialItems, init
 
 // ── Inline row editor ──────────────────────────────────────────────
 
+/** The stored watcher list on a row, so Watch reads "Unwatch" when it should. */
+function rowWatcherIds(row: BoardItemRow): string[] {
+  const md = (row.metadata as Record<string, unknown> | undefined) ?? {};
+  return Array.isArray(md.watchers) ? (md.watchers as unknown[]).filter((v): v is string => typeof v === "string") : [];
+}
+
 function Row({
   row,
+  boardId: rowBoardId,
   customFields,
   statuses,
   itemTypeMap,
@@ -1527,6 +1686,8 @@ function Row({
   showLinked = false,
   showSops = false,
   canEdit,
+  currentUserId,
+  canDelete,
   monday = false,
   selected,
   onToggleSelect,
@@ -1551,6 +1712,9 @@ function Row({
   onToggleExpand,
 }: {
   row: BoardItemRow;
+  /** The list this table is showing, so the assignee picker can ask who is
+   *  on it. Rows fetched from a board endpoint may not carry their own. */
+  boardId?: string | null;
   customFields: FieldDef[];
   statuses: StatusOption[];
   itemTypeMap: Map<string, ItemTypeLite>;
@@ -1572,6 +1736,10 @@ function Row({
   showLinked?: boolean;
   showSops?: boolean;
   canEdit: boolean;
+  /** The viewer, for the row menu's "Assign to me" and "Watch". */
+  currentUserId: string | null;
+  /** undefined = the host could not work it out; the menu leaves Delete alone. */
+  canDelete?: boolean;
   monday?: boolean;
   selected: boolean;
   onToggleSelect: (id: string, shiftKey?: boolean) => void;
@@ -1627,6 +1795,12 @@ function Row({
         onDrop(row.id);
       }}
       onDragEnd={onDragEnd}
+      // THE VIEWER'S DENSITY, NOT A HARDCODED 40. Rows measured 40px whatever
+      // the preference said, because the height came only from cell padding and
+      // nothing here read the setting. `--os-row-h` is the token
+      // html[data-density] rebinds (comfortable 44 / cozy 36 / compact 32,
+      // design-system 3.2), so one variable makes the preference real.
+      style={{ height: "var(--os-row-h, 44px)" }}
       className={`border-b border-zinc-100 last:border-b-0 hover:bg-zinc-50 group ${
         selected ? "bg-[color-mix(in_srgb,var(--os-brand)_6%,transparent)]" : ""
       } ${isDragging ? "opacity-40" : ""} ${
@@ -1699,7 +1873,7 @@ function Row({
       ) : null}
       {showOwner ? (
         <MetaCell>
-          <OwnerCell row={row} canEdit={canEdit} onUpdate={onUpdate} />
+          <OwnerCell row={row} boardId={row.boardId ?? rowBoardId ?? null} canEdit={canEdit} onUpdate={onUpdate} />
         </MetaCell>
       ) : null}
       {showDue ? (
@@ -1728,8 +1902,13 @@ function Row({
             field={f}
             value={row.metadata?.[f.key]}
             canEdit={canEdit}
+            boardId={row.boardId ?? rowBoardId ?? null}
+            // metadataPatch, never metadata: see the RowPatch comment. This
+            // cell used to spread the row's cached blob, which destroyed the
+            // task's description on any page that had been open while somebody
+            // else edited it.
             onChange={(next) =>
-              onUpdate(row.id, { metadata: { ...(row.metadata ?? {}), [f.key]: next } })
+              onUpdate(row.id, { metadataPatch: { [f.key]: next === undefined || next === "" ? null : next } })
             }
           />
         </MetaCell>
@@ -1789,19 +1968,31 @@ function Row({
         <td className="px-3 py-1.5 text-xs text-zinc-500">{row.linkedSopCount ? <span className="inline-flex items-center gap-1"><BookOpen className="w-3.5 h-3.5 text-zinc-400" />{row.linkedSopCount}</span> : "—"}</td>
       ) : null}
       <td className="sticky right-0 bg-white group-hover:bg-zinc-50 px-2 py-1.5 text-right">
+        {/* The canon menu, shared with the task drawer and the task page
+            (src/lib/item-menu.ts). The row knows only the LIST-level flags, so
+            the role is the honest translation of those; the task's own
+            decision arrives from GET /api/items/[id] when it opens. */}
         {canEdit ? (
-          <ItemRowMoreMenu
+          <ItemMoreMenu
             ref={moreRef}
-            item={{ id: row.id, title: row.title }}
-            canEdit={canEdit}
+            host="row"
+            role={canDelete ? "FULL" : canEdit ? "EDIT" : "VIEW"}
+            item={{ id: row.id, boardId: row.boardId ?? null, title: row.title, status: row.status, assigneeIds: row.assigneeIds, itemTypeId: row.itemTypeId ?? null }}
+            // Not null: ItemMoreMenu guards "Assign to me" and "Watch" on
+            // this, so a null here renders both rows and makes both inert.
+            currentUserId={currentUserId}
+            watcherIds={rowWatcherIds(row)}
+            statuses={statuses}
+            timeTrackingOn={timeTrackingEnabled}
+            onPatch={(body) => onUpdate(row.id, body as Partial<BoardItemRow>)}
             onOpen={onOpen}
-            onRename={() => setEditToken((t) => t + 1)}
-            onDuplicate={onDuplicate ? () => onDuplicate(row) : undefined}
-            onArchive={() => onArchive(row.id)}
+            onRenameRequested={() => setEditToken((t) => t + 1)}
+            onDuplicated={onDuplicate ? () => onDuplicate(row) : undefined}
+            onArchived={() => onArchive(row.id)}
             onDeleted={() => onDeleted(row.id)}
-            itemTypeId={row.itemTypeId ?? null}
-            onSetType={(t) => onUpdate(row.id, { itemTypeId: t })}
-            timeTrackingEnabled={timeTrackingEnabled}
+            // Same rule as the Kanban card: a moved task leaves this List, so
+            // the row goes with it rather than lingering until a reload.
+            onMoved={() => onDeleted(row.id)}
           />
         ) : null}
       </td>
@@ -1813,14 +2004,16 @@ function Row({
 // (or no edit rights) see the compact display; editors get the field's own
 // inline editor — a dropdown for select fields, a text input for text, a date
 // picker for dates, etc. — so each column behaves like its own kind of cell.
-function EditableFieldCell({ field, value, canEdit, onChange }: {
+function EditableFieldCell({ field, value, canEdit, onChange, boardId }: {
   field: FieldDef;
   value: unknown;
   canEdit: boolean;
   onChange: (next: unknown) => void;
+  /** Scopes a USER / PEOPLE cell's candidates AND the people it can draw. */
+  boardId: string | null;
 }) {
-  if (!canEdit) return <FieldValue field={field} value={value} mode="display" />;
-  return <FieldValue field={field} value={value} mode="edit" onChange={onChange} />;
+  if (!canEdit) return <FieldValue field={field} value={value} mode="display" boardId={boardId} />;
+  return <FieldValue field={field} value={value} mode="edit" onChange={onChange} boardId={boardId} />;
 }
 
 // Inline due-date cell — the full ClickUp DatePlanner (Date / Reminder / Repeat)
@@ -2255,12 +2448,15 @@ function AddTaskInline({
   defaultStatus,
   itemTypes,
   defaultTypeId,
+  boardId,
   onCreate,
 }: {
   statuses: StatusOption[];
   defaultStatus: string;
   itemTypes: ItemTypeLite[];
   defaultTypeId: string | null;
+  /** Scopes the quick-set assignee picker to this list's people. */
+  boardId?: string | null;
   onCreate: (p: { title: string; status: string; ownerId: string | null; dueAt: string | null; priority: string | null; tagIds: string[]; itemTypeId: string | null }) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const [open, setOpen] = useState(false);
@@ -2402,7 +2598,7 @@ function AddTaskInline({
           </span>
         ) : null}
         {itemTypes.length > 0 ? <span aria-hidden className="w-px h-5 bg-zinc-200 mx-0.5" /> : null}
-        <span className={box} title="Assignee"><AssigneePicker value={owner} canEdit compact onChange={setOwner} /></span>
+        <span className={box} title="Assignee"><AssigneePicker value={owner} canEdit compact boardId={boardId} onChange={setOwner} /></span>
         <span className={`relative ${box} ${dueDate ? "text-zinc-700" : "text-zinc-400"}`} title="Due date">
           <button
             type="button"
@@ -2416,7 +2612,9 @@ function AddTaskInline({
               type="date"
               autoFocus
               value={dueInput}
-              onChange={(e) => { setDueAt(e.target.value ? `${e.target.value}T00:00:00.000Z` : null); setDueEditing(false); }}
+              // Local midnight, not UTC: the same rule the bulk bar and the
+              // calendar drag follow (audit Medium #24, critic #13).
+              onChange={(e) => { setDueAt(e.target.value ? localDayIso(e.target.value) : null); setDueEditing(false); }}
               onBlur={() => setDueEditing(false)}
               className="absolute left-0 top-8 z-20 h-7 px-1 text-sm border border-zinc-200 rounded bg-white shadow-md focus:outline-none focus:border-[var(--os-brand)]"
             />
@@ -3167,29 +3365,52 @@ function StatusCell({
   );
 }
 
+/** The Assignee cell. It writes the SAME field the opened task writes.
+ *
+ *  It used to be the single-owner picker, so the row and the detail disagreed
+ *  about what "assignee" meant: the row could hold one person and the detail
+ *  many. Now both send `assigneeIds` and both keep ownerId = assigneeIds[0],
+ *  and the row's candidates come from the list rather than the report tree. */
 function OwnerCell({
   row,
+  boardId,
   canEdit,
   onUpdate,
 }: {
   row: BoardItemRow;
+  boardId: string | null;
   canEdit: boolean;
   onUpdate: (id: string, patch: RowPatch) => void;
 }) {
+  const value: PersonRef[] = row.assignees?.length
+    ? row.assignees.map((p) => ({ ...p, email: p.email ?? null }))
+    : row.owner
+      ? [{ ...row.owner, email: null }]
+      : [];
   return (
-    <AssigneePicker
-      value={row.owner ? { ...row.owner, email: null } : null}
+    <MultiAssigneePicker
+      value={value}
       canEdit={canEdit}
       compact
-      onChange={(person) =>
+      boardId={boardId}
+      onChange={(people) =>
         onUpdate(row.id, {
-          ownerId: person?.id ?? null,
-          owner: person
+          assigneeIds: people.map((p) => p.id),
+          // Optimistic twin of the server rule: the primary is [0].
+          ownerId: people[0]?.id ?? null,
+          assignees: people.map((p) => ({
+            id: p.id,
+            firstName: p.firstName ?? "",
+            lastName: p.lastName ?? "",
+            avatar: p.avatar,
+            email: p.email ?? null,
+          })),
+          owner: people[0]
             ? {
-                id: person.id,
-                firstName: person.firstName ?? "",
-                lastName: person.lastName ?? "",
-                avatar: person.avatar,
+                id: people[0].id,
+                firstName: people[0].firstName ?? "",
+                lastName: people[0].lastName ?? "",
+                avatar: people[0].avatar,
               }
             : null,
         })

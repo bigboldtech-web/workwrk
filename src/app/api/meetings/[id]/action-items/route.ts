@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { createPersonalTask } from "@/lib/work/personal-task";
 
 // GET: Get action items for a meeting
 export async function GET(
@@ -62,17 +63,23 @@ export async function POST(
     },
   });
 
-  // Auto-create a task in Work Calendar for the assigned person
-  await prisma.task.create({
-    data: {
-      title: `[Action Item] ${title}`,
-      description: `From meeting: ${meeting.title}`,
-      date: deadline ? new Date(deadline) : new Date(),
-      assigneeId,
-      organizationId: orgId,
-      status: "PLANNED",
-    },
-  });
+  // Auto-create a task on the assigned person's own list.
+  //
+  // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in this
+  // release, so the auto-created task was invisible the moment it was made.
+  // Items on a Personal list are what /my-work and /my-work/personal read.
+  // A failure here must not lose the ActionItem written just above, so it is
+  // caught: the action item is the record of record, the task is the
+  // convenience copy.
+  await createPersonalTask({
+    organizationId: orgId,
+    assigneeId,
+    title: `[Action Item] ${title}`,
+    description: `From meeting: ${meeting.title}`,
+    dueAt: deadline ? new Date(deadline) : new Date(),
+    legacy: { source: "MEETING", sourceRef: meetingId },
+    actorId: getUserId(session),
+  }).catch(() => null);
 
   // Create notification for the assignee
   if (assigneeId !== getUserId(session)) {
@@ -169,16 +176,20 @@ export async function PATCH(
   });
   if (!item) return jsonError("Action item not found", 404);
 
-  // Create a calendar task from this action item
-  const task = await prisma.task.create({
-    data: {
-      title: item.title,
-      description: `From meeting: ${item.meeting.title}`,
-      assigneeId: item.assigneeId,
-      organizationId: orgId,
-      date: item.deadline || new Date(),
-      status: "PLANNED",
-    },
+  // Convert this action item into a real task on the assignee's own list.
+  //
+  // Phase 2 W4, as above. The UI toasts "Task created: <title>"
+  // (src/app/(dashboard)/meetings/[id]/page.tsx), so a failure must be an
+  // error the caller sees rather than a success over a row that was never
+  // written: this one is deliberately NOT caught.
+  const task = await createPersonalTask({
+    organizationId: orgId,
+    assigneeId: item.assigneeId,
+    title: item.title,
+    description: `From meeting: ${item.meeting.title}`,
+    dueAt: item.deadline || new Date(),
+    legacy: { source: "MEETING", sourceRef: meetingId },
+    actorId: userId,
   });
 
   return jsonSuccess({ task, message: "Action item converted to task" });

@@ -91,13 +91,25 @@ export async function PATCH(
     });
 
     if (body.status && body.status !== idea.status) {
+      // Phase 2 W5. The link used to be the bare "/ideas", which is the page
+      // this idea is on TODAY and the page that goes away the moment
+      // scripts/migrate-ideas.ts has run in production. Once it has, this idea
+      // is an Item on the Ideas list and has its own URL, so the notification
+      // names the row rather than the board. A workspace that has not migrated
+      // yet has no forwarding row and keeps the old link, which still works.
+      const forwarded = await prisma.legacyRedirect
+        .findUnique({
+          where: { organizationId_kind_legacyId: { organizationId: orgId, kind: "idea", legacyId: idea.id } },
+          select: { target: true },
+        })
+        .catch(() => null);
       await prisma.notification.create({
         data: {
           userId: idea.submitterId,
           type: "idea_update",
           title: `Your idea "${idea.title}" is now ${body.status.replace(/_/g, " ").toLowerCase()}`,
           message: body.reviewNotes || "",
-          link: "/ideas",
+          link: forwarded?.target ?? "/ideas",
         },
       });
     }

@@ -9,6 +9,7 @@ import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { DotsLoaderScreen } from "@/components/brand/dots-loader";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 export default function SetupLayout({
   children,
@@ -38,7 +39,7 @@ export default function SetupLayout({
       <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-3.5">
           <Link
-            href="/dashboard"
+            href={WORK_HOME_HREF}
             className="inline-flex items-center gap-2.5 text-lg font-semibold tracking-tight text-zinc-900 no-underline"
           >
             <span

@@ -10,13 +10,13 @@
 //
 // Pure: imports only the folded-app table (no imports of its own).
 
-import { FOLDED_APP_HUB } from "./nav/route-hub";
+import { FOLDED_APP_HUB, WORK_HOME_HREF } from "./nav/route-hub";
 import type { AppLike } from "./rail-apps";
 
 type Row = Omit<AppLike, "hubKey">;
 
 const ROWS: readonly Row[] = [
-  { key: "home", label: "Work", defaultHref: "/today", alwaysPinned: true },
+  { key: "home", label: "Work", defaultHref: WORK_HOME_HREF, alwaysPinned: true },
   { key: "planner", label: "Planner", defaultHref: "/planner" },
   { key: "ai", label: "AI", defaultHref: "/sidekick" },
   { key: "chat", label: "Talk", defaultHref: "/tlk" },
@@ -42,7 +42,10 @@ const ROWS: readonly Row[] = [
   { key: "store", label: "Marketplace", defaultHref: "/store" },
   { key: "automation", label: "Automation", defaultHref: "/automation/workflows", requiredAccess: "manager" },
   { key: "settings", label: "Settings", defaultHref: "/settings", alwaysPinned: true },
-  { key: "trash", label: "Trash", defaultHref: "/trash", requiredAccess: "manager" },
+  // No tier: the manager gate came off when /api/trash moved onto the `trash`
+  // app key and per-source accessibleIds(type, FULL) in Phase 2 stage E. Guests
+  // are kept out by APP_RULES.trash (guest: "none"), not by a tier.
+  { key: "trash", label: "Trash", defaultHref: "/trash" },
 ];
 
 /** Catalog order, with `hubKey` stamped the way apps-catalog.tsx stamps it. */

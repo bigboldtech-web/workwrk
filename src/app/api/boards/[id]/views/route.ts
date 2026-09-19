@@ -5,8 +5,14 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canEditBoard, canReadBoard, getBoardForReader } from "@/lib/board";
+import { canContributeBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { prisma } from "@/lib/prisma";
+
+/** The refusal, as a sentence. The sibling route already writes one
+ *  (SAVE_DENIED); this one answered the bare code "Forbidden", which the
+ *  client printed verbatim. */
+const CREATE_DENIED =
+  "You can read this List but not add views to it. Ask a List or Space admin for access.";
 
 const VIEW_TYPES = [
   "TABLE", "KANBAN", "GANTT", "CALENDAR", "TIMELINE", "CHART", "DOC", "FORM",
@@ -32,11 +38,21 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const canRead = await canReadBoard(id, c.userId, c.accessLevel);
   if (!canRead) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  const views = await prisma.view.findMany({
-    where: { boardId: id },
+  // audit spaces-boards High #5: "Private view" was cosmetic. The create
+  // popover has always written `isShared: !isPrivate` and every create sets
+  // `ownerId`, but this read returned every row, so a private view was private
+  // in the dialog and public on the page. The rule lives in
+  // src/lib/work/view-visibility.ts and is applied here AND on the page, so
+  // the two can never disagree. `ownerId: null` is the legacy row and reads as
+  // shared: hiding those would take a List's tabs away from everyone.
+  const rows = await prisma.view.findMany({
+    where: {
+      boardId: id,
+      OR: [{ isShared: true }, { ownerId: null }, { ownerId: c.userId }],
+    },
     orderBy: [{ isDefault: "desc" }, { displayOrder: "asc" }, { name: "asc" }],
   });
-  return NextResponse.json({ views });
+  return NextResponse.json({ views: rows });
 }
 
 const createSchema = z.object({
@@ -54,8 +70,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!board || board.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  const canEdit = await canEditBoard(id, c.userId, c.accessLevel);
-  if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // CONTRIBUTE, not manage. PATCH on the sibling route
+  // (/views/[viewId]) has gated on canContributeBoard since the
+  // "a Space member who may create every task still got a 403 when they
+  // renamed a tab" fix, so a Board member could already rename a shared view
+  // and rewrite its config, but not add one of their own. Allowing the edit
+  // and refusing the create is backwards in risk terms. DELETE stays on the
+  // management ladder (canManageView), because removing a shared view destroys
+  // other people's saved work.
+  const canCreate = await canContributeBoard(id, c.userId, c.accessLevel);
+  if (!canCreate) return NextResponse.json({ error: CREATE_DENIED }, { status: 403 });
 
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);

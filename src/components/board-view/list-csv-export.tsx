@@ -33,7 +33,11 @@ function escapeCsv(value: string): string {
 }
 
 function buildCsv(rows: CsvRow[]): string {
-  const header = ["Title", "Status", "Board", "Owner", "Updated"];
+  // naming-canon.md: the container a task sits in is a List. "Board" is the
+  // KANBAN VIEW's name and never the container's, and this column is the
+  // container. The field behind it is still `boardName` because the database
+  // table is `Board`; the word a person reads is not.
+  const header = ["Title", "Status", "List", "Owner", "Updated"];
   const lines = [header.map(escapeCsv).join(",")];
   for (const r of rows) {
     lines.push([

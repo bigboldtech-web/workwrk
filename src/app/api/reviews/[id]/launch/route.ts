@@ -68,7 +68,7 @@ export async function POST(
   const notifications = employees.map((emp) => ({
     title: "Review Cycle Started",
     message: `${cycle.name} has been launched. Please complete your self-assessment.`,
-    type: "REVIEW",
+    type: "review",
     link: `/reviews/${id}`,
     userId: emp.id,
   }));

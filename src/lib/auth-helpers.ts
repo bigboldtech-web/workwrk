@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "./auth";
 import { redirect } from "next/navigation";
 import { AccessLevel } from "@/generated/prisma";
+import { WORK_HOME_HREF } from "./nav/route-hub";
 
 export async function requireAuth() {
   const session = await getServerSession(authOptions);
@@ -13,9 +14,9 @@ export async function requireAuth() {
 
 export async function requireRole(allowedRoles: AccessLevel[]) {
   const session = await requireAuth();
-  const userRole = (session.user as any).accessLevel as AccessLevel;
+  const userRole = (session.user as { accessLevel?: AccessLevel }).accessLevel as AccessLevel;
   if (!allowedRoles.includes(userRole)) {
-    redirect("/dashboard");
+    redirect(WORK_HOME_HREF);
   }
   return session;
 }

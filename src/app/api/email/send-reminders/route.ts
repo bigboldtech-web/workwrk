@@ -7,6 +7,7 @@ import {
   overdueManagerTemplate,
 } from "@/lib/email-templates";
 import { filterNotifyUsers } from "@/lib/notify-prefs";
+import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
     await Promise.all(
       Array.from(mgrMap.values()).map((e) => {
         const { subject, html } = overdueManagerTemplate({
-          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/dashboard`,
+          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/home`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-manager",
           variables: { count: e.items.length }, category: "reminder" })
@@ -118,30 +119,56 @@ export async function POST(req: NextRequest) {
   // 3. OVERDUE TASKS → manager summary
   // ──────────────────────────────────────
   if (type === "all" || type === "overdue-tasks") {
-    const overdueTasks = await prisma.task.findMany({
-      where: { status: { not: "COMPLETED" }, date: { lt: now } },
-      include: {
-        assignee: { select: { id: true, email: true, firstName: true, lastName: true,
-          manager: { select: { id: true, email: true, firstName: true } } } },
-      },
-      take: 200,
+    // Phase 2 W4. This read the legacy `Task` table. Those rows are Items now
+    // (scripts/migrate-legacy-tasks.ts) and nothing writes `Task` from the
+    // product any more, so left here this cron would have gone quiet the day
+    // the migration ran, and until then it would have named work whose only
+    // UI is deleted. "Overdue" is a due date in the past on a row whose status
+    // is not a done column; done is a per-List NAME, so it is applied after
+    // the read, over the Lists actually in play.
+    const overdueRows = await prisma.item.findMany({
+      where: { archivedAt: null, dueAt: { lt: now }, ownerId: { not: null } },
+      select: { id: true, title: true, dueAt: true, status: true, boardId: true, ownerId: true },
+      orderBy: { dueAt: "asc" },
+      take: 600,
     });
+    const overdueBoards = await prisma.board.findMany({
+      where: { id: { in: Array.from(new Set(overdueRows.map((r) => r.boardId))) } },
+      select: { id: true, statuses: true },
+    });
+    const overdueStatuses = new Map(overdueBoards.map((b) => [b.id, getBoardStatuses(b)]));
+    const overdueTasks = overdueRows
+      .filter((r) => !isDoneStatus(overdueStatuses.get(r.boardId) ?? [], r.status))
+      .slice(0, 200);
+    // `Item.ownerId` is a plain column, not a relation, so the people are read
+    // in one batch rather than per row.
+    const overdueOwners = await prisma.user.findMany({
+      where: { id: { in: Array.from(new Set(overdueTasks.map((t) => t.ownerId!))) }, deletedAt: null },
+      select: { id: true, email: true, firstName: true, lastName: true,
+        manager: { select: { id: true, email: true, firstName: true } } },
+    });
+    const ownerById = new Map(overdueOwners.map((u) => [u.id, u]));
 
-    const mgrMap = new Map<string, { mgr: any; items: any[] }>();
+    type OverdueLine = { type: string; title: string; personName: string; daysOverdue: number };
+    type Manager = { id: string; email: string; firstName: string };
+    const mgrMap = new Map<string, { mgr: Manager; items: OverdueLine[] }>();
     for (const t of overdueTasks) {
-      if (!t.assignee.manager) continue;
-      const mId = t.assignee.manager.id;
-      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: t.assignee.manager, items: [] });
+      const assignee = ownerById.get(t.ownerId!);
+      if (!assignee?.manager) continue;
+      const mId = assignee.manager.id;
+      if (!mgrMap.has(mId)) mgrMap.set(mId, { mgr: assignee.manager, items: [] });
       mgrMap.get(mId)!.items.push({
         type: "Task", title: t.title,
-        personName: `${t.assignee.firstName} ${t.assignee.lastName}`,
-        daysOverdue: t.date ? Math.floor((now.getTime() - new Date(t.date).getTime()) / 86400000) : 0,
+        personName: `${assignee.firstName} ${assignee.lastName}`,
+        daysOverdue: t.dueAt ? Math.floor((now.getTime() - new Date(t.dueAt).getTime()) / 86400000) : 0,
       });
     }
     await Promise.all(
       Array.from(mgrMap.values()).map((e) => {
         const { subject, html } = overdueManagerTemplate({
-          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/tasks`,
+          // Phase 2 W4: /tasks/assigned-to-me is gone with the legacy task
+          // grid. My work is the one list of everything assigned to a person.
+          managerName: e.mgr.firstName, items: e.items, dashboardLink: `${baseUrl}/my-work`,
         });
         return sendEmail({ to: e.mgr.email, subject, html, template: "overdue-tasks-manager",
           variables: { count: e.items.length }, category: "reminder" })
@@ -160,24 +187,36 @@ export async function POST(req: NextRequest) {
     const endOfDay = new Date(now);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const dueToday = await prisma.task.findMany({
-      where: {
-        status: { not: "COMPLETED" },
-        date: { gte: startOfDay, lte: endOfDay },
-      },
-      select: { id: true, title: true, assigneeId: true },
+    // Phase 2 W4, as above: Items, not the legacy `Task` table.
+    const dueRows = await prisma.item.findMany({
+      where: { archivedAt: null, dueAt: { gte: startOfDay, lte: endOfDay } },
+      select: { id: true, title: true, status: true, boardId: true, ownerId: true },
+      take: 2000,
     });
+    const dueBoards = await prisma.board.findMany({
+      where: { id: { in: Array.from(new Set(dueRows.map((r) => r.boardId))) } },
+      select: { id: true, statuses: true },
+    });
+    const dueStatuses = new Map(dueBoards.map((b) => [b.id, getBoardStatuses(b)]));
+    const dueToday = dueRows.filter(
+      (r): r is typeof r & { ownerId: string } =>
+        Boolean(r.ownerId) && !isDoneStatus(dueStatuses.get(r.boardId) ?? [], r.status),
+    );
     // Honor the "Due-date reminders" inbox toggle (batched, one query).
-    const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.assigneeId), "due_reminders");
-    const toNotify = dueToday.filter((t) => wantsDue.has(t.assigneeId));
+    const wantsDue = await filterNotifyUsers(dueToday.map((t) => t.ownerId), "due_reminders");
+    const toNotify = dueToday.filter((t) => wantsDue.has(t.ownerId));
     if (toNotify.length > 0) {
       await prisma.notification.createMany({
+        // The link names THE TASK, not a landing. It used to be the bare
+        // "/tasks", which is a 308 to /home since Phase 2 W4, so a
+        // notification that named one task in its message dropped the reader
+        // on Home with no way back to it.
         data: toNotify.map((t) => ({
-          userId: t.assigneeId,
+          userId: t.ownerId,
           type: "task_due_today",
           title: "Task Due Today",
           message: t.title,
-          link: "/tasks",
+          link: `/item/${t.id}`,
         })),
       });
     }

@@ -14,9 +14,9 @@ import {
   Calendar,
   Flag,
   Tag,
-  MoreHorizontal,
   Wand2,
   Paperclip,
+  Link2,
   Bell,
   Search,
   Check,
@@ -41,13 +41,17 @@ import { usePrompt } from "@/components/ui/dialog-provider";
 import { useRouter } from "next/navigation";
 import { Chip, StatusChip } from "@/components/ui/chip";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { TAUPE, taupeButton } from "@/components/ui/accent";
+import { LightEditor } from "@/components/ui/light-editor";
+
 import { SkeletonLines } from "@/components/ui/skeleton";
+import { Avatar as SharedAvatar } from "@/components/ui/avatar-stack";
 import { Dots } from "@/components/ui/dots";
+import { useItemFields } from "@/hooks/use-item-fields";
+import { ITEM_FIELD_LABELS, type ItemFieldKey } from "@/lib/item-fields";
 
 // ── Task types ─────────────────────────────────────────────────────
-// No `type` column on Item — the chosen type is persisted into
-// Task Types — fetched from /api/item-types (org-level ItemType rows).
+// No `type` column on Item: the chosen type is persisted into
+// Task Types: fetched from /api/item-types (org-level ItemType rows).
 // Item.itemTypeId stores the chosen type; null = the org default.
 type ItemTypeOpt = { id: string; singular: string; plural: string; icon: string; isDefault: boolean };
 
@@ -85,7 +89,7 @@ const LAST_LIST_KEY = "workwrk:create-task:last-list";
 // the current route so every "+" lands correctly without asking.
 //   /boards/<slug>  → that board
 //   /spaces/<slug>  → that space's first board (still pickable in-modal)
-// Returns null on Inbox/global routes → the modal shows "Select List…".
+// Returns null on Inbox/global routes; the modal then reads "Choose a list".
 function deriveListFromRoute(boards: BoardRow[], spaces: SpaceRow[]): SelectedList | null {
   if (typeof window === "undefined") return null;
   const path = window.location.pathname;
@@ -118,13 +122,13 @@ function lastUsedList(boards: BoardRow[]): SelectedList | null {
 }
 type Person = { id: string; firstName?: string | null; lastName?: string | null; email?: string | null; avatar?: string | null };
 type ChecklistItem = { text: string; done: boolean };
-type ExtraKey = "TIME_ESTIMATE" | "DEPENDENCIES" | "SUBTASKS" | "CHECKLIST";
+type ExtraKey = "TIME_ESTIMATE" | "SUBTASKS" | "CHECKLIST";
 type MenuKey =
   | "list" | "type" | "status" | "assignee" | "due"
   | "priority" | "tags" | "align" | "more" | "attach" | "followers"
   | "templates" | "createMenu";
 
-// Alignment options — a task can be tagged with the KPI it moves (which
+// Alignment options: a task can be tagged with the KPI it moves (which
 // carries its parent KRA) or, when no specific number applies, a KRA alone.
 type KraOpt = { id: string; name: string; category?: string | null };
 type KpiOpt = { id: string; name: string; kra: { id: string; name: string } | null };
@@ -136,14 +140,12 @@ function personName(p: Person): string {
   const n = [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
   return n || p.email || "Unknown";
 }
-function initials(p: Person): string {
-  const f = (p.firstName ?? "").charAt(0);
-  const l = (p.lastName ?? "").charAt(0);
-  const fallback = (p.email ?? "?").charAt(0);
-  return (f + l).toUpperCase() || fallback.toUpperCase();
-}
-// Stable per-person hue (djb2) so avatars are consistent.
-function hueFor(seed: string): string {
+// A starting colour for a NEW WORKSPACE TAG, from its name (djb2). This is not
+// the person hue that used to live here: a tag's colour is a real property the
+// creator can change afterwards, whereas a hue hashed from a user id said
+// nothing and made one colleague three different colours across three screens.
+// People render through the one neutral Avatar now.
+function tagHueFor(seed: string): string {
   let h = 5381;
   for (let i = 0; i < seed.length; i++) h = (h * 33) ^ seed.charCodeAt(i);
   return `hsl(${Math.abs(h) % 360} 55% 55%)`;
@@ -160,20 +162,13 @@ function addDays(d: Date, n: number): Date {
   return x;
 }
 
+// The ONE person mark (design-system 5.18). This was the third file hashing an
+// id into a djb2 hue, so the same colleague was a magenta chip here and a slate
+// one in the row and detail pickers, two clicks apart, and neither colour meant
+// anything. The other two were deleted with the picker rewrite; this is the
+// last of them.
 function Avatar({ person, size = 24 }: { person: Person; size?: number }) {
-  const s = { width: size, height: size };
-  if (person.avatar) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={person.avatar} alt={personName(person)} style={s} className="rounded-full object-cover shrink-0" />;
-  }
-  return (
-    <span
-      style={{ ...s, backgroundColor: hueFor(person.id) }}
-      className="rounded-full flex items-center justify-center text-white font-semibold text-xs shrink-0"
-    >
-      {initials(person)}
-    </span>
-  );
+  return <SharedAvatar person={person} size={size} />;
 }
 
 // Reusable people picker (single for assignee, multi for followers).
@@ -197,9 +192,9 @@ function PeoplePicker({
     return out.filter((p) => personName(p).toLowerCase().includes(needle) || (p.email ?? "").toLowerCase().includes(needle));
   }, [people, me, q]);
   return (
-    <div className={`absolute ${position === "top" ? "bottom-full mb-1" : "top-full mt-1"} start-0 w-[300px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] overflow-hidden`}>
+    <div className={`absolute ${position === "top" ? "bottom-full mb-1" : "top-full mt-1"} start-0 w-[300px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] overflow-hidden`}>
       <div className="p-2 border-b border-zinc-100">
-        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c]">
+        <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line-strong focus-within:border-brand">
           <Search className="w-3.5 h-3.5 text-zinc-400" />
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search or enter email..." className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400" />
         </div>
@@ -215,7 +210,7 @@ function PeoplePicker({
           >
             <Avatar person={p} />
             <span className="flex-1 truncate">{me && p.id === me.id ? "Me" : personName(p)}</span>
-            {selected.includes(p.id) && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+            {selected.includes(p.id) && <Check className="w-3.5 h-3.5 text-brand-deep" />}
           </button>
         ))}
         {ordered.length === 0 && <div className="px-4 py-4 text-center text-base text-zinc-400">No people found.</div>}
@@ -225,7 +220,7 @@ function PeoplePicker({
 }
 
 export function CreateTaskModal() {
-  const { createTaskOpen, closeCreateTask, createTaskPreselect } = useOsShell();
+  const { createTaskOpen, closeCreateTask, createTaskPreselect, createTaskTemplate } = useOsShell();
   const promptDialog = usePrompt();
   const router = useRouter();
   const { data: session } = useSession();
@@ -240,6 +235,15 @@ export function CreateTaskModal() {
   const [itemTypes, setItemTypes] = useState<ItemTypeOpt[]>([]);
   const [itemTypeId, setItemTypeId] = useState<string | null>(null);
   const [selectedList, setSelectedList] = useState<SelectedList | null>(null);
+  // THE SAME FIELD MEMORY THE TASK DRAWER KEEPS (spec-task-detail section 4
+  // step 5). Create used to render six always-on chips and a separate "..."
+  // menu, so a person who had hidden Tags on a List still got a Tags chip the
+  // moment they created a task in it, and the two surfaces for one task
+  // disagreed about what a task has. One hook, keyed by the List, now answers
+  // for both: Status, Assignee, Due date and Priority are the four that
+  // cannot be hidden, and everything else is behind "+ Add field".
+  const { stored: listFields, toggle: toggleListFieldPref } = useItemFields(selectedList?.id ?? null);
+  const fieldOn = (key: ItemFieldKey) => listFields.includes(key);
   const [selectedStatus, setSelectedStatus] = useState<string>("TO_DO");
 
   // Toolbar values
@@ -247,11 +251,13 @@ export function CreateTaskModal() {
   const [startAt, setStartAt] = useState<Date | null>(null);
   const [dueAt, setDueAt] = useState<Date | null>(null);
   const [priority, setPriority] = useState<PriorityKey | null>(null);
-  // Workspace tags (Tag model, type CUSTOM) — selected set + org catalog
+  // Workspace tags (Tag model, type CUSTOM): selected set + org catalog
   // (lazy-loaded the first time the Tags menu opens).
   const [tags, setTags] = useState<WorkspaceTag[]>([]);
   const [orgTags, setOrgTags] = useState<WorkspaceTag[] | null>(null);
   const [creatingTag, setCreatingTag] = useState(false);
+  // "Watchers" in the UI; the state name is kept so the ~10 call sites below
+  // do not all move in the same change.
   const [followers, setFollowers] = useState<string[]>([]);
   // Alignment (KPI-first, KRA auto-fills). Both persisted into Item.metadata.
   const [kras, setKras] = useState<KraOpt[]>([]);
@@ -285,13 +291,13 @@ export function CreateTaskModal() {
   const [notice, setNotice] = useState<string | null>(null);
   const loadedRef = useRef(false);
 
-  // Attachments — uploaded immediately (so we have FileEntry ids), then
+  // Attachments: uploaded immediately (so we have FileEntry ids), then
   // linked to the new Item via EntityLink once it's created.
   const [stagedFiles, setStagedFiles] = useState<{ id: string; name: string; mimeType: string; url: string }[]>([]);
   const [uploading, setUploading] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Templates — org-shared task presets.
+  // Templates: org-shared task presets.
   type TemplateRow = { id: string; name: string; config: Record<string, unknown> };
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [tplMode, setTplMode] = useState<"root" | "use" | "instant" | "update" | "save">("root");
@@ -340,7 +346,10 @@ export function CreateTaskModal() {
     setLoadingLists(true);
     Promise.all([
       fetch("/api/spaces", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { spaces: [] })),
-      fetch("/api/boards?all=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { boards: [] })),
+      // `?editable=1`, not `?all=1`: the location picker must list only the
+      // Lists the viewer may WRITE to. Offering one they cannot write to is a
+      // control that 403s on the primary action (spec-task-detail, modal Data).
+      fetch("/api/boards?editable=1", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { boards: [] })),
       fetch("/api/users?scope=all&limit=200", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { data: [] })),
       fetch("/api/item-templates", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { templates: [] })),
       fetch("/api/item-types", { cache: "no-store" }).then((r) => (r.ok ? r.json() : { types: [] })),
@@ -365,7 +374,33 @@ export function CreateTaskModal() {
       .finally(() => setLoadingLists(false));
   }, [createTaskOpen]);
 
-  // Default followers to the creator once we know who that is.
+  // ── The assignable roster FOLLOWS THE DESTINATION LIST ──
+  //
+  // The bulk load above asks /api/users?scope=all, and that endpoint pins any
+  // caller below ORG_WIDE_ALIGNMENT_LEVELS to their own report tree. A Space
+  // Admin with no direct reports therefore opened the Assignee popover here
+  // and saw exactly one row, "Me": the reported bug, still live on the screen
+  // where a task is most often assigned, because the modal never moved to the
+  // board-scoped endpoint even though its own header already names the
+  // destination ("In BUG7 Private Shared List").
+  //
+  // A list whose roster cannot be read leaves the previous candidates in place
+  // rather than emptying the picker: a picker that goes blank is worse than a
+  // picker that is one list out of date.
+  const listId = selectedList?.id ?? null;
+  useEffect(() => {
+    if (!createTaskOpen || !listId) return;
+    let active = true;
+    fetch(`/api/boards/${encodeURIComponent(listId)}/assignable?limit=200`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (active && Array.isArray(d?.data) && d.data.length > 0) setPeople(d.data);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [createTaskOpen, listId]);
+
+  // The creator watches their own task by default.
   useEffect(() => {
     if (me && followers.length === 0) setFollowers([me.id]);
   }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -467,7 +502,8 @@ export function CreateTaskModal() {
   const alignLabel = useMemo(() => {
     if (kpiId) return kpis.find((k) => k.id === kpiId)?.name ?? "KPI";
     if (kraId) return kras.find((k) => k.id === kraId)?.name ?? "KRA";
-    return "Alignment";
+    // naming-canon.md: "Alignment" is not a word this product uses.
+    return "KRA / KPI";
   }, [kpiId, kraId, kpis, kras]);
 
   // Build the calendar grid (6 weeks) for the current calMonth.
@@ -510,7 +546,7 @@ export function CreateTaskModal() {
       const res = await fetch("/api/tags", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), type: "CUSTOM", color: hueFor(name.trim().toLowerCase()) }),
+        body: JSON.stringify({ name: name.trim(), type: "CUSTOM", color: tagHueFor(name.trim().toLowerCase()) }),
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.id) {
@@ -527,7 +563,10 @@ export function CreateTaskModal() {
   function buildMetadata(): Record<string, unknown> {
     const md: Record<string, unknown> = {};
     if (description.trim()) md.description = description.trim();
-    if (followers.length) md.followers = followers;
+    // `watchers` is the key notify-item.ts reads (the two-list rule in
+    // src/lib/item-watchers.ts). The old `followers` key had no reader at all,
+    // so every person picked here was silently dropped.
+    if (followers.length) md.watchers = followers;
     const mins = (parseInt(timeEstimate.h || "0", 10) || 0) * 60 + (parseInt(timeEstimate.m || "0", 10) || 0);
     if (mins > 0) md.timeEstimate = mins;
     if (checklist.length) md.checklist = checklist;
@@ -573,7 +612,7 @@ export function CreateTaskModal() {
   };
 
   // External sources (Dropbox/OneDrive/Box/Google Drive/New Google Doc).
-  // Until OAuth file-pickers are wired, attach by share link — which still
+  // Until OAuth file-pickers are wired, attach by share link: which still
   // creates a real FileEntry + EntityLink through the same path local
   // uploads use, so the link shows up as an attachment everywhere.
   const attachExternal = async (provider: string) => {
@@ -633,7 +672,7 @@ export function CreateTaskModal() {
     setDescription(typeof cfg.description === "string" ? cfg.description : "");
     setPriority((cfg.priority as PriorityKey) ?? null);
     // Tags stored as WorkspaceTag objects; legacy string entries (pre
-    // Tag-model templates) are dropped — they have no Tag row to link.
+    // Tag-model templates) are dropped: they have no Tag row to link.
     setTags(Array.isArray(cfg.tags) ? (cfg.tags as unknown[]).filter((t): t is WorkspaceTag => !!t && typeof t === "object" && "id" in (t as object)) : []);
     const te = (cfg.timeEstimate as { h?: string; m?: string } | undefined) ?? {};
     setTimeEstimate({ h: te.h ?? "", m: te.m ?? "" });
@@ -649,6 +688,23 @@ export function CreateTaskModal() {
     if (cl.length) ex.push("CHECKLIST");
     setExtras(ex);
   };
+
+  // A Task template applied from /templates or from a "Browse templates" menu
+  // arrives on the shell beside the open flag. Applying it here is what makes
+  // "Applying navigates: Task -> the CreateTaskModal prefilled" true: before
+  // this the apply POST ran, usedCount went up and nothing opened at all.
+  const appliedTemplateRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!createTaskOpen) { appliedTemplateRef.current = null; return; }
+    if (!createTaskTemplate) return;
+    if (appliedTemplateRef.current === createTaskTemplate.name) return;
+    appliedTemplateRef.current = createTaskTemplate.name;
+    applyTemplate(createTaskTemplate.config);
+    setNotice(`Applied \u201c${createTaskTemplate.name}\u201d`);
+    // applyTemplate is a plain closure over this render's setters; adding it
+    // to the deps would re-run the effect on every keystroke in the modal.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [createTaskOpen, createTaskTemplate]);
 
   const refreshTemplates = async () => {
     try {
@@ -694,7 +750,7 @@ export function CreateTaskModal() {
     if (Array.isArray(cfg.checklist) && cfg.checklist.length) md.checklist = cfg.checklist;
     if (typeof cfg.kraId === "string") md.kraId = cfg.kraId;
     if (typeof cfg.kpiId === "string") md.kpiId = cfg.kpiId;
-    if (me) md.followers = [me.id];
+    if (me) md.watchers = [me.id];
     const status = (cfg.status as string) ?? selectedStatus;
     const tagIds = Array.isArray(cfg.tags)
       ? (cfg.tags as unknown[]).filter((t): t is WorkspaceTag => !!t && typeof t === "object" && "id" in (t as object)).map((t) => t.id)
@@ -713,7 +769,9 @@ export function CreateTaskModal() {
   const createInstant = async (tpl: TemplateRow) => {
     setOpenMenu(null);
     setError(null);
-    if (!selectedList) { setError("Choose a list first"); setOpenMenu("list"); return; }
+    // No List: open the picker rather than refusing. The person is one click
+    // from being able to do the thing they just asked for.
+    if (!selectedList) { setOpenMenu("list"); return; }
     setSubmitting(true);
     try {
       const body = payloadFromConfig(tpl.config, taskName.trim() || tpl.name);
@@ -752,7 +810,7 @@ export function CreateTaskModal() {
   const doCreate = useCallback(async (): Promise<{ id: string; slug: string } | null> => {
     setError(null);
     setNotice(null);
-    if (!selectedList) { setError("Choose a list first"); setOpenMenu("list"); return null; }
+    if (!selectedList) { setOpenMenu("list"); return null; }
     if (!taskName.trim()) { setError("Add a name"); return null; }
     setSubmitting(true);
     try {
@@ -829,7 +887,7 @@ export function CreateTaskModal() {
     if (variant === "open") {
       const slug = created.slug;
       resetAndClose();
-      router.push(`/boards/${slug}?item=${created.id}`);
+      router.push(`/item/${created.id}`);
       return;
     }
     if (variant === "another") {
@@ -847,14 +905,16 @@ export function CreateTaskModal() {
   if (!createTaskOpen) return null;
 
   const TypeIcon = itemTypeIcon(activeType?.icon);
-  const placeholder = !activeType || activeType.isDefault ? "Task Name or type '/' for commands" : `${activeType.singular} Name`;
+  // No "type '/' for commands": there is no slash menu in this modal, and a
+  // placeholder that advertises one is a control with no handler.
+  const placeholder = !activeType || activeType.isDefault ? "Task name" : `${activeType.singular} name`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={resetAndClose} aria-hidden="true" />
 
       <div
-        className="relative w-full max-w-[750px] bg-white rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] flex flex-col overflow-visible animate-in fade-in zoom-in-95 duration-200 border border-zinc-200/60"
+        className="os-chrome relative w-full max-w-[720px] bg-raised rounded-xl shadow-[var(--os-shadow-modal)] flex flex-col overflow-visible animate-in fade-in zoom-in-95 duration-200 border border-line"
         role="dialog"
         aria-modal="true"
         aria-labelledby="create-task-title"
@@ -865,25 +925,36 @@ export function CreateTaskModal() {
         {/* Hidden file input — driven by the attachment menu's "Upload file" */}
         <input ref={fileInputRef} type="file" multiple className="hidden" onChange={(e) => { uploadFiles(e.target.files); e.target.value = ""; }} />
 
-        {/* Top Header */}
-        <div className="flex items-center justify-between px-5 py-4 bg-white rounded-t-2xl z-[60] relative">
-          <div className="flex items-center gap-3">
+        {/* Top Header. The 56px title row the spec asks for: the modal opened
+            with two bare pickers and an X, so it had no name on screen and,
+            because `aria-labelledby` pointed at an id nothing rendered, no
+            accessible name either. */}
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-1 bg-white rounded-t-2xl z-[60] relative">
+          <h2 id="create-task-title" className="text-base font-semibold text-ink">Create task</h2>
+          <button onClick={resetAndClose} className="p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 rounded-md transition-colors" aria-label="Close">
+            <X size={16} />
+          </button>
+        </div>
+        <div className="flex items-center justify-between px-5 pb-3 bg-white z-[60] relative">
+          <div className="flex items-center gap-2">
+            {/* Where it lands. The row says so in words: a bare list chip was
+                the only thing naming the destination. */}
+            <span className="text-sm font-medium text-ink-2">In</span>
             {/* Select List */}
             <div className="relative">
               <Chip
                 onClick={() => setOpenMenu(openMenu === "list" ? null : "list")}
-                state={error === "Choose a list first" ? "danger" : undefined}
                 active={!!selectedList}
                 className="max-w-[260px]"
               >
                 <ListChecks size={14} className="shrink-0" />
-                <span className="truncate">{selectedList ? selectedList.name : "Select List..."}</span>
+                <span className="truncate">{selectedList ? selectedList.name : "Choose a list"}</span>
                 <ChevronDown size={12} className="ms-0.5 opacity-70 shrink-0" />
               </Chip>
               {openMenu === "list" && (
-                <div className="absolute top-full start-0 mt-1 w-[320px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[70] overflow-hidden">
+                <div className="absolute top-full start-0 mt-1 w-[320px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[70] overflow-hidden">
                   <div className="p-2 border-b border-zinc-100">
-                    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c]">
+                    <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line-strong focus-within:border-brand">
                       <Search className="w-3.5 h-3.5 text-zinc-400" />
                       <input autoFocus value={listSearch} onChange={(e) => setListSearch(e.target.value)} placeholder="Search..." className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400" />
                     </div>
@@ -898,7 +969,7 @@ export function CreateTaskModal() {
                         <div key={space?.id ?? "__none__"} className="px-1 pb-1">
                           <div className="flex items-center gap-2 px-2.5 py-1.5">
                             <EntityTile size="sm" color={space?.color ?? "#a1a1aa"} name={space?.name ?? "·"} />
-                            <span className="text-sm font-medium text-zinc-500 truncate">{space?.name ?? "Other"}</span>
+                            <span className="text-sm font-medium text-zinc-500 truncate">{space?.name ?? "My work"}</span>
                           </div>
                           {sb.map((b) => (
                             <button
@@ -909,7 +980,7 @@ export function CreateTaskModal() {
                             >
                               <ListChecks className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                               <span className="truncate flex-1">{b.name}</span>
-                              {selectedList?.id === b.id && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
+                              {selectedList?.id === b.id && <Check className="w-3.5 h-3.5 text-brand-deep shrink-0" />}
                             </button>
                           ))}
                         </div>
@@ -928,7 +999,7 @@ export function CreateTaskModal() {
                 <ChevronDown size={12} className="ms-0.5 opacity-70" />
               </Chip>
               {openMenu === "type" && (
-                <div className="absolute top-full start-0 mt-1 w-[240px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[70] py-2 max-h-[320px] overflow-y-auto">
+                <div className="absolute top-full start-0 mt-1 w-[240px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[70] py-2 max-h-[320px] overflow-y-auto">
                   <div className="px-3 pb-1.5 text-xs font-medium text-zinc-400 uppercase tracking-wide">Task Types</div>
                   {itemTypes.map((t) => {
                     const Icon = itemTypeIcon(t.icon);
@@ -938,7 +1009,7 @@ export function CreateTaskModal() {
                         <Icon className="w-4 h-4 text-zinc-500" />
                         <span className="flex-1 truncate">{t.singular}</span>
                         {t.isDefault && <span className="text-xs text-zinc-400">(default)</span>}
-                        {selected && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+                        {selected && <Check className="w-3.5 h-3.5 text-brand-deep" />}
                       </button>
                     );
                   })}
@@ -950,14 +1021,6 @@ export function CreateTaskModal() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1 text-zinc-400">
-            <button onClick={resetAndClose} className="p-1.5 hover:bg-zinc-100 hover:text-zinc-600 rounded-md transition-colors" aria-label="Minimize">
-              <ArrowDownRight size={16} />
-            </button>
-            <button onClick={resetAndClose} className="p-1.5 hover:bg-zinc-100 hover:text-zinc-600 rounded-md transition-colors" aria-label="Close">
-              <X size={16} />
-            </button>
-          </div>
         </div>
 
         {/* Body */}
@@ -977,19 +1040,22 @@ export function CreateTaskModal() {
 
           {/* Description */}
           <div className="px-6 relative group pb-4 mt-2">
-            <textarea 
-              value={description} 
-              onChange={(e) => setDescription(e.target.value)} 
-              placeholder="Add description, or write with AI" 
-              rows={3} 
-              className="w-full min-h-[120px] resize-none text-base text-zinc-700 bg-transparent border-none outline-none placeholder:text-zinc-400 transition-all" 
+            {/* THE SAME EDITOR THE TASK DETAIL USES. This was a bare
+                transparent textarea, so a person could not make a bullet or
+                a bold run while creating a task and then found a different
+                control when they opened the task they had just made. One
+                editor, one format, one set of keys. */}
+            <LightEditor
+              value={description}
+              onChange={setDescription}
+              placeholder="Add a description…"
+              ariaLabel="Description"
+              minRows={4}
+              maxRows={10}
             />
-            {!description && (
-              <div className="absolute end-10 bottom-8 pointer-events-none text-zinc-400 flex items-center gap-1.5 opacity-50">
-                <Wand2 size={16} />
-                <span className="text-xs font-medium">AI</span>
-              </div>
-            )}
+            {/* The "write with AI" wand is gone: it was a decorative glyph
+                with no handler, and the AI door on a task is the one Ask AI
+                slot in the header (spec-task-detail section 0). */}
           </div>
 
           {/* Extras (revealed from the … menu) */}
@@ -1037,12 +1103,6 @@ export function CreateTaskModal() {
                   </div>
                 </div>
               )}
-              {extras.includes("DEPENDENCIES") && (
-                <div className="flex items-center gap-2 text-base text-zinc-400 ps-0">
-                  <GitFork className="w-4 h-4" />
-                  <span>Dependencies link to other tasks — add them from the task page once it exists.</span>
-                </div>
-              )}
             </div>
           )}
 
@@ -1074,7 +1134,7 @@ export function CreateTaskModal() {
                 label={selectedStatusDef?.label ?? "TO DO"}
               />
               {openMenu === "status" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[240px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5 max-h-[300px] overflow-y-auto">
+                <div className="absolute bottom-full start-0 mb-1 w-[240px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5 max-h-[300px] overflow-y-auto">
                   {(["ACTIVE", "DONE", "CLOSED"] as StatusGroup[]).map((group) => {
                     const gs = statuses.filter((s) => s.group === group);
                     if (gs.length === 0) return null;
@@ -1085,7 +1145,7 @@ export function CreateTaskModal() {
                           <button key={s.key} type="button" onClick={() => { setSelectedStatus(s.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                             <span className="flex-1 truncate">{s.label}</span>
-                            {selectedStatus === s.key && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+                            {selectedStatus === s.key && <Check className="w-3.5 h-3.5 text-brand-deep" />}
                           </button>
                         ))}
                       </div>
@@ -1113,7 +1173,7 @@ export function CreateTaskModal() {
                 {dueAt ? fmtDate(dueAt) : startAt ? `${fmtDate(startAt)} →` : "Due date"}
               </Chip>
               {openMenu === "due" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[440px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-3">
+                <div className="absolute bottom-full start-0 mb-1 w-[440px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] p-3">
                   <div className="flex gap-2 mb-3">
                     {(["start", "due"] as const).map((f) => {
                       const val = f === "start" ? startAt : dueAt;
@@ -1155,7 +1215,7 @@ export function CreateTaskModal() {
                           const isToday = d.getTime() === today.getTime();
                           const active = (dateField === "start" ? startAt : dueAt)?.getTime() === d.getTime();
                           return (
-                            <button key={i} type="button" onClick={() => applyDate(d)} style={active ? { backgroundColor: TAUPE.soft } : undefined} className={`h-7 rounded text-sm ${active ? "text-white" : isToday ? "bg-red-500 text-white" : inMonth ? "text-zinc-700 hover:bg-zinc-100" : "text-zinc-300 hover:bg-zinc-50"}`}>
+                            <button key={i} type="button" onClick={() => applyDate(d)} style={active ? { backgroundColor: "var(--os-brand)" } : undefined} className={`h-7 rounded text-sm ${active ? "text-white" : isToday ? "bg-red-500 text-white" : inMonth ? "text-zinc-700 hover:bg-zinc-100" : "text-zinc-300 hover:bg-zinc-50"}`}>
                               {d.getDate()}
                             </button>
                           );
@@ -1178,13 +1238,13 @@ export function CreateTaskModal() {
                 {priority ? PRIORITIES.find((p) => p.key === priority)!.label : "Priority"}
               </Chip>
               {openMenu === "priority" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[180px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
+                <div className="absolute bottom-full start-0 mb-1 w-[180px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
                   <div className="px-3 py-1 text-xs font-medium text-zinc-400 uppercase tracking-wide">Priority</div>
                   {PRIORITIES.map((p) => (
                     <button key={p.key} type="button" onClick={() => { setPriority(p.key); setOpenMenu(null); }} className="w-full flex items-center gap-2.5 px-3 py-1.5 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                       <Flag className="w-4 h-4" style={{ color: p.color }} />
                       <span className="flex-1">{p.label}</span>
-                      {priority === p.key && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+                      {priority === p.key && <Check className="w-3.5 h-3.5 text-brand-deep" />}
                     </button>
                   ))}
                   <div className="border-t border-zinc-100 mt-1 pt-1">
@@ -1196,15 +1256,17 @@ export function CreateTaskModal() {
               )}
             </div>
 
-            {/* Tags */}
+            {/* Tags: an optional field, off unless this List's set names it
+                or the person adds it from "+ Add field". */}
+            {fieldOn("tags") || tags.length > 0 ? (
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "tags" ? null : "tags")} active={tags.length > 0}>
                 <Tag className="w-3.5 h-3.5 text-zinc-400" />
                 {tags.length ? `${tags.length} tag${tags.length > 1 ? "s" : ""}` : "Tags"}
               </Chip>
               {openMenu === "tags" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[260px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-2">
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
+                <div className="absolute bottom-full start-0 mb-1 w-[260px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] p-2">
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line-strong focus-within:border-brand mb-2">
                     <Search className="w-3.5 h-3.5 text-zinc-400" />
                     <input
                       autoFocus
@@ -1243,7 +1305,7 @@ export function CreateTaskModal() {
                               className="w-full flex items-center gap-2 px-2 py-1.5 text-start text-base hover:bg-zinc-50 rounded"
                             >
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-sm font-medium" style={{ background: `${color}22`, color }}>{t.name}</span>
-                              {active && <Check className="w-3.5 h-3.5 ms-auto text-[#a78b80]" />}
+                              {active && <Check className="w-3.5 h-3.5 ms-auto text-brand-deep" />}
                             </button>
                           );
                         })
@@ -1270,16 +1332,18 @@ export function CreateTaskModal() {
                 </div>
               )}
             </div>
+            ) : null}
 
-            {/* Alignment (KPI-first · KRA auto-fills) */}
+            {/* Alignment (KPI-first, KRA auto-fills): optional, same rule. */}
+            {fieldOn("alignment") || kraId || kpiId ? (
             <div className="relative">
               <Chip onClick={() => setOpenMenu(openMenu === "align" ? null : "align")} active={!!(kraId || kpiId)}>
                 <Target className="w-3.5 h-3.5 text-zinc-400" />
                 <span className="truncate max-w-[140px]">{alignLabel}</span>
               </Chip>
               {openMenu === "align" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[300px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] p-2">
-                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[#c39b8c] mb-2">
+                <div className="absolute bottom-full start-0 mb-1 w-[300px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] p-2">
+                  <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-line-strong focus-within:border-brand mb-2">
                     <Search className="w-3.5 h-3.5 text-zinc-400" />
                     <input autoFocus value={alignSearch} onChange={(e) => setAlignSearch(e.target.value)} placeholder="Search KPIs or KRAs…" className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400" />
                   </div>
@@ -1292,12 +1356,12 @@ export function CreateTaskModal() {
                         const active = kpiId === k.id;
                         return (
                           <button key={k.id} type="button" onClick={() => { setKpiId(k.id); setKraId(k.kra?.id ?? null); setOpenMenu(null); }} className="w-full flex items-center gap-2 px-2 py-1.5 text-start text-base hover:bg-zinc-50 rounded">
-                            <Target className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />
+                            <Target className="w-3.5 h-3.5 text-brand-deep shrink-0" />
                             <span className="flex-1 min-w-0">
                               <span className="block truncate text-zinc-700">{k.name}</span>
                               {k.kra ? <span className="block text-xs text-zinc-400 truncate">KRA · {k.kra.name}</span> : null}
                             </span>
-                            {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
+                            {active && <Check className="w-3.5 h-3.5 text-brand-deep shrink-0" />}
                           </button>
                         );
                       })
@@ -1315,7 +1379,7 @@ export function CreateTaskModal() {
                               <span className="block truncate text-zinc-700">{k.name}</span>
                               {k.category ? <span className="block text-xs text-zinc-400 truncate">{k.category}</span> : null}
                             </span>
-                            {active && <Check className="w-3.5 h-3.5 text-[#a78b80] shrink-0" />}
+                            {active && <Check className="w-3.5 h-3.5 text-brand-deep shrink-0" />}
                           </button>
                         );
                       })
@@ -1329,19 +1393,34 @@ export function CreateTaskModal() {
                 </div>
               )}
             </div>
+            ) : null}
 
-            {/* ... more */}
+            {/* "+ Add field", not an unlabelled "..." (spec-task-detail
+                section 4 step 3f and step 5). It carries BOTH kinds of thing
+                a task can gain: the optional fields, whose checks are the
+                same per-List memory the drawer reads and writes, and the
+                three body sections this modal can stage. An icon-only "..."
+                named neither. */}
             <div className="relative">
-              <Chip size="icon" onClick={() => setOpenMenu(openMenu === "more" ? null : "more")}>
-                <MoreHorizontal className="w-4 h-4" />
+              <Chip onClick={() => setOpenMenu(openMenu === "more" ? null : "more")}>
+                <Plus className="w-3.5 h-3.5 text-ink-3" />
+                Add field
               </Chip>
               {openMenu === "more" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[200px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
-                  {([["TIME_ESTIMATE", "Time Estimate", Hourglass], ["DEPENDENCIES", "Dependencies", GitFork], ["SUBTASKS", "Subtasks", ListTree], ["CHECKLIST", "Checklist", ChecklistIcon]] as [ExtraKey, string, typeof Hourglass][]).map(([k, label, Icon]) => (
-                    <button key={k} type="button" onClick={() => toggleExtra(k)} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
-                      <Icon className="w-4 h-4 text-zinc-500" />
+                <div className="absolute bottom-full start-0 mb-1 w-[220px] rounded-lg border border-line bg-raised shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
+                  {(["tags", "alignment"] as ItemFieldKey[]).map((k) => (
+                    <button key={k} type="button" onClick={() => toggleListFieldPref(k)} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-ink hover:bg-hover transition-colors">
+                      {k === "tags" ? <Tag className="w-4 h-4 text-ink-2" strokeWidth={1.5} /> : <Target className="w-4 h-4 text-ink-2" strokeWidth={1.5} />}
+                      <span className="flex-1">{ITEM_FIELD_LABELS[k]}</span>
+                      {fieldOn(k) && <Check className="w-3.5 h-3.5 text-brand-deep" />}
+                    </button>
+                  ))}
+                  <div className="my-1 h-px bg-line" aria-hidden />
+                  {([["TIME_ESTIMATE", "Estimate", Hourglass], ["SUBTASKS", "Subtasks", ListTree], ["CHECKLIST", "Checklist", ChecklistIcon]] as [ExtraKey, string, typeof Hourglass][]).map(([k, label, Icon]) => (
+                    <button key={k} type="button" onClick={() => toggleExtra(k)} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-ink hover:bg-hover transition-colors">
+                      <Icon className="w-4 h-4 text-ink-2" strokeWidth={1.5} />
                       <span className="flex-1">{label}</span>
-                      {extras.includes(k) && <Check className="w-3.5 h-3.5 text-[#a78b80]" />}
+                      {extras.includes(k) && <Check className="w-3.5 h-3.5 text-brand-deep" />}
                     </button>
                   ))}
                 </div>
@@ -1359,7 +1438,7 @@ export function CreateTaskModal() {
                 <Wand2 className="w-4 h-4 text-zinc-400" /> Templates
               </button>
               {openMenu === "templates" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[280px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
+                <div className="absolute bottom-full start-0 mb-1 w-[280px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
                   {tplMode === "root" && (
                     <>
                       <button type="button" onClick={() => setTplMode("use")} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors"><Wand2 className="w-4 h-4 text-zinc-500" /><span className="flex-1">Use Template</span><ChevronRight className="w-3.5 h-3.5 text-zinc-300 rtl:rotate-180" /></button>
@@ -1374,7 +1453,7 @@ export function CreateTaskModal() {
                     <div className="px-3 py-2">
                       <button type="button" onClick={() => setTplMode("root")} className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-800 mb-2"><ChevronLeft className="w-3.5 h-3.5 rtl:rotate-180" /> Back</button>
                       <div className="text-sm text-zinc-500 mb-1.5">Save the current task setup as a reusable template.</div>
-                      <input autoFocus value={tplNameDraft} onChange={(e) => setTplNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveTemplate(tplNameDraft); }} placeholder="Template name…" className="w-full px-2.5 py-1.5 text-base border border-[#c39b8c] rounded-md outline-none mb-2 placeholder:text-zinc-400" />
+                      <input autoFocus value={tplNameDraft} onChange={(e) => setTplNameDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveTemplate(tplNameDraft); }} placeholder="Template name…" className="w-full px-2.5 py-1.5 text-base border border-line-strong focus-within:border-brand rounded-md outline-none mb-2 placeholder:text-zinc-400" />
                       <button type="button" onClick={() => saveTemplate(tplNameDraft)} disabled={!tplNameDraft.trim()} className="w-full px-3 py-1.5 text-base font-medium text-white bg-[#9d7d70] hover:bg-[#8e7165] rounded-md disabled:opacity-50">Save template</button>
                     </div>
                   )}
@@ -1414,25 +1493,27 @@ export function CreateTaskModal() {
             <div className="relative">
               <button type="button" onClick={() => setOpenMenu(openMenu === "attach" ? null : "attach")} className="text-zinc-500 hover:text-zinc-700 p-1.5 rounded hover:bg-zinc-100 transition-colors"><Paperclip className="w-5 h-5" /></button>
               {openMenu === "attach" && (
-                <div className="absolute bottom-full start-0 mb-1 w-[230px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
+                <div className="absolute bottom-full start-0 mb-1 w-[230px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
                   <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
                     <FileUp className="w-4 h-4 text-zinc-500" />
                     <span className="flex-1">Upload file</span>
                   </button>
                   <div className="border-t border-zinc-100 my-1" />
-                  {["Dropbox", "OneDrive/SharePoint", "Box", "Google Drive", "New Google Doc"].map((label) => (
-                    <button key={label} type="button" onClick={() => void attachExternal(label)} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
-                      {label === "New Google Doc" ? <FileText className="w-4 h-4 text-blue-500" /> : <Cloud className="w-4 h-4 text-zinc-500" />}
-                      <span className="flex-1">{label}</span>
-                    </button>
-                  ))}
+                  {/* One row, not five. Every provider row was the same
+                      prompt-for-a-URL flow wearing a different logo. */}
+                  <button type="button" onClick={() => void attachExternal("link")} className="w-full flex items-center gap-2.5 px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">
+                    <Link2 className="w-4 h-4 text-zinc-500" />
+                    <span className="flex-1">Add link</span>
+                  </button>
                 </div>
               )}
             </div>
 
-            {/* Followers */}
+            {/* Watchers, written to metadata.watchers, which notify-item.ts
+                reads when it fans a comment or a status change. It was called
+                "Followers" and had no reader at all. */}
             <div className="relative">
-              <button type="button" onClick={() => setOpenMenu(openMenu === "followers" ? null : "followers")} className="flex items-center gap-1 text-zinc-500 hover:text-zinc-700 p-1.5 rounded hover:bg-zinc-100 transition-colors" title="Followers">
+              <button type="button" onClick={() => setOpenMenu(openMenu === "followers" ? null : "followers")} className="flex items-center gap-1 text-zinc-500 hover:text-zinc-700 p-1.5 rounded hover:bg-zinc-100 transition-colors" title="Watchers">
                 <Bell className="w-5 h-5" />
                 {followers.length > 0 && <span className="text-sm font-medium">{followers.length}</span>}
               </button>
@@ -1446,18 +1527,33 @@ export function CreateTaskModal() {
             {error && <span className="text-sm font-medium text-red-500">{error}</span>}
             {!error && notice && <span className="text-sm font-medium text-emerald-600">{notice}</span>}
 
+            {/* Cancel, then the ONE blue thing (spec section 2: "Right =
+                Cancel (ghost) then the one blue split button"). */}
+            <button
+              type="button"
+              onClick={resetAndClose}
+              disabled={submitting}
+              className="h-9 rounded-md px-3 text-base font-medium text-ink-2 transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
+            >
+              Cancel
+            </button>
+
             {/* Create split button */}
             <div className="flex items-center rounded-lg shadow-sm overflow-visible ms-1 relative">
-              <button type="button" onClick={() => handleCreate("default")} disabled={submitting} className={`px-4 h-[34px] text-base rounded-s-lg inline-flex items-center gap-2 ${taupeButton}`}>
-                {submitting && <Dots variant="pending" />}
-                Create {activeType?.singular ?? "Task"}
+              <button type="button" onClick={() => handleCreate("default")} disabled={submitting} className="px-4 h-9 text-base font-medium rounded-s-md inline-flex items-center gap-2 bg-brand text-white transition-colors hover:bg-brand-hover disabled:opacity-60">
+                {submitting ? <Dots variant="pending" /> : <Plus className="w-4 h-4" strokeWidth={1.5} />}
+                {/* "Create task" by default; "Create {Type}" only once a
+                    non-default type has been chosen (spec section 2). */}
+                Create {activeType && !activeType.isDefault ? activeType.singular : "task"}
               </button>
-              <button type="button" onClick={() => setOpenMenu(openMenu === "createMenu" ? null : "createMenu")} disabled={submitting} className={`px-2 h-[34px] flex items-center justify-center rounded-e-lg border-s border-white/25 ${taupeButton}`}>
+              <button type="button" aria-label="More create options" onClick={() => setOpenMenu(openMenu === "createMenu" ? null : "createMenu")} disabled={submitting} className="px-2 h-9 flex items-center justify-center rounded-e-md border-s border-white/25 bg-brand text-white transition-colors hover:bg-brand-hover disabled:opacity-60">
                 {openMenu === "createMenu" ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               {openMenu === "createMenu" && (
-                <div className="absolute bottom-full end-0 mb-1 w-[230px] bg-white border border-zinc-200/70 rounded-xl shadow-[0_16px_48px_-16px_rgba(24,24,27,0.30)] z-[60] py-1.5">
-                  {([["open", "Create and open"], ["another", "Create and start another"], ["duplicate", "Create and duplicate"]] as [Variant, string][]).map(([v, label]) => (
+                <div className="absolute bottom-full end-0 mb-1 w-[230px] bg-raised border border-line rounded-lg shadow-[var(--os-shadow-pop)] z-[60] py-1.5">
+                  {/* Two variants, not three: Duplicate lives in the task and
+                      row "…" menus, where it duplicates a task that exists. */}
+                  {([["open", "Create and open"], ["another", "Create another"]] as [Variant, string][]).map(([v, label]) => (
                     <button key={v} type="button" onClick={() => handleCreate(v)} className="w-full px-3 py-2 text-start text-base text-zinc-700 hover:bg-zinc-100/70 transition-colors">{label}</button>
                   ))}
                 </div>

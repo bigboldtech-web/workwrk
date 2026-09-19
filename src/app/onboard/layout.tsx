@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { LogoLockup } from "@/components/brand/logo";
 import { DotsLoaderScreen } from "@/components/brand/dots-loader";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 export default function OnboardLayout({ children }: { children: React.ReactNode }) {
   const { status } = useSession();
@@ -35,10 +36,10 @@ export default function OnboardLayout({ children }: { children: React.ReactNode 
     >
       <header className="sticky top-0 z-10 border-b border-zinc-100 bg-white/80 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-3.5">
-          <Link href="/today" aria-label="WorkwrK home" className="flex items-center">
+          <Link href={WORK_HOME_HREF} aria-label="WorkwrK home" className="flex items-center">
             <LogoLockup size={19} textColor="#181B34" />
           </Link>
-          <Link href="/today" className="ml-auto rounded-md px-3 py-1.5 text-base text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
+          <Link href={WORK_HOME_HREF} className="ml-auto rounded-md px-3 py-1.5 text-base text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800">
             Skip for now
           </Link>
         </div>

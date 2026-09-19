@@ -83,7 +83,7 @@ export async function POST(
   const notifications = peerIds.map((peerId: string) => ({
     title: "Peer Feedback Requested",
     message: `Please provide feedback for ${review.subject.firstName} ${review.subject.lastName} as part of ${review.cycle.name}.`,
-    type: "REVIEW",
+    type: "review",
     link: `/reviews/${cycleId}`,
     userId: peerId,
   }));

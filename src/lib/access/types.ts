@@ -223,6 +223,7 @@ export type AppKey =
   | "build"
   | "store"
   | "trash"
+  | "templates"
   // routes without a catalog entry
   | "talent"
   | "analytics"

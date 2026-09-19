@@ -198,7 +198,7 @@ async function notifyAudience(
     data: audience.map((u) => ({
       title: "New pulse survey",
       message,
-      type: "SURVEY",
+      type: "survey",
       link: "/surveys",
       userId: u.id,
     })),

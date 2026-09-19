@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 /**
  * Host routing for WorkwrK's three surfaces:
@@ -186,7 +187,7 @@ export function proxy(req: NextRequest) {
   // 3) App host root lands in the app, not the marketing landing. Opt-in via APP_HOST.
   if (appHost && hostMatches(reqHost, appHost) && path === "/") {
     const url = req.nextUrl.clone();
-    url.pathname = "/today";
+    url.pathname = WORK_HOME_HREF;
     return NextResponse.redirect(url);
   }
 

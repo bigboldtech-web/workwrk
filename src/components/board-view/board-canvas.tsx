@@ -1,7 +1,8 @@
 "use client";
 
 // BoardCanvas — the client wrapper that picks a view renderer, mounts
-// the shared BoardItemDrawer, and owns the FieldShelf state. Sits
+// the task drawer (now the @drawer route, not a mounted component), and
+// owns the FieldShelf state. Sits
 // inside the server-rendered /boards/[slug] page so the page can stay
 // SSR while all interactivity (drawer state, field shelf, row clicks)
 // lives here.
@@ -29,7 +30,6 @@ import { BoardHierarchyView } from "./board-hierarchy-view";
 import { BoardPivotView } from "./board-pivot-view";
 import { BoardCardsView } from "./board-cards-view";
 import { BoardActivityView } from "./board-activity-view";
-import { BoardItemDrawer } from "./board-item-drawer";
 import {
   FilterMenu,
   applyFilters,
@@ -44,6 +44,8 @@ import { BoardStatusEditor } from "./board-status-editor";
 import { SprintHeaderStrip } from "./sprint-header-strip";
 import type { SprintMeta } from "@/lib/sprint";
 import { useOsToast } from "@/components/layout/os/toast";
+import { openTask, armTaskDrawer } from "@/lib/nav/open-task";
+import { WINDOW_EVENTS, type RealtimeEvent } from "@/lib/realtime-events";
 
 // View types that render the (filterable) item list — only these get the
 // toolbar FilterMenu; content views (FORM / DOC / WHITEBOARD / …) don't.
@@ -65,7 +67,38 @@ interface BoardCanvasProps {
    *  server-side via getBoardStatuses(board). Every renderer + the
    *  drawer + the filter bar read THIS set, never the global default. */
   statuses: StatusOption[];
-  canEdit: boolean;
+  /**
+   * May this viewer write CONTENT here: create a task, edit a cell, drag a
+   * card, open the inline editors on a row?
+   *
+   * This is the CONTRIBUTE ladder (`canContributeBoard`: any non-guest Space
+   * or Board member), which is what every write endpoint behind this canvas
+   * actually gates on. It was called `canEdit` and the List page filled it
+   * from `canEditSpace`, the MANAGEMENT ladder, so a Space member whose
+   * writes the server accepts was shown a read-only List. The name is
+   * `canContribute` now so it can never again be confused with `canManage`.
+   */
+  canContribute: boolean;
+  /**
+   * Does this viewer hold FULL access on the List?
+   *
+   * Only used to decide whether the row menu offers Delete. Delete is not an
+   * edit: `DELETE /api/items/[id]?hard=1` wants full access on the List OR the
+   * task's own creator, so a Member with Can edit saw the row and got a 403
+   * every time. `undefined` means the host did not work it out and the row is
+   * left alone.
+   */
+  canDeleteTasks?: boolean;
+  /**
+   * Does this viewer MANAGE the List (statuses, fields, views)?
+   *
+   * Separate from `canContribute`, which is content write. The Statuses and
+   * Fields toolbar buttons were rendered for everyone, and both `PATCH
+   * /api/boards/[id]` and the field routes answer 403 below Full access, so a
+   * Can view member was handed two controls that could not work. Absent =
+   * fall back to `canContribute`, the old behaviour.
+   */
+  canManage?: boolean;
   /** Threaded through to the drawer so the comments thread can gate
    *  "delete my own comment" without an extra session fetch. */
   currentUserId: string | null;
@@ -81,27 +114,45 @@ interface BoardCanvasProps {
   sprint?: SprintMeta | null;
 }
 
-export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canEdit, currentUserId, addTaskSlot, moduleGating, sprint }: BoardCanvasProps) {
+export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItems, initialFields, statuses, canContribute, canManage, canDeleteTasks, currentUserId, addTaskSlot, moduleGating, sprint }: BoardCanvasProps) {
+  // Below this line the renderers each take a `canEdit` prop, and at THAT
+  // level the word is unambiguous: it is content write on a row, which is
+  // exactly what `canContribute` answers. The board-level confusion the
+  // rename closes was between content write and managing the List itself,
+  // and `canManage` is the only thing that travels for the latter.
+  const canEdit = canContribute;
+  const mayManage = canManage ?? canContribute;
   const router = useRouter();
   const { toast } = useOsToast();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [trackedItemParam, setTrackedItemParam] = useState<string | null>(null);
   const [shelfOpen, setShelfOpen] = useState(false);
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
 
-  // Cross-board deep link: any Space view (List/Recent/Team/etc.) can
-  // route to /boards/[slug]?item=<id> to land here with the drawer open.
-  // Derived-state-during-render pattern (React 19 friendly): we mirror
-  // the URL param into a tracked sentinel; when it changes, we update
-  // openItemId in the same render pass. The closeDrawer handler strips
-  // the param so a refresh doesn't reopen.
+  // A task now opens at its OWN url: `router.push("/item/<id>")`, which the
+  // (dashboard)/@drawer/(.)item/[id] intercept renders as a drawer over this
+  // list, so Copy link works and a refresh gives the full page
+  // (spec-task-detail section 4 step 4).
+  const openItem = useCallback((id: string) => {
+    openTask(router, id);
+  }, [router]);
+
+  // `?item=<id>` is the OLD mechanism. It is kept for ONE release as a
+  // redirect, so a bookmark, a pasted link or a server payload written before
+  // this change still lands on the task instead of on a list with nothing
+  // open. Every producer inside the app has moved; the one-release window
+  // covers the ones outside it.
   const itemParam = searchParams?.get("item") ?? null;
-  if (itemParam !== trackedItemParam) {
-    setTrackedItemParam(itemParam);
-    if (itemParam) setOpenItemId(itemParam);
-  }
+  if (itemParam !== trackedItemParam) setTrackedItemParam(itemParam);
+  useEffect(() => {
+    if (!itemParam) return;
+    // Arm the Close fallback so ✕ comes back to THIS list rather than to the
+    // generic /everything. (What renders is the intercept's decision; the
+    // intent is only the breadcrumb Close follows.)
+    armTaskDrawer(itemParam, `${window.location.pathname}`);
+    router.replace(`/item/${itemParam}`, { scroll: false });
+  }, [itemParam, router]);
 
   // ?panel=fields|statuses — deep link from the sidebar List "…" menu
   // (Custom Fields / Task statuses) opens the matching editor on arrival.
@@ -109,8 +160,11 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
   const panelParam = searchParams?.get("panel") ?? null;
   if (panelParam !== trackedPanel) {
     setTrackedPanel(panelParam);
-    if (panelParam === "fields") setShelfOpen(true);
-    if (panelParam === "statuses") setStatusEditorOpen(true);
+    // The menu row that writes this param is itself Full-access-only, so the
+    // deep link honours the same gate rather than opening an editor whose
+    // every save answers 403.
+    if (mayManage && panelParam === "fields") setShelfOpen(true);
+    if (mayManage && panelParam === "statuses") setStatusEditorOpen(true);
   }
 
   const stripPanel = useCallback(() => {
@@ -121,15 +175,6 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }, [router, pathname, searchParams]);
 
-  const closeDrawer = useCallback(() => {
-    setOpenItemId(null);
-    if (searchParams?.get("item")) {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("item");
-      const qs = params.toString();
-      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    }
-  }, [router, pathname, searchParams]);
   // Local mirrors so drawer/shelf edits sync into the active renderer
   // without a full router.refresh().
   const [items, setItems] = useState<BoardItemRow[]>(initialItems);
@@ -245,6 +290,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       statuses={statuses}
       items={items}
       customFields={customFieldsOn ? fields : []}
+      boardId={boardId}
       savedFilters={savedFilters}
       onSavedFiltersChange={viewId ? setSavedFilters : undefined}
     />
@@ -321,34 +367,75 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
     return () => { cancelled = true; clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
   }, [boardId]);
 
-  const handleItemArchived = useCallback((id: string) => {
+  const dropItem = useCallback((id: string) => {
     setItems((prev) => prev.filter((r) => r.id !== id));
-    setOpenItemId(null);
-    router.refresh();
-  }, [router]);
+  }, []);
+
+  // The drawer is rendered by the @drawer slot, so its edits cannot arrive as
+  // props. They arrive as the one `item` window event instead, which is also
+  // what the SSE stream fans out, so a colleague's change and this tab's own
+  // land through the same door and the row under the drawer is never stale for
+  // the twelve seconds the poll would otherwise take.
+  useEffect(() => {
+    const onEvent = (e: Event) => {
+      const ev = (e as CustomEvent<RealtimeEvent & { gone?: boolean }>).detail;
+      if (!ev || ev.type !== "item") return;
+      if (ev.boardId && ev.boardId !== boardId) {
+        // It moved somewhere else: it is no longer one of ours.
+        dropItem(ev.itemId);
+        return;
+      }
+      if (ev.gone) {
+        dropItem(ev.itemId);
+        return;
+      }
+      void fetch(`/api/items/${ev.itemId}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          const fresh = d?.item as BoardItemRow | undefined;
+          if (!fresh) return;
+          setItems((prev) => {
+            const at = prev.findIndex((r) => r.id === fresh.id);
+            if (at === -1) return prev;
+            const next = [...prev];
+            next[at] = { ...next[at], ...fresh };
+            return next;
+          });
+        })
+        .catch(() => { /* the 12s poll is the backstop */ });
+    };
+    window.addEventListener(WINDOW_EVENTS.realtime, onEvent as EventListener);
+    return () => window.removeEventListener(WINDOW_EVENTS.realtime, onEvent as EventListener);
+  }, [boardId, dropItem]);
 
   // Right-side toolbar actions. For the TABLE view these ride on the same row as
   // the group/subtask/columns icons (just below the tabs); other views keep the
   // dedicated action row above the canvas.
+  // Statuses and Fields BOTH need Full access on the List, so neither renders
+  // below it: the read-only rule is an absent control, never a 403.
   const toolbarActions = (
     <>
-      <button
-        type="button"
-        onClick={() => setStatusEditorOpen(true)}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-base border border-zinc-200 hover:bg-zinc-50"
-        title="Edit this List's task statuses"
-      >
-        <CircleDot className="w-3.5 h-3.5" />
-        Statuses <span className="text-xs text-zinc-500">({statuses.length})</span>
-      </button>
-      <button
-        type="button"
-        onClick={() => setShelfOpen(true)}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-base border border-zinc-200 hover:bg-zinc-50"
-      >
-        <Settings2 className="w-3.5 h-3.5" />
-        Fields {fields.length > 0 ? <span className="text-xs text-zinc-500">({fields.length})</span> : null}
-      </button>
+      {mayManage ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setStatusEditorOpen(true)}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-base border border-line hover:bg-hover"
+            title="Edit this List's task statuses"
+          >
+            <CircleDot className="w-3.5 h-3.5" />
+            Statuses <span className="text-xs text-ink-2">({statuses.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShelfOpen(true)}
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md text-base border border-line hover:bg-hover"
+          >
+            <Settings2 className="w-3.5 h-3.5" />
+            Fields {fields.length > 0 ? <span className="text-xs text-ink-2">({fields.length})</span> : null}
+          </button>
+        </>
+      ) : null}
       {addTaskSlot}
     </>
   );
@@ -381,7 +468,8 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          canDeleteTasks={canDeleteTasks}
+          onOpenItem={openItem}
           onEditStatuses={() => setStatusEditorOpen(true)}
           onOpenFields={() => setShelfOpen(true)}
           currentUserId={currentUserId}
@@ -405,7 +493,9 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={gatedFields}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          canDeleteTasks={canDeleteTasks}
+          currentUserId={currentUserId}
+          onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemPatched={handleItemPatched}
           onItemRemoved={handleItemRemoved}
@@ -423,7 +513,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemChanged={handleItemChanged}
           onItemRemoved={handleItemRemoved}
@@ -438,7 +528,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialFields={fields}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
           onItemChanged={handleItemChanged}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
@@ -461,7 +551,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
       ) : viewType === "DOC" ? (
         <BoardDocView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
       ) : viewType === "FILE_GALLERY" ? (
-        <BoardFileGalleryView boardId={boardId} onOpenItem={(id) => setOpenItemId(id)} />
+        <BoardFileGalleryView boardId={boardId} onOpenItem={openItem} />
       ) : viewType === "WORKLOAD" ? (
         <BoardWorkloadView
           boardId={boardId}
@@ -471,7 +561,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           statuses={statuses}
           canEdit={canEdit}
           variant={viewConfig?.variant === "team" ? "team" : "workload"}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
         />
       ) : viewType === "TIMELINE" ? (
         <BoardTimelineView
@@ -479,7 +569,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
           timeTrackingEnabled={timeTrackingOn}
@@ -490,7 +580,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           initialFields={fields}
           statuses={statuses}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
         />
       ) : viewType === "WHITEBOARD" ? (
         <BoardWhiteboardView boardId={boardId} viewId={viewId} viewConfig={viewConfig} canEdit={canEdit} />
@@ -500,7 +590,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
           timeTrackingEnabled={timeTrackingOn}
@@ -521,7 +611,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           initialItems={filteredItems}
           statuses={statuses}
           canEdit={canEdit}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
           onItemCreated={handleItemCreated}
           onItemRemoved={handleItemRemoved}
           timeTrackingEnabled={timeTrackingOn}
@@ -530,7 +620,7 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
         <BoardActivityView
           boardId={boardId}
           statuses={statuses}
-          onOpenItem={(id) => setOpenItemId(id)}
+          onOpenItem={openItem}
         />
       ) : (
         // Safety net for any future ViewType the client predates.
@@ -541,19 +631,6 @@ export function BoardCanvas({ boardId, viewId, viewType, viewConfig, initialItem
           </p>
         </div>
       )}
-
-      <BoardItemDrawer
-        itemId={openItemId}
-        canEdit={canEdit}
-        currentUserId={currentUserId}
-        fields={fields}
-        statuses={statuses}
-        moduleGating={{ priority: priorityOn, tags: tagsOn, timeTracking: timeTrackingOn, customFields: customFieldsOn }}
-        onClose={closeDrawer}
-        onItemChanged={handleItemChanged}
-        onItemArchived={handleItemArchived}
-        onOpenItem={(id) => setOpenItemId(id)}
-      />
 
       <BoardStatusEditor
         boardId={boardId}

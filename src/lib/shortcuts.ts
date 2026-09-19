@@ -171,6 +171,7 @@ export const SHORTCUTS: readonly ShortcutCanonEntry[] = [
   { id: "hub-8", keys: "g 8", label: "Go to the 8th hub", group: "Navigate" },
   { id: "go-inbox", keys: "g i", label: "Go to Inbox", group: "Navigate" },
   { id: "go-home", keys: "g h", label: "Go to Home", group: "Navigate" },
+  { id: "go-my-work", keys: "g w", label: "Go to My work", group: "Navigate" },
   { id: "close-layer", keys: "escape", label: "Close", group: "General", inInputs: true },
 ];
 

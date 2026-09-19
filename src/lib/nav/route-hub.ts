@@ -56,18 +56,34 @@ export function isHubKey(key: string): key is HubKey {
 export const SETTINGS_ROUTES: readonly string[] = ["/settings", "/account", "/imports"];
 
 /**
- * Directories under `(dashboard)` that are resolved by a redirect before a hub
- * is ever computed, so they carry no `ROUTE_HUB` row. Exactly one today:
- * `/dashboard` redirects into the Work landing.
+ * URLs under `(dashboard)` that are resolved by a redirect before a hub is ever
+ * computed, so they carry no `ROUTE_HUB` row. Four today:
  *
- * Nothing else belongs here. `/today` and `/tasks` were listed as redirects in
- * an earlier draft and are not: `/today` renders a server component that sends
- * the viewer into their first Space, and `/tasks` is the live "My Wrk" page
- * with nine live children. Both carry real `ROUTE_HUB` rows below, because an
- * entry here is an exemption from the completeness test and an exemption over a
- * live route tree is exactly the drift that test exists to catch.
+ *   `/today`             -> `/home`. It was never a landing: it ran a query for
+ *                           the viewer's first Space and sent them into
+ *                           somebody else's project list.
+ *   `/dashboard`         -> `/home`.
+ *   `/assigned-comments` -> `/inbox?tab=primary&type=task_comment`. Its stub
+ *                           page is deleted (spec-work-home.md line 24) and its
+ *                           sidebar row with it; the only thing left is the
+ *                           `next.config.ts` row that keeps old links working.
+ *   `/tasks`             -> `/home`. The "My Wrk" card grid, whose two cards
+ *                           that read anything are now Home widgets.
+ *
+ * `/tasks` is the exact path only. Its seven legacy list CHILDREN
+ * (assigned-to-me, today-overdue, backlog, board, calendar, gantt, sprint)
+ * were the UI over the legacy `Task` table and are DELETED as of Phase 2 W4:
+ * those rows are Items now (scripts/migrate-legacy-tasks.ts) and My work shows
+ * them. `/tasks/[id]` is not a redirect and not deleted: it is a live page that
+ * looks a legacy task id up in `LegacyRedirect` and forwards to `/item/[id]`,
+ * so old links, emails and embedded doc blocks keep opening their task.
  */
-export const REDIRECT_ROUTES: readonly string[] = ["/dashboard"];
+export const REDIRECT_ROUTES: readonly string[] = [
+  "/today",
+  "/dashboard",
+  "/assigned-comments",
+  "/tasks",
+];
 
 /**
  * One row per route directory under `src/app/(dashboard)`, from spec §1.1.
@@ -82,12 +98,12 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   // ── Work ──────────────────────────────────────────────────────────
   "/home": "home",
   "/my-work": "home",
-  // Live pages, not redirects: /today is the Work landing (it sends the viewer
-  // into their first Space) and /tasks is "My Wrk" plus nine children. The
-  // work and home unit turns them into 308s toward /home and /my-work and
-  // deletes these two rows when it does.
-  "/today": "home",
-  "/tasks": "home",
+  // No `/tasks` row, and that is deliberate rather than an omission: `/tasks`
+  // is a redirect (REDIRECT_ROUTES), and `/tasks/[id]` is a forwarder whose
+  // only rendered output is the in-shell 404 on a miss. It takes the Work
+  // fallback `resolveHub` gives every unmapped path, which is the right hub
+  // for it, and adding a row would put a redirected directory back in this
+  // table, which the completeness test forbids for good reason.
   "/inbox": "home",
   "/everything": "home",
   "/item": "home",
@@ -99,8 +115,12 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   "/templates": "home",
   "/me/weekly-review": "home",
   "/me/mentions": "home",
-  "/assigned-comments": "home",
   "/activity": "home",
+  // spec-work-home section 1 line 91 registers /favorites under the Work hub:
+  // it is the page behind the FAVORITES section's "See all favorites" row, and
+  // under "ai" that row swapped the rail pill, replaced the sidebar and could
+  // never go active, because the Work sidebar is not rendered on /favorites.
+  "/favorites": "home",
   "/marketing": "home",
 
   // ── Planner ───────────────────────────────────────────────────────
@@ -119,7 +139,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
   "/build": "ai",
   "/store": "ai",
   "/integrations": "ai",
-  "/favorites": "ai",
 
   // ── Talk ──────────────────────────────────────────────────────────
   "/tlk": "chat",
@@ -176,8 +195,6 @@ export const ROUTE_HUB: Readonly<Record<string, HubKey>> = {
 export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/home": "Home",
   "/my-work": "My work",
-  "/today": "Home",
-  "/tasks": "My work",
   "/inbox": "Inbox",
   "/everything": "Everything",
   "/item": "Task",
@@ -189,7 +206,6 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/templates": "Templates",
   "/me/weekly-review": "Weekly review",
   "/me/mentions": "Mentions",
-  "/assigned-comments": "Assigned comments",
   "/activity": "Activity",
   "/marketing": "Marketing",
   "/planner": "Calendar",
@@ -237,15 +253,14 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/imports": "Import",
 
   // ── Nested static directories (the hierarchy under a hub row) ──────
-  "/tasks/board": "Sprint board",
-  "/tasks/backlog": "Backlog",
-  "/tasks/calendar": "Task calendar",
-  "/tasks/gantt": "Gantt",
-  "/tasks/sprint": "Sprint",
+  //
+  "/my-work/personal": "Personal list",
   "/marketing/campaigns": "Campaigns",
   "/marketing/events": "Events",
   "/marketing/content": "Content library",
-  "/docs/trash": "Trash",
+  // "/docs/trash" is gone: it 308s to /trash?tab=archived&type=doc, the one
+  // Trash (spec-spaces-lists section 2). A ROUTE_TITLES row for a route with
+  // no page fails the completeness test, which is the test doing its job.
   "/automation/workflows": "Workflows",
   "/automation/templates": "Templates",
   "/automation/logs": "Logs",
@@ -310,19 +325,20 @@ export const FOLDED_APP_HUB: Readonly<Record<string, HubKey>> = {
 /**
  * Work's landing URL.
  *
- * The spec settles this as `/home`, the quiet widget page the work and home
- * unit builds alongside `/my-work`. That directory does not exist in
- * `src/app/(dashboard)` yet, and pointing the first rail hub at a path with no
- * page would land every viewer on the in-shell 404, so this constant carries
- * today's live landing and becomes `/home` in the one PR that creates the route
- * and the `/today` + `/dashboard` redirects. `ROUTE_HUB` already carries the
- * `/home` row, so nothing else has to move when it flips.
+ * `/home`: the quiet widget page, which now exists. Before this it was
+ * `/today`, which was not a landing at all: it ran a query for the viewer's
+ * earliest readable Space and redirected them into it, so "go home" meant "go
+ * to somebody's project list", and a person with no Space landed on /spaces.
+ *
+ * This constant is the one every in-app href reads. `next.config.ts` carries
+ * its ONE mirror (it runs before the "@/" alias exists), and both flip in the
+ * same edit.
  *
  * Whatever it points at, it points at a path the table owns: a test asserts
  * `resolveHubPrefix(WORK_HOME_HREF)` matches a row, so the Work landing can
  * never be the one landing that resolves by the no-match fallback.
  */
-export const WORK_HOME_HREF = "/today";
+export const WORK_HOME_HREF = "/home";
 
 /** Trailing slashes and empty strings normalised to a comparable path. */
 function normalisePath(pathname: string): string {

@@ -16,7 +16,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Info, Users } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { SpaceIconPicker } from "./space-icon-picker";
 import { SPACE_COLOR_PALETTE } from "./space-icon-catalog";
@@ -32,14 +31,12 @@ interface SpaceLike {
   visibility: Visibility;
 }
 
-type Permission = "FULL_EDIT" | "EDIT" | "COMMENT" | "VIEW";
-
-const PERMISSION_LABELS: Record<Permission, string> = {
-  FULL_EDIT: "Full edit",
-  EDIT: "Edit",
-  COMMENT: "Comment",
-  VIEW: "View",
-};
+// `settings.defaultPermission` is gone from this file entirely. The select
+// that asked for it was deleted, nothing in src reads the stored value, and
+// the POST kept writing a hardcoded "FULL_EDIT" on every new Space, which is
+// a fabricated answer for the access migration to pick up. Existing stored
+// values are untouched; the access spec's step 4 migrates them onto the
+// Everyone grant, which is the rule that is actually enforced.
 
 interface WizardState {
   step: 1 | 2;
@@ -48,7 +45,6 @@ interface WizardState {
   color: string;
   name: string;
   description: string;
-  defaultPermission: Permission;
   isPrivate: boolean;
   workflow: WorkflowConfig;
 }
@@ -60,7 +56,6 @@ const INITIAL: WizardState = {
   color: SPACE_COLOR_PALETTE[0].hex,
   name: "",
   description: "",
-  defaultPermission: "FULL_EDIT",
   isPrivate: false,
   workflow: workflowFromPreset("starter"),
 };
@@ -148,8 +143,12 @@ export function NewSpaceDialog({
           icon: state.iconName ?? undefined,
           color: state.color,
           ownerId: state.workflow.ownerId ?? undefined,
+          // `settings.defaultPermission` is NOT written any more. The select
+          // that asked for it is gone, nothing in src reads the stored value,
+          // and writing a hardcoded FULL_EDIT on every new Space would hand
+          // the access migration a fabricated answer to a question nobody was
+          // asked. Who can do what is the Share dialog's "Everyone" row.
           settings: {
-            defaultPermission: state.defaultPermission,
             workflow: state.workflow,
           },
         }),
@@ -269,28 +268,26 @@ function Step1({
           />
         </div>
 
-        <div className="border-t border-border pt-4 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-muted" />
-            <span className="text-base font-medium">Default permission</span>
-            <Info className="h-3.5 w-3.5 text-muted-2" />
-          </div>
-          <PermissionSelect
-            value={state.defaultPermission}
-            onChange={(v) => onChange("defaultPermission", v)}
-          />
-        </div>
+        {/* The "Default permission" select is gone (spec-spaces-lists section
+            4 step 3: "the default-permission select stops rendering", audit
+            Medium #16 and critic #7). It wrote `settings.defaultPermission`,
+            and grep finds no runtime reader anywhere in src: the four choices
+            were stored and never enforced, so the dialog was asking a question
+            whose answer nothing acted on. Who can do what in a Space is the
+            Share dialog's "Everyone at {org}" row, which is enforced. */}
 
         <div className="border-t border-border pt-4">
           <label className="flex items-center justify-between gap-3 cursor-pointer">
             <div>
-              <div className="text-base font-medium">Make Private</div>
-              <div className="text-sm text-muted">Only you and invited members have access</div>
+              <div className="text-base font-medium">Restricted</div>
+              <div className="text-sm text-muted">
+                Only you and the people you share it with can open it. Change this later in Share.
+              </div>
             </div>
             <Switch
               checked={state.isPrivate}
               onChange={(v) => onChange("isPrivate", v)}
-              aria-label="Make space private"
+              aria-label="Restrict this Space"
             />
           </label>
         </div>
@@ -322,25 +319,4 @@ function Step1({
   );
 }
 
-function PermissionSelect({
-  value,
-  onChange,
-}: {
-  value: Permission;
-  onChange: (v: Permission) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value as Permission)}
-      className="h-8 px-2.5 pe-7 rounded-md border border-border bg-surface text-base focus:outline-none focus:border-[color:var(--accent)]"
-    >
-      {(Object.keys(PERMISSION_LABELS) as Permission[]).map((k) => (
-        <option key={k} value={k}>
-          {PERMISSION_LABELS[k]}
-        </option>
-      ))}
-    </select>
-  );
-}
 

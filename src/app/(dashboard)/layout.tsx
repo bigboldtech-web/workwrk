@@ -36,8 +36,16 @@ const BOOT_BG = "var(--os-nv900, #1B2537)";
 
 export default function DashboardLayout({
   children,
+  drawer,
 }: {
   children: React.ReactNode;
+  /**
+   * The @drawer parallel slot. It holds the intercepted /item/[id] task
+   * drawer and nothing else, and renders `@drawer/default.tsx` (null) on any
+   * route that is not one, including every hard load of a task URL, which is
+   * how a refresh gives the full page instead of a drawer over nothing.
+   */
+  drawer: React.ReactNode;
 }) {
   const { status } = useSession();
   const router = useRouter();
@@ -110,7 +118,7 @@ export default function DashboardLayout({
           <div id={APP_ROOT_ID} style={{ display: "contents" }}>
             {ready ? (
               <BootProvider boot={boot}>
-                <OsShell>{children}</OsShell>
+                <OsShell drawer={drawer}>{children}</OsShell>
               </BootProvider>
             ) : (
               <BootScreen error={bootError} showMark={showMark} onRetry={retry} />

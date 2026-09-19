@@ -27,6 +27,7 @@ import { useBoot } from "./boot-context";
 import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { useSettingsNav } from "@/hooks/use-settings-nav";
+import { KindIcon } from "@/components/inbox/inbox-row";
 
 type Notification = {
   id: string;
@@ -36,6 +37,10 @@ type Notification = {
   read: boolean;
   link?: string | null;
   createdAt: string;
+  /** From src/lib/inbox-kinds.ts, so the bell and the Inbox say one thing. */
+  kind?: { label: string; icon: string };
+  /** The server's answer about whether this can still be opened. */
+  target?: { href: string | null; readable: boolean };
 };
 type NotifResponse = { notifications: Notification[]; unreadCount: number };
 
@@ -195,7 +200,14 @@ function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => 
   const router = useRouter();
 
   const load = useCallback(async () => {
-    const r = await apiFetch<NotifResponse>("/api/notifications", { cache: "no-store" });
+    // THE BELL LIST AND THE BELL BADGE ANSWER THE SAME QUESTION. The badge
+    // counts `unreadWhere` = Primary + Other unread; narrowing the list to
+    // `tab=primary` made a viewer with unread Other rows (kudos, announcements,
+    // SOP published, status changes, automations) see a number the popover
+    // could not account for, and took the bell away as those rows' entry point.
+    // `tab=other&all=1&unread=1` IS every unread row, which is the badge's own
+    // clause, newest first.
+    const r = await apiFetch<NotifResponse>("/api/notifications?tab=other&all=1&unread=1&limit=20", { cache: "no-store" });
     if (!r.ok) { if (r.status !== 401) setError(r.error); return; }
     setError(null);
     setData(r.data);
@@ -235,12 +247,22 @@ function InboxTab({ open, onClose, onMutated }: { open: boolean; onClose: () => 
               <li key={n.id} className="group/n relative">
                 <button
                   type="button"
-                  onClick={() => { void markOne(n.id); if (n.link) { onClose(); router.push(n.link); } }}
+                  onClick={() => {
+                    void markOne(n.id);
+                    // The server decides whether the target is still openable;
+                    // a row whose task was deleted opens the Inbox, where the
+                    // pane says so, rather than a 404.
+                    const href = n.target?.readable === false ? `/inbox?n=${n.id}` : n.target?.href ?? n.link;
+                    if (href) { onClose(); router.push(href); }
+                  }}
                   className="flex h-11 w-full items-center gap-3 rounded-lg px-2 text-start hover:bg-hover"
                 >
                   <span className="flex w-2 shrink-0 justify-center">
                     {!n.read ? <span className="h-1.5 w-1.5 rounded-full bg-attention" aria-label="Unread" /> : null}
                   </span>
+                  {n.kind ? (
+                    <KindIcon name={n.kind.icon} className="h-4 w-4 shrink-0 text-ink-2" label={n.kind.label} />
+                  ) : null}
                   <span className="min-w-0 flex-1">
                     <span className={cn("block truncate text-base", n.read ? "text-ink" : "font-medium text-ink")}>{n.title}</span>
                     <span className="block truncate text-xs text-ink-2">
@@ -383,7 +405,14 @@ function useNewItemAlerts(muted: boolean) {
     if (before === null || next <= before || mutedRef.current) return;
     let alive = true;
     void (async () => {
-      const r = await apiFetch<NotifResponse>("/api/notifications", { cache: "no-store" });
+      // THE BELL LIST AND THE BELL BADGE ANSWER THE SAME QUESTION. The badge
+    // counts `unreadWhere` = Primary + Other unread; narrowing the list to
+    // `tab=primary` made a viewer with unread Other rows (kudos, announcements,
+    // SOP published, status changes, automations) see a number the popover
+    // could not account for, and took the bell away as those rows' entry point.
+    // `tab=other&all=1&unread=1` IS every unread row, which is the badge's own
+    // clause, newest first.
+    const r = await apiFetch<NotifResponse>("/api/notifications?tab=other&all=1&unread=1&limit=20", { cache: "no-store" });
       if (!alive || !r.ok) return;
       const newest = r.data.notifications?.find((n) => !n.read);
       if (!newest || newest.id === lastNotified.current) return;

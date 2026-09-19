@@ -11,7 +11,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Check, ClipboardList, ExternalLink, Link2, Loader2, RefreshCcw } from "lucide-react";
+import { Check, ClipboardList, ExternalLink, Link2, RefreshCcw } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 
 interface ApiForm {
   id: string;
@@ -124,7 +125,7 @@ export function BoardFormView({ boardId, viewId, viewConfig, canEdit }: BoardFor
                 disabled={busy}
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-base font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
               >
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                {busy ? <Dots variant="pending" /> : null}
                 Create intake form
               </button>
               {forms === null ? (

@@ -15,6 +15,7 @@ import {
   Star,
   Heart,
 } from "lucide-react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 type Focus = "ic" | "manager" | "founder";
 
@@ -66,9 +67,9 @@ export default function OnboardingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ focus, title, completed: true }),
       }).catch(() => {});
-      router.push("/dashboard");
+      router.push(WORK_HOME_HREF);
     } catch {
-      router.push("/dashboard");
+      router.push(WORK_HOME_HREF);
     }
   }
 
@@ -132,7 +133,7 @@ export default function OnboardingPage() {
 
           <div className="mt-7 flex items-center justify-between gap-3">
             <Link
-              href="/dashboard"
+              href={WORK_HOME_HREF}
               className="inline-flex items-center gap-1.5 text-base text-zinc-500 hover:text-zinc-800"
             >
               Skip

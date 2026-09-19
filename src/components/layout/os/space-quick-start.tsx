@@ -3,7 +3,8 @@
 // SpaceQuickStart — empty-state tile grid for the Space detail page.
 // Replaces the static decorative tiles from Phase 42a with a real
 // 4-button client island:
-//   Board    → opens NewBoardDialog
+//   List     → opens CreateListModal (the one List dialog; "Board" and the
+//              second dialog are retired, spec-spaces-lists section 0)
 //   Folder   → opens NewFolderDialog
 //   Doc      → POST /api/docs { entityType: SPACE, entityId } → /docs/[id]
 //   Database → POST /api/tables { spaceId } → /tables/[id]
@@ -16,8 +17,8 @@ import { useRouter } from "next/navigation";
 import {
   Database, FileText, FolderPlus, LayoutGrid,
 } from "lucide-react";
-import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
+import { useOsShell } from "./shell-context";
 import { useOsToast } from "./toast";
 import { Dots } from "@/components/ui/dots";
 
@@ -29,7 +30,7 @@ interface Props {
 export function SpaceQuickStart({ spaceId, accent }: Props) {
   const router = useRouter();
   const { toast } = useOsToast();
-  const [boardOpen, setBoardOpen] = useState(false);
+  const { openCreateList } = useOsShell();
   const [folderOpen, setFolderOpen] = useState(false);
   const [busy, setBusy] = useState<"doc" | "table" | null>(null);
 
@@ -89,15 +90,15 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         <Tile
           Icon={LayoutGrid}
-          label="Board"
-          blurb="Tasks · status pipeline"
+          label="List"
+          blurb="Tasks, with their own statuses"
           accent={accent}
-          onClick={() => setBoardOpen(true)}
+          onClick={() => openCreateList({ spaceId })}
         />
         <Tile
           Icon={FolderPlus}
           label="Folder"
-          blurb="Group related boards"
+          blurb="Group related lists"
           accent={accent}
           onClick={() => setFolderOpen(true)}
         />
@@ -111,21 +112,14 @@ export function SpaceQuickStart({ spaceId, accent }: Props) {
         />
         <Tile
           Icon={Database}
-          label="Database"
-          blurb="Stackby-style rows"
+          label="Table"
+          blurb="Rows, columns and formulas"
           accent={accent}
           onClick={createTable}
           busy={busy === "table"}
         />
       </div>
 
-      <NewBoardDialog
-        open={boardOpen}
-        onOpenChange={setBoardOpen}
-        spaceId={spaceId}
-        folderId={null}
-        onCreated={() => { setBoardOpen(false); router.refresh(); }}
-      />
       <NewFolderDialog
         open={folderOpen}
         onOpenChange={setFolderOpen}

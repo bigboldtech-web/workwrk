@@ -75,7 +75,16 @@ export async function GET(req: Request) {
     take: 300,
   });
 
-  const actorIds = Array.from(new Set(activity.map((a) => a.actorId).filter(Boolean) as string[]));
+  // The actors, PLUS the people ids stored inside meta (an assignee added or
+  // removed, an owner handed over). Resolved in the same query because the only
+  // alternative for the renderer is to print a raw cuid at a person, or to say
+  // "someone" when the name was one join away.
+  const metaPersonIds = activity.flatMap((a) =>
+    personIdsInMeta(a.action, (a.meta as Record<string, unknown> | null) ?? {}),
+  );
+  const actorIds = Array.from(
+    new Set([...(activity.map((a) => a.actorId).filter(Boolean) as string[]), ...metaPersonIds]),
+  );
   const actors = actorIds.length
     ? await prisma.user.findMany({
         where: { id: { in: actorIds } },
@@ -83,8 +92,15 @@ export async function GET(req: Request) {
       })
     : [];
   const actorMap = new Map(actors.map((a) => [a.id, a]));
+  const people: Record<string, string> = {};
+  for (const a of actors) {
+    const name = `${a.firstName ?? ""} ${a.lastName ?? ""}`.trim() || a.email;
+    if (name) people[a.id] = name;
+  }
 
   return NextResponse.json({
+    // Shared by every row in this response, the same shape ThreadActivity uses.
+    people,
     activity: activity.map((a) => {
       const actor = a.actorId ? actorMap.get(a.actorId) : null;
       return {
@@ -98,4 +114,27 @@ export async function GET(req: Request) {
       };
     }),
   });
+}
+
+/**
+ * The user ids stored inside one activity row's meta.
+ *
+ * Only the actions that actually carry people are read, and only the keys those
+ * actions write, so a meta blob from an automation cannot turn an arbitrary
+ * string into a user lookup.
+ */
+function personIdsInMeta(action: string, meta: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v.length > 0) out.push(v);
+    else if (Array.isArray(v)) for (const x of v) if (typeof x === "string" && x) out.push(x);
+  };
+  if (action === "ASSIGNEES_CHANGED") {
+    push(meta.added);
+    push(meta.removed);
+  } else if (action === "OWNER_CHANGED" || action === "ASSIGNED") {
+    push(meta.from);
+    push(meta.to);
+  }
+  return out;
 }

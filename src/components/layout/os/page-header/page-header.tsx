@@ -371,6 +371,15 @@ function HeaderMenu({ entries, variant = "bordered", label = "More options" }: {
 
 export function OsToolbar({ filter, sort, group, switcher, left, right, primary, menu, className }: OsToolbarProps) {
   const hasLeft = Boolean(filter || sort || group || switcher || left);
+  // ONE PRIMARY ON SCREEN (design-system principle 1: "while a drawer or
+  // modal with its own primary is open, the page's primary is not rendered
+  // at all"). Opening the create-task modal over a List put its blue "Create
+  // task" beside the page's own blue "+ Create task", which is two blues
+  // competing for the same click. The page's is the one that gives way,
+  // because the thing in front is what the person is doing.
+  const { topLayerKind } = useOsShell();
+  const primaryHidden = topLayerKind === "modal" || topLayerKind === "drawer" || topLayerKind === "dialog";
+  const shownPrimary = primaryHidden ? undefined : primary;
   return (
     <div className={cn("os-toolbar flex h-11 min-w-0 items-center gap-2 px-6", className)}>
       {hasLeft ? (
@@ -430,10 +439,10 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
       ) : (
         <div className="min-w-0 flex-1" />
       )}
-      {right || primary || menu ? (
+      {right || shownPrimary || menu ? (
         <div className="flex shrink-0 items-center gap-2">
           {right}
-          {primary ? <PrimaryButton action={primary} /> : null}
+          {shownPrimary ? <PrimaryButton action={shownPrimary} /> : null}
           {menu && menu.length > 0 ? <HeaderMenu entries={menu} /> : null}
         </div>
       ) : null}

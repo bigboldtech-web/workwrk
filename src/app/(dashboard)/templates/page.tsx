@@ -1,109 +1,55 @@
-"use client";
+// /templates: start something from a template instead of from blank.
+//
+// Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2 (/templates).
+//
+// WHAT THIS REPLACES. The route existed and held the wrong thing: a 109-line
+// client page over `/api/workspace-templates` with gradient card heads, a
+// button reading "Applied - apply again?", a hint pointing at three raw paths,
+// and a catch that turned every failure into the sentence "No templates
+// configured." The real Template Center was a modal with no full-size home, so
+// the product had six things called Templates and this URL led to the one that
+// knew the least.
+//
+// NOTHING DISAPPEARS. The workspace bundles that page listed are the "Starter
+// kits" kind of this one, applied through the same POST
+// /api/workspace-templates/apply. Every "Browse templates" menu row across the
+// product opens this same component as a modal scoped to a kind.
+//
+// The server half is the gate plus the stored view options the first paint
+// needs; `?kind=` is read here so a link can scope the page.
 
-/* Templates — starter workspace bundles users can apply any time.
- *
- * Each template seeds a Doc + Form + Table into the current org. Lets
- * teams get from zero → useful in one click; great for new orgs but
- * also for teams adding a new function (e.g. spinning up Marketing).
- */
+import { gatePage } from "@/lib/access/gate";
+import { getEffectivePreferences } from "@/lib/preferences";
+import { kindFromParam } from "@/lib/templates/kinds";
+import { TemplatesClient } from "./templates-client";
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  LayoutTemplate, FileText, FormInput, Table as TableIcon, Check, Loader2,
-  Code2, Users, BarChart3, Megaphone, Boxes,
-} from "lucide-react";
-import { useOsToast } from "@/components/layout/os/toast";
+export const dynamic = "force-dynamic";
 
-type ApiTemplate = {
-  id: string; name: string; tagline: string; description: string;
-  iconKey: string; gradient: string;
-  summary: { doc: string; form: string; table: string };
-};
+export default async function TemplatesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ kind?: string; q?: string }>;
+}) {
+  // The `templates` app key (access section 5.2.1 plus spec-spaces-lists
+  // section 1's one added row): every Member, Guests never. gatePage 404s a
+  // Guest in the shell, which is the same answer their missing sidebar row
+  // gives, so no row ever leads somewhere that denies.
+  const { viewer } = await gatePage("view", { type: "app", key: "templates" }, { callbackUrl: "/templates" });
 
-const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  code: Code2, users: Users, sales: BarChart3, megaphone: Megaphone, boxes: Boxes,
-};
-
-export default function TemplatesPage() {
-  const [templates, setTemplates] = useState<ApiTemplate[] | null>(null);
-  const [applying, setApplying] = useState<string | null>(null);
-  const [applied, setApplied] = useState<Set<string>>(new Set());
-  const { toast } = useOsToast();
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/workspace-templates");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      setTemplates(d.data ?? (Array.isArray(d) ? d : []));
-    } catch {
-      setTemplates([]);
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-
-  async function apply(id: string) {
-    setApplying(id);
-    try {
-      const res = await fetch("/api/workspace-templates/apply", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ templateId: id }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setApplied((prev) => new Set(prev).add(id));
-      toast("Template applied — Doc, Form, and Table created");
-    } catch { toast("Couldn't apply template"); }
-    finally { setApplying(null); }
-  }
+  const sp = await searchParams;
+  const prefs = await getEffectivePreferences(viewer.userId, viewer.organizationId).catch(() => null);
+  const work = (prefs?.home?.work ?? {}) as { surface?: Record<string, unknown> };
+  const stored = (work.surface?.templates ?? {}) as { viewOptions?: { showBuiltIn?: unknown; layout?: unknown } };
 
   return (
-    <div className="tmpl">
-      <header className="tmpl__head">
-        <div className="tmpl__icon"><LayoutTemplate /></div>
-        <div>
-          <h1>Workspace templates</h1>
-          <p>Pick a team type — we&apos;ll seed a starter doc, form, and table so you can edit instead of starting blank.</p>
-        </div>
-      </header>
-
-      {templates === null ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)" }}>Loading…</div>
-      ) : templates.length === 0 ? (
-        <div style={{ padding: 60, textAlign: "center", color: "var(--os-ink-3)" }}>No templates configured.</div>
-      ) : (
-        <div className="tmpl__grid">
-          {templates.map((t) => {
-            const Icon = ICONS[t.iconKey] ?? LayoutTemplate;
-            const isApplying = applying === t.id;
-            const isApplied = applied.has(t.id);
-            return (
-              <article key={t.id} className="tmpl-card">
-                <header className="tmpl-card__head" style={{ background: t.gradient }}>
-                  <Icon />
-                </header>
-                <div className="tmpl-card__body">
-                  <h3>{t.name}</h3>
-                  <p className="tmpl-card__tagline">{t.tagline}</p>
-                  <p className="tmpl-card__desc">{t.description}</p>
-                  <ul className="tmpl-card__list">
-                    <li><FileText /> Doc: <em>{t.summary.doc}</em></li>
-                    <li><FormInput /> Form: <em>{t.summary.form}</em></li>
-                    <li><TableIcon /> Table: <em>{t.summary.table}</em></li>
-                  </ul>
-                </div>
-                <footer className="tmpl-card__foot">
-                  <button type="button" className={`tmpl-card__btn ${isApplied ? "is-done" : ""}`} onClick={() => apply(t.id)} disabled={isApplying}>
-                    {isApplying ? <><Loader2 className="tmpl-card__spin" /> Applying…</> : isApplied ? <><Check /> Applied — apply again?</> : "Apply template"}
-                  </button>
-                </footer>
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      <p className="tmpl__hint">After applying, find your new items at <Link href="/docs">/docs</Link>, <Link href="/forms">/forms</Link>, and <Link href="/tables">/tables</Link>.</p>
-    </div>
+    <TemplatesClient
+      initialKind={kindFromParam(sp.kind)}
+      // `?q=` is part of this route's contract (spec-spaces-lists section 0)
+      // and was declared here and then dropped, so /templates?q=ideas (where
+      // spec-work-home lands /ideas) showed the whole unfiltered library.
+      initialQuery={(sp.q ?? "").trim()}
+      initialShowBuiltIn={stored.viewOptions?.showBuiltIn !== false}
+      initialLayout={stored.viewOptions?.layout === "list" ? "list" : "grid"}
+    />
   );
 }

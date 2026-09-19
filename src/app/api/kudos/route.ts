@@ -132,8 +132,10 @@ export async function POST(req: NextRequest) {
     data: {
       title: "You received kudos!",
       message: `${kudos.giver.firstName} ${kudos.giver.lastName} recognized you: "${message.trim().slice(0, 80)}"`,
-      type: "KUDOS",
-      link: "/dashboard",
+      type: "kudos",
+      // The kudos page, not the Work landing: "/dashboard" showed the
+      // recipient a page that no longer holds a kudos feed at all.
+      link: "/kudos",
       userId: receiverId,
     },
   });
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest) {
   const { subject, html } = kudosTemplate({
     senderName: `${kudos.giver.firstName} ${kudos.giver.lastName}`,
     message: message.trim(),
-    dashboardLink: `${baseUrl}/dashboard`,
+    dashboardLink: `${baseUrl}/kudos`,
   });
 
   // Gated by both the /settings/notifications email toggle and the legacy

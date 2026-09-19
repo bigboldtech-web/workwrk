@@ -5,7 +5,8 @@
 // a status pill + owner per row, lets you add a new subtask and open one.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Plus, ChevronRight, Loader2 } from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import { isDoneStatus } from "@/lib/board-items-shared";
 import { PersonAvatar } from "./assignee-picker";
@@ -92,7 +93,7 @@ export function ItemSubtasks({
         Subtasks {list.length > 0 ? <span className="text-xs text-zinc-400 normal-case tracking-normal">{doneCount}/{list.length}</span> : null}
       </h3>
       {rows === null ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+        <div className="py-1"><Dots variant="pending" label="Loading subtasks" className="text-ink-3" /></div>
       ) : (
         <div className="rounded-lg border border-zinc-200 divide-y divide-zinc-100">
           {list.map((r) => {
@@ -123,7 +124,7 @@ export function ItemSubtasks({
                 placeholder="Type a subtask and press Enter…"
                 className="flex-1 text-base bg-transparent outline-none placeholder:text-zinc-400"
               />
-              {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400 shrink-0" /> : null}
+              {adding ? <Dots variant="pending" label="Adding" className="shrink-0 text-ink-3" /> : null}
             </div>
           ) : null}
         </div>

@@ -51,8 +51,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         data: {
           title: "New reaction on your kudos",
           message: `${reactorName} reacted ${emoji} to: "${kudos.message.slice(0, 60)}"`,
-          type: "KUDOS",
-          link: "/dashboard/kudos",
+          type: "kudos",
+          // There is no /dashboard/kudos directory and there never was, so
+          // every reaction notification written before this line pointed at a
+          // hard 404. The real page is /kudos.
+          link: "/kudos",
           userId: kudos.receiverId,
         },
       }).catch(() => {});

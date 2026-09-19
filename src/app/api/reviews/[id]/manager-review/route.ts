@@ -98,7 +98,7 @@ export async function PATCH(
       data: {
         title: "Manager Review Submitted",
         message: `Your manager has completed their review for ${review.cycleId}.`,
-        type: "REVIEW",
+        type: "review",
         link: `/reviews/${cycleId}`,
         userId: review.subjectId,
       },

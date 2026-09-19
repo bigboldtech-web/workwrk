@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { legacyAllows, type LegacyInputs, type VisibilityValue } from "@/lib/access/parity";
 import { loadFolderInputs } from "@/lib/access/legacy-facts";
+import { withArchivedBy } from "@/lib/archived-by";
 
 const MAX_FOLDER_DEPTH = 6;
 
@@ -355,6 +356,36 @@ export interface UpdateFolderInput {
   spaceId?: string;
   parentFolderId?: string | null;
   position?: number;
+  /**
+   * access-model Broken #10: a Folder made PRIVATE at creation could never be
+   * un-privated. `POST /api/folders` was the only writer of folder visibility
+   * in the whole codebase, the share dialog had no control and the "…" menu
+   * had no row, so the switch was one-way. It is a normal field now.
+   */
+  visibility?: "PRIVATE" | "WORKSPACE" | "ORG";
+}
+
+/**
+ * Is `candidate` inside `folderId`'s subtree (or the folder itself)?
+ *
+ * The Move guard. `updateFolder` already refused a folder as its own parent,
+ * but not as its own GRANDparent: moving A under its child B detached the
+ * whole branch from every tree query, because nothing walks a cycle. Bounded
+ * by MAX_FOLDER_DEPTH + 2 so corrupt data cannot spin here.
+ */
+export async function isFolderDescendant(folderId: string, candidate: string): Promise<boolean> {
+  if (folderId === candidate) return true;
+  let currentId: string | null = candidate;
+  for (let hops = 0; currentId && hops < MAX_FOLDER_DEPTH + 2; hops += 1) {
+    const row: { parentFolderId: string | null } | null = await prisma.folder.findUnique({
+      where: { id: currentId },
+      select: { parentFolderId: true },
+    });
+    if (!row) return false;
+    if (row.parentFolderId === folderId) return true;
+    currentId = row.parentFolderId;
+  }
+  return false;
 }
 
 export async function updateFolder(folderId: string, patch: UpdateFolderInput) {
@@ -373,6 +404,12 @@ export async function updateFolder(folderId: string, patch: UpdateFolderInput) {
       throw new Error("Folder cannot be its own parent");
     }
     if (patch.parentFolderId) {
+      // A folder may not move inside its own subtree: the branch would leave
+      // every tree query at once and there would be no page left to move it
+      // back from.
+      if (await isFolderDescendant(folderId, patch.parentFolderId)) {
+        throw new Error("A folder can't move inside itself");
+      }
       const targetDepth = await getFolderDepth(patch.parentFolderId);
       if (targetDepth + 1 >= MAX_FOLDER_DEPTH) {
         throw new Error(`Folders can only nest ${MAX_FOLDER_DEPTH} levels deep`);
@@ -381,15 +418,15 @@ export async function updateFolder(folderId: string, patch: UpdateFolderInput) {
     data.parentFolderId = patch.parentFolderId;
   }
   if (patch.position !== undefined) data.position = patch.position;
+  if (patch.visibility !== undefined) data.visibility = patch.visibility;
 
   return prisma.folder.update({ where: { id: folderId }, data });
 }
 
-export async function archiveFolder(folderId: string) {
-  return prisma.folder.update({
-    where: { id: folderId },
-    data: { archivedAt: new Date() },
-  });
+export async function archiveFolder(folderId: string, actorId: string | null = null) {
+  return withArchivedBy(actorId, (extra) =>
+    prisma.folder.update({ where: { id: folderId }, data: { archivedAt: new Date(), ...extra } }),
+  );
 }
 
 export async function unarchiveFolder(folderId: string) {

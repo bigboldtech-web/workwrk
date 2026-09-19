@@ -62,11 +62,17 @@ export async function POST(req: NextRequest) {
         userId: row.userId,
         type: "kpi_score_due",
         title: n === 1 ? "A KPI score is waiting" : `${n} KPI scores are waiting`,
+        // The profile's KRAs tab is where a KPI number is actually recorded.
+        // This used to link to /today, whose "KPIs to score" column lived in
+        // `components/today/my-alignment.tsx`: a file nothing has imported
+        // since the ClickUp-parity slice, so the link landed on a Space
+        // redirect and the column it named was unreachable. Home's Weekly
+        // review widget shows the same count and points at the same tab.
         message:
           n === 1
-            ? "You have a KPI score to submit. Open Today to record it."
-            : `You have ${n} KPI scores to submit. Open Today to record them.`,
-        link: "/today",
+            ? "You have a KPI score to submit. Open your KRAs and KPIs to record it."
+            : `You have ${n} KPI scores to submit. Open your KRAs and KPIs to record them.`,
+        link: "/people/me?tab=kras",
       },
     });
     nudgesCreated++;

@@ -1,15 +1,29 @@
-// Closing CTA band — the final ask.
+// Closing CTA band: the final ask.
 //
 // Full-bleed brand-red panel with a single drifting yellow highlight
 // blob in the corner. Faint white dot pattern adds texture. A handful
-// of sparkle particles drift upward. The primary white pill carries
-// a continuous radar pulse — that's the focal point.
+// of sparkle particles drift upward. The primary white pill is the
+// focal point.
+//
+// This is a client component, so the CTA specs and the free-tier sentence
+// arrive as PROPS from the server rather than by importing the marketing
+// config here. Importing it would pull the whole Tuesday fixture and the
+// pricing table into the browser bundle of every page that renders this.
 
 "use client";
 
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowRight, Sparkles } from "lucide-react";
+
+export interface ClosingCtaProps {
+  primary: { label: string; href: string; dataCta: string };
+  secondary: { label: string; href: string; dataCta: string };
+  /** "Free for up to N people. No credit card.", built from the enforced cap. */
+  freeLine: string;
+  /** Certification rows, already filtered by the claim flags. Usually empty. */
+  certifications?: string[];
+}
 
 const PARTICLES = Array.from({ length: 6 }).map((_, i) => ({
   id: i,
@@ -20,7 +34,9 @@ const PARTICLES = Array.from({ length: 6 }).map((_, i) => ({
   size: 2 + (i % 3),
 }));
 
-export function ClosingCTA() {
+export function ClosingCTA({ primary, secondary, freeLine, certifications = [] }: ClosingCtaProps) {
+  const homePrimary = primary;
+  const homeSecondary = secondary;
   return (
     <section className="px-4 lg:px-6 py-12 lg:py-16">
       <div
@@ -109,8 +125,11 @@ export function ClosingCTA() {
             viewport={{ once: true, margin: "-80px" }}
             transition={{ duration: 0.7, delay: 0.2 }}
           >
-            14-day free trial. No credit card. Free forever under 5 people.
-            Get started and your workspace runs on the same afternoon.
+            {/* There is no 14-day clock: Starter is free at the cap the
+                server enforces, forever, which is a better sentence anyway.
+                The number comes from the pricing source, so it moves when
+                PLAN_LIMITS does and a unit test fails if it does not. */}
+            {freeLine} Your workspace runs the same afternoon.
           </motion.p>
 
           <motion.div
@@ -120,33 +139,27 @@ export function ClosingCTA() {
             viewport={{ once: true, margin: "-80px" }}
             transition={{ duration: 0.7, delay: 0.3 }}
           >
-            {/* Primary: white pill with pulsing radar */}
+            {/* Primary: the canon's label, the canon's destination. It was
+                "Get started - it's free", which naming-canon forbids in
+                favour of "Start free", beside "Watch a 2-min demo" pointing
+                at a video that does not exist. */}
             <Link
-              href="/signup"
-              className="relative inline-flex items-center gap-2 px-7 rounded-full bg-white font-bold text-[15px] hover:-translate-y-0.5 transition-transform"
+              href={homePrimary.href}
+              data-cta={homePrimary.dataCta}
+              className="relative inline-flex items-center gap-2 px-7 rounded-full bg-white font-bold text-[15px] transition-colors"
               style={{ color: "var(--brand-red)", height: 52 }}
             >
-              <motion.span
-                className="absolute inset-0 rounded-full"
-                animate={{
-                  boxShadow: [
-                    "0 0 0 0 rgba(255,255,255,0.5)",
-                    "0 0 0 16px rgba(255,255,255,0)",
-                  ],
-                }}
-                transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
-                aria-hidden
-              />
-              Get started — it&apos;s free <ArrowRight size={15} />
+              {homePrimary.label} <ArrowRight size={15} />
             </Link>
 
             {/* Secondary: outlined */}
             <Link
-              href="/demo"
+              href={homeSecondary.href}
+              data-cta={homeSecondary.dataCta}
               className="inline-flex items-center gap-2 px-7 rounded-full font-semibold text-[15px] text-white border-2 border-white/30 hover:border-white/60 hover:bg-white/10 transition-colors"
               style={{ height: 52 }}
             >
-              Watch a 2-min demo
+              {homeSecondary.label}
             </Link>
           </motion.div>
 
@@ -158,10 +171,16 @@ export function ClosingCTA() {
             viewport={{ once: true, margin: "-60px" }}
             transition={{ duration: 0.7, delay: 0.4 }}
           >
+            {/* "SOC 2 + ISO 27001" was here. Neither certification is held:
+                flags.soc2 and flags.iso27001 are both false, and a legal
+                claim is not a reassurance row. It returns when the report
+                does, through the flag, not through a typed string. */}
             <Reassurance label="Free forever" />
             <Reassurance label="No credit card" />
-            <Reassurance label="60-second signup" />
-            <Reassurance label="SOC 2 + ISO 27001" />
+            <Reassurance label="Export everything, any time" />
+            {certifications.map((c) => (
+              <Reassurance key={c} label={c} />
+            ))}
           </motion.div>
         </div>
       </div>

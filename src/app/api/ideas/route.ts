@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+import { findMigratedIdeasList } from "@/lib/work/ideas-destination";
+import { gone } from "@/lib/work/legacy-task-api";
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
@@ -52,6 +54,27 @@ export async function POST(req: NextRequest) {
 
   if (!title?.trim() || !description?.trim()) {
     return jsonError("Title and description are required");
+  }
+
+  // THE WRITE DOOR CLOSES WITH THE MIGRATION, not before it.
+  //
+  // Once scripts/migrate-ideas.ts has run for this org, every `Idea` row has
+  // a twin Item on the org's Ideas List and nothing in the product reads the
+  // `Idea` table any more. A create after that point writes a row that is
+  // invisible everywhere except the retired /ideas page and that stays
+  // stranded until somebody thinks to re-run the migration, which is a quiet
+  // way to lose somebody's idea. 410 with the replacement path named is the
+  // honest answer: it says the door moved and where it moved to.
+  //
+  // Before the migration there is no List, the `Idea` table is still the only
+  // home these rows have, and this route behaves exactly as it always did.
+  const migrated = await findMigratedIdeasList(orgId);
+  if (migrated) {
+    return gone(
+      "POST /api/ideas",
+      `/api/boards/${migrated.id}/items`,
+      "Ideas are tasks on the Ideas list now. Create it there.",
+    );
   }
 
   try {

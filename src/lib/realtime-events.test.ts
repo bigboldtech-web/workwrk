@@ -31,6 +31,10 @@ describe("realtime event contract", () => {
       expect(REALTIME_EVENT_NAMES).toContain(name);
     }
   });
+  it("carries the task event Phase 2 adds, so an open task stops polling and hoping", () => {
+    expect(REALTIME_EVENT_NAMES).toContain("item");
+    expect(isRealtimeEvent({ type: "item", itemId: "i1", boardId: "b1" })).toBe(true);
+  });
   it("guards parsed payloads by type name only", () => {
     expect(isRealtimeEvent({ type: "notif.changed", unread: 3 })).toBe(true);
     expect(isRealtimeEvent({ type: "message", conversationId: "c1" })).toBe(true);
@@ -48,6 +52,7 @@ describe("realtime event contract", () => {
       [{ type: "prefs.changed" }, [WINDOW_EVENTS.prefsChanged]],
       [{ type: "session.idle", idleUntil: null }, [WINDOW_EVENTS.sessionIdle]],
       [{ type: "call.ended" }, []],
+      [{ type: "item", itemId: "i1", boardId: "b1" }, [WINDOW_EVENTS.itemChanged]],
     ];
     for (const [ev, expected] of cases) expect(legacyWindowEventsFor(ev)).toEqual(expected);
     // Exhaustive: every named type has a mapping (the switch returns an array).

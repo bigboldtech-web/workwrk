@@ -41,9 +41,13 @@ export function PlannerCommandBar({ onCreated, initialMeet }: { onCreated: () =>
     const start = new Date(); start.setMinutes(0, 0, 0); start.setHours(start.getHours() + 1);
     const end = new Date(start.getTime() + 30 * 60_000);
     try {
-      const res = await fetch("/api/tasks", {
+      // Phase 2 W4: this wrote a row on the legacy `Task` table, which no
+      // task surface reads, so a meeting booked here never appeared on a
+      // board, in My work or in search. It lands on the viewer's Personal
+      // list now, like every other personal task.
+      const res = await fetch("/api/me/work", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: `Meet with ${name(p)}`, startAt: start.toISOString(), endAt: end.toISOString(), allDay: false, date: start.toISOString() }),
+        body: JSON.stringify({ title: `Meet with ${name(p)}`, startAt: start.toISOString(), endAt: end.toISOString() }),
       });
       if (res.ok) { setShowMeet(false); setQ(""); setPeople(null); onCreated(); }
     } finally { setBusy(null); }

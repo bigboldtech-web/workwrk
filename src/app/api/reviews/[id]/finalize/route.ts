@@ -61,7 +61,7 @@ export async function POST(
   const notifications = reviews.map((r) => ({
     title: "Review Completed",
     message: `Your ${cycle.name} review is complete. View your results.`,
-    type: "REVIEW",
+    type: "review",
     link: `/reviews/${cycleId}`,
     userId: r.subjectId,
   }));

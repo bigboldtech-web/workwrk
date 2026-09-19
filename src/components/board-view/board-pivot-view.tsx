@@ -38,14 +38,20 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
     typeof viewConfig?.metric === "string" ? (viewConfig.metric as string) : "count",
   );
 
+  // audit spaces-boards Medium #26: these selects were `disabled={!canEdit}`,
+  // so a person with Can view could not change what they were LOOKING AT.
+  // Changing an axis changes the reader's own picture, not the saved view, so
+  // it is never an edit. The controls are live for everyone; only the PATCH
+  // that saves the choice back onto the shared view is gated, and for a viewer
+  // without edit rights the choice simply lives for the page's lifetime.
   const persist = useCallback((patch: Record<string, unknown>) => {
-    if (!viewId) return;
+    if (!viewId || !canEdit) return;
     void fetch(`/api/boards/${boardId}/views/${viewId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ config: { ...(viewConfig ?? {}), rowAxis, colAxis, metric, ...patch } }),
     }).catch(() => {});
-  }, [boardId, viewId, viewConfig, rowAxis, colAxis, metric]);
+  }, [boardId, viewId, viewConfig, rowAxis, colAxis, metric, canEdit]);
 
   const axisOptions = useMemo(() => {
     const opts: { key: string; label: string }[] = [
@@ -170,11 +176,11 @@ export function BoardPivotView({ boardId, viewId, viewConfig, initialItems, init
     <div className="rounded-lg border border-zinc-200 bg-white overflow-hidden">
       <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2 flex-wrap text-xs text-zinc-500">
         <span>Rows</span>
-        <AxisSelect value={rowAxis} options={axisOptions} disabled={!canEdit} onChange={(v) => { setRowAxis(v); persist({ rowAxis: v }); }} />
+        <AxisSelect value={rowAxis} options={axisOptions} onChange={(v) => { setRowAxis(v); persist({ rowAxis: v }); }} />
         <span>Columns</span>
-        <AxisSelect value={colAxis} options={axisOptions} disabled={!canEdit} onChange={(v) => { setColAxis(v); persist({ colAxis: v }); }} />
+        <AxisSelect value={colAxis} options={axisOptions} onChange={(v) => { setColAxis(v); persist({ colAxis: v }); }} />
         <span>Value</span>
-        <AxisSelect value={metric} options={metricOptions} disabled={!canEdit} onChange={(v) => { setMetric(v); persist({ metric: v }); }} />
+        <AxisSelect value={metric} options={metricOptions} onChange={(v) => { setMetric(v); persist({ metric: v }); }} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">

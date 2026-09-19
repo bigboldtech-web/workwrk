@@ -50,14 +50,20 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
     typeof viewConfig?.metric === "string" ? (viewConfig.metric as string) : "count",
   );
 
+  // audit spaces-boards Medium #26: these selects were `disabled={!canEdit}`,
+  // so a person with Can view could not change what they were LOOKING AT.
+  // Changing an axis changes the reader's own picture, not the saved view, so
+  // it is never an edit. The controls are live for everyone; only the PATCH
+  // that saves the choice back onto the shared view is gated, and for a viewer
+  // without edit rights the choice simply lives for the page's lifetime.
   const persist = useCallback((patch: Record<string, unknown>) => {
-    if (!viewId) return;
+    if (!viewId || !canEdit) return;
     void fetch(`/api/boards/${boardId}/views/${viewId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ config: { ...(viewConfig ?? {}), chartType, groupBy, metric, ...patch } }),
     }).catch(() => {});
-  }, [boardId, viewId, viewConfig, chartType, groupBy, metric]);
+  }, [boardId, viewId, viewConfig, chartType, groupBy, metric, canEdit]);
 
   // Group-by axes: built-ins + choice custom fields.
   const axisOptions = useMemo(() => {
@@ -193,7 +199,6 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
       <div className="px-3 py-2 border-b border-zinc-100 flex items-center gap-2 flex-wrap">
         <Select
           value={chartType}
-          disabled={!canEdit}
           onChange={(v) => { setChartType(v as ChartType); persist({ chartType: v }); }}
           options={[
             { key: "bar", label: "Bar" },
@@ -206,14 +211,12 @@ export function BoardChartView({ boardId, viewId, viewConfig, initialItems, init
           <>
             <Select
               value={groupBy}
-              disabled={!canEdit}
-              onChange={(v) => { setGroupBy(v); persist({ groupBy: v }); }}
+                  onChange={(v) => { setGroupBy(v); persist({ groupBy: v }); }}
               options={axisOptions}
             />
             <Select
               value={metric}
-              disabled={!canEdit}
-              onChange={(v) => { setMetric(v); persist({ metric: v }); }}
+                  onChange={(v) => { setMetric(v); persist({ metric: v }); }}
               options={metricOptions}
             />
           </>

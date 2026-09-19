@@ -3,7 +3,7 @@
 // Central registry for the ClickUp-style app switcher. Each entry is
 // one icon in the left rail; clicking it navigates to the hub's landing
 // URL and the URL is what decides which `Sidebar` renders. Keep this
-// file lean — sidebars that grow past ~30 lines of UI should move to
+// file lean: sidebars that grow past ~30 lines of UI should move to
 // apps/<key>-sidebar.tsx.
 //
 // The URL -> hub mapping is NOT here: it lives in src/lib/nav/route-hub.ts
@@ -13,23 +13,23 @@
 import Link from "next/link";
 import { ChatSidebar } from "./chat-sidebar";
 import { canAccessTier, MANAGER_LEVELS, type AccessTier } from "./access-tiers";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // Re-exported so existing consumers (rail-apps.ts) keep importing the access
 // ladder from the catalog while the definitions live in ./access-tiers.
 export { canAccessTier };
 export type { AccessTier };
 import {
-  Home, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
+  Home, House, Lock, Calendar, Sparkles, Users, FileText, BarChart3, Brush, ClipboardCheck,
   Video, Trophy, Clock, CircleUser,
-  Inbox, MessageSquare, CheckSquare, MoreHorizontal,
+  Inbox, MessageSquare, CheckSquare, MoreHorizontal, Eye, EyeOff,
   Plus, ChevronDown, ChevronRight, X,
   Megaphone, Briefcase, Wrench, Building2, Bot, Cable, Hammer,
-  UserCheck, Award, ThumbsUp, FileSpreadsheet,
+  Award, ThumbsUp, FileSpreadsheet, Star,
   HardDrive, Boxes, Layers, Upload,
   Settings as SettingsIcon,
   ShoppingBag, Workflow, ScrollText,
   ListChecks, ListOrdered, MousePointerClick,
-  Activity, LayoutTemplate, Plug,
+  Activity, LayoutTemplate, Plug, LineChart,
   ShieldCheck, FileSignature,
   Library as LibraryIcon, Folder, Trash2,
   Target, GaugeCircle, BookUser, Network, Heart,
@@ -40,20 +40,25 @@ import { TeamsCreateMenu } from "./teams-create-menu";
 import { usePathname, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { NewSpaceDialog } from "./new-space-dialog";
-import { NewBoardDialog } from "./new-board-dialog";
 import { NewFolderDialog } from "./new-folder-dialog";
 import { DocsSidebar } from "./docs-sidebar";
 import { TablesSidebar } from "./tables-sidebar";
 import { ShareSpaceDialog } from "./share-space-dialog";
 import { SpaceTreeRow } from "./space-tree-row";
+import {
+  hydrateSidebarState, hiddenSpaces, setAllExpanded, subscribeSidebarState,
+} from "@/lib/work/sidebar-expand";
 import { onSidebarRefresh, refreshSidebar } from "./sidebar-refresh";
 import { useSidebarSearch } from "./sidebar-search-context";
-import { useBoot } from "./boot-context";
+import { useBoot, useViewerRole } from "./boot-context";
+import { useOsShell } from "./shell-context";
+import { readSidebarCards } from "@/lib/home-prefs";
+import { WINDOW_EVENTS } from "@/lib/realtime-events";
 import { MorePortal } from "./more-portal";
-import { FOLDED_APP_HUB, type HubKey } from "@/lib/nav/route-hub";
+import { FOLDED_APP_HUB, WORK_HOME_HREF, type HubKey } from "@/lib/nav/route-hub";
 import { useActiveRowHref } from "./use-active-row";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { MenuItem, MenuList } from "@/components/ui/menu";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import {
   SidebarEmptyLine, SidebarErrorLine, SidebarGhostRow, SidebarRow, SidebarSectionAction, SidebarSectionLabel,
 } from "./sidebar-primitives";
@@ -77,7 +82,7 @@ export interface CreateActionContext {
 /**
  * One row of an app's "+" offering. Exactly one of `onSelect` (wins),
  * `href`, or `event` (dispatches `workwrk:os:new:<event>`) should be set.
- * `requiredAccess` hides the row below that tier — hide, never 403.
+ * `requiredAccess` hides the row below that tier: hide, never 403.
  */
 export interface CreateAction {
   label: string;
@@ -98,8 +103,8 @@ export interface AppEntry {
   Icon: LucideIcon | React.ComponentType<{ className?: string }>;
   /**
    * Where to navigate when the user clicks this rail icon. For the eight hubs
-   * `hubDefaultHref` (src/lib/nav/route-hub.ts) is the authority — it carries
-   * the two conditional landings (Talk on module state, Settings on role) — and
+   * `hubDefaultHref` (src/lib/nav/route-hub.ts) is the authority: it carries
+   * the two conditional landings (Talk on module state, Settings on role): and
    * this value is the static fallback used for folded apps and the palette.
    */
   defaultHref: string;
@@ -109,12 +114,12 @@ export interface AppEntry {
   category?: string;
   /** Pinned to the rail by default for new users. More-popover apps default to false. */
   defaultPinned?: boolean;
-  /** Cannot be unpinned — always shown in the rail (e.g. Home). */
+  /** Cannot be unpinned: always shown in the rail (e.g. Home). */
   alwaysPinned?: boolean;
   /** Hidden in the More-popover catalog (e.g. the "More" tile itself). */
   hideFromCatalog?: boolean;
   /**
-   * Folded into a hub — kept in the catalog (still reachable by route, the
+   * Folded into a hub: kept in the catalog (still reachable by route, the
    * More launcher, and search) but NOT shown as its own rail icon. The value
    * names the hub whose secondary sidebar carries this app's rows, so the
    * catalog says where each folded app lives instead of only that it is off
@@ -133,7 +138,7 @@ export interface AppEntry {
    *   "global"        → the OS-wide CreateMenu (Home's catch-all)
    *   CreateAction[]  → one visible action fires directly on click;
    *                     two or more open the generic SidebarCreateMenu
-   *   [] or absent    → (and no custom CreateMenu) the "+" is hidden —
+   *   [] or absent    → (and no custom CreateMenu) the "+" is hidden: 
    *                     this app has nothing the viewer can create
    */
   createActions?: CreateAction[] | "global";
@@ -152,11 +157,11 @@ export interface AppEntry {
    * Minimum access tier required to see this app at all. Absent =
    * available to everyone (default).
    *
-   *   "manager"   — TEAM_LEAD, MANAGER, DIRECTOR, VP, C_LEVEL, HR, admin
-   *   "hr-admin"  — HR + COMPANY_ADMIN + SUPER_ADMIN (people management)
-   *   "org-admin" — COMPANY_ADMIN + SUPER_ADMIN only (finance/legal)
+   *   "manager": TEAM_LEAD, MANAGER, DIRECTOR, VP, C_LEVEL, HR, admin
+   *   "hr-admin": HR + COMPANY_ADMIN + SUPER_ADMIN (people management)
+   *   "org-admin": COMPANY_ADMIN + SUPER_ADMIN only (finance/legal)
    *
-   * This hides the rail entry only — every gated page ALSO enforces the
+   * This hides the rail entry only: every gated page ALSO enforces the
    * same tier server-side (src/lib/page-gates.ts). ICs keep their own
    * door: "My Profile" (/people/me) carries their KRAs/KPIs/goals.
    */
@@ -172,7 +177,7 @@ export function canAccessApp(app: AppEntry, accessLevel: string | null | undefin
 /** Window event name format for per-app "new" actions. */
 export const NEW_EVENT_PREFIX = "workwrk:os:new:";
 
-/* ── "+" onSelect helpers — mirror the create flows the pages themselves
+/* ── "+" onSelect helpers: mirror the create flows the pages themselves
  *    run, so the sidebar "+" is never a dead link. ─────────────────── */
 
 /** Library → New note. Same POST the Library Notes tab's button makes. */
@@ -271,7 +276,7 @@ function NavItem({
 // (indent 20). The active row comes from the one resolver over the whole
 // sidebar, so two rows can never light at once.
 function GroupRow({
-  href, label, Icon, active, expanded, onToggle,
+  href, label, Icon, active, expanded, onToggle, count,
 }: {
   href: string;
   label: string;
@@ -279,6 +284,8 @@ function GroupRow({
   active: boolean;
   expanded: boolean;
   onToggle: () => void;
+  /** Right-aligned, only when above zero. */
+  count?: number;
 }) {
   return (
     <SidebarRow
@@ -286,6 +293,7 @@ function GroupRow({
       label={label}
       icon={Icon}
       active={active}
+      count={count}
       trailing={
         <button
           type="button"
@@ -311,9 +319,13 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
       <GroupRow href="/okrs" label="Goals" Icon={Target} active={activeHref === "/okrs"} expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
       {expanded ? (
         <>
-          <SidebarRow depth={1} href="/okrs?mine=1" icon={Trophy} label="My goals" active={activeHref === "/okrs?mine=1"} />
-          {isManager ? <SidebarRow depth={1} href="/okrs?team=1" icon={Users} label="Team goals" active={activeHref === "/okrs?team=1"} /> : null}
-          <SidebarRow depth={1} href="/okrs?level=company" icon={Building2} label="Company goals" active={activeHref === "/okrs?level=company"} />
+          {/* spec-goals section 1 owns these hrefs. The retired `?mine=1`,
+              `?team=1` and `?level=company` forms are never printed again:
+              `/okrs` IS My goals, which is why there is no separate "My goals"
+              child: the group row is that destination, and printing it twice
+              would light two rows for one URL. */}
+          {isManager ? <SidebarRow depth={1} href="/okrs?view=team" icon={Users} label="Team goals" active={activeHref === "/okrs?view=team"} /> : null}
+          <SidebarRow depth={1} href="/okrs?view=company" icon={Building2} label="Company goals" active={activeHref === "/okrs?view=company"} />
           {/* sidebar-map 1 row 5d ("My KRAs & KPIs" as a jump to
               /people/me?tab=kras) waits for the profile page to grow a KRAs
               tab; until then it would be a second row to the My profile
@@ -324,17 +336,56 @@ function GoalsGroup({ activeHref }: { activeHref: string | undefined }) {
   );
 }
 
-function MyTasksGroup({ activeHref }: { activeHref: string | undefined }) {
-  const [expanded, setExpanded] = useState(Boolean(activeHref?.startsWith("/tasks")));
+/**
+ * My work: ONE row, ONE label, ONE URL, and one child.
+ *
+ * It used to be a group row at `/tasks` with three children: "Assigned to
+ * me", "Today & overdue" and "Personal list": of which the first two were
+ * separate pages over the legacy `Task` table showing two slices of the same
+ * list. spec-work-home section 1 collapses them: "/my-work has exactly one
+ * label and one row (hard rule, one label per destination). 'Assigned to me'
+ * survives only as words inside the page."
+ *
+ * The count is Overdue + Today, so the row says how much is actually on fire
+ * today rather than how many tasks exist.
+ */
+function MyTasksGroup({
+  activeHref,
+  isGuest,
+  dueCount,
+  expanded,
+  onToggle,
+}: {
+  activeHref: string | undefined;
+  isGuest: boolean;
+  dueCount: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  // A Guest has no personal List (spec section 1 row 2a), so for them the row
+  // has no children at all and the chevron would toggle nothing.
+  if (isGuest) {
+    return <NavItem href="/my-work" Icon={CheckSquare} label="My work" active={activeHref === "/my-work"} badge={dueCount} />;
+  }
   return (
     <>
-      <GroupRow href="/tasks" label="My work" Icon={CheckSquare} active={activeHref === "/tasks"} expanded={expanded} onToggle={() => setExpanded((v) => !v)} />
+      <GroupRow
+        href="/my-work"
+        label="My work"
+        Icon={CheckSquare}
+        active={activeHref === "/my-work"}
+        expanded={expanded}
+        onToggle={onToggle}
+        count={dueCount}
+      />
       {expanded ? (
-        <>
-          <SidebarRow depth={1} href="/tasks/assigned-to-me" icon={UserCheck} label="Assigned to me" active={activeHref === "/tasks/assigned-to-me"} />
-          <SidebarRow depth={1} href="/tasks/today-overdue" icon={Calendar} label="Today & overdue" active={activeHref === "/tasks/today-overdue"} />
-          <SidebarRow depth={1} href="/tasks/personal-list" icon={ClipboardCheck} label="Personal list" active={activeHref === "/tasks/personal-list"} />
-        </>
+        <SidebarRow
+          depth={1}
+          href="/my-work/personal"
+          icon={Lock}
+          label="Personal list"
+          active={activeHref === "/my-work/personal"}
+        />
       ) : null}
     </>
   );
@@ -416,19 +467,27 @@ function UnstarButton({ kind, id }: { kind: "space" | "board" | "doc" | "folder"
 // Every static row of the Work sidebar in one list, in declaration order, so
 // resolveActiveRow can light exactly one of them (spec-shell §1.1). The Spaces
 // and Favorites trees are dynamic rows and carry their own active state.
+/** The collapse key the My work group stores in `sidebar.collapsedSections`. */
+const MY_WORK_GROUP_KEY = "work:my-work";
+/** The same, for FAVORITES. Expanded by default: a collapsed section hides
+ *  its own "See all favorites" row, which is the section's only door to the
+ *  page, and the section renders only when there is at least one star to see. */
+const FAVORITES_SECTION_KEY = "work:favorites";
+
 const WORK_ROWS = [
-  { href: "/people/me", match: "exact" as const },
+  { href: "/home", match: "exact" as const },
+  { href: "/my-work", match: "exact" as const },
+  { href: "/my-work/personal" },
   { href: "/inbox" },
-  { href: "/assigned-comments" },
-  { href: "/tasks", match: "exact" as const },
-  { href: "/tasks/assigned-to-me" },
-  { href: "/tasks/today-overdue" },
-  { href: "/tasks/personal-list" },
+  // /activity had a rendered NavItem and NO row here, so the one resolver
+  // could never return it and the row never lit. A row that renders without a
+  // row here is the same defect, silently, every time.
+  { href: "/activity" },
   { href: "/everything" },
+  { href: "/favorites" },
   { href: "/okrs" },
-  { href: "/okrs?mine=1" },
-  { href: "/okrs?team=1" },
-  { href: "/okrs?level=company" },
+  { href: "/okrs?view=team" },
+  { href: "/okrs?view=company" },
   { href: "/templates" },
   { href: "/trash" },
 ];
@@ -439,13 +498,9 @@ function HomeSidebar() {
   const accessLevel = (session?.user as { accessLevel?: string } | undefined)?.accessLevel ?? "";
   const activeHref = useActiveRowHref(WORK_ROWS);
   const { counts } = useBoot();
+  const { prefs, patchPrefs } = useOsShell();
   const inboxUnread = counts.inboxUnread;
-  // /people/me redirects to /people/<myId>, so the profile row also answers to
-  // the resolved id, which no declared href can match.
   const pathname = usePathname() || "";
-  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
-  const profileActive =
-    activeHref === "/people/me" || (meId !== null && pathname === `/people/${meId}`);
   const { query: searchQuery } = useSidebarSearch();
   const [spaces, setSpaces] = useState<SpaceRow[]>([]);
   // A failed Spaces read shows the one-line error with Try again (spec-shell
@@ -455,7 +510,6 @@ function HomeSidebar() {
   // (section "+", ghost row) exist only for the tier that can use them
   // (spec-shell 2.10: a row that appears always works).
   const canCreateSpace = canAccessTier("manager", accessLevel);
-  const [favoritesOpen, setFavoritesOpen] = useState(false);
   const [favoriteBoards, setFavoriteBoards] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteSpaces, setFavoriteSpaces] = useState<Array<{ id: string; slug: string; name: string; icon: string | null; color: string | null; visibility: string }>>([]);
   const [favoriteDocs, setFavoriteDocs] = useState<Array<{ id: string; title: string; excerpt: string | null }>>([]);
@@ -465,18 +519,128 @@ function HomeSidebar() {
   const [favoriteFiles, setFavoriteFiles] = useState<Array<{ id: string; name: string; url: string; mimeType: string }>>([]);
   const [newSpaceOpen, setNewSpaceOpen] = useState(false);
   const [spacesMenuOpen, setSpacesMenuOpen] = useState(false);
+  // `sidebar.hiddenSpaceIds[]`, read once and kept in sync with the container
+  // menu's "Hide from sidebar" row. `showHidden` is a per-visit reveal, not a
+  // stored preference: the point of the row is to find one and unhide it.
+  const [hiddenIds, setHiddenIds] = useState<string[]>([]);
+  const [showHidden, setShowHidden] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const sync = () => { if (alive) setHiddenIds(hiddenSpaces()); };
+    const off = subscribeSidebarState(sync);
+    void hydrateSidebarState().then(sync);
+    return () => { alive = false; off(); };
+  }, []);
+  // A DEEP LINK OPENS ITS OWN BRANCH. Expand state came only from the stored
+  // preference, so the first time a person followed a link to a Folder or a
+  // List the tree sat collapsed with no active row (spec-spaces-lists section
+  // 1, Tree data: "ancestors expanded"). The tree cannot work the ancestry out
+  // for itself, because a Space's children are only loaded once that Space is
+  // open, which is the thing being decided; `GET /api/work/locate` answers it
+  // in ids. It runs once per deep-link URL and never for a Space URL, which
+  // already resolves from the pathname alone.
+  useEffect(() => {
+    const folderMatch = /^\/folders\/([^/?#]+)/.exec(pathname);
+    const boardMatch = /^\/boards\/([^/?#]+)/.exec(pathname);
+    if (!folderMatch && !boardMatch) return;
+    const qs = folderMatch
+      ? `folderId=${encodeURIComponent(folderMatch[1])}`
+      : `boardSlug=${encodeURIComponent(boardMatch![1])}`;
+    let alive = true;
+    void (async () => {
+      await hydrateSidebarState();
+      if (!alive) return;
+      try {
+        const res = await fetch(`/api/work/locate?${qs}`, { cache: "no-store" });
+        if (!res.ok || !alive) return;
+        const d = await res.json();
+        const ids: string[] = [
+          ...(typeof d?.spaceId === "string" ? [d.spaceId] : []),
+          ...(Array.isArray(d?.folderIds) ? (d.folderIds as string[]) : []),
+        ];
+        if (ids.length > 0 && alive) setAllExpanded(ids, true);
+      } catch {
+        // The tree stays as the person left it. Nothing is lost.
+      }
+    })();
+    return () => { alive = false; };
+  }, [pathname]);
+
   const spacesMenuRef = useRef<HTMLButtonElement>(null);
   const [sectionsOrder, setSectionsOrder] = useState<string[]>(DEFAULT_SECTIONS_ORDER);
   const [hiddenSections, setHiddenSections] = useState<string[]>([]);
-  // Per-Space create dialogs — co-hosted at the sidebar level so we
+
+  // `home.cards`: WHICH OPTIONAL ROWS AND SECTIONS ARE ON.
+  //
+  // settings-architecture section 4.2 assigns this key to "the Work sidebar
+  // and the Space overview", and until now nothing anywhere read it: the
+  // Settings > Defaults page has offered it as a lockable org default
+  // ("Freezes which cards show on Home") over a key with no reader. This is
+  // that reader. `readSidebarCards` also maps the old CustomizePanel values
+  // once, so `allSpaces` and `allTasks` still mean something and `inbox`,
+  // `myWrk`, `assignedComments` and `draftsSent` are dropped rather than
+  // silently hiding a row that can no longer be hidden.
+  //
+  // Home's six widgets deliberately read a DIFFERENT key
+  // (`home.work.surface.home.viewOptions.widgets`), so one stored array can
+  // never mean both "which sidebar rows" and "which Home widgets".
+  const cards = useMemo(() => readSidebarCards(prefs?.home?.cards), [prefs?.home?.cards]);
+  const { isGuest } = useViewerRole();
+
+  // The My work group's collapse state, remembered across navigations. It was
+  // `useState(activeHref.startsWith("/tasks"))`, so the group re-collapsed on
+  // every navigation away from it.
+  const myWorkOpen = !(prefs?.sidebar?.collapsedSections ?? []).includes(MY_WORK_GROUP_KEY);
+  // Remembered across navigations, like My work, rather than `useState(false)`
+  // which re-collapsed on every page and hid the See-all row every time.
+  const favoritesOpen = !(prefs?.sidebar?.collapsedSections ?? []).includes(FAVORITES_SECTION_KEY);
+  const toggleFavorites = useCallback(() => {
+    const current = prefs?.sidebar?.collapsedSections ?? [];
+    const next = favoritesOpen ? [...current, FAVORITES_SECTION_KEY] : current.filter((k) => k !== FAVORITES_SECTION_KEY);
+    void patchPrefs({ sidebar: { collapsedSections: next } });
+  }, [prefs?.sidebar?.collapsedSections, favoritesOpen, patchPrefs]);
+  const toggleMyWork = useCallback(() => {
+    const current = prefs?.sidebar?.collapsedSections ?? [];
+    const next = myWorkOpen ? [...current, MY_WORK_GROUP_KEY] : current.filter((k) => k !== MY_WORK_GROUP_KEY);
+    void patchPrefs({ sidebar: { collapsedSections: next } });
+  }, [prefs?.sidebar?.collapsedSections, myWorkOpen, patchPrefs]);
+
+  // Overdue + Today, the number the My work row prints. One cheap read of the
+  // page's own API, refreshed when a task changes anywhere.
+  const [myWorkDue, setMyWorkDue] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/me/work?group=due&limit=200", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { rows?: Array<{ dueBucket?: string }> };
+        if (!alive) return;
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        setMyWorkDue(rows.filter((r) => r.dueBucket === "overdue" || r.dueBucket === "today").length);
+      } catch {
+        // A count that could not be read shows no badge, never a zero: "none
+        // due" and "we did not manage to ask" are different things.
+      }
+    };
+    void load();
+    const onChange = () => void load();
+    window.addEventListener(WINDOW_EVENTS.itemChanged, onChange);
+    window.addEventListener("workwrk:item-created", onChange);
+    return () => {
+      alive = false;
+      window.removeEventListener(WINDOW_EVENTS.itemChanged, onChange);
+      window.removeEventListener("workwrk:item-created", onChange);
+    };
+  }, []);
+  // Per-Space create dialogs: co-hosted at the sidebar level so we
   // don't mount one dialog per row. The SpaceCreateTrigger popover
   // sets the activeSpaceId and which dialog kind to show.
-  const [boardDialogSpaceId, setBoardDialogSpaceId] = useState<string | null>(null);
   const [folderDialogSpaceId, setFolderDialogSpaceId] = useState<string | null>(null);
   const [shareDialogSpace, setShareDialogSpace] = useState<SpaceRow | null>(null);
 
   // The sidebar header "+" dispatches `workwrk:os:new:home-new-space`
-  // when Home is active — open the NewSpaceDialog in response.
+  // when Home is active: open the NewSpaceDialog in response.
   useEffect(() => {
     const onNew = () => setNewSpaceOpen(true);
     window.addEventListener("workwrk:os:new:home-new-space", onNew);
@@ -556,7 +720,7 @@ function HomeSidebar() {
     };
   }, []);
 
-  // Phases 79/80/82/83/84/89 — hydrate all seven favorite kinds in
+  // Phases 79/80/82/83/84/89: hydrate all seven favorite kinds in
   // parallel. Refetches when any favorite button fires the event.
   useEffect(() => {
     let alive = true;
@@ -619,7 +783,7 @@ function HomeSidebar() {
     if (total === 0) return null;
     return (
       <div key="favorites">
-        <SidebarSectionLabel collapsed={!favoritesOpen} onToggle={() => setFavoritesOpen((v) => !v)} count={total}>
+        <SidebarSectionLabel collapsed={!favoritesOpen} onToggle={toggleFavorites} count={total}>
           Favorites
         </SidebarSectionLabel>
         {favoritesOpen ? (
@@ -632,18 +796,24 @@ function HomeSidebar() {
               {/* Phase 85 — when the user has more than 6 favorites,
                   group by kind with small uppercase sub-headers so the
                   list doesn't become a mystery soup. */}
+              {/* ONE active row for the whole sidebar (sidebar-map section 0:
+                  the pill means "where you are", and you are only in one
+                  place). Spaces, Lists and Folders have their home in the
+                  SPACES tree below, which reveals its own branch for whatever
+                  URL is open (GET /api/work/locate), so a FAVORITES row of one
+                  of those kinds never carries the pill: open a Space you have
+                  also starred and both rows lit, for one destination. Docs,
+                  Tables, Canvases and Files have no tree row in this hub, so
+                  their favourite IS the location row and keeps its pill. */}
               {total > 6 && favoriteSpaces.length > 0 ? (
                 <FavSubLabel>Spaces</FavSubLabel>
               ) : null}
               {favoriteSpaces.map((s) => {
-                const active = pathname === `/spaces/${s.slug}`;
                 return (
                   <li key={`s-${s.id}`} className="group/fav relative">
                     <Link
                       href={`/spaces/${s.slug}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
+                      className="flex h-9 items-center gap-3 px-3 rounded-lg text-ink hover:bg-hover"
                     >
                       <EntityTile size="sm" icon={s.icon} color={s.color} name={s.name} />
                       <span className="truncate flex-1">{s.name}</span>
@@ -656,14 +826,11 @@ function HomeSidebar() {
                 <FavSubLabel>Boards</FavSubLabel>
               ) : null}
               {favoriteBoards.map((b) => {
-                const active = pathname === `/boards/${b.slug}`;
                 return (
                   <li key={`b-${b.id}`} className="group/fav relative">
                     <Link
                       href={`/boards/${b.slug}`}
-                      className={`flex h-9 items-center gap-3 px-3 rounded-lg ${
-                        active ? "bg-side-pill text-ink font-medium" : "text-ink hover:bg-hover"
-                      }`}
+                      className="flex h-9 items-center gap-3 px-3 rounded-lg text-ink hover:bg-hover"
                     >
                       <EntityTile size="sm" icon={b.icon} color={b.color} name={b.name} />
                       <span className="truncate flex-1">{b.name}</span>
@@ -698,8 +865,12 @@ function HomeSidebar() {
               {favoriteFolders.map((f) => {
                 return (
                   <li key={`f-${f.id}`} className="group/fav relative">
+                    {/* `#folder-<id>` was an anchor no page has ever rendered:
+                        the link landed on the Space Overview and the folder was
+                        never opened or scrolled to. A Folder has its own route
+                        (audit Medium #15), and /favorites already links it. */}
                     <Link
-                      href={`/spaces/${f.space.slug}#folder-${f.id}`}
+                      href={`/folders/${f.id}`}
                       className="flex h-9 items-center gap-3 px-3 rounded-lg text-ink hover:bg-hover"
                     >
                       <EntityTile size="sm" color={f.color} fallbackIcon={Folder} name={f.name} />
@@ -766,6 +937,17 @@ function HomeSidebar() {
                   <UnstarButton kind="file" id={f.id} />
                 </li>
               ))}
+              {/* spec-work-home section 1 row 8z: rendered WHENEVER the
+                  section renders, not only past eight rows. The section LABEL
+                  is a collapse control and nothing else (design-system 4.2),
+                  so this ghost row is the section's one door to the page, and
+                  it is the row that goes active on /favorites. */}
+              <SidebarRow
+                href="/favorites"
+                icon={Star}
+                label="See all favorites"
+                active={activeHref === "/favorites"}
+              />
             </ul>
           )
         ) : null}
@@ -775,9 +957,16 @@ function HomeSidebar() {
 
   const renderSpaces = () => {
     const q = searchQuery.trim().toLowerCase();
+    // "Hide from sidebar" is personal and never an access change: a hidden
+    // Space stays on /spaces, in search, in the breadcrumb and behind the
+    // section menu's "Show hidden Spaces" row (spec-spaces-lists section 1).
+    // A search shows them again, because a person searching by name is asking
+    // for that Space by name.
+    const shown = q || showHidden ? spaces : spaces.filter((s) => !hiddenIds.includes(s.id));
+    const hiddenCount = spaces.length - spaces.filter((s) => !hiddenIds.includes(s.id)).length;
     const visibleSpaces = q
-      ? spaces.filter((s) => s.name.toLowerCase().includes(q))
-      : spaces;
+      ? shown.filter((s) => s.name.toLowerCase().includes(q))
+      : shown;
     return (
       <div key="spaces">
         <SidebarSectionLabel
@@ -796,12 +985,40 @@ function HomeSidebar() {
             <div className="fixed inset-0 z-30" onClick={() => setSpacesMenuOpen(false)} aria-hidden />
             <MorePortal anchorRef={spacesMenuRef} width={220} open={spacesMenuOpen} placement="below">
               <MenuList>
+                <MenuItem
+                  icon={ChevronRight}
+                  label="Collapse all"
+                  onClick={() => { setAllExpanded(spaces.map((s) => s.id), false); setSpacesMenuOpen(false); }}
+                />
+                <MenuItem
+                  icon={ChevronDown}
+                  label="Expand all"
+                  onClick={() => { setAllExpanded(spaces.map((s) => s.id), true); setSpacesMenuOpen(false); }}
+                />
+                {hiddenCount > 0 ? (
+                  <MenuItem
+                    icon={showHidden ? EyeOff : Eye}
+                    label={showHidden ? "Hide hidden Spaces again" : `Show hidden Spaces (${hiddenCount})`}
+                    onClick={() => { setShowHidden((v) => !v); setSpacesMenuOpen(false); }}
+                  />
+                ) : null}
+                <MenuSeparator />
                 <MenuItem href="/spaces" icon={Layers} label="Browse all Spaces" onClick={() => setSpacesMenuOpen(false)} />
               </MenuList>
             </MorePortal>
           </>
         ) : null}
         <ul>
+          {/* Row 9 of spec-work-home section 1: "Everything" is the FIRST row
+              of the SPACES section, because it is all tasks in all Spaces.
+              Without it /everything is a live 200 page with no link anywhere
+              in the product, reachable only by typing its URL, which is the
+              exact orphan this unit exists to close. It is not filtered by the
+              sidebar search: the search narrows the Spaces tree, and a row
+              that is not a Space is not part of that list. */}
+          {!q ? (
+            <NavItem href="/everything" Icon={Layers} label="Everything" active={activeHref === "/everything"} />
+          ) : null}
           {visibleSpaces.map((s, i) => {
             const isActive = pathname === `/spaces/${s.slug}`;
             const prev = q ? null : visibleSpaces[i - 1];
@@ -812,9 +1029,6 @@ function HomeSidebar() {
                 space={s}
                 isActive={isActive}
                 onReloadSpaces={() => void reload()}
-                onRequestShareSpace={() => setShareDialogSpace(s)}
-                onRequestNewBoard={() => setBoardDialogSpaceId(s.id)}
-                onRequestNewFolder={() => setFolderDialogSpaceId(s.id)}
                 // Reordering only makes sense on the full, unfiltered list.
                 reorderable={!q}
                 onReorderSpace={(draggedId, place) => reorderSpaces(draggedId, s.id, place)}
@@ -837,41 +1051,77 @@ function HomeSidebar() {
   return (
     <>
       <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={profileActive} />
-        <MyTasksGroup activeHref={activeHref} />
+        {/* Row 1 (spec-work-home section 1): Home is the first row, and the
+            Work hub finally has a row pointing at its own landing. */}
+        <NavItem href="/home" Icon={House} label="Home" active={activeHref === "/home"} />
+        {/* No "My profile" row. naming-canon 2.1 retires "Me" from the Work
+            sidebar and gives the destination two doors: the Teams hub and the
+            avatar menu. The avatar menu already carries it (avatar-menu.tsx,
+            `profileHref`), so /people/me stays one click away for every role
+            including a guest, whose door is /account/profile. This row was
+            row 2 of a sidebar whose contract (sidebar-map section 1) has no
+            row 2, and it sat between Home and My work reading as work. */}
+        <MyTasksGroup
+          activeHref={activeHref}
+          isGuest={isGuest}
+          dueCount={myWorkDue}
+          expanded={myWorkOpen}
+          onToggle={toggleMyWork}
+        />
         <NavItem href="/inbox" Icon={Inbox} label="Inbox" active={activeHref === "/inbox"} badge={inboxUnread} />
-        <NavItem href="/assigned-comments" Icon={MessageSquare} label="Assigned comments" active={activeHref === "/assigned-comments"} />
-        {/* sidebar-map 1 row 4. /activity is a live, ungated page that had no
-            row, no catalog key and no link anywhere in src, so the palette's
-            Apps group could not list it either: it was reachable by typing
-            the URL and by nothing else. */}
-        <NavItem href="/activity" Icon={Activity} label="Activity" active={activeHref === "/activity"} />
-        <NavItem href="/everything" Icon={Layers} label="Everything" active={activeHref === "/everything"} />
-        <GoalsGroup activeHref={activeHref} />
-        {/* The rule between the personal rows and the two workspace rows
-            (sidebar-map 1). Templates (row 6): the workspace starter bundles
-            at /templates, every Member; this row is the page's one door since
-            the workspace menu lost its Templates row. Trash (row 7): the
-            org-wide recycle bin. The spec gives it to every Member, but
-            GET /api/trash and the page still answer 403 below manager, so the
-            row keeps the manager tier until the trash rule moves into
-            APP_RULES; a row that lands on a denial is worse than no row. */}
-        {accessLevel ? <li aria-hidden className="my-2 h-px bg-line" /> : null}
-        {accessLevel ? (
+        {/* Rows 4 and 5 are optional: `home.cards` is the key
+            settings-architecture section 4.2 assigns to this sidebar, and this
+            is at last its reader. Home, My work and Inbox above are FIXED and
+            can never be switched off, a person must always be able to reach
+            their own work and their own notifications. A Guest gets neither
+            row: their access row grants My work and Inbox and nothing else. */}
+        {!isGuest && cards.includes("activity") ? (
+          <NavItem href="/activity" Icon={Activity} label="Activity" active={activeHref === "/activity"} />
+        ) : null}
+        {!isGuest && cards.includes("goals") ? <GoalsGroup activeHref={activeHref} /> : null}
+        {/* The rule between the personal rows and the two workspace rows. This
+            hub owns the placement (spec-work-home section 1 overrides
+            spec-spaces-lists section 1 for position only): the tail of the
+            personal block, after Goals. Templates: the Template Center, every
+            Member. Trash: the one recycle bin for the whole app.
+
+            The Trash row's manager tier is GONE as of Phase 2 stage E. It was
+            there because GET /api/trash answered `isManager`, so a Member who
+            deleted their own list was told "Trash is for managers" and had to
+            find a manager to undo it (work-tasks #11). The route is the
+            `trash` app key plus per-source `accessibleIds(type, FULL)` now,
+            with "rows you deleted yourself" as the floor, so the row and what
+            is behind it agree: every Member, never a Guest. */}
+        {/* NOT gated on `home.cards`. That preference has no UI writer any
+            more (the rebuilt CustomizePanel has no Home cards tab and
+            Settings > Defaults only LOCKS the key), so a stored value that
+            happens to map to a subset would take these two rows away with no
+            control anywhere to bring them back. Templates and Trash are the
+            only doors to those two pages in this hub, and a door with no way
+            to restore it is a removal. Access still decides: Guests get
+            neither. */}
+        {!isGuest && accessLevel ? <li aria-hidden className="my-2 h-px bg-line" /> : null}
+        {!isGuest && accessLevel ? (
           <NavItem href="/templates" Icon={LayoutTemplate} label="Templates" active={activeHref === "/templates"} />
         ) : null}
-        {canAccessTier("manager", accessLevel) ? (
+        {!isGuest ? (
           <NavItem href="/trash" Icon={Trash2} label="Trash" active={activeHref === "/trash"} />
         ) : null}
       </ul>
 
-      {/* Sections in the viewer's order; hidden ones (Customize) omitted. */}
-      {sectionsOrder.map((key) => {
-        if (hiddenSections.includes(key)) return null;
-        if (key === "favorites") return renderFavorites();
-        if (key === "spaces") return renderSpaces();
-        return null;
-      })}
+      {/* Sections in the viewer's order; hidden ones (Customize) omitted, and
+          the two `home.cards` can switch off as well. A Guest gets neither:
+          their access row grants My work and Inbox, so there is no FAVORITES
+          section and no Everything row leading anywhere they could not
+          already reach through My work. */}
+      {isGuest
+        ? null
+        : sectionsOrder.map((key) => {
+            if (hiddenSections.includes(key)) return null;
+            if (key === "favorites") return cards.includes("favorites") ? renderFavorites() : null;
+            if (key === "spaces") return cards.includes("spaces") ? renderSpaces() : null;
+            return null;
+          })}
 
       <NewSpaceDialog
         open={newSpaceOpen}
@@ -879,17 +1129,11 @@ function HomeSidebar() {
         onCreated={() => { void reload(); refreshSidebar(); router.refresh(); }}
       />
 
-      {boardDialogSpaceId ? (
-        <NewBoardDialog
-          open
-          onOpenChange={(v) => { if (!v) setBoardDialogSpaceId(null); }}
-          spaceId={boardDialogSpaceId}
-          folderId={null}
-          // refreshSidebar updates the tree; router.refresh re-fetches the
-          // current route (e.g. the Space Overview) so its cards update too.
-          onCreated={() => { setBoardDialogSpaceId(null); refreshSidebar(); router.refresh(); }}
-        />
-      ) : null}
+      {/* `NewBoardDialog` ("New Board") is deleted: two dialogs for one object,
+          and the retired word. Every door that opened it now opens
+          `CreateListModal` through `openCreateList` (spec-spaces-lists section
+          0, audit Medium #21). The Space tree row reaches it from
+          ContainerMenu > New > List. */}
 
       {folderDialogSpaceId ? (
         <NewFolderDialog
@@ -1010,12 +1254,12 @@ function AiSidebar() {
 
 /* ───────────────────────── Teams sidebar ───────────────────────── */
 
-// Teams — a people-operation cockpit. Three buckets: who (People), what they
+// Teams: a people-operation cockpit. Three buckets: who (People), what they
 // own & are measured on (Alignment), how they're doing (Performance), plus an
 // Overview landing. Every item has one clear job.
 //
 // The app entry is manager-gated, but this sidebar can still render for an
-// employee (route match on /people/[id] — their own career home), so it is
+// employee (route match on /people/[id]: their own career home), so it is
 // access-aware: below manager tier it shows only the personal door, and the
 // director-gated Rollup row is hidden below director (no dead controls).
 const DIRECTOR_LEVELS = new Set(["SUPER_ADMIN", "COMPANY_ADMIN", "C_LEVEL", "VP", "DIRECTOR"]);
@@ -1036,6 +1280,7 @@ const TEAMS_ROWS = [
   { href: "/team/kpi-reviews", match: "exact" as const },
   { href: "/team/rollup", match: "exact" as const },
   { href: "/team/workload", match: "exact" as const },
+  { href: "/analytics", match: "exact" as const },
   { href: "/reviews" },
   { href: "/talent" },
   { href: "/candor" },
@@ -1055,7 +1300,7 @@ function TeamsSidebar() {
   if (!isManagerTier) {
     return (
       <ul>
-        <NavItem href="/people/me" Icon={CircleUser} label="My profile" active={activeHref === "/people/me"} />
+        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
       </ul>
     );
   }
@@ -1064,7 +1309,7 @@ function TeamsSidebar() {
     <>
       <ul>
         <NavItem href="/team" Icon={Users} label="My team" active={activeHref === "/team"} />
-        <NavItem href="/people/me" Icon={CircleUser} label="My profile" active={activeHref === "/people/me"} />
+        <NavItem href="/people/me" Icon={CircleUser} label={PROFILE_NAV_LABEL} active={activeHref === "/people/me"} />
       </ul>
       <SectionLabel>People</SectionLabel>
       <ul>
@@ -1085,6 +1330,12 @@ function TeamsSidebar() {
           <NavItem href="/team/rollup" Icon={BarChart3} label="Sub-teams" active={activeHref === "/team/rollup"} />
         ) : null}
         <NavItem href="/team/workload" Icon={GaugeCircle} label="Workload" active={activeHref === "/team/workload"} />
+        {/* spec-work-home section 1 row 15, and a hard precondition on W6: a
+            rebuilt /analytics with no row is the orphan that work names. The
+            gate is the `analytics` app key (access 5.2.1): anyone with reports
+            over their chain, the People team and Admin over the org, which is
+            exactly the manager tier this sidebar already renders inside. */}
+        <NavItem href="/analytics" Icon={LineChart} label="Analytics" active={activeHref === "/analytics"} />
         {isHrAdmin ? (
           <>
             <NavItem href="/reviews" Icon={ClipboardCheck} label="Review cycles" active={activeHref === "/reviews"} />
@@ -1188,11 +1439,13 @@ function ClipsSidebar() {
 
 /* ───────────────────────── Goals sidebar ───────────────────────── */
 
+// The canon hrefs (spec-goals section 1), the same two /okrs reads: `?view=`.
+// The retired `?mine=1`, `?team=1` and `?level=company` forms are still
+// ACCEPTED by the page so stored links land, but they are not printed.
 const GOALS_ROWS = [
-  { href: "/okrs?mine=1", label: "My Goals", Icon: Trophy },
-  { href: "/okrs?team=1", label: "Team Goals", Icon: Users },
-  { href: "/okrs?level=company", label: "Company Goals", Icon: Building2 },
-  { href: "/people/me", label: "My KRAs & KPIs", Icon: Target },
+  { href: "/okrs", label: "My goals", Icon: Trophy },
+  { href: "/okrs?view=team", label: "Team goals", Icon: Users },
+  { href: "/okrs?view=company", label: "Company goals", Icon: Building2 },
 ];
 
 function GoalsSidebar() {
@@ -1203,10 +1456,10 @@ function GoalsSidebar() {
   return (
     <>
       <ul>
-        {/* My Goals is primary: what I own or am assigned. Team Goals (my
+        {/* My goals is primary: what I own or am assigned. Team goals (my
             report tree) is manager-only. Company objectives show as context
-            inside each view — no "All Goals" firehose. */}
-        {GOALS_ROWS.filter((r) => isManager || r.href !== "/okrs?team=1").map((r) => (
+            inside each view, with no "All goals" firehose. */}
+        {GOALS_ROWS.filter((r) => isManager || r.href !== "/okrs?view=team").map((r) => (
           <NavItem key={r.href} href={r.href} Icon={r.Icon} label={r.label} active={r.href === activeHref} />
         ))}
       </ul>
@@ -1246,7 +1499,7 @@ function SettingsSidebar() {
  * via the More popover's pin toggles (persisted to localStorage).
  *
  * Adding a new app:
- *   1. add an entry below — set category + defaultPinned
+ *   1. add an entry below: set category + defaultPinned
  *   2. its Sidebar is the linksSidebar helper for simple link lists
  *   3. give its routes a ROUTE_HUB row in src/lib/nav/route-hub.ts, and a
  *      FOLDED_APP_HUB entry when it folds into a hub rather than taking a
@@ -1255,10 +1508,10 @@ function SettingsSidebar() {
 
 export const APPS: AppEntry[] = [
   // ── Core (always pinned by default) ──────────────────────────
-  { key: "home", label: "Work", Icon: Home, defaultHref: "/today",
+  { key: "home", label: "Work", Icon: Home, defaultHref: WORK_HOME_HREF,
     Sidebar: HomeSidebar, category: "Core", defaultPinned: true, alwaysPinned: true,
     newAction: { label: "New Space", event: "home-new-space" },
-    // Home is the OS-wide catch-all — it keeps the global create menu.
+    // Home is the OS-wide catch-all: it keeps the global create menu.
     createActions: "global" },
   { key: "planner", label: "Planner", Icon: Calendar, defaultHref: "/planner", Sidebar: CalendarSidebar,
     category: "Core", defaultPinned: true,
@@ -1315,7 +1568,7 @@ export const APPS: AppEntry[] = [
     ] },
   { key: "forms", label: "Forms", Icon: ClipboardCheck, defaultHref: "/forms", Sidebar: FormsSidebar, category: "Core", defaultPinned: true,
     createActions: [{ label: "New form", icon: ClipboardCheck, href: "/forms?new=1" }] },
-  // Clips has no separate creatable object — /notetaker IS the composer,
+  // Clips has no separate creatable object: /notetaker IS the composer,
   // so the sidebar "+" stays hidden for it.
   { key: "clips", label: "Notetaker", Icon: Video, defaultHref: "/notetaker", Sidebar: ClipsSidebar,
     category: "Core", defaultPinned: true },
@@ -1330,11 +1583,11 @@ export const APPS: AppEntry[] = [
   // intentionally not pinned. WorkwrK is a People + Project Management
   // System; sales/external-support/IT are not core. Their /api routes
   // and pages still exist for direct linking if needed.
-  // Tools + Assets ARE PPMS-core (per-employee provisioning) — see
+  // Tools + Assets ARE PPMS-core (per-employee provisioning): see
   // the People section below.
 
   // ── People ──────────────────────────────────────────────────
-  // "Review cycles", not "Reviews" — the Teams sidebar's weekly "Reviews"
+  // "Review cycles", not "Reviews": the Teams sidebar's weekly "Reviews"
   // queue keeps that name, and the two colliding was the confusion.
   { key: "reviews", label: "Review cycles", Icon: ClipboardCheck, defaultHref: "/reviews", category: "People", requiredAccess: "hr-admin",
     // /reviews?new=1 auto-opens NewReviewCycleDialog (armed latch in
@@ -1356,10 +1609,10 @@ export const APPS: AppEntry[] = [
   { key: "surveys", label: "Surveys", Icon: FileSpreadsheet, defaultHref: "/surveys", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/surveys", label: "Surveys", Icon: FileSpreadsheet }]) },
 
-  // ── People resourcing — provisioning what employees need to do work.
+  // ── People resourcing: provisioning what employees need to do work.
   // Tools = SaaS subscriptions + access grants (Slack, GitHub, Figma…).
   // Assets = physical equipment (laptops, monitors, keys, badges).
-  // Both are per-employee provisioning surfaces — natural fit under
+  // Both are per-employee provisioning surfaces: natural fit under
   // People. Tied to joiner (grant) and offboarding (revoke) flows.
   { key: "tools", label: "Tools", Icon: HardDrive, defaultHref: "/tools", category: "People", requiredAccess: "hr-admin",
     Sidebar: linksSidebar([{ href: "/tools", label: "Tools & subscriptions", Icon: HardDrive }]) },
@@ -1368,7 +1621,7 @@ export const APPS: AppEntry[] = [
 
   // ── Knowledge ───────────────────────────────────────────────
   { key: "sops", label: "SOPs", Icon: ScrollText, defaultHref: "/sops", category: "Knowledge", defaultPinned: true,
-    // One action per SOP kind — /sops/new?type=STEPS pre-creates a
+    // One action per SOP kind: /sops/new?type=STEPS pre-creates a
     // step-list SOP and drops straight into inline editing.
     createActions: [
       { label: "New written SOP",       icon: FileText,          href: "/sops/new/text" },
@@ -1416,17 +1669,17 @@ export const APPS: AppEntry[] = [
   { key: "settings", label: "Settings", Icon: SettingsIcon, defaultHref: "/settings",
     category: "Workspace", alwaysPinned: true,
     Sidebar: SettingsSidebar },
-  // Org-wide Trash: one place to recover anything deleted (60-day window).
-  // Manager tier, matching GET /api/trash and the page (isManager) today;
-  // sidebar-map 1 row 7 widens it to every Member when the API's rule does.
+  // The one Trash for the whole app: Deleted and Archived, every kind.
+  // Every Member (sidebar-map 1 row 7): the manager tier came off when
+  // /api/trash moved onto the `trash` app key and per-source
+  // `accessibleIds(type, FULL)` in Phase 2 stage E.
   { key: "trash", label: "Trash", Icon: Trash2, defaultHref: "/trash", category: "Workspace", defaultPinned: true,
-    requiredAccess: "manager",
     Sidebar: linksSidebar([
       { href: "/trash", label: "All deleted items", Icon: Trash2 },
     ]) },
 ];
 
-// Rail consolidation: these apps are FOLDED into a hub — still in the catalog,
+// Rail consolidation: these apps are FOLDED into a hub: still in the catalog,
 // still reachable by route / the More launcher / search, but not their own rail
 // icon. Their rows live inside the hub's secondary sidebar. The list of 19 and
 // the hub each one folds into is FOLDED_APP_HUB in src/lib/nav/route-hub.ts, so

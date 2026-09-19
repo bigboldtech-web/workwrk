@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { canMutateLinkFromSource } from "@/lib/entity-link-authz";
+import { logActivity } from "@/lib/item-thread";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -25,7 +26,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 
   const existing = await prisma.entityLink.findFirst({
     where: { id, organizationId: c.organizationId },
-    select: { id: true, sourceType: true, sourceId: true },
+    select: { id: true, sourceType: true, sourceId: true, targetType: true, targetId: true, relationKind: true },
   });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
@@ -38,5 +39,21 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!allowed) return NextResponse.json({ error: "You can't edit links on this item." }, { status: 403 });
 
   await prisma.entityLink.delete({ where: { id } });
+
+  // The removal is recorded on the task the same way the create is, so the
+  // Activity tab's attachments filter tells a whole story rather than half.
+  if (existing.sourceType === "BOARD_ITEM") {
+    await logActivity({
+      organizationId: c.organizationId,
+      itemId: existing.sourceId,
+      actorId: c.userId,
+      action: existing.targetType === "FILE" ? "ATTACHMENT_REMOVED" : "LINK_REMOVED",
+      meta: {
+        targetType: existing.targetType,
+        targetId: existing.targetId,
+        relationKind: existing.relationKind,
+      },
+    });
+  }
   return NextResponse.json({ ok: true });
 }

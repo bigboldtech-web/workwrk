@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Loader2, ArrowRight, CheckCircle2, AlertCircle } from "lucide-react";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 function VerifyEmailInner() {
   const params = useSearchParams();
@@ -68,7 +69,7 @@ function VerifyEmailInner() {
           <CheckCircle2 size={16} /> All set.
         </div>
         <Link
-          href="/dashboard"
+          href={WORK_HOME_HREF}
           className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
         >
           Open dashboard <ArrowRight size={14} />
@@ -93,7 +94,7 @@ function VerifyEmailInner() {
           </p>
         </div>
         <Link
-          href="/dashboard"
+          href={WORK_HOME_HREF}
           className="w-full h-11 rounded-lg bg-slate-900 text-white text-base font-semibold inline-flex items-center justify-center gap-2 hover:bg-slate-800 transition-all"
         >
           Open dashboard <ArrowRight size={14} />

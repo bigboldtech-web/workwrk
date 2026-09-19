@@ -10,7 +10,8 @@
 // AI types render as a muted "—" placeholder until Phase 4+.
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Loader2, Frame } from "lucide-react";
+import { Check, ChevronDown, MapPin, Paperclip, Star, Target, ThumbsUp, FileText, BookOpen, Link2, Search, X, Plus, Frame } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import type { FieldChoice, FieldDef } from "@/lib/field-catalog";
 import { AssigneePicker, PersonAvatar, type PersonRef } from "./assignee-picker";
 import { useAnchorPos } from "./use-anchor-pos";
@@ -79,36 +80,54 @@ async function loadKras(): Promise<KraLite[]> {
 
 // Module-level user cache — every USER/PEOPLE/VOTING cell on the page
 // shares one fetch (same pattern as the KRA cache above).
-let _usersCache: { items: PersonRef[]; loadedAt: number } | null = null;
-let _usersPromise: Promise<PersonRef[]> | null = null;
+//
+// KEYED BY LIST, because /api/users?scope=all is the wrong source here and was
+// the reported bug: it clamps any caller below ORG_WIDE_ALIGNMENT_LEVELS to
+// their own report tree, so on the very task whose Assignee row was just fixed
+// a USER or PEOPLE field still offered one candidate, and, worse, in READ-ONLY
+// mode a colleague outside the viewer's report tree could not be DISPLAYED at
+// all: UserValue renders a permanent "Loading" and PeopleValue drops the
+// avatar. With a board in scope the roster comes from that List. The org-wide
+// fallback stays for the surfaces that have no List (it is what every one of
+// them used before), under its own cache key.
+const ORG_SCOPE = "__org__";
+const _usersCache = new Map<string, { items: PersonRef[]; loadedAt: number }>();
+const _usersPromise = new Map<string, Promise<PersonRef[]>>();
 
-async function loadUsers(): Promise<PersonRef[]> {
-  if (_usersCache && Date.now() - _usersCache.loadedAt < 60_000) {
-    return _usersCache.items;
-  }
-  if (_usersPromise) return _usersPromise;
-  _usersPromise = (async () => {
-    const res = await fetch("/api/users?scope=all&limit=200", { cache: "no-store" });
+async function loadUsers(boardId: string | null): Promise<PersonRef[]> {
+  const key = boardId ?? ORG_SCOPE;
+  const hit = _usersCache.get(key);
+  if (hit && Date.now() - hit.loadedAt < 60_000) return hit.items;
+  const inflight = _usersPromise.get(key);
+  if (inflight) return inflight;
+  const run = (async () => {
+    const url = boardId
+      ? `/api/boards/${encodeURIComponent(boardId)}/assignable?limit=200`
+      : "/api/users?scope=all&limit=200";
+    const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return [];
     const data = await res.json();
     const items: PersonRef[] = Array.isArray(data?.data) ? data.data : [];
-    _usersCache = { items, loadedAt: Date.now() };
+    _usersCache.set(key, { items, loadedAt: Date.now() });
     return items;
   })();
+  _usersPromise.set(key, run);
   try {
-    return await _usersPromise;
+    return await run;
   } finally {
-    _usersPromise = null;
+    _usersPromise.delete(key);
   }
 }
 
-function useOrgUsers(): PersonRef[] {
-  const [users, setUsers] = useState<PersonRef[]>(_usersCache?.items ?? []);
+function useOrgUsers(boardId: string | null): PersonRef[] {
+  const [users, setUsers] = useState<PersonRef[]>(
+    () => _usersCache.get(boardId ?? ORG_SCOPE)?.items ?? [],
+  );
   useEffect(() => {
     let active = true;
-    void loadUsers().then((items) => { if (active) setUsers(items); });
+    void loadUsers(boardId).then((items) => { if (active) setUsers(items); });
     return () => { active = false; };
-  }, []);
+  }, [boardId]);
   return users;
 }
 
@@ -214,10 +233,15 @@ interface FieldValueProps {
   disabled?: boolean;
   /** Session user id — needed by VOTING to toggle the viewer's vote. */
   currentUserId?: string | null;
+  /** The List this row belongs to. Scopes the people a USER / PEOPLE field
+   *  can offer AND the people it can draw. PASS IT wherever a board is in
+   *  scope; without it these fields fall back to /api/users, which answers a
+   *  non-exec caller with their own report tree and nobody else. */
+  boardId?: string | null;
 }
 
 export function FieldValue(props: FieldValueProps) {
-  const { field, value, mode, onChange, disabled, currentUserId } = props;
+  const { field, value, mode, onChange, disabled, currentUserId, boardId = null } = props;
   const readOnly = mode === "display" || disabled || !onChange;
 
   switch (field.type) {
@@ -258,9 +282,9 @@ export function FieldValue(props: FieldValueProps) {
     case "RELATIONSHIP":
       return <RelationshipValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "USER":
-      return <UserValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <UserValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
     case "PEOPLE":
-      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} />;
+      return <PeopleValue value={value} readOnly={readOnly} onChange={onChange} boardId={boardId} />;
     case "PROGRESS_MANUAL":
       return <ProgressValue value={value} readOnly={readOnly} onChange={onChange} />;
     case "LOCATION":
@@ -280,18 +304,20 @@ function UserValue({
   value,
   readOnly,
   onChange,
+  boardId = null,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  boardId?: string | null;
 }) {
   const userId = typeof value === "string" ? value : null;
-  const users = useOrgUsers();
+  const users = useOrgUsers(boardId);
   const person = userId ? users.find((u) => u.id === userId) ?? null : null;
 
   if (readOnly) {
     if (!userId) return <span className="text-xs text-zinc-500">—</span>;
-    if (!person) return <span className="text-xs text-zinc-500">Loading…</span>;
+    if (!person) return <Dots variant="pending" label="Loading" className="text-ink-3" />;
     return (
       <span className="inline-flex items-center gap-1.5">
         <PersonAvatar person={person} size={20} />
@@ -303,6 +329,7 @@ function UserValue({
     <AssigneePicker
       value={person}
       canEdit
+      boardId={boardId}
       onChange={(p) => onChange?.(p?.id ?? null)}
     />
   );
@@ -314,13 +341,15 @@ function PeopleValue({
   value,
   readOnly,
   onChange,
+  boardId = null,
 }: {
   value: unknown;
   readOnly: boolean;
   onChange?: (v: unknown) => void;
+  boardId?: string | null;
 }) {
   const ids = Array.isArray(value) ? (value as string[]).filter((x) => typeof x === "string") : [];
-  const users = useOrgUsers();
+  const users = useOrgUsers(boardId);
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const selected = ids.map((id) => users.find((u) => u.id === id)).filter((u): u is PersonRef => !!u);
@@ -351,7 +380,7 @@ function PeopleValue({
       </button>
       <CellPopover anchorRef={anchorRef} open={open} width={220} maxH={260} onMouseLeave={() => setOpen(false)}>
         {users.length === 0 ? (
-          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          <div className="px-2 py-2"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
         ) : (
           users.map((p) => {
             const on = ids.includes(p.id);
@@ -885,7 +914,7 @@ function KraValue({
       {current.name}
     </span>
   ) : v ? (
-    <span className="text-xs text-zinc-500">{loading ? "Loading…" : "Unknown KRA"}</span>
+    <span className="text-xs text-zinc-500">{loading ? "" : "Unknown KRA"}</span>
   ) : (
     <span className="text-xs text-zinc-500">—</span>
   );
@@ -899,7 +928,7 @@ function KraValue({
       </button>
       <CellPopover anchorRef={anchorRef} open={open} width={260} maxH={320} onMouseLeave={() => setOpen(false)}>
         {loading ? (
-          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          <div className="px-2 py-2"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
         ) : kras.length === 0 ? (
           <div className="px-2 py-2 text-xs text-zinc-500">No KRAs in this org yet.</div>
         ) : (
@@ -995,7 +1024,7 @@ function LinkedEntityValue({
       <span className="truncate max-w-[160px]">{current.label}</span>
     </span>
   ) : v ? (
-    <span className="text-xs text-zinc-500">{loading ? "Loading…" : "Unknown"}</span>
+    <span className="text-xs text-zinc-500">{loading ? "" : "Unknown"}</span>
   ) : (
     <span className="text-xs text-zinc-500">—</span>
   );
@@ -1037,7 +1066,7 @@ function LinkedEntityValue({
           className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs border border-dashed border-zinc-200 text-zinc-400 hover:text-[var(--os-brand)] hover:border-[var(--os-brand)] transition-colors"
         >
           {v ? (
-            <span>{loading ? "Loading…" : "Unknown"}</span>
+            <span>{loading ? "" : "Unknown"}</span>
           ) : (
             <>
               <Icon className="w-3 h-3" />
@@ -1055,7 +1084,7 @@ function LinkedEntityValue({
           </div>
         </div>
         {loading ? (
-          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          <div className="px-2 py-2"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
         ) : filtered.length === 0 ? (
           <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? emptyHint : "No matches."}</div>
         ) : (
@@ -1077,7 +1106,7 @@ function LinkedEntityValue({
             disabled={creating}
             className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-xs text-[var(--os-brand)] hover:bg-zinc-50 border-t border-zinc-200 mt-1 disabled:opacity-60"
           >
-            {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
+            {creating ? <Dots variant="pending" label="Working" /> : <Plus className="w-3.5 h-3.5 shrink-0" />}
             <span className="truncate">
               {creating ? "Creating…" : q.trim() ? `Create “${q.trim()}”` : `Create new ${createLabel ?? "item"}`}
             </span>
@@ -1210,7 +1239,7 @@ function RelationshipValue({
           </div>
         </div>
         {loading ? (
-          <div className="px-2 py-2 text-xs text-zinc-500">Loading…</div>
+          <div className="px-2 py-2"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
         ) : filtered.length === 0 ? (
           <div className="px-2 py-2 text-xs text-zinc-500">{items.length === 0 ? `No ${active.label.toLowerCase()} yet.` : "No matches."}</div>
         ) : (

@@ -12,6 +12,7 @@
 // can't slow down a user-facing POST.
 
 import { prisma } from "@/lib/prisma";
+import { createPersonalTask } from "@/lib/work/personal-task";
 
 // ─────────────────────────────────────────────────────────
 // Public API
@@ -207,17 +208,19 @@ async function executeCreateTask(orgId: string, cfg: Record<string, unknown>, pa
   const priority: "LOW" | "NORMAL" | "HIGH" | "URGENT" =
     priorityRaw === "LOW" || priorityRaw === "HIGH" || priorityRaw === "URGENT" ? priorityRaw : "NORMAL";
 
-  const t = await prisma.task.create({
-    data: {
-      organizationId: orgId,
-      title,
-      ...(description ? { description } : {}),
-      priority,
-      date: new Date(),
-      assigneeId,
-      source: "MANUAL",
-    },
-    select: { id: true, title: true },
+  // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in this
+  // release, so every task an automation created was invisible and the run log
+  // recorded a `taskId` nothing could open. It lands on the assignee's Personal
+  // list now, and `taskId` is an Item id, which opens at /item/<id>.
+  const t = await createPersonalTask({
+    organizationId: orgId,
+    assigneeId,
+    title,
+    description,
+    priority,
+    dueAt: new Date(),
+    legacy: { source: "AUTOMATION" },
+    actorId: null,
   });
   return { taskId: t.id, title: t.title };
 }

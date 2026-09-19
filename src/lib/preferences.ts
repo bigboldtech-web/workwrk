@@ -31,6 +31,10 @@ export interface SidebarPref {
   quickTools?: string[];
   collapsedSections?: string[];
   hiddenSections?: string[];
+  /** Open Space and Folder rows in the Spaces tree (was a module-level Map). */
+  expanded?: string[];
+  /** Spaces this viewer hid from their own tree; still reachable from /spaces. */
+  hiddenSpaceIds?: string[];
   // 2026-08-22 ACCESS system — the org rail config (which apps the rail
   // shows, in what order, with what tier floors). Meaningful on the ORG
   // row (OrgPreference.sidebarDefault) ONLY; a copy on a user row is
@@ -40,7 +44,15 @@ export interface SidebarPref {
 }
 
 export interface HomePref {
-  cards: string[];            // card keys shown on Home (e.g. "inbox", "assigned-comments")
+  /**
+   * Which OPTIONAL rows and sections the Work sidebar shows
+   * (settings-architecture 4.2 assigns this key to "the Work sidebar and the
+   * Space overview"). Read through `readSidebarCards` in src/lib/home-prefs.ts,
+   * which also maps the old CustomizePanel card keys once. Home's six widgets
+   * deliberately use a DIFFERENT key, `home.work.surface.home.viewOptions
+   * .widgets`, so one array can never mean two things.
+   */
+  cards: string[];
   order: string[];            // display order
   // Phase 78 — favorite (starred) board ids. Surfaced in the board
   // page header star toggle + sidebar Favorites section.
@@ -77,7 +89,16 @@ export interface HomePref {
     inbox?: Record<string, boolean>;
     email?: Record<string, boolean>; // includes the "master" switch key
     /** Inbox display prefs (was a stripped top-level `inbox` key; settings spec 7.3). */
-    inboxView?: { showAll?: boolean; groupByDate?: boolean; sortNewest?: boolean; mode?: "fullscreen" | "inline" };
+    inboxView?: {
+      showAll?: boolean;
+      groupByDate?: boolean;
+      sortNewest?: boolean;
+      /** Days after which read rows are auto-cleared; null = never. */
+      autoClearDays?: number | null;
+      defaultTab?: "primary" | "other" | "mentions";
+      /** Legacy, accepted and ignored: two modes that rendered one list. */
+      mode?: "fullscreen" | "inline";
+    };
     mutedUntil?: string | null;
     quietHours?: { start?: string; end?: string; days?: number[]; enabled?: boolean };
     muted?: string[];
@@ -88,7 +109,18 @@ export interface HomePref {
   taskCardLayoutV3?: Record<string, Array<{ i: string; x: number; y: number; w: number; h: number }>>;
   locale?: { language?: string; timezone?: string; weekStart?: number; dateFormat?: string; timeFormat?: "12h" | "24h" };
   ui?: { reducedMotion?: boolean; showUpcoming?: boolean; dismissed?: string[]; contrast?: "normal" | "high" };
-  work?: { savedFilters?: unknown[]; pinnedViews?: string[]; surface?: Record<string, unknown> };
+  work?: {
+    savedFilters?: unknown[];
+    pinnedViews?: string[];
+    /** Keyed by view id or by one of preferences-schema's RESERVED_SURFACE_KEYS. */
+    surface?: Record<string, unknown>;
+    /** One viewer's sort/group/columns over a SHARED saved view, by view id. */
+    viewOverrides?: Record<string, unknown>;
+    /** Task-detail visible field keys, by List id (spec-task-detail section 2). */
+    itemFields?: Record<string, string[]>;
+    /** Task drawer width in px, 480..720. */
+    drawerWidth?: number;
+  };
   // Recently-viewed Docs (Docs hub "Recent" tab + "Date viewed" column).
   // MRU-ordered, ISO timestamps, capped at 20. Written by
   // /api/me/recent-docs on every successful doc load.

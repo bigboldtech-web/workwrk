@@ -18,10 +18,14 @@ async function ctx() {
   return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
 }
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const c = await ctx();
   if ("error" in c) return c.error;
   const { id } = await params;
+  // `{ includeTasks }` from the Duplicate confirm. Absent means "include",
+  // which is what every caller got before the checkbox existed.
+  const body = (await req.json().catch(() => null)) as { includeTasks?: unknown } | null;
+  const includeTasks = body && typeof body.includeTasks === "boolean" ? body.includeTasks : true;
 
   const board = await getBoardForReader(id, c.userId, c.accessLevel);
   if (!board || board.organizationId !== c.organizationId) {
@@ -32,7 +36,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   }
 
   try {
-    const clone = await duplicateBoard(id, c.userId, c.organizationId);
+    const clone = await duplicateBoard(id, c.userId, c.organizationId, { includeTasks });
     return NextResponse.json({ board: clone });
   } catch (err) {
     return NextResponse.json(

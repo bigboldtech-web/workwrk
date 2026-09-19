@@ -1,10 +1,15 @@
 "use client";
 
-/* Brain — the right-dock AI panel.
+/* Ask AI, the right-dock AI panel.
+ *
+ * naming-canon section 2.3 retires "Brain" as a product name, "Board" as an
+ * object and "Item" in favour of "Task". This panel opens straight off the
+ * Work page headers, so it is the first AI surface a Work user meets and it
+ * speaks the same vocabulary as the pages behind it.
  *
  * Distinct from the left-side agents shell: this panel is the system-
  * wide knowledge oracle. It answers questions about the workspace
- * (boards, items, KRAs, KPIs, SOPs, weekly reviews, team alignment)
+ * (lists, tasks, KRAs, KPIs, SOPs, weekly reviews, team alignment)
  * via /api/sidekick/chat/stream, which runs Claude with tools wired to
  * the org's read-only data through resolveAccess.
  *
@@ -89,7 +94,7 @@ const SUGGESTED = [
 ];
 
 const FEATURED: Array<{ icon: typeof Wand2; label: string; tag?: string }> = [
-  { icon: Wand2,         label: "Create a board",        tag: "New" },
+  { icon: Wand2,         label: "Create a list",         tag: "New" },
   { icon: ImageIcon,     label: "Generate an image",     tag: "New" },
   { icon: CalendarDays,  label: "Today's calendar",      tag: "New" },
   { icon: MessageCircle, label: "Ask about my notes",    tag: "New" },
@@ -418,12 +423,12 @@ export function OsSidekickPanel() {
                   <BloomMark size={26} animated />
                 </span>
                 <div>
-                  <div className="os-sk__greet-eyebrow">Brain</div>
+                  <div className="os-sk__greet-eyebrow">Ask AI</div>
                   <div className="os-sk__greet-title">What can I help with?</div>
                 </div>
               </div>
               <div className="os-sk__greet-body">
-                I know your boards, items, KRAs, KPIs, SOPs, weekly reviews, and team alignment. Ask me anything about what&apos;s happening in your workspace.
+                I know your lists, tasks, KRAs, KPIs, SOPs, weekly reviews, and team alignment. Ask me anything about what&apos;s happening in your workspace.
               </div>
             </div>
             <div className="os-sk__sec">
@@ -509,7 +514,7 @@ export function OsSidekickPanel() {
             <textarea
               ref={inputRef}
               className="os-sk__composer-input"
-              placeholder={messages.length === 0 ? "Ask, create, search, @ to mention" : "Tell Brain what to do next"}
+              placeholder={messages.length === 0 ? "Ask, create, search, @ to mention" : "What next?"}
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);

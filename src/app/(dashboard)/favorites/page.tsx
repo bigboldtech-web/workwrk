@@ -1,194 +1,47 @@
-"use client";
+// /favorites: everything you have starred, in one list.
+//
+// Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/favorites).
+//
+// WHAT THIS REPLACES. The route existed but held somebody else's content: a
+// pinboard of pinned Sidekick chats, under a page title that said "Favorites".
+// So the Work sidebar's FAVORITES section could read "FAVORITES 1" while the
+// page its own "See all favorites" row led to said "No favorites yet. Star a
+// chat or a board item" and offered a blue "Open Sidekick" link, in the AI hub,
+// with the Work sidebar gone.
+//
+// NOTHING DISAPPEARS. The pinned and recent Sidekick chats this page used to
+// list are every session `GET /api/sidekick/sessions` returns, and /sidekick
+// renders that same list in its own history sidebar with a pin glyph on the
+// pinned ones. So both halves keep a door; this page stops being their door
+// and becomes the one the seven star buttons across the product point at.
+//
+// The server half is the gate and nothing else: one client fetch of
+// `GET /api/me/favorites` (built in this phase and, until now, called by
+// nobody) answers all seven kinds at once.
 
-/* Favorites — pinboard of pinned Sidekick chats.
- *
- *  GET   /api/sidekick/sessions  → list all my chats
- *  PATCH /api/sidekick/sessions/[id]  { pinned } → toggle pin
- *
- * Renders pinned chats as a card grid (the actual "favorites"), with
- * "Recent" chats appearing below as a slimmer list. Each pinned card
- * shows title, model badge, message-burst summary, and a quick "Open"
- * arrow that deep-links into the chat thread.
- */
+import { gatePage } from "@/lib/access/gate";
+import { notFound } from "next/navigation";
+import { getEffectivePreferences } from "@/lib/preferences";
+import { FavoritesClient } from "./favorites-client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import {
-  MessageSquare,
-  ChevronRight,
-  Pin,
-  PinOff,
-  Clock,
-  Sparkles,
-} from "lucide-react";
-import { OsPageHeader } from "@/components/layout/os/page-header";
-import { OsEmptyView, askSidekick } from "@/components/layout/os/empty-view";
-import { useOsShell } from "@/components/layout/os/shell-context";
-import { useOsToast } from "@/components/layout/os/toast";
-import { SkeletonRows } from "@/components/ui/skeleton";
+export const dynamic = "force-dynamic";
 
-type ApiSession = {
-  id: string;
-  title: string | null;
-  pinned: boolean;
-  lastModel?: string | null;
-  totalTokensIn?: number;
-  totalTokensOut?: number;
-  createdAt: string;
-  updatedAt: string;
-};
+export default async function FavoritesPage() {
+  // The one Work-hub app key (access section 5.2.1 `home`), then the page's
+  // own rule: a Guest's `home` row grants My work and Inbox only, so this is
+  // the shell's in-frame 404 for them and the FAVORITES section does not
+  // render in their sidebar either. No row leads anywhere that 404s.
+  const { viewer } = await gatePage("view", { type: "app", key: "home" }, { callbackUrl: "/favorites" });
+  if (viewer.orgRole === "GUEST") notFound();
 
-function relTime(iso: string): string {
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function modelShortName(m?: string | null): string {
-  if (!m) return "Claude";
-  // claude-opus-4-7 → "Opus 4.7", claude-sonnet-4-6 → "Sonnet 4.6"
-  const match = m.match(/claude-(opus|sonnet|haiku)-(\d+(?:-\d+)?)/i);
-  if (!match) return m;
-  const tier = match[1].charAt(0).toUpperCase() + match[1].slice(1);
-  const ver = match[2].replace("-", ".");
-  return `${tier} ${ver}`;
-}
-
-export default function FavoritesPage() {
-  const [rows, setRows] = useState<ApiSession[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const { rowVersion } = useOsShell();
-  const { toast } = useOsToast();
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sidekick/sessions");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRows(data.sessions ?? data.data ?? (Array.isArray(data) ? data : []));
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("favorites");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  async function togglePin(id: string, pinned: boolean) {
-    setRows((prev) => prev?.map((s) => s.id === id ? { ...s, pinned } : s) ?? prev);
-    try {
-      await fetch(`/api/sidekick/sessions/${id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pinned }),
-      });
-    } catch { toast("Couldn't update pin"); void load(); }
-  }
-
-  const pinned = useMemo(() => (rows ?? []).filter((s) => s.pinned), [rows]);
-  const recent = useMemo(() => (rows ?? []).filter((s) => !s.pinned).slice(0, 25), [rows]);
+  const prefs = await getEffectivePreferences(viewer.userId, viewer.organizationId).catch(() => null);
+  const work = (prefs?.home?.work ?? {}) as { surface?: Record<string, unknown> };
+  const view = (work.surface?.favorites ?? {}) as { viewOptions?: { location?: unknown; starred?: unknown } };
 
   return (
-    <>
-      <OsPageHeader title="Favorites" />
-
-      {loadError ? (
-        <OsEmptyView variant="error" title="Couldn't load favorites" hint={`API error: ${loadError}.`} action={{ label: "Try again", onClick: () => void load() }} />
-      ) : rows === null ? (
-        <SkeletonRows />
-      ) : rows.length === 0 ? (
-        <OsEmptyView context="list" title="No favorites yet" hint="Star a chat or a board item to keep it one click away." action={{ label: "Open Sidekick", onClick: () => askSidekick() }} />
-      ) : (
-        <div className="fav">
-          <section className="fav__section">
-            <header className="fav__section-head">
-              <Pin className="fav__section-icon" />
-              <h2>Pinned chats</h2>
-              <span className="fav__section-count">{pinned.length}</span>
-            </header>
-            {pinned.length === 0 ? (
-              <div className="fav__hint">
-                Nothing pinned yet — open a chat in Sidekick and click the pin icon to make it appear here.
-              </div>
-            ) : (
-              <div className="fav__pin-grid">
-                {pinned.map((s) => <PinnedCard key={s.id} session={s} onUnpin={() => togglePin(s.id, false)} />)}
-              </div>
-            )}
-          </section>
-
-          {recent.length > 0 && (
-            <section className="fav__section fav__section--recent">
-              <header className="fav__section-head">
-                <Clock className="fav__section-icon" />
-                <h2>Recent chats</h2>
-                <span className="fav__section-count">{recent.length}</span>
-              </header>
-              <div className="fav__recent-list">
-                {recent.map((s) => <RecentRow key={s.id} session={s} onPin={() => togglePin(s.id, true)} />)}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
-function PinnedCard({ session, onUnpin }: { session: ApiSession; onUnpin: () => void }) {
-  return (
-    <Link href={`/sidekick?session=${session.id}`} className="fav-card">
-      <header className="fav-card__head">
-        <span className="fav-card__icon"><Sparkles /></span>
-        <button
-          type="button"
-          className="fav-card__pin"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onUnpin(); }}
-          title="Unpin"
-          aria-label="Unpin chat"
-        >
-          <PinOff />
-        </button>
-      </header>
-      <h3 className="fav-card__title">{session.title ?? "Untitled chat"}</h3>
-      <div className="fav-card__meta">
-        <span className="fav-card__model">{modelShortName(session.lastModel)}</span>
-        <span>·</span>
-        <span>{relTime(session.updatedAt)}</span>
-      </div>
-      <footer className="fav-card__foot">
-        <span><MessageSquare /> Open</span>
-        <ChevronRight />
-      </footer>
-    </Link>
-  );
-}
-
-function RecentRow({ session, onPin }: { session: ApiSession; onPin: () => void }) {
-  return (
-    <Link href={`/sidekick?session=${session.id}`} className="fav-recent">
-      <span className="fav-recent__icon"><MessageSquare /></span>
-      <span className="fav-recent__title">{session.title ?? "Untitled chat"}</span>
-      <span className="fav-recent__meta">
-        <span>{modelShortName(session.lastModel)}</span>
-        <span>·</span>
-        <span>{relTime(session.updatedAt)}</span>
-      </span>
-      <button
-        type="button"
-        className="fav-recent__pin"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onPin(); }}
-        title="Pin"
-        aria-label="Pin chat"
-      >
-        <Pin />
-      </button>
-    </Link>
+    <FavoritesClient
+      initialShowLocation={view.viewOptions?.location !== false}
+      initialShowStarred={view.viewOptions?.starred !== false}
+    />
   );
 }

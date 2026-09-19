@@ -12,7 +12,6 @@
 // otherwise, and inline style beats the reset — same fix as ui/switch.
 
 import { useState } from "react";
-import { ChevronRight, LayoutList } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -112,16 +111,16 @@ export function NewFolderDialog({
   };
 
   const inputCls =
-    "w-full h-9 px-3 rounded-md border border-zinc-200 bg-white text-base text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-[#0073EA]";
+    "w-full h-9 px-3 rounded-md border border-line bg-raised text-base text-ink placeholder:text-ink-3 focus:outline-none focus:border-brand";
 
   return (
     <Dialog open={open} onOpenChange={handle}>
       <DialogContent className="max-w-[460px] p-0 overflow-visible">
         {/* Header */}
         <div className="px-5 pt-5 pb-3">
-          <DialogTitle className="text-lg font-semibold text-zinc-900">Create Folder</DialogTitle>
-          <DialogDescription className="text-base text-zinc-500 mt-1">
-            Use Folders to organize your Lists, Docs, and more.
+          <DialogTitle className="text-lg font-semibold text-ink">Create folder</DialogTitle>
+          <DialogDescription className="text-base text-ink-2 mt-1">
+            A Folder is a shelf in a Space: it groups Lists, Docs and Canvases.
           </DialogDescription>
         </div>
 
@@ -129,7 +128,7 @@ export function NewFolderDialog({
         <div className="px-5 space-y-4">
           {/* Name + colour swatch */}
           <div>
-            <label className="text-base font-medium text-zinc-700 block mb-1.5">Name</label>
+            <label className="text-base font-medium text-ink-2 block mb-1.5">Name</label>
             <div className="relative">
               <input
                 type="text"
@@ -143,20 +142,20 @@ export function NewFolderDialog({
               <button
                 type="button"
                 onClick={() => setColorOpen((v) => !v)}
-                className="absolute end-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-zinc-100 flex items-center justify-center"
+                className="absolute end-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-md hover:bg-hover flex items-center justify-center"
                 title="Folder colour"
                 aria-label="Folder colour"
               >
                 <span className="w-4 h-4 rounded-full border border-black/10" style={{ backgroundColor: color ?? "#9CA3AF" }} />
               </button>
               {colorOpen ? (
-                <div className="absolute end-0 top-[38px] z-10 p-2 rounded-lg bg-white border border-zinc-200 shadow-lg grid grid-cols-4 gap-1.5">
+                <div className="absolute end-0 top-[38px] z-10 p-2 rounded-lg bg-raised border border-line grid grid-cols-4 gap-1.5" style={{ boxShadow: "var(--os-shadow-pop)" }}>
                   {FOLDER_COLORS.map((c) => (
                     <button
                       key={c}
                       type="button"
                       onClick={() => { setColor(c); setColorOpen(false); }}
-                      className={`w-6 h-6 rounded-full border ${color === c ? "ring-2 ring-offset-1 ring-zinc-400" : "border-black/10"}`}
+                      className={`w-6 h-6 rounded-full border ${color === c ? "ring-2 ring-offset-1 ring-line-strong" : "border-black/10"}`}
                       style={{ backgroundColor: c }}
                       aria-label={`Colour ${c}`}
                     />
@@ -168,70 +167,59 @@ export function NewFolderDialog({
 
           {/* Description */}
           <div>
-            <label className="text-base font-medium text-zinc-700 block mb-1.5">Description</label>
+            <label className="text-base font-medium text-ink-2 block mb-1.5">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Tell us a bit about your Folder (optional)"
               maxLength={280}
-              className="w-full min-h-[64px] px-3 py-2 rounded-md border border-zinc-200 bg-white text-base text-zinc-900 placeholder:text-zinc-400 resize-none focus:outline-none focus:border-[#0073EA]"
+              className="w-full min-h-[64px] px-3 py-2 rounded-md border border-line bg-raised text-base text-ink placeholder:text-ink-3 resize-none focus:outline-none focus:border-brand"
             />
           </div>
 
           {/* Location breadcrumb — display-only, like ClickUp's "Space / Folder". */}
           {spaceName ? (
-            <div className="flex items-center gap-1.5 text-sm text-zinc-500">
+            <div className="flex items-center gap-1.5 text-sm text-ink-2">
               <EntityTile size="sm" icon={null} color={null} name={spaceName} />
               <span className="truncate">{spaceName}</span>
               {parentFolderName ? <span className="truncate"> / {parentFolderName}</span> : null}
             </div>
           ) : null}
 
-          {/* Settings — Statuses (folders inherit the Space's statuses) */}
-          <div>
-            <div className="text-base font-medium text-zinc-700 mb-1.5">Settings</div>
-            <div className="flex items-center gap-3 px-3 py-2.5 rounded-md border border-zinc-200 hover:bg-zinc-50 cursor-default transition-colors">
-              <span className="w-8 h-8 rounded-md bg-zinc-100 flex items-center justify-center flex-shrink-0">
-                <LayoutList className="w-4 h-4 text-zinc-500" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="text-base font-medium text-zinc-800">Statuses</div>
-                <div className="text-xs text-zinc-500">Use Space statuses</div>
-              </div>
-              <ChevronRight className="w-3.5 h-3.5 text-zinc-400 shrink-0 rtl:rotate-180" />
-            </div>
-          </div>
-
-          {/* Make private — plain title + toggle row, same pattern as the
-              List modal (no leading lock tile). */}
+          {/* "Restricted" is the canon word (spec-spaces-lists section 1), and
+              the second line says how to undo it: until this stage the Folder
+              share dialog had no visibility control at all, so a folder ticked
+              here was private forever (access-model Broken #10). */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-col">
-              <span className="text-base font-medium text-zinc-800">Make private</span>
-              <span className="text-xs text-zinc-500">Only you and invited members have access</span>
+              <span className="text-base font-medium text-ink">Restricted</span>
+              <span className="text-xs text-ink-2">
+                Only you and the people you share it with can open it. Change this later in Share.
+              </span>
             </div>
-            <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Make private" />
+            <Switch checked={isPrivate} onChange={setIsPrivate} aria-label="Restrict this folder" />
           </div>
 
-          {error ? <div className="text-sm text-red-500">{error}</div> : null}
+          {error ? <div className="rounded-md bg-danger-bg px-3 py-2 text-sm text-danger-text">{error}</div> : null}
         </div>
 
         {/* Footer — Use Templates left, dark Create right (X closes; no Cancel). */}
-        <div className="px-5 py-4 mt-3 border-t border-zinc-100 flex items-center justify-between">
+        <div className="px-5 py-4 mt-3 border-t border-line-soft flex items-center justify-between">
           <button
             type="button"
             onClick={() => { handle(false); openTemplateCenter({ kind: "FOLDER" }); }}
-            className="px-2.5 h-8 text-base font-medium text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 rounded-md transition-colors"
+            className="px-2.5 h-8 text-base font-medium text-ink-2 hover:text-ink hover:bg-hover rounded-md transition-colors"
             disabled={submitting}
           >
-            Use Templates
+            Use a template
           </button>
           <button
             type="button"
             onClick={submit}
             disabled={submitting || !name.trim()}
-            className="px-4 h-8 rounded-md text-base font-medium text-white bg-[#0073EA] hover:bg-[#0060B9] disabled:opacity-50"
+            className="px-4 h-8 rounded-md text-base font-medium text-ink-inv bg-brand hover:bg-brand-hover disabled:opacity-50"
           >
-            {submitting ? "Creating…" : "Create"}
+            {submitting ? "Creating…" : "Create folder"}
           </button>
         </div>
       </DialogContent>

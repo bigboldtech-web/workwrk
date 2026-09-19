@@ -10,8 +10,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, FileText, Loader2, RefreshCcw } from "lucide-react";
+import { ExternalLink, FileText, RefreshCcw } from "lucide-react";
 import { BlockDocEditor } from "@/components/docs/block-doc-editor";
+import { Dots } from "@/components/ui/dots";
 
 interface ApiDoc { id: string; title: string; updatedAt?: string }
 
@@ -101,7 +102,7 @@ export function BoardDocView({ boardId, viewId, viewConfig, canEdit }: BoardDocV
                 disabled={busy}
                 className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-base font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
               >
-                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                {busy ? <Dots variant="pending" /> : null}
                 Create doc
               </button>
               {docs === null ? (

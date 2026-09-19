@@ -8,9 +8,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  BookOpen, FileText, Frame, Paperclip, Plus, X, ExternalLink, Loader2, Upload,
+  BookOpen, FileText, Frame, Paperclip, Plus, X, ExternalLink, Upload,
   Image as ImageIcon, FileVideo, FileAudio, FileType, Database, Link2,
 } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 import { LinkExistingPicker } from "./link-existing-picker";
 
 interface PickerCandidate { id: string; title: string; subtitle?: string | null }
@@ -85,8 +86,12 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
 
   return (
     <div className="space-y-4">
+      {/* One named section, not five loose lists. The spec calls this block
+          "Related", and its sub-sections carry the canon names: "Docs", not
+          "Notes" (naming-canon.md). */}
+      <h3 className="text-sm font-medium text-ink">Related</h3>
       <LinkSection
-        title="Notes"
+        title="Docs"
         Icon={FileText}
         items={notes}
         canEdit={canEdit}
@@ -95,7 +100,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         sourceId={sourceId}
         onReload={load}
         linkExisting={{
-          kindLabel: "note",
+          kindLabel: "doc",
           targetType: "NOTE",
           loadCandidates: async () => {
             const res = await fetch("/api/docs");
@@ -112,7 +117,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
           });
           const data = await docRes.json();
           const docId = data?.doc?.id;
-          if (!docId) throw new Error("Could not create note");
+          if (!docId) throw new Error("Could not create doc");
           await fetch("/api/entity-links", {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -135,7 +140,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         Icon={Frame}
         items={boards}
         canEdit={canEdit}
-        emptyHint="Sketch a flow, diagram, or retro — drop it in for context."
+        emptyHint="Sketch a flow, diagram or retro, and drop it in for context."
         sourceType={sourceType}
         sourceId={sourceId}
         onReload={load}
@@ -189,7 +194,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         Icon={Database}
         items={tables}
         canEdit={canEdit}
-        emptyHint="Attach a Stackby-style data table — vendor list, CRM, anything spreadsheet-shaped."
+        emptyHint="Attach a data table: a vendor list, a CRM, anything spreadsheet-shaped."
         sourceType={sourceType}
         sourceId={sourceId}
         onReload={load}
@@ -242,7 +247,7 @@ export function LinkedAttachments({ sourceType, sourceId, spaceId, canEdit, onCo
         Icon={BookOpen}
         items={sops}
         canEdit={canEdit}
-        emptyHint="Link the SOP that governs this work — it shows up as required reading."
+        emptyHint="Link the SOP that governs this work. It shows up as required reading."
         sourceType={sourceType}
         sourceId={sourceId}
         onReload={load}
@@ -409,7 +414,7 @@ function LinkSection({
             disabled={busy || !draft.trim()}
             className="h-8 px-2.5 rounded-md bg-zinc-900 text-white text-xs font-medium disabled:opacity-50"
           >
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Add"}
+            {busy ? <Dots variant="pending" label="Adding" /> : "Add"}
           </button>
           <button
             type="button"
@@ -424,7 +429,7 @@ function LinkSection({
       ) : null}
 
       {items === null ? (
-        <div className="text-xs text-zinc-400">Loading…</div>
+        <div className="py-1"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
       ) : items.length === 0 ? (
         <div className="text-xs text-zinc-400 leading-relaxed">{emptyHint}</div>
       ) : (
@@ -600,7 +605,7 @@ function FileLinkSection({
               disabled={uploading}
               className="text-xs text-zinc-500 hover:text-zinc-900 inline-flex items-center gap-1 disabled:opacity-50"
             >
-              {uploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+              {uploading ? <Dots variant="pending" label="Uploading" /> : <Upload className="h-3 w-3" />}
               Upload
             </button>
             <LinkExistingPicker
@@ -634,7 +639,7 @@ function FileLinkSection({
         className={dragOver ? "rounded-md ring-2 ring-zinc-900 ring-offset-2 ring-offset-white p-1 -m-1" : ""}
       >
         {items === null ? (
-          <div className="text-xs text-zinc-400">Loading…</div>
+          <div className="py-1"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
         ) : items.length === 0 ? (
           <div className="text-xs text-zinc-400 leading-relaxed">
             {canEdit ? "Drag a file here or click Upload. Max 10MB." : "No files attached."}

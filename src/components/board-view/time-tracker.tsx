@@ -6,7 +6,8 @@
 // summed into a total.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, Square, Plus, Clock, Loader2, X } from "lucide-react";
+import { Play, Square, Plus, Clock, X } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 
 interface Session {
   id: string;
@@ -161,7 +162,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
               disabled={busy}
               className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-red-500 hover:bg-red-600 text-white text-base font-medium disabled:opacity-50"
             >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3 w-3 fill-current" />}
+              {busy ? <Dots variant="pending" label="Working" /> : <Square className="h-3 w-3 fill-current" />}
               Stop
               {state?.active ? (
                 <span className="font-mono tabular-nums text-xs opacity-90">
@@ -176,7 +177,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
               disabled={busy}
               className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-zinc-900 hover:bg-zinc-800 text-white text-base font-medium disabled:opacity-50"
             >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3 w-3 fill-current" />}
+              {busy ? <Dots variant="pending" label="Working" /> : <Play className="h-3 w-3 fill-current" />}
               Start timer
             </button>
           )}
@@ -196,7 +197,7 @@ export function TimeTracker({ entityType, entityId, canEdit }: Props) {
       ) : null}
 
       {state === null ? (
-        <div className="text-xs text-zinc-400">Loading…</div>
+        <div className="py-1"><Dots variant="pending" label="Loading" className="text-ink-3" /></div>
       ) : state.sessions.length === 0 ? (
         <div className="text-xs text-zinc-400 leading-relaxed">
           No time logged yet. Start the timer when you begin a focused block.
@@ -316,7 +317,7 @@ function ManualEntryForm({
           disabled={busy}
           className="h-7 px-2.5 rounded bg-zinc-900 text-white text-sm font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
         >
-          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          {busy ? <Dots variant="pending" label="Working" /> : null}
           Log time
         </button>
       </div>

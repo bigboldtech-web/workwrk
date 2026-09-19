@@ -114,7 +114,7 @@ async function rotateOne(survey: {
       data: audience.map((u) => ({
         title: "New pulse survey",
         message: `A new pulse survey "${survey.title}" is waiting for your input.`,
-        type: "SURVEY",
+        type: "survey",
         link: "/surveys",
         userId: u.id,
       })),
@@ -190,7 +190,7 @@ async function sendReminders(survey: {
     data: pending.map((u) => ({
       title: "Survey closing soon",
       message: `"${survey.title}" closes in about ${closesIn}h — your response is still pending.`,
-      type: "SURVEY",
+      type: "survey",
       link: "/surveys",
       userId: u.id,
     })),

@@ -31,7 +31,6 @@ import {
   AlignLeft,
   Activity,
   GaugeCircle,
-  Workflow,
   MapPin,
   Users as UsersIcon,
   Globe,
@@ -69,8 +68,11 @@ const POPULAR: ViewTile[] = [
 
 // Every tile maps to its real ViewType now (Phase: views-catalog) —
 // the old placeholders (Activity→CHART, Team→DASHBOARD) are gone.
-// Team rides WORKLOAD with a config variant; Mind Map rides WHITEBOARD
-// (the canvas covers it until a dedicated graph renderer exists).
+// Team rides WORKLOAD with a config variant. There is ONE Canvas tile: the
+// "Mind Map" tile beside it created the very same WHITEBOARD view with the
+// very same renderer, so it was two names and two swatches for one thing,
+// which naming-canon 2.6 collapses to Canvas. It comes back the day a real
+// graph renderer exists to sit behind it.
 // Order mirrors ClickUp's "+ View" panel; our extra views (Pivot / Hierarchy /
 // File gallery) trail at the end. Colors match ClickUp's per-view palette.
 const SECONDARY: ViewTile[] = [
@@ -79,7 +81,6 @@ const SECONDARY: ViewTile[] = [
   { type: "ACTIVITY",     label: "Activity",      tag: "Feed",    Icon: Activity,     swatch: "#0EA5E9" },
   { type: "WORKLOAD",     label: "Workload",      tag: "Capacity",Icon: GaugeCircle,  swatch: "#14B8A6" },
   { type: "WORKLOAD",     label: "Team",          tag: undefined, Icon: UsersIcon,    swatch: "#00C875", config: { variant: "team" } },
-  { type: "WHITEBOARD",   label: "Mind Map",      tag: undefined, Icon: Workflow,     swatch: "#EC4899" },
   { type: "MAP",          label: "Map",           tag: undefined, Icon: MapPin,       swatch: "#EA580C" },
   { type: "CHART",        label: "Chart",         tag: "Report",  Icon: BarChart3,    swatch: "#F43F5E" },
   { type: "TIMELINE",     label: "Timeline",      tag: undefined, Icon: AlignLeft,    swatch: "#F59E0B" },

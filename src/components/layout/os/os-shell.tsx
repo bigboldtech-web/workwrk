@@ -16,8 +16,9 @@
 // drawer / modal used here"; the More launcher, the pins strip, the legacy
 // item drawer, the My Work panel and the quick-capture chord are gone.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { recordShellPath } from "@/lib/nav/entry-path";
 import { OsShellProvider, useLayer, useOsShell } from "./shell-context";
 import { OsCommandPalette } from "./command-palette";
 import { OsToastProvider } from "./toast";
@@ -58,12 +59,22 @@ function TemplateCenterMount() {
   const { templateCenterOpen, templateCenterOpts, closeTemplateCenter, openCreateTask } = useOsShell();
   return (
     <TemplateCenter
+      mode="modal"
       open={templateCenterOpen}
       onClose={closeTemplateCenter}
-      kind={templateCenterOpts?.kind}
-      applyContext={templateCenterOpts?.applyContext}
+      kind={templateCenterOpts?.kind ?? null}
+      target={templateCenterOpts?.applyContext}
       onApplied={(result) => {
-        if (result.kind === "TASK") openCreateTask();
+        // TASK is the one kind with no page to land on: the modal it fills is
+        // the destination. Every other kind navigates itself now, so this
+        // handler is no longer the reason four of them went nowhere.
+        //
+        // The CONFIG travels with it. openCreateTask() with no argument opened
+        // a blank modal, so the apply created nothing and prefilled nothing
+        // while the toast said "Template loaded into a new task".
+        if (result.kind === "TASK") {
+          openCreateTask(null, { name: result.name ?? "Template", config: result.config ?? {} });
+        }
       }}
     />
   );
@@ -248,7 +259,11 @@ function Frame({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function OsShell({ children }: { children: React.ReactNode }) {
+export function OsShell({ children, drawer }: { children: React.ReactNode; drawer?: React.ReactNode }) {
+  // The shell is the @drawer slot's parent, so this runs before the slot's own
+  // render: it is what lets the intercepted task drawer tell a hard load of
+  // /item/<id> from a click on a list row. See src/lib/nav/entry-path.ts.
+  recordShellPath(usePathname());
   return (
     <OsShellProvider>
       <OsToastProvider>
@@ -261,6 +276,17 @@ export function OsShell({ children }: { children: React.ReactNode }) {
           <ShellShortcuts />
           <ShortcutsOverlay />
           <Frame>{children}</Frame>
+          {/* The @drawer parallel slot (the intercepted task drawer). It is
+              fixed-position, so it is deliberately NOT a grid item of the
+              Frame: it sits over the content area and dims it through
+              data-os-drawer rather than being laid out beside it.
+              Children.toArray, not a bare {drawer}: Next hands a slot's value
+              in as an ARRAY, and an unkeyed array child is reconciled by
+              POSITION, which is how a slot silently remounts and loses its
+              state on an unrelated shell re-render. It also put a React key
+              warning in every user's console on every route under this
+              layout. */}
+          {Children.toArray(drawer)}
           <OsCommandPalette />
           <CustomizeMount />
           <SetStatusModal />

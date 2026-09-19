@@ -65,7 +65,7 @@ describe("resolveSettingsPage", () => {
     expect(resolveSettingsPage("/settings", "?tab=nope")?.key).toBe("overview");
   });
   it("returns null outside settings", () => {
-    expect(resolveSettingsPage("/today")).toBeNull();
+    expect(resolveSettingsPage("/home")).toBeNull();
     expect(resolveSettingsPage("")).toBeNull();
   });
 });
@@ -101,15 +101,18 @@ describe("today's hrefs and the sidebar", () => {
 });
 
 describe("closeSettings origin rule", () => {
-  it("returnTo, else lastAppPath, else /today", () => {
+  it("returnTo, else lastAppPath, else the Work landing", () => {
     expect(resolveCloseTarget({ returnTo: "/boards/x?item=1", lastAppPath: "/inbox" })).toBe("/boards/x?item=1");
     expect(resolveCloseTarget({ returnTo: null, lastAppPath: "/inbox" })).toBe("/inbox");
-    expect(resolveCloseTarget({})).toBe("/today");
+    // SETTINGS_FALLBACK_HREF is WORK_HOME_HREF, which is /home as of Phase 2
+    // Stage C. It was /today, which was itself a redirect into the viewer's
+    // first Space, so closing Settings landed you in somebody's project list.
+    expect(resolveCloseTarget({})).toBe("/home");
   });
   it("never returns into the takeover or to a foreign origin", () => {
     expect(resolveCloseTarget({ returnTo: "/settings/members", lastAppPath: "/docs" })).toBe("/docs");
-    expect(resolveCloseTarget({ returnTo: "/account/profile", lastAppPath: "/account/security" })).toBe("/today");
-    expect(resolveCloseTarget({ returnTo: "//evil.example", lastAppPath: "https://evil.example" })).toBe("/today");
+    expect(resolveCloseTarget({ returnTo: "/account/profile", lastAppPath: "/account/security" })).toBe("/home");
+    expect(resolveCloseTarget({ returnTo: "//evil.example", lastAppPath: "https://evil.example" })).toBe("/home");
   });
   it("knows the three takeover prefixes and nothing else", () => {
     expect(isSettingsRoute("/settings")).toBe(true);

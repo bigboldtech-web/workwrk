@@ -10,12 +10,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  MoreHorizontal, Edit2, Copy, Trash2, Star, Loader2,
-} from "lucide-react";
+  MoreHorizontal, Edit2, Copy, Trash2, Star, } from "lucide-react";
 import type { ViewType } from "@/generated/prisma";
 import { useOsToast } from "@/components/layout/os/toast";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { useConfirm } from "@/components/ui/dialog-provider";
+import { Dots } from "@/components/ui/dots";
 
 interface ViewLike {
   id: string;
@@ -207,7 +207,7 @@ function ViewMenuPanel({
             disabled={Boolean(busy) || !draft.trim()}
             className="h-6 px-2 rounded-md text-xs font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5"
           >
-            {busy === "rename" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            {busy === "rename" ? <Dots variant="pending" /> : null}
             Save
           </button>
         </div>

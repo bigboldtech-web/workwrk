@@ -1,52 +1,55 @@
 // PATCH  /api/items/[id]/updates/[updateId] — edit a comment { body }.
 //   Author-only: deleting someone's comment is moderation, rewriting
-//   their words is not — so PATCH never falls back to space-edit access.
+//   their words is not, so PATCH never falls back to a wider role.
 // DELETE /api/items/[id]/updates/[updateId] — soft-delete a comment.
-// Allowed if the caller is the comment author OR has edit access on
-// the parent Space (org admin / SpaceMember OWNER/ADMIN).
+//   The author always may. Anyone else needs FULL on the task (access
+//   section 1: "delete of any comment on the task" is Full access only;
+//   Can edit explicitly does NOT include it).
+//
+// Both verbs now gate on the ITEM ref rather than resolving a Space, so a
+// personal-list task's comments can be edited and deleted like any other
+// (before Phase 2 the DELETE branch 404'd on `!item.board.spaceId`).
 
 import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
 import { z } from "zod";
-import { canContributeSpace } from "@/lib/space";
 import { deleteUpdate, editUpdate, getUpdate } from "@/lib/item-thread";
-import { prisma } from "@/lib/prisma";
-
-async function ctx() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  const u = session.user as { id?: string; accessLevel?: string; organizationId?: string };
-  if (!u.id || !u.organizationId) {
-    return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  }
-  return { userId: u.id, accessLevel: u.accessLevel ?? "EMPLOYEE", organizationId: u.organizationId };
-}
+import { gateItem, itemCtx } from "@/lib/item-gate";
+import { publishItemChanged } from "@/lib/notify-realtime";
 
 const patchSchema = z.object({
   body: z.string().min(1).max(10_000),
 });
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string; updateId: string }> }) {
-  const c = await ctx();
+  const c = await itemCtx();
   if ("error" in c) return c.error;
   const { id, updateId } = await params;
+  // Reading the task is the floor; authorship is the real gate below.
+  const gate = await gateItem(id, c, "view");
+  if ("error" in gate) return gate.error;
+
   const update = await getUpdate(updateId);
   if (!update || update.entityId !== id || update.organizationId !== c.organizationId || update.archivedAt) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   if (update.authorId !== c.userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return NextResponse.json(
+      { error: "no_access", reason: "not_comment_author" },
+      { status: 403 },
+    );
   }
-  const body = await req.json().catch(() => null);
-  const parsed = patchSchema.safeParse(body);
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
   }
   try {
     const edited = await editUpdate(updateId, parsed.data.body);
+    void publishItemChanged({
+      itemId: id,
+      boardId: gate.item.boardId,
+      organizationId: c.organizationId,
+      actorId: c.userId,
+    });
     return NextResponse.json({ update: edited });
   } catch (err) {
     return NextResponse.json(
@@ -57,23 +60,31 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string; updateId: string }> }) {
-  const c = await ctx();
+  const c = await itemCtx();
   if ("error" in c) return c.error;
   const { id, updateId } = await params;
+  const gate = await gateItem(id, c, "view");
+  if ("error" in gate) return gate.error;
+
   const update = await getUpdate(updateId);
   if (!update || update.entityId !== id || update.organizationId !== c.organizationId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  // Author can always delete their own comment. Otherwise need space-edit access.
-  if (update.authorId !== c.userId) {
-    const item = await prisma.item.findUnique({
-      where: { id },
-      select: { board: { select: { spaceId: true } } },
-    });
-    if (!item?.board.spaceId) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    const canEdit = await canContributeSpace(item.board.spaceId, c.userId, c.accessLevel);
-    if (!canEdit) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  // The author can always delete their own comment. Anyone else needs Full
+  // access on the task: Can edit is deliberately not enough to delete another
+  // person's words.
+  if (update.authorId !== c.userId && gate.decision.role !== "FULL") {
+    return NextResponse.json(
+      { error: "no_access", reason: "moderation_needs_full_access" },
+      { status: 403 },
+    );
   }
   await deleteUpdate(updateId);
+  void publishItemChanged({
+    itemId: id,
+    boardId: gate.item.boardId,
+    organizationId: c.organizationId,
+    actorId: c.userId,
+  });
   return NextResponse.json({ ok: true });
 }

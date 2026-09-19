@@ -4,41 +4,67 @@
 // Click the chevron → lazy-fetches /api/spaces/[id]/children, renders
 // nested folders + boards inline. Each child is click-to-navigate.
 //
-// Hover clusters (share/more/create) stay only on the top-level Space
-// row for v1 — nested folders/boards have hover-revealed "..." menus
-// for management, opening the existing FolderMoreTrigger /
-// BoardMoreTrigger / ShareBoardButton components.
+// ONE "…" PER ROW (spec-spaces-lists section 1, Row anatomy): "Hover on any
+// row reveals ONE 28px ghost '…' at the right. Right-click opens the same menu.
+// There are no other hover icons: star and '+' live inside the menu.
+// The star and the "+" leave the three container rows; Doc, Canvas and Table
+// rows keep theirs, because their menus belong to other units.
+//
+// The three icons that used to sit there were a star (Favorite), a "…" and a
+// "+", which is three targets inside 28 pixels of a 36px row, and the star and
+// the "+" were both duplicates of rows already inside the menu. Every
+// destination they had is in `ContainerMenu`: Favorite is its first row, and
+// New > List / Sprint / Folder / Doc / Canvas / Table is the "+".
+//
+// GLYPH VOCABULARY (spec section 1, fixed by access 6.1 and not varied here):
+// a LOCK means Restricted, a GLOBE means Everyone at {org}, and there is no
+// third use. A Space carries a globe when it is ORG-visible and NOTHING
+// otherwise, because "a lock never appears on a Space the viewer can open: a
+// Space is never Restricted". This file used to put a lock on a PRIVATE Space
+// (the third meaning the spec forbids) and no globe on an ORG one.
+//
+// THE ROLE EVERY "…" NEEDS comes down with the row, from
+// `GET /api/spaces` and `GET /api/spaces/[id]/children`. Without it the menu
+// falls back to the reader's rows, which is the safe direction but hides
+// Rename / Move / Duplicate from people who do hold them.
 
 import { useState, useEffect, useRef, type DragEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { refreshSidebar, onSidebarRefresh } from "./sidebar-refresh";
 import {
-  ChevronDown, ChevronRight, Lock, Folder as FolderIcon, FolderOpen,
-  Table as TableIcon, FileText, Pencil as WhiteboardIcon, Plus, ListChecks,
-  Files, MoreHorizontal, IterationCw,
+  ChevronDown, ChevronRight, Lock, Globe, Folder as FolderIcon, FolderOpen,
+  Table as TableIcon, FileText, Pencil as WhiteboardIcon, ListChecks,
+  MoreHorizontal, IterationCw,
 } from "lucide-react";
 import { parseSprintMeta } from "@/lib/sprint";
 import { EntityTile } from "@/components/ui/entity-tile";
-import { SpaceMoreTrigger } from "./space-more-menu";
-import { SpaceCreateTrigger } from "./space-create-popover";
-import { BoardMoreTrigger } from "./board-more-menu";
-import { FolderMoreTrigger } from "./folder-more-menu";
+import { ContainerMenuTrigger } from "./container-menu";
+import type { ContainerRole } from "@/lib/work/container-menu";
 import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
 import { TableMoreTrigger } from "./table-more-menu";
-import { MorePortal, type ContextMenuHandle } from "./more-portal";
+import { type ContextMenuHandle } from "./more-portal";
 import { CanvasMoreTrigger } from "./canvas-more-menu";
-import { MenuList, MenuItem, MenuSeparator, MenuSectionLabel } from "@/components/ui/menu";
 import { useOsToast } from "./toast";
 import { uploadDroppedFiles, dragHasFiles } from "@/lib/upload-dropped-files";
-import { useOsShell } from "./shell-context";
-import { SidebarQuickStar } from "./sidebar-quick-star";
 import { SkeletonLines } from "@/components/ui/skeleton";
+import {
+  hydrateSidebarState, isExpanded as storedExpanded, setExpanded as storeExpanded,
+  subscribeSidebarState,
+} from "@/lib/work/sidebar-expand";
+// Doc, Canvas and Table rows keep their own unit's menu and their own star:
+// spec-spaces-lists section 1 exempts them ("except View, Doc / Canvas / Table
+// rows, which use their own units' menus"). Only the three container rows this
+// unit owns collapse to one "…".
+import { SidebarQuickStar } from "./sidebar-quick-star";
 
-// Session-persistent expand state for the sidebar tree, keyed by id. The rail's
-// hover-preview swaps out (unmounts) the Home sidebar and remounts it when the
-// cursor leaves the rail — without this, every Space/Folder would collapse on
-// that cycle. Lives for the session; a full page reload starts collapsed.
+// Expand state for the sidebar tree, keyed by id.
+//
+// The in-memory maps are the fast path: a row must decide "am I open?" during
+// render, not after a fetch. `src/lib/work/sidebar-expand.ts` puts a stored
+// preference (`sidebar.expanded[]`) behind them, so a reload, a second tab and
+// tomorrow morning all open the same rows, which is what the maps alone could
+// never do (spec-spaces-lists section 1, Tree data).
 const spaceExpandStore = new Map<string, boolean>();
 const folderExpandStore = new Map<string, boolean>();
 // Cache a Space's loaded children too, so a remount restores the tree instantly
@@ -156,6 +182,8 @@ interface SpaceRow {
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
   icon: string | null;
   color: string | null;
+  /** From `GET /api/spaces` (SpaceSummary.role). Absent = the reader's menu. */
+  role?: ContainerRole;
 }
 
 interface BoardChild {
@@ -167,6 +195,8 @@ interface BoardChild {
   visibility: "PRIVATE" | "WORKSPACE" | "ORG";
   /** Board.settings — sprint Lists carry settings.sprint (parseSprintMeta). */
   settings?: unknown;
+  /** The viewer's role on this List, from the children route. */
+  role?: ContainerRole;
 }
 
 interface FolderChild {
@@ -175,6 +205,9 @@ interface FolderChild {
   icon: string | null;
   color: string | null;
   position: number;
+  /** A Folder's management gate is its Space's, so this IS the Space role. */
+  role?: ContainerRole;
+  visibility?: "PRIVATE" | "WORKSPACE" | "ORG";
   _count: { boards: number; childFolders: number };
   boards: BoardChild[];
   docs: DocChild[];
@@ -209,9 +242,6 @@ interface Props {
   space: SpaceRow;
   isActive: boolean;
   onReloadSpaces: () => void;
-  onRequestShareSpace: () => void;
-  onRequestNewBoard: () => void;
-  onRequestNewFolder: () => void;
   // Drag-reorder a Space above/below this one. Omitted (e.g. while searching)
   // disables reordering. `place` is relative to THIS row's midpoint.
   onReorderSpace?: (draggedSpaceId: string, place: "before" | "after") => void;
@@ -225,9 +255,6 @@ export function SpaceTreeRow({
   space,
   isActive,
   onReloadSpaces,
-  onRequestShareSpace,
-  onRequestNewBoard,
-  onRequestNewFolder,
   onReorderSpace,
   reorderable = false,
   onMoveUp,
@@ -235,12 +262,30 @@ export function SpaceTreeRow({
 }: Props) {
   const { toast } = useOsToast();
   const router = useRouter();
-  const [expanded, setExpanded] = useState(() => spaceExpandStore.get(space.id) ?? false);
+  const [expanded, setExpanded] = useState(() => spaceExpandStore.get(space.id) ?? storedExpanded(space.id));
   const [data, setData] = useState<ChildrenPayload | null>(() => spaceChildrenStore.get(space.id) ?? null);
   const [loading, setLoading] = useState(false);
   const [rootDragOver, setRootDragOver] = useState(false);
-  // Persist expand state across the rail hover-preview remount.
-  useEffect(() => { spaceExpandStore.set(space.id, expanded); }, [expanded, space.id]);
+  // Session memory for the rail's hover-preview remount, and the stored
+  // preference for every other way a person comes back.
+  useEffect(() => { spaceExpandStore.set(space.id, expanded); storeExpanded(space.id, expanded); }, [expanded, space.id]);
+  // Hydrate once, then adopt whatever was stored for this row.
+  useEffect(() => {
+    let alive = true;
+    // Two cases. On first mount the row has no session memory and simply
+    // adopts whatever is stored. After that the session memory wins, EXCEPT
+    // when something opened this row from outside: a deep link to a Folder or
+    // a List asks the tree to reveal its branch (GET /api/work/locate), and a
+    // reveal only ever OPENS, so it can never undo a collapse the person made.
+    const adopt = () => {
+      if (!alive) return;
+      if (!spaceExpandStore.has(space.id)) { setExpanded(storedExpanded(space.id)); return; }
+      if (storedExpanded(space.id) && !spaceExpandStore.get(space.id)) setExpanded(true);
+    };
+    const off = subscribeSidebarState(adopt);
+    void hydrateSidebarState().then(adopt);
+    return () => { alive = false; off(); };
+  }, [space.id]);
   // Reorder drop indicator: which edge of this row the dragged Space would land on.
   const [spaceDropEdge, setSpaceDropEdge] = useState<"before" | "after" | null>(null);
   const moreRef = useRef<ContextMenuHandle>(null);
@@ -276,12 +321,15 @@ export function SpaceTreeRow({
     setExpanded((v) => !v);
   };
 
-  // If we remounted already-expanded (restored from the store), the children
-  // aren't loaded yet — fetch them so the tree shows its contents, not a blank.
+  // Whenever this row is open and has no children yet, fetch them. It used to
+  // run on MOUNT only, which covered the restored-from-the-store case and
+  // nothing else: a row opened from outside the component (a deep link asking
+  // the tree to reveal its branch) flipped to expanded with `data === null`
+  // and rendered "Couldn't load" over a fetch that was never made.
   useEffect(() => {
-    if (expanded && data === null) loadChildren();
+    if (expanded && data === null && !loading) loadChildren();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [expanded, data, loading]);
 
   const refresh = () => {
     if (expanded) loadChildren();
@@ -356,12 +404,12 @@ export function SpaceTreeRow({
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
         className={`relative flex h-9 items-center gap-2 px-3 rounded-lg ${
-          rootDragOver ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-side-pill" : "hover:bg-hover"
+          rootDragOver ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"
         } ${reorderable ? "cursor-pointer" : ""}`}
       >
         {spaceDropEdge ? (
           <span
-            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-[#0073EA] ${
+            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-brand ${
               spaceDropEdge === "before" ? "-top-px" : "-bottom-px"
             }`}
           />
@@ -376,7 +424,7 @@ export function SpaceTreeRow({
           <span className="group-hover/space:opacity-0 transition-opacity">
             <EntityTile size="sm" icon={space.icon} color={space.color} name={space.name} />
           </span>
-          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-zinc-500">
+          <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/space:opacity-100 transition-opacity text-ink-3">
             {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
           </span>
         </button>
@@ -387,25 +435,30 @@ export function SpaceTreeRow({
           }`}
         >
           <span className="min-w-0 flex-1 truncate">{space.name}</span>
-          {space.visibility === "PRIVATE" ? (
-            <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
+          {space.visibility === "ORG" ? (
+            <Globe className="w-3 h-3 text-ink-3 shrink-0" aria-label="Everyone in the org" />
           ) : null}
         </Link>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
-          <SidebarQuickStar kind="space" id={space.id} />
-          <SpaceMoreTrigger
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/space:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
+          <ContainerMenuTrigger
             ref={moreRef}
-            space={space}
-            onUpdated={onReloadSpaces}
-            onRequestShare={onRequestShareSpace}
+            compact
+            container={{
+              kind: "space",
+              id: space.id,
+              name: space.name,
+              slug: space.slug,
+              icon: space.icon,
+              color: space.color,
+              visibility: space.visibility,
+              spaceId: space.id,
+              spaceSlug: space.slug,
+              spaceName: space.name,
+            }}
+            role={space.role}
+            onUpdated={() => { onReloadSpaces(); refresh(); }}
             onMoveUp={onMoveUp}
             onMoveDown={onMoveDown}
-          />
-          <SpaceCreateTrigger
-            spaceId={space.id}
-            onRequestBoard={onRequestNewBoard}
-            onRequestFolder={onRequestNewFolder}
-            onCreated={refresh}
           />
         </span>
       </div>
@@ -415,9 +468,9 @@ export function SpaceTreeRow({
           {loading && data === null ? (
             <li><SkeletonLines lines={2} className="px-2 py-1" /></li>
           ) : data === null ? (
-            <li className="px-2 py-1 text-xs text-zinc-400">Couldn&rsquo;t load</li>
+            <li className="px-2 py-1 text-xs text-ink-3">Couldn&rsquo;t load</li>
           ) : data.folders.length === 0 && data.boards.length === 0 && data.tables.length === 0 && data.docs.length === 0 && data.whiteboards.length === 0 ? (
-            <li className="px-2 py-1 text-xs text-zinc-400">Empty</li>
+            <li className="px-2 py-1 text-xs text-ink-3">Empty</li>
           ) : (
             <>
               {data.folders.map((f) => (
@@ -433,6 +486,7 @@ export function SpaceTreeRow({
                 <BoardTreeRow
                   key={b.id}
                   board={b}
+                  spaceId={space.id}
                   onChanged={refresh}
                 />
               ))}
@@ -465,11 +519,23 @@ function FolderTreeRow({
   onChanged: () => void;
 }) {
   const { toast } = useOsToast();
-  const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? false);
+  const [expanded, setExpanded] = useState(() => folderExpandStore.get(folder.id) ?? storedExpanded(folder.id));
   const pathname = usePathname();
   const isActive = pathname === `/folders/${folder.id}`;
-  // Persist expand state across the rail hover-preview remount.
-  useEffect(() => { folderExpandStore.set(folder.id, expanded); }, [expanded, folder.id]);
+  useEffect(() => { folderExpandStore.set(folder.id, expanded); storeExpanded(folder.id, expanded); }, [expanded, folder.id]);
+  useEffect(() => {
+    let alive = true;
+    // Same two cases as the Space row: session memory wins, but an outside
+    // reveal (a deep link's ancestor chain) still opens the branch.
+    const adopt = () => {
+      if (!alive) return;
+      if (!folderExpandStore.has(folder.id)) { setExpanded(storedExpanded(folder.id)); return; }
+      if (storedExpanded(folder.id) && !folderExpandStore.get(folder.id)) setExpanded(true);
+    };
+    const off = subscribeSidebarState(adopt);
+    void hydrateSidebarState().then(adopt);
+    return () => { alive = false; off(); };
+  }, [folder.id]);
   // Which drop zone the cursor is in: "inside" nests, "before"/"after" reorder
   // this folder relative to the dragged one. null = not a drop target right now.
   const [dropZone, setDropZone] = useState<"before" | "inside" | "after" | null>(null);
@@ -528,11 +594,11 @@ function FolderTreeRow({
           if (ok) { setExpanded(true); onChanged(); refreshSidebar(); }
         }}
         onContextMenu={(e) => { e.preventDefault(); moreRef.current?.openAtPoint(e.clientX, e.clientY); }}
-        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-[#0073EA] bg-[#0073EA]/10" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
+        className={`relative flex h-9 items-center gap-2 ps-1 pe-1.5 rounded-lg cursor-pointer ${dropZone === "inside" ? "ring-2 ring-inset ring-brand bg-selected" : isActive ? "bg-side-pill" : "hover:bg-hover"}`}
       >
         {dropZone === "before" || dropZone === "after" ? (
           <span
-            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-[#0073EA] ${
+            className={`pointer-events-none absolute start-1 end-1 h-0.5 rounded-full bg-brand ${
               dropZone === "before" ? "-top-px" : "-bottom-px"
             }`}
           />
@@ -549,13 +615,13 @@ function FolderTreeRow({
             const FolderGlyph = expanded && hasChildren ? FolderOpen : FolderIcon;
             return (
               <FolderGlyph
-                className={`h-3.5 w-3.5 text-zinc-500 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity" : ""}`}
+                className={`h-3.5 w-3.5 text-ink-2 ${hasChildren ? "group-hover/folderrow:opacity-0 transition-opacity" : ""}`}
                 style={folder.color ? { color: folder.color } : undefined}
               />
             );
           })()}
           {hasChildren ? (
-            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-zinc-500">
+            <span className="absolute inset-0 inline-flex items-center justify-center opacity-0 group-hover/folderrow:opacity-100 transition-opacity text-ink-3">
               {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
             </span>
           ) : null}
@@ -565,22 +631,29 @@ function FolderTreeRow({
             inline tree expansion. */}
         <Link
           href={`/folders/${folder.id}`}
-          className={`min-w-0 flex-1 truncate text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
+          className={`flex min-w-0 flex-1 items-center gap-1.5 truncate text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          {folder.name}
+          <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+          {folder.visibility === "PRIVATE" ? (
+            <Lock className="w-3 h-3 text-ink-3 shrink-0" aria-label="Restricted" />
+          ) : null}
         </Link>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
-          <SidebarQuickStar kind="folder" id={folder.id} />
-          <FolderMoreTrigger
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/folderrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
+          <ContainerMenuTrigger
             ref={moreRef}
-            folder={{ id: folder.id, name: folder.name, icon: folder.icon, color: folder.color }}
-            spaceId={spaceId}
-            onUpdated={onChanged}
-          />
-          <FolderAddTrigger
-            folderId={folder.id}
-            spaceId={spaceId}
-            onCreated={() => { setExpanded(true); onChanged(); }}
+            compact
+            container={{
+              kind: "folder",
+              id: folder.id,
+              name: folder.name,
+              icon: folder.icon,
+              color: folder.color,
+              visibility: folder.visibility,
+              spaceId,
+              spaceName,
+            }}
+            role={folder.role}
+            onUpdated={() => { setExpanded(true); onChanged(); }}
           />
         </span>
       </div>
@@ -599,7 +672,7 @@ function FolderTreeRow({
             />
           ))}
           {folder.boards.map((b) => (
-            <BoardTreeRow key={b.id} board={b} onChanged={onChanged} />
+            <BoardTreeRow key={b.id} board={b} spaceId={spaceId} onChanged={onChanged} />
           ))}
           {folder.docs.map((d) => (
             <DocTreeRow key={d.id} doc={d} />
@@ -612,9 +685,12 @@ function FolderTreeRow({
 
 function BoardTreeRow({
   board,
+  spaceId,
   onChanged,
 }: {
   board: BoardChild;
+  /** The Space the List lives in, so its menu can create siblings. */
+  spaceId?: string;
   onChanged: () => void;
 }) {
   const router = useRouter();
@@ -624,7 +700,7 @@ function BoardTreeRow({
   // Space row uses; child icons stay monochrome unless user-colored.
   const isActive = pathname === `/boards/${board.slug}`;
   // Sprint Lists swap the glyph (dates already live in the name convention);
-  // the icon stays zinc-500 like every sibling row — no hue-keying.
+  // the icon stays neutral like every sibling row, no hue-keying.
   const sprint = parseSprintMeta(board.settings);
   return (
     <li className="group/boardrow relative">
@@ -640,20 +716,30 @@ function BoardTreeRow({
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
           {sprint ? (
-            <IterationCw className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
+            <IterationCw className="h-3.5 w-3.5 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
           ) : (
-            <ListChecks className="h-3.5 w-3.5 shrink-0 text-zinc-500" style={board.color ? { color: board.color } : undefined} />
+            <ListChecks className="h-3.5 w-3.5 shrink-0 text-ink-2" style={board.color ? { color: board.color } : undefined} />
           )}
           <span className="min-w-0 flex-1 truncate">{board.name}</span>
           {board.visibility === "PRIVATE" ? (
-            <Lock className="w-3 h-3 text-zinc-400 shrink-0" />
+            <Lock className="w-3 h-3 text-ink-3 shrink-0" aria-label="Restricted" />
           ) : null}
         </button>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/boardrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
-          <SidebarQuickStar kind="board" id={board.id} />
-          <BoardMoreTrigger
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/boardrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
+          <ContainerMenuTrigger
             ref={moreRef}
-            board={{ id: board.id, name: board.name, slug: board.slug, icon: board.icon, color: board.color }}
+            compact
+            container={{
+              kind: "list",
+              id: board.id,
+              name: board.name,
+              slug: board.slug,
+              icon: board.icon,
+              color: board.color,
+              visibility: board.visibility,
+              spaceId,
+            }}
+            role={board.role}
             onUpdated={onChanged}
           />
         </span>
@@ -684,10 +770,10 @@ function TableTreeRow({
           onClick={() => router.push(`/tables/${table.id}`)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <TableIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <TableIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{table.name}</span>
         </button>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/tablerow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="table" id={table.id} />
           <TableMoreTrigger ref={moreRef} table={{ id: table.id, name: table.name }} onUpdated={onChanged} />
         </span>
@@ -714,16 +800,16 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
           onClick={() => router.push(`/docs/${doc.id}`)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <FileText className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <FileText className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{doc.title || "Untitled"}</span>
         </button>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/docrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/docrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="doc" id={doc.id} />
           <button
             type="button"
             aria-label="Note actions"
             onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: doc.id, title: doc.title }); }}
-            className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700"
+            className="w-5 h-5 grid place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink"
           >
             <MoreHorizontal className="h-3.5 w-3.5" />
           </button>
@@ -758,148 +844,14 @@ function WhiteboardTreeRow({ whiteboard, onChanged }: { whiteboard: WhiteboardCh
           onClick={() => router.push(`/canvas/${whiteboard.id}`)}
           className={`flex items-center gap-1.5 flex-1 min-w-0 text-start ${isActive ? "text-ink font-medium" : "text-ink"}`}
         >
-          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <WhiteboardIcon className="h-3.5 w-3.5 shrink-0 text-ink-2" />
           <span className="min-w-0 flex-1 truncate">{whiteboard.name || "Untitled canvas"}</span>
         </button>
-        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-zinc-200/95" : "bg-white"}`}>
+        <span className={`absolute end-1 top-1/2 -translate-y-1/2 inline-flex items-center gap-0.5 rounded ps-1.5 opacity-0 group-hover/wbrow:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity ${isActive ? "bg-side-pill" : "bg-side"}`}>
           <SidebarQuickStar kind="whiteboard" id={whiteboard.id} />
           <CanvasMoreTrigger ref={moreRef} canvas={{ id: whiteboard.id, name: whiteboard.name }} onUpdated={onChanged} />
         </span>
       </div>
     </li>
-  );
-}
-
-function FolderAddTrigger({
-  folderId,
-  spaceId,
-  onCreated,
-}: {
-  folderId: string;
-  spaceId: string;
-  onCreated: () => void;
-}) {
-  const router = useRouter();
-  const { toast } = useOsToast();
-  const { openTemplateCenter } = useOsShell();
-  const [open, setOpen] = useState(false);
-  const [creating, setCreating] = useState<string | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Close on click-outside / Escape (MorePortal only handles positioning).
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (panelRef.current?.contains(t) || btnRef.current?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("mousedown", onDown); window.removeEventListener("keydown", onKey); };
-  }, [open]);
-
-  const close = () => setOpen(false);
-
-  const createList = async () => {
-    if (creating) return;
-    setCreating("list"); close();
-    try {
-      const res = await fetch("/api/boards", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ spaceId, folderId, name: "New List" }),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) { toast(d?.error ?? "Couldn't create list"); return; }
-      onCreated(); refreshSidebar();
-      const slug = d?.board?.slug ?? d?.slug;
-      if (slug) router.push(`/boards/${slug}`);
-    } catch { toast("Couldn't create list"); }
-    finally { setCreating(null); }
-  };
-
-  const createDoc = async () => {
-    if (creating) return;
-    setCreating("doc"); close();
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          title: "Untitled",
-          content: { type: "doc", content: [{ type: "paragraph" }] },
-          entityType: "FOLDER", entityId: folderId,
-        }),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) { toast(d?.error ?? "Couldn't create doc"); return; }
-      onCreated(); refreshSidebar();
-      const id = d?.doc?.id ?? d?.id;
-      if (id) router.push(`/docs/${id}`);
-    } catch { toast("Couldn't create doc"); }
-    finally { setCreating(null); }
-  };
-
-  const createWhiteboard = async () => {
-    if (creating) return;
-    setCreating("whiteboard"); close();
-    try {
-      const res = await fetch("/api/whiteboards", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "Untitled canvas", spaceId }),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) { toast(d?.error ?? "Couldn't create whiteboard"); return; }
-      onCreated(); refreshSidebar();
-      const id = d?.whiteboard?.id ?? d?.id;
-      if (id) router.push(`/canvas/${id}`);
-    } catch { toast("Couldn't create whiteboard"); }
-    finally { setCreating(null); }
-  };
-
-  const createSubFolder = async () => {
-    if (creating) return;
-    setCreating("folder"); close();
-    try {
-      const res = await fetch("/api/folders", {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ spaceId, parentFolderId: folderId, name: "New Folder" }),
-      });
-      const d = await res.json().catch(() => null);
-      if (!res.ok) { toast(d?.error ?? "Couldn't create folder"); return; }
-      onCreated(); refreshSidebar();
-    } catch { toast("Couldn't create folder"); }
-    finally { setCreating(null); }
-  };
-
-  return (
-    <span className="relative inline-flex">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((v) => !v); }}
-        aria-label="Create inside folder"
-        title="Create"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="w-5 h-5 grid place-items-center rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/70"
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
-      <MorePortal anchorRef={btnRef} panelRef={panelRef} width={260} open={open} placement="below">
-        <MenuList className="min-w-[260px]">
-          <MenuSectionLabel>Create</MenuSectionLabel>
-          {/* Only things that exist (spec-shell 1.15): no Dashboard, Form or
-              Imports rows until each has a backend. */}
-          <MenuItem icon={ListChecks}      iconClassName="text-emerald-500" label="List" onClick={createList} />
-          <MenuItem icon={FileText}        iconClassName="text-blue-500"    label="Doc" onClick={createDoc} />
-          <MenuItem icon={WhiteboardIcon}  iconClassName="text-amber-500"   label="Canvas" onClick={createWhiteboard} />
-          <MenuItem icon={FolderIcon}      iconClassName="text-amber-500"   label="Folder" onClick={createSubFolder} />
-          <MenuSeparator />
-          <MenuItem icon={Files} label="Templates" onClick={() => { close(); openTemplateCenter({ kind: "FOLDER" }); }} />
-        </MenuList>
-      </MorePortal>
-    </span>
   );
 }

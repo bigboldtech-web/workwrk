@@ -771,6 +771,10 @@ model Template {
   id             String              @id @default(cuid())
   organizationId String? // null = built-in/global library row
   createdById    String?
+  // Stable seed key. prisma/seed-templates.ts upserts on it, so re-running the
+  // seed never duplicates a built-in row and never touches a template an org
+  // saved (those carry null, and null is not unique in Postgres).
+  key            String?             @unique
   kind           TemplateKind
   name           String
   description    String?
@@ -1964,12 +1968,20 @@ model Notification {
   // suppress this row. Reads via `(snoozedUntil IS NULL OR
   // snoozedUntil <= now())`. Clearing snooze = set NULL.
   snoozedUntil DateTime?
+  // Cleared-at — when the person filed this row away with the Clear action.
+  // READ AND CLEARED ARE TWO DIFFERENT THINGS: a row you have read stays in
+  // Primary (quieter), a row you cleared moves to the Cleared tab. Before this
+  // column the two were one boolean, so opening a notification silently filed
+  // it away and "Mark all read" emptied the whole tab.
+  // Nullable and additive: a release that does not know the column still works.
+  clearedAt    DateTime?
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime  @default(now())
 
   @@index([userId, read])
   @@index([userId, snoozedUntil])
+  @@index([userId, clearedAt])
 }
 
 enum ReminderStatus {
@@ -4288,6 +4300,10 @@ model Space {
   ownerId        String?
   displayOrder   Int          @default(0)
   archivedAt     DateTime?
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
   settings       Json         @default("{}")
   // 🆕 Phase 1 shell — who can see this Space. Defaults to WORKSPACE
   // (visible to SpaceMembers + org admins), can be widened to ORG
@@ -4327,6 +4343,10 @@ model Board {
   ownerId        String?
   isDefault      Boolean      @default(false)
   archivedAt     DateTime?
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
   schema         Json         @default("{}")
   settings       Json         @default("{}")
   // Per-List statuses (ClickUp parity backbone #1) — array of
@@ -4437,6 +4457,10 @@ model Item {
   groupKey       String?
   position       Float        @default(0)
   archivedAt     DateTime?
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
   // 🆕 Phase 58 — first-class date columns. Pre-Phase 58 dates lived
   // in metadata under user-defined keys (per-board DATE field). The
   // Calendar + Gantt views still project metadata as a fallback, but
@@ -4540,6 +4564,10 @@ model Folder {
   visibility     Visibility   @default(WORKSPACE)
   position       Float        @default(0) // fractional ordering — Linear pattern, no renumber on drop
   archivedAt     DateTime?
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
   settings       Json         @default("{}")
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -5698,9 +5726,22 @@ model Whiteboard {
   lastEditedById String?
   lastEditedAt   DateTime?
   archivedAt     DateTime?
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
   // Optional pinning to a Space or Product so it shows under the right
   // surface (e.g. a brainstorm tied to /marketing or /dev).
   spaceId        String?
+  // A Canvas created from a Folder's "New" menu used to land in the Space with
+  // no way back: the menu offered "Canvas", the create call had nowhere to put
+  // the folder, and the Folder page listed no canvases, so the thing a person
+  // had just made was not on the page they made it from
+  // (spec-spaces-lists section 2, /folders/[id]: "Canvases are here because the
+  // Folder's own New submenu creates them"). Nullable and unconstrained by a
+  // relation on purpose: every existing row keeps its NULL and every reader
+  // treats the column as optional.
+  folderId       String?
   productSlug    String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -5708,6 +5749,7 @@ model Whiteboard {
   @@index([organizationId, archivedAt])
   @@index([organizationId, ownerId])
   @@index([spaceId])
+  @@index([folderId])
   @@index([productSlug])
 }
 
@@ -5910,6 +5952,10 @@ model Doc {
 
   createdById String?
   archivedAt  DateTime? // soft-archive only; never hard-delete
+  /// Who archived it. Null for rows archived before this column existed and
+  /// for archives no actor was recorded for: Trash prints a blank cell rather
+  /// than naming somebody who may not have done it.
+  archivedById   String?
 
   // 🆕 AI-generated summary (Claude) — populated on demand from
   // /api/docs/[id]/summarize. Useful in list views to show what a
@@ -5977,8 +6023,67 @@ model ItemUpdate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Phase 2 (spec-task-detail section 4 step 1) — a comment can carry files
+  // and reactions. Both are separate tables so nothing on ItemUpdate itself
+  // changed: every reader that predates them keeps working unchanged.
+  attachments ItemUpdateAttachment[]
+  reactions   ItemUpdateReaction[]
+
   @@index([organizationId, entityType, entityId])
   @@index([authorId])
+}
+
+// A file attached to ONE comment. The file itself is a FileEntry uploaded
+// through /api/files first, and is ALSO linked to the task as an EntityLink
+// FILE row, so it shows in the task's Attachments section whether or not the
+// comment it arrived on is later deleted. `fileId` is scalar-only on purpose:
+// deleting a file must not cascade a comment away.
+model ItemUpdateAttachment {
+  id             String     @id @default(cuid())
+  organizationId String
+  updateId       String
+  update         ItemUpdate @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  fileId         String
+  createdAt      DateTime   @default(now())
+
+  @@unique([updateId, fileId])
+  @@index([organizationId, fileId])
+}
+
+// One emoji from one person on one comment. The unique key is what makes the
+// POST idempotent and the DELETE exact.
+model ItemUpdateReaction {
+  id             String     @id @default(cuid())
+  organizationId String
+  updateId       String
+  update         ItemUpdate @relation(fields: [updateId], references: [id], onDelete: Cascade)
+  userId         String
+  emoji          String
+  createdAt      DateTime   @default(now())
+
+  @@unique([updateId, userId, emoji])
+  @@index([updateId])
+  @@index([organizationId, userId])
+}
+
+// Where a legacy id went (spec-work-home section 4, data migrations item 3).
+// Written by the Task and Ideas migrations so a bookmarked /tasks/<id> or
+// /ideas/<id> resolves to the Item that replaced it FOREVER, not just while
+// the source rows survive. Nothing reads it until those migrations run, and a
+// reader that finds no row falls through to its own 404 — the table being
+// absent for a release degrades the redirect, never the page.
+model LegacyRedirect {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// "task" | "task_comment" | "idea"
+  kind           String
+  legacyId       String
+  /// The in-app path the legacy id now resolves to, e.g. "/item/<id>".
+  target         String
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, kind, legacyId])
+  @@index([organizationId, kind])
 }
 
 model ItemActivity {
@@ -6125,6 +6230,12 @@ enum EntityLinkRelation {
   EMBEDDED
   REQUIRED_READING
   REFERENCES
+  // Phase 2 (spec-task-detail section 2, Related) — task dependencies. The
+  // Related section renders the "Waiting on" and "Blocking" groups only once
+  // these exist; a reader that sees neither value renders the flat link list,
+  // which is exactly the pre-Phase-2 behaviour.
+  BLOCKS
+  WAITING_ON
 }
 
 // ─────────────────────────────────────────────────────────────────

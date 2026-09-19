@@ -35,7 +35,9 @@ export type CloseTopLayerResult = "closed" | "refused" | "none";
 export type TemplateCenterKind = "TASK" | "LIST" | "SPACE" | "FOLDER" | "DOC" | "VIEW" | "WHITEBOARD";
 export type TemplateCenterOpts = {
   kind?: TemplateCenterKind;
-  applyContext?: { spaceId?: string };
+  /** `folderId` lands a LIST template inside a Folder rather than at the
+   *  Space root, which is what "applied inside this Folder" means. */
+  applyContext?: { spaceId?: string; folderId?: string };
 };
 
 /** Board the create-task modal should preselect as its destination
@@ -45,6 +47,20 @@ export type CreateTaskPreselect = {
   slug: string;
   name: string;
   spaceId: string | null;
+};
+
+/**
+ * A Task template the create-task modal should open PREFILLED with.
+ *
+ * Applying a Task template used to dead-end: the apply POST ran, usedCount was
+ * incremented, and nothing opened, because the shell called openCreateTask()
+ * with no argument and `CreateTaskPreselect` is a board, not a config. The
+ * config travels beside the preselect now, so "Applying navigates: Task ->
+ * the CreateTaskModal prefilled" is true from the page and from the modal.
+ */
+export type CreateTaskTemplate = {
+  name: string;
+  config: Record<string, unknown>;
 };
 
 /** The one call/huddle in progress, hoisted to the shell so it survives page
@@ -110,9 +126,10 @@ type ShellState = {
   setCustomizeOpen: (v: boolean) => void;
 
   createTaskOpen: boolean;
-  openCreateTask: (preselect?: CreateTaskPreselect | null) => void;
+  openCreateTask: (preselect?: CreateTaskPreselect | null, template?: CreateTaskTemplate | null) => void;
   closeCreateTask: () => void;
   createTaskPreselect: CreateTaskPreselect | null;
+  createTaskTemplate: CreateTaskTemplate | null;
 
   activeCall: ActiveCall | null;
   startCall: (call: Omit<ActiveCall, "minimized">) => void;
@@ -186,6 +203,29 @@ type ShellState = {
   mutedNotifications: boolean;
   setMutedUntil: (iso: string | null) => Promise<boolean>;
 
+  /**
+   * The LEGACY module-view drawer state (kanban.tsx, calendar.tsx,
+   * main-table.tsx: the demo surfaces of the removed verticals). It is NOT
+   * the task drawer.
+   *
+   * A task opens at its own URL: `router.push("/item/<id>")`, which the
+   * (dashboard)/@drawer/(.)item/[id] intercept renders over the list. Wiring
+   * the task drawer into this state instead would put a second mechanism back
+   * beside the one Phase 2 exists to establish, and it would have no URL, so
+   * Copy link would silently stop working.
+   *
+   * WHAT IT ACTUALLY IS TODAY: dead. `OsItemDrawer`, the only component that
+   * ever rendered `openItem`, was deleted in Phase 1 (24aaf922), and the three
+   * callers of `openItemDrawer` (kanban.tsx, main-table.tsx, calendar.tsx) are
+   * themselves rendered by nothing: `OsModuleView` does not exist in this
+   * repo, and the only imports of those three files anywhere are `import
+   * type`. So this state has no writer that runs and no reader at all.
+   *
+   * It is left in place rather than deleted because deleting it means deleting
+   * those three files too, and that is a removal to make deliberately with the
+   * catalog, not a side effect of a task-detail stage. Nothing renders behind
+   * it, so nothing regresses either way.
+   */
   openItem: OpenItem | null;
   openItemDrawer: (it: OpenItem) => void;
   closeItemDrawer: () => void;
@@ -239,6 +279,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [createTaskOpen, setCreateTaskOpen] = useState(false);
   const [createTaskPreselect, setCreateTaskPreselect] = useState<CreateTaskPreselect | null>(null);
+  const [createTaskTemplate, setCreateTaskTemplate] = useState<CreateTaskTemplate | null>(null);
   const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
   const [createListOpen, setCreateListOpen] = useState(false);
   const [createListPreselect, setCreateListPreselect] = useState<{ spaceId?: string; folderId?: string } | null>(null);
@@ -417,13 +458,15 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, [sidekickInitialPrompt]);
   const openCustomize = useCallback(() => setCustomizeOpen(true), []);
   const closeCustomize = useCallback(() => setCustomizeOpen(false), []);
-  const openCreateTask = useCallback((preselect?: CreateTaskPreselect | null) => {
+  const openCreateTask = useCallback((preselect?: CreateTaskPreselect | null, template?: CreateTaskTemplate | null) => {
     setCreateTaskPreselect(preselect ?? null);
+    setCreateTaskTemplate(template ?? null);
     setCreateTaskOpen(true);
   }, []);
   const closeCreateTask = useCallback(() => {
     setCreateTaskOpen(false);
     setCreateTaskPreselect(null);
+    setCreateTaskTemplate(null);
   }, []);
   const startCall = useCallback((call: Omit<ActiveCall, "minimized">) => {
     setActiveCall((prev) =>
@@ -537,7 +580,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
   }, [paletteOpen, registerLayer]);
   useEffect(() => {
     if (!openItem) return;
-    return registerLayer({ id: "item-drawer", kind: "drawer", close: () => setOpenItem(null) });
+    return registerLayer({ id: "module-item-drawer", kind: "drawer", close: () => setOpenItem(null) });
   }, [openItem, registerLayer]);
 
   const value = useMemo<ShellState>(
@@ -546,7 +589,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       sidekickOpen, openSidekick, closeSidekick, toggleSidekick,
       sidekickInitialPrompt, consumeSidekickInitialPrompt,
       customizeOpen, openCustomize, closeCustomize, setCustomizeOpen,
-      createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect,
+      createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate,
       activeCall, startCall, endCall, setCallMinimized,
       createListOpen, openCreateList, closeCreateList, createListPreselect,
       createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect,
@@ -563,7 +606,7 @@ export function OsShellProvider({ children }: { children: React.ReactNode }) {
       routePending, setRoutePending,
       lastAppPath,
     }),
-    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
+    [paletteOpen, openPalette, closePalette, sidekickOpen, openSidekick, closeSidekick, toggleSidekick, sidekickInitialPrompt, consumeSidekickInitialPrompt, customizeOpen, openCustomize, closeCustomize, createTaskOpen, openCreateTask, closeCreateTask, createTaskPreselect, createTaskTemplate, activeCall, startCall, endCall, setCallMinimized, createListOpen, openCreateList, closeCreateList, createListPreselect, createSprintOpen, openCreateSprint, closeCreateSprint, createSprintPreselect, templateCenterOpen, templateCenterOpts, openTemplateCenter, closeTemplateCenter, openItem, openItemDrawer, closeItemDrawer, bumpRowVersion, rowVersion, sidebarCollapsed, toggleSidebar, setSidebarCollapsed, sidebarWidth, setSidebarWidth, railApps, launcherApps, manageableOffModules, canCreateSpace, hubHref, hubSidebarApp, recentAppKeys, pushRecentApp, prefs, patchPrefs, refetchPrefs, presenceStatus, setPresenceStatus, statusModalOpen, openStatusModal, closeStatusModal, mutedUntil, mutedNotifications, setMutedUntil, registerLayer, closeTopLayer, layerCount, topLayerKind, routePending, lastAppPath],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

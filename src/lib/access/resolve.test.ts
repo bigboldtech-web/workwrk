@@ -2447,8 +2447,11 @@ describe("spec 5.2.1: the app rule table", () => {
   const guest = viewer({ orgRole: "GUEST" });
 
   it("has a row for every app key, and the key list is the union of hubs, folded apps and the four route-only keys", () => {
-    expect(APP_KEYS.length).toBe(31);
+    // 31 in the access spec's own table, plus `templates`, which
+    // spec-spaces-lists section 1 adds as the one APP_RULES row that unit owns.
+    expect(APP_KEYS.length).toBe(32);
     for (const key of APP_KEYS) expect(APP_RULES[key]).toBeTruthy();
+    expect(APP_RULES.templates).toEqual({ hub: "home", audience: "member", guest: "none" });
   });
 
   it("opens Work and Settings to everyone signed in, Guests included", () => {

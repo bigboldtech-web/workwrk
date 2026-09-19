@@ -14,6 +14,8 @@
 // users can drop to the UI for everything else.
 
 import { prisma } from "@/lib/prisma";
+import { createPersonalTask } from "@/lib/work/personal-task";
+import { isDoneStatusName } from "@/lib/board-items-shared";
 
 export interface ToolContext {
   orgId: string;
@@ -81,17 +83,26 @@ const createTask: ToolDefinition = {
     const priorityMap: Record<string, "LOW" | "NORMAL" | "HIGH" | "URGENT"> = {
       LOW: "LOW", NORMAL: "NORMAL", HIGH: "HIGH", URGENT: "URGENT",
     };
-    const task = await prisma.task.create({
-      data: {
-        organizationId: ctx.orgId,
-        title: input.title as string,
-        description: (input.description as string) ?? null,
-        priority: priorityMap[input.priority as string] ?? "NORMAL",
-        date,
-        assigneeId,
-      },
-      select: { id: true, title: true, priority: true, date: true, assigneeId: true },
+    // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in
+    // this release, so the agent reported creating a task the person could
+    // never open. It lands on the assignee's Personal list now, which is what
+    // /my-work reads and what search_tasks below lists.
+    const created = await createPersonalTask({
+      organizationId: ctx.orgId,
+      assigneeId,
+      title: input.title as string,
+      description: (input.description as string) ?? null,
+      priority: priorityMap[input.priority as string] ?? "NORMAL",
+      dueAt: date,
+      actorId: ctx.userId,
     });
+    const task = {
+      id: created.id,
+      title: created.title,
+      priority: created.priority,
+      date: created.dueAt,
+      assigneeId: created.assigneeId,
+    };
     return { ok: true, task };
   },
 };
@@ -103,29 +114,52 @@ const searchTasks: ToolDefinition = {
   input_schema: {
     type: "object",
     properties: {
+      // A status on an Item is a per-List NAME ("To Do", "Shipped"), not one
+      // of three enum values, so this is a free-text match rather than an
+      // enum. `done: true` is the question people actually ask.
       status: {
         type: "string",
-        enum: ["PLANNED", "IN_PROGRESS", "COMPLETED"],
-        description: "Filter to a single status",
+        description: "Filter to a single status name, as it appears on the List (e.g. 'To Do', 'In Progress')",
       },
+      done: { type: "boolean", description: "true = only finished tasks, false = only unfinished" },
       assignedToMe: { type: "boolean", description: "Only my tasks" },
       titleContains: { type: "string", description: "Case-insensitive substring match" },
       limit: { type: "integer", description: "Max rows (default 20, max 50)" },
     },
   },
+  // Phase 2 W4. This listed the legacy `Task` table, so it could not see a
+  // single task the product has shown anybody since the migration, including
+  // the ones create_task above had just written.
   handler: async (ctx, input) => {
     const limit = Math.min(50, Number(input.limit ?? 20));
-    const tasks = await prisma.task.findMany({
+    const rows = await prisma.item.findMany({
       where: {
         organizationId: ctx.orgId,
-        ...(input.status ? { status: input.status as "PLANNED" | "IN_PROGRESS" | "COMPLETED" } : {}),
-        ...(input.assignedToMe ? { assigneeId: ctx.userId } : {}),
+        archivedAt: null,
+        ...(input.status ? { status: { equals: input.status as string, mode: "insensitive" } } : {}),
+        ...(input.assignedToMe
+          ? { OR: [{ ownerId: ctx.userId }, { assigneeIds: { has: ctx.userId } }] }
+          : {}),
         ...(input.titleContains ? { title: { contains: input.titleContains as string, mode: "insensitive" } } : {}),
       },
-      select: { id: true, title: true, status: true, priority: true, date: true, assigneeId: true },
-      orderBy: { date: "desc" },
-      take: limit,
+      select: { id: true, title: true, status: true, priority: true, dueAt: true, ownerId: true },
+      orderBy: { updatedAt: "desc" },
+      // Over-fetch only when the done filter has to be applied after the read:
+      // "done" is a status-name rule, not a column.
+      take: input.done === undefined ? limit : limit * 3,
     });
+    const filtered =
+      input.done === undefined
+        ? rows
+        : rows.filter((r) => isDoneStatusName(r.status) === Boolean(input.done));
+    const tasks = filtered.slice(0, limit).map((r) => ({
+      id: r.id,
+      title: r.title,
+      status: r.status,
+      priority: r.priority,
+      date: r.dueAt,
+      assigneeId: r.ownerId,
+    }));
     return { count: tasks.length, tasks };
   },
 };

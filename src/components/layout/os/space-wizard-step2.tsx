@@ -18,6 +18,7 @@ import type {
   WorkflowConfig,
 } from "./space-wizard-types";
 import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
+import { Dots } from "@/components/ui/dots";
 
 export type Step2SubScreen = null | "owner" | "views" | "statuses" | "modules";
 
@@ -227,14 +228,18 @@ function Step2Main({
         >
           Back
         </button>
+        {/* ONE BLUE, and it is the brand's, not the Space's chosen hue: this
+            primary was painted `backgroundColor: accent`, so picking the red
+            swatch for a Space icon repainted the create button red
+            (design-system: one primary per page, always --os-brand). */}
         <button
           type="button"
           onClick={onCreate}
           disabled={submitting}
-          className="px-4 py-2 rounded-lg text-base font-medium text-white shadow-sm transition hover:opacity-90 disabled:opacity-50"
-          style={{ backgroundColor: accent }}
+          className="px-4 py-2 rounded-lg text-base font-medium text-ink-inv bg-brand shadow-sm transition hover:bg-brand-hover disabled:opacity-50 inline-flex items-center gap-1.5"
         >
-          {submitting ? "Creating…" : "Create Space"}
+          {submitting ? <Dots variant="pending" /> : null}
+          Create Space
         </button>
       </div>
     </>

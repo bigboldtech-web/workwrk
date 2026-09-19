@@ -60,9 +60,10 @@ interface Props {
 }
 
 const VISIBILITY_OPTIONS: { value: Visibility; label: string; blurb: string; Icon: typeof Lock }[] = [
-  { value: "PRIVATE", label: "Private", blurb: "Only invited members", Icon: Lock },
-  { value: "WORKSPACE", label: "Workspace", blurb: "Members + org admins", Icon: UsersIcon },
-  { value: "ORG", label: "Org-wide", blurb: "Every member of the org", Icon: Globe },
+  // One vocabulary across the three Share bodies (naming canon).
+  { value: "PRIVATE", label: "Invite only", blurb: "Only the people listed below", Icon: Lock },
+  { value: "WORKSPACE", label: "Space members", blurb: "The people below, plus org admins", Icon: UsersIcon },
+  { value: "ORG", label: "Everyone in the org", blurb: "Every member of the organisation", Icon: Globe },
 ];
 
 const ROLE_OPTIONS: { value: SpaceRole; label: string }[] = [

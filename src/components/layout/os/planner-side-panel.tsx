@@ -113,9 +113,11 @@ function MeetWith({ onCreated, autoFocus }: { onCreated: () => void; autoFocus?:
     const start = new Date(); start.setMinutes(0, 0, 0); start.setHours(start.getHours() + 1);
     const end = new Date(start.getTime() + 30 * 60_000);
     try {
-      const res = await fetch("/api/tasks", {
+      // Phase 2 W4: see planner-command-bar. The legacy `Task` table this
+      // used to write to is not read by any task surface.
+      const res = await fetch("/api/me/work", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: `Meet with ${personName(p)}`, startAt: start.toISOString(), endAt: end.toISOString(), allDay: false, date: start.toISOString() }),
+        body: JSON.stringify({ title: `Meet with ${personName(p)}`, startAt: start.toISOString(), endAt: end.toISOString() }),
       });
       if (res.ok) { setQ(""); setPeople(null); onCreated(); }
     } finally { setBusy(null); }

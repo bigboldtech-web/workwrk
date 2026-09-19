@@ -28,7 +28,7 @@ export function AutosaveIndicator({ status, lastSavedAt, labels, className }: Pr
   const text =
     status === "saving" ? (labels?.saving ?? "Saving…")
     : status === "saved" ? `${labels?.saved ?? "Saved"}${at ? ` at ${at}` : ""}`
-    : status === "error" ? (labels?.error ?? "Save failed — retrying")
+    : status === "error" ? (labels?.error ?? "Not saved, retrying")
     : status === "dirty" ? (labels?.dirty ?? "Unsaved changes")
     : (labels?.idle ?? "Autosave on");
 

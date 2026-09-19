@@ -10,7 +10,9 @@
 // → POST /api/entity-links + close.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link as LinkIcon, Search, Loader2, X, Check } from "lucide-react";
+import { Link as LinkIcon, Search, X, Check } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 interface Candidate {
   id: string;
@@ -147,9 +149,8 @@ export function LinkExistingPicker({
 
       <div className="max-h-[260px] overflow-y-auto py-1">
         {rows === null ? (
-          <div className="px-3 py-4 inline-flex items-center gap-1.5 text-xs text-zinc-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Loading…
+          <div className="px-2 py-2">
+            <SkeletonRows rows={3} rowHeight="28px" />
           </div>
         ) : filtered.length === 0 ? (
           <div className="px-3 py-4 text-xs text-zinc-400">
@@ -177,7 +178,7 @@ export function LinkExistingPicker({
                   ) : null}
                 </span>
                 {busy ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-zinc-400" />
+                  <Dots variant="pending" className="text-ink-3" />
                 ) : picked ? (
                   <Check className="h-3 w-3 text-emerald-600" />
                 ) : null}

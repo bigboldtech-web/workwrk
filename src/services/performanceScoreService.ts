@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@/generated/prisma";
 import { computeGoalRollups, goalRollupFor } from "@/lib/alignment";
+import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
 
 interface ScoreWeights {
   kpi: number;
@@ -169,14 +170,57 @@ async function calcOkrScore(userId: string): Promise<number | null> {
   return Math.min(Math.round(avg), 100);
 }
 
+/**
+ * The task half of the performance score, on the Item model.
+ *
+ * Phase 2 W4 (docs/plans/ui-refresh/spec-work-home.md section 4). This counted
+ * legacy `Task` rows until the Task -> Item migration; leaving it there would
+ * have zeroed every score in the org on the day that table stopped being
+ * written, and fourteen API routes plus the person profile read this number.
+ *
+ * Three things changed with the model, all of them fixes:
+ *
+ *  1. WINDOW. It filtered on `Task.date`, the nullable legacy day anchor, so
+ *     every unscheduled task was invisible to both the numerator and the
+ *     denominator: a person who finished thirty undated tasks scored nothing.
+ *     It now counts by `createdAt`, which every task has.
+ *  2. MULTI-ASSIGNEE. `Task.assigneeId` was one person. An Item has an owner
+ *     and an assignee set, and a task assigned to somebody counts for them.
+ *  3. DONE. "done" is the one cross-surface rule, not a hardcoded
+ *     `status === "COMPLETED"`, so a List whose owner renamed its statuses
+ *     still scores. It resolves through each row's OWN List (`isDoneStatus`
+ *     over that List's status set), which is the only thing that can read a
+ *     renamed column: the name heuristic alone knows five words
+ *     (done/complete/completed/closed/resolved) and would score "Implemented",
+ *     "Rewarded" and "Shipped" as unfinished for ever. The Ideas list that
+ *     scripts/migrate-ideas.ts seeds is exactly that case, so the heuristic
+ *     was guaranteed wrong in every migrated org. Statuses are counted in JS
+ *     because the rule is per-List, not a column predicate.
+ *
+ * Archived rows are excluded: a task somebody deleted is not a task they
+ * failed to finish.
+ */
 async function calcTaskScore(userId: string): Promise<number | null> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const [total, completed] = await Promise.all([
-    prisma.task.count({ where: { assigneeId: userId, date: { gte: thirtyDaysAgo } } }),
-    prisma.task.count({ where: { assigneeId: userId, date: { gte: thirtyDaysAgo }, status: "COMPLETED" } }),
-  ]);
-  if (total === 0) return null;
-  return Math.round((completed / total) * 100);
+  const rows = await prisma.item.findMany({
+    where: {
+      archivedAt: null,
+      createdAt: { gte: thirtyDaysAgo },
+      OR: [{ ownerId: userId }, { assigneeIds: { has: userId } }],
+    },
+    select: { status: true, boardId: true },
+  });
+  if (rows.length === 0) return null;
+  // One read for the Lists in play, not one per row. `isDoneStatus` falls back
+  // to the shared name heuristic for a List with no set of its own, so a
+  // missing board row degrades the rule rather than the score.
+  const boards = await prisma.board.findMany({
+    where: { id: { in: Array.from(new Set(rows.map((r) => r.boardId))) } },
+    select: { id: true, statuses: true },
+  });
+  const statusesByBoard = new Map(boards.map((b) => [b.id, getBoardStatuses(b)]));
+  const completed = rows.filter((r) => isDoneStatus(statusesByBoard.get(r.boardId) ?? [], r.status)).length;
+  return Math.round((completed / rows.length) * 100);
 }
 
 async function calcKudosBonus(userId: string): Promise<number> {

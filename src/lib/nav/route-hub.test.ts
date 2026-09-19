@@ -49,6 +49,15 @@ function dashboardRoutes(): string[] {
       // The catch-all `[...rest]` is the no-match fallback itself (rule 3
       // renders it as Work's in-shell 404); it owns no URL and needs no row.
       if (entry.startsWith("[...")) continue;
+      // A PARALLEL-ROUTE SLOT owns no URL: "slots are not route segments and
+      // do not affect the URL structure" (Next's parallel-routes doc). And an
+      // INTERCEPTING directory, "(.)item", "(..)x", is a second renderer for
+      // a route that already exists somewhere else, so its row belongs to that
+      // route, not to a path of its own. The task drawer is both at once:
+      // (dashboard)/@drawer/(.)item/[id] re-renders /item/[id], whose ROUTE_HUB
+      // row is the one that answers for it.
+      if (entry.startsWith("@")) continue;
+      if (/^\(\.+\)/.test(entry)) continue;
       const full = path.join(dir, entry);
       if (!statSync(full).isDirectory()) continue;
       // A route group contributes no URL segment.
@@ -209,12 +218,39 @@ describe("ROUTE_HUB completeness", () => {
 
   it("exempts only genuine redirects from the completeness gate", () => {
     // An entry here is an exemption from the test above, so it must be a route
-    // that really redirects before a hub is computed. /today and /tasks are
-    // live pages and carry rows instead.
-    expect([...REDIRECT_ROUTES]).toEqual(["/dashboard"]);
-    expect(ROUTE_HUB["/today"]).toBe("home");
-    expect(ROUTE_HUB["/tasks"]).toBe("home");
-    expect(resolveHub("/tasks/board")).toBe("home");
+    // that really redirects before a hub is computed. All four do, as of
+    // Phase 2 Stage C: /today and /tasks joined /dashboard and
+    // /assigned-comments when /home and /my-work replaced them.
+    expect([...REDIRECT_ROUTES]).toEqual(["/today", "/dashboard", "/assigned-comments", "/tasks"]);
+    expect(ROUTE_HUB["/today"]).toBeUndefined();
+    expect(ROUTE_HUB["/tasks"]).toBeUndefined();
+    // Phase 2 W4: the seven legacy `/tasks/*` list pages are DELETED (their
+    // rows are Items now, and My work shows them), so none of them carries a
+    // row any more. Each one resolves to Work by the no-match fallback, which
+    // is the right hub and needs no table entry.
+    for (const gone of [
+      "/tasks/assigned-to-me",
+      "/tasks/today-overdue",
+      "/tasks/backlog",
+      "/tasks/board",
+      "/tasks/gantt",
+      "/tasks/sprint",
+      "/tasks/calendar",
+    ]) {
+      expect(ROUTE_HUB[gone], `${gone} is deleted and must not keep a row`).toBeUndefined();
+    }
+    // `/tasks/[id]` survives as a forwarder from a legacy task id to
+    // `/item/[id]`, and takes the same Work fallback.
+    expect(resolveHub("/tasks/cmu82l810000bh6xps9f6dmhf")).toBe("home");
+  });
+
+  it("lands the Work hub on /home, and /home is a real page", () => {
+    // spec-work-home section 2: "the rail 'Work' (its defaultHref becomes
+    // /home)". The old value, "/today", was itself a redirect into the
+    // viewer's first Space.
+    expect(WORK_HOME_HREF).toBe("/home");
+    expect(ROUTE_HUB["/home"]).toBe("home");
+    expect(ROUTE_HUB["/my-work"]).toBe("home");
   });
 
   it("never maps a redirected directory to a hub row", () => {

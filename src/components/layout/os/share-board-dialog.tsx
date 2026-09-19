@@ -52,9 +52,12 @@ interface Props {
 }
 
 const VISIBILITY_OPTIONS: { value: Visibility; label: string; blurb: string; Icon: typeof Lock }[] = [
-  { value: "WORKSPACE", label: "Inherit Space", blurb: "Members of the parent Space (default)", Icon: UsersIcon },
-  { value: "PRIVATE",   label: "Private",        blurb: "Tighter than Space — board members only", Icon: Lock },
-  { value: "ORG",       label: "Org-wide",       blurb: "Looser — every member of the org", Icon: Globe },
+  // The naming canon, not three private vocabularies: "Restricted" replaces
+  // Private on a Folder and a List, "Everyone in the org" replaces Org-wide and
+  // Workspace-visible, and a List's default inherits from its Space.
+  { value: "WORKSPACE", label: "Inherits from the Space", blurb: "Anyone who can open the Space (default)", Icon: UsersIcon },
+  { value: "PRIVATE",   label: "Restricted",              blurb: "Only the people listed below", Icon: Lock },
+  { value: "ORG",       label: "Everyone in the org",     blurb: "Every member of the organisation", Icon: Globe },
 ];
 
 // Labelled by what the role can DO, since that's what people are choosing:
@@ -258,9 +261,9 @@ export function ShareBoardDialog({
           <DialogTitle className="text-lg font-semibold">Share {boardName}</DialogTitle>
           <DialogDescription className="mt-1">
             {parentSpaceName ? (
-              <>Tighten or widen access to this board inside <span className="font-medium">{parentSpaceName}</span>.</>
+              <>Tighten or widen access to this list inside <span className="font-medium">{parentSpaceName}</span>.</>
             ) : (
-              <>Decide who can see this board.</>
+              <>Decide who can see this list.</>
             )}
           </DialogDescription>
         </div>
@@ -291,9 +294,15 @@ export function ShareBoardDialog({
               );
             })}
           </div>
-          <div className="mt-2 text-xs text-zinc-500 inline-flex items-start gap-1.5">
+          {/* `inline-flex` on a box of mixed text and <span>s makes EVERY text
+              node and span its own flex item, so this sentence rendered as
+              three fragments jammed across one row. The flex box now holds the
+              icon and ONE span, and the sentence is text inside that span. */}
+          <div className="mt-2 flex items-start gap-1.5 text-xs text-zinc-500">
             <Info className="h-3 w-3 mt-0.5 shrink-0" />
-            Anyone you add below gets access to <span className="font-medium">this list</span> — even without access to the Space. <span className="font-medium">Can edit</span> to work on it, <span className="font-medium">View only</span> to just see it.
+            <span>
+              Anyone you add below gets access to <span className="font-medium">this list</span>, even without access to the Space. <span className="font-medium">Can edit</span> to work on it, <span className="font-medium">View only</span> to just see it.
+            </span>
           </div>
         </div>
 
@@ -352,7 +361,7 @@ export function ShareBoardDialog({
             <SkeletonLines lines={2} />
           ) : members.length === 0 ? (
             <div className="text-sm text-zinc-400">
-              No one added to this list yet. Add someone above to give them direct access — the Space&apos;s own members keep their access either way.
+              No one added to this list yet. Add someone above to give them direct access. The Space&apos;s own members keep their access either way.
             </div>
           ) : (
             <ul className="rounded-lg border border-zinc-200 divide-y divide-zinc-100 max-h-[260px] overflow-y-auto">

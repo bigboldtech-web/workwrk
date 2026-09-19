@@ -155,6 +155,7 @@ export function ShellShortcuts() {
   }
   useShortcut({ ...canon["go-inbox"], scope: "global", run: () => router.push("/inbox") });
   useShortcut({ ...canon["go-home"], scope: "global", run: () => router.push(WORK_HOME_HREF) });
+  useShortcut({ ...canon["go-my-work"], scope: "global", run: () => router.push("/my-work") });
   // Esc is handled above before dispatch; this entry exists so the overlay
   // lists it while a layer is open, and it is a no-op otherwise.
   useShortcut({

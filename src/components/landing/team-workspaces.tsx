@@ -439,7 +439,7 @@ function FloatingLiveChip({ team }: { team: TeamData }) {
 
 function Workspace({ team, bodyKey }: { team: TeamData; bodyKey: number }) {
   return (
-    <div className="grid lg:grid-cols-[1fr_240px] gap-0">
+    <div className="grid grid-cols-1 lg:grid-cols-[1fr_240px] gap-0">
       {/* Main column */}
       <div className="p-6 lg:p-8">
         <WSHeader team={team} bodyKey={bodyKey} />
@@ -996,7 +996,7 @@ function OpsBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; body
 // 3. HR — Cycle dashboard + queue
 function HRBody({ hue, hueSoft, bodyKey }: { hue: string; hueSoft: string; bodyKey: number }) {
   return (
-    <div className="grid lg:grid-cols-[1.4fr_1fr] gap-3">
+    <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-3">
       <motion.div
         className="rounded-xl p-4 bg-white"
         style={{ border: "1px solid var(--m-border)" }}

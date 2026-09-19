@@ -165,6 +165,11 @@ export const APP_RULES: Record<AppKey, AppRule> = {
   // Work
   goals: { hub: "home", audience: "member", guest: "none" },
   trash: { hub: "home", audience: "member", guest: "none" },
+  // spec-spaces-lists section 1, "The `templates` app key": Work hub row plus
+  // the Task system > Templates link. Every Member browses and applies; "Save
+  // as template" needs Full access on the source object; Owner, Admin and the
+  // creator delete a "Made here" template. Guests never.
+  templates: { hub: "home", audience: "member", guest: "none" },
   // Planner
   timesheets: { hub: "planner", audience: "member", guest: "none" },
   // Docs

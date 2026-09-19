@@ -116,7 +116,14 @@ export function SpaceFilesCard({ spaceId, spaceName, canEdit }: { spaceId: strin
               {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Upload
             </button>
           </>
-        ) : null}
+        ) : (
+          // A refusal has to be readable. A "View only" grant on the Space no
+          // longer gets Upload or the per-row Delete, so say what the person
+          // holds and what to ask for instead of showing an empty toolbar.
+          <span className="text-xs text-ink-3">
+            View only · ask a space admin for Can edit to add or remove files
+          </span>
+        )}
       </div>
 
       {files === null ? (

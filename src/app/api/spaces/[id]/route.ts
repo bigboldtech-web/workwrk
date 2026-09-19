@@ -94,6 +94,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       return NextResponse.json({ error: "Couldn't delete this Space" }, { status: 400 });
     }
   }
-  const archived = await archiveSpace(id);
+  const archived = await archiveSpace(id, c.userId);
   return NextResponse.json({ space: archived });
 }

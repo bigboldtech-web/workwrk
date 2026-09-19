@@ -92,6 +92,24 @@ export function FilterPanel({ open, onClose, objects, activeCount = 0, onClearAl
   );
 }
 
+/**
+ * A section heading inside the panel: 11/600 uppercase, the same label style
+ * the sidebar sections use.
+ *
+ * Both /everything and /trash offer several groups of checkboxes (Space, List,
+ * Status, Priority; Type, Deleted by, Location) and rendered them as one
+ * undifferentiated run of rows, so a Space name and a status name sat in the
+ * same list with nothing saying which field either belonged to.
+ */
+export function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <li className="flex flex-col">
+      <span className="px-2 pb-1 pt-3 text-micro font-semibold uppercase tracking-wide text-ink-2">{label}</span>
+      <ul className="flex flex-col">{children}</ul>
+    </li>
+  );
+}
+
 /** One 36px checkbox row; `children` is the inline value control shown when checked. */
 export function FilterRow({ label, checked, onCheckedChange, children, count }: {
   label: ReactNode;

@@ -1,6 +1,6 @@
 "use client";
 
-// ItemChecklist — metadata-backed checklist (metadata.checklist = array of
+// ItemChecklist, metadata-backed checklist (metadata.checklist = array of
 // { text, done }). Add / toggle / remove; each change persists the whole
 // array via onSave. Mirrors the create-task modal's checklist shape.
 

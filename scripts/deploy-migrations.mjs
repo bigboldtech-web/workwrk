@@ -14,11 +14,116 @@
 //
 // Run with: node scripts/deploy-migrations.mjs
 import { Client } from "pg";
-import { readdirSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
+import { createHash } from "crypto";
 import { spawnSync } from "child_process";
 import "dotenv/config";
 
 const PRISMA_LOCK_ID = 72707369;
+
+// ── Hand-written SQL (prisma/sql) ─────────────────────────────────────
+//
+// WHY THIS EXISTS. `prisma migrate deploy` reads prisma/migrations and
+// nothing else, so for a long time the files in prisma/sql were applied
+// by hand on the box before each deploy. Miss one and the new release
+// meets a database without its tables: the deploy "succeeds" and the
+// product 500s. Applying them here closes that window, because this
+// script runs inside `npm run build`, before `next build` and therefore
+// before pm2 reloads onto the new release. A failure below exits non
+// zero, which aborts the build and leaves production on the old build.
+//
+// EXPLICIT MANIFEST, not a directory glob. A glob would auto-apply
+// whatever happens to be in the folder, including files that are not
+// idempotent or are deliberately withheld. Add a file here only after
+// reading it.
+//
+// NOT IN THE MANIFEST, on purpose:
+//   2026-07-21-operating-core.sql — 35 DDL statements with ZERO
+//   IF NOT EXISTS guards, so it is additive but NOT idempotent, and it
+//   belongs to the Operating Core work which is deliberately gated. The
+//   ledger below would apply it exactly once and safely, but nobody has
+//   asked for that feature to ship. Leave it to a decision, not a glob.
+const SQL_MANIFEST = [
+  "2026-09-18-task-detail-phase2.sql",
+  "2026-09-18-notification-cleared-at.sql",
+  "2026-09-19-canvas-folder.sql",
+  "2026-09-19-template-key.sql",
+];
+
+const LEDGER = `
+  CREATE TABLE IF NOT EXISTS "_sql_migrations" (
+    filename   TEXT PRIMARY KEY,
+    checksum   TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+
+/**
+ * Apply each manifest file exactly once, recording it in a ledger table.
+ *
+ * The ledger (rather than relying on IF NOT EXISTS everywhere) means a
+ * file that is NOT idempotent still applies safely, and a file whose
+ * content changed after it was applied is reported rather than re-run:
+ * re-running edited DDL is how a "safe" migration quietly becomes a
+ * destructive one. Each file runs in its own transaction, so a failure
+ * leaves no half-applied file behind.
+ */
+async function applyHandWrittenSql() {
+  // Deliberately NO statement_timeout here, unlike the migration-state client
+  // below which uses 15s. One of these files backfills a column across every
+  // row of Notification, and on a real org that single UPDATE can outlast any
+  // short timeout. A timeout would abort the transaction, roll the file back,
+  // and fail the deploy for no reason other than the table being big.
+  const client = new Client({ connectionString: url });
+  try {
+    await client.connect();
+  } catch (err) {
+    console.error(`deploy-migrations: cannot reach the database to apply prisma/sql (${err.code || err.message})`);
+    try { await client.end(); } catch {}
+    return false;
+  }
+  try {
+    await client.query(LEDGER);
+    const done = new Map(
+      (await client.query(`SELECT filename, checksum FROM "_sql_migrations"`)).rows.map((r) => [r.filename, r.checksum]),
+    );
+    for (const name of SQL_MANIFEST) {
+      const path = `prisma/sql/${name}`;
+      let sql;
+      try {
+        sql = readFileSync(path, "utf8");
+      } catch {
+        console.error(`deploy-migrations: ${path} is in the manifest but missing on disk`);
+        return false;
+      }
+      const sum = createHash("sha256").update(sql).digest("hex");
+      const seen = done.get(name);
+      if (seen === sum) {
+        console.log(`deploy-migrations: sql ${name} already applied`);
+        continue;
+      }
+      if (seen && seen !== sum) {
+        console.log(`deploy-migrations: WARNING ${name} changed after it was applied; NOT re-running it.`);
+        console.log("  If the change must reach this database, ship it as a NEW file in prisma/sql.");
+        continue;
+      }
+      console.log(`deploy-migrations: applying sql ${name}`);
+      try {
+        await client.query("BEGIN");
+        await client.query(sql);
+        await client.query(`INSERT INTO "_sql_migrations" (filename, checksum) VALUES ($1, $2)`, [name, sum]);
+        await client.query("COMMIT");
+        console.log(`deploy-migrations: applied ${name}`);
+      } catch (err) {
+        try { await client.query("ROLLBACK"); } catch {}
+        console.error(`deploy-migrations: ${name} FAILED, rolled back: ${err.message}`);
+        return false;
+      }
+    }
+    return true;
+  } finally {
+    try { await client.end(); } catch {}
+  }
+}
 
 const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
@@ -85,6 +190,14 @@ async function runPrismaDeployWithRetry(attempts = 3, delayMs = 15_000) {
     }
   }
   return false;
+}
+
+// Hand-written SQL first: the new release's code depends on these objects,
+// and `next build` runs after this script. Abort the whole build if any of
+// them fails rather than reloading onto a release the database cannot serve.
+if (!(await applyHandWrittenSql())) {
+  console.error("deploy-migrations: aborting the build; production stays on the previous release");
+  process.exit(1);
 }
 
 const onDisk = readdirSync("prisma/migrations", { withFileTypes: true })

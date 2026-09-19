@@ -204,6 +204,18 @@ export function filtersActive(f: BoardFilters): boolean {
 
 // ── Matching ───────────────────────────────────────────────────────
 
+/** Everyone on a task: the primary owner and every secondary assignee, with
+ *  no duplicates. The assignee filter used to read ownerId alone, so "Me"
+ *  hid every task somebody else was primary on even when the viewer was
+ *  assigned to it. */
+export function rowAssigneeIds(row: BoardItemRow): string[] {
+  const ids = new Set<string>();
+  if (row.ownerId) ids.add(row.ownerId);
+  for (const id of row.assigneeIds ?? []) if (id) ids.add(id);
+  for (const p of row.assignees ?? []) if (p?.id) ids.add(p.id);
+  return Array.from(ids);
+}
+
 function scalarFor(row: BoardItemRow, field: string): string {
   switch (field) {
     case "status": return row.status ?? "";
@@ -238,6 +250,18 @@ function matchesRule(row: BoardItemRow, rule: FilterRule): boolean {
       return due.getTime() > endOfDay.getTime();
     }
     return true;
+  }
+
+  // Assignee — membership in the WHOLE assignee set, not just the primary.
+  if (rule.field === "assignee") {
+    const ids = rowAssigneeIds(row);
+    switch (rule.operator) {
+      case "is": return ids.includes(rule.value);
+      case "isNot": return !ids.includes(rule.value);
+      case "isSet": return ids.length > 0;
+      case "isNotSet": return ids.length === 0;
+      default: return true;
+    }
   }
 
   // Tags — membership in the row's tag list.
@@ -280,10 +304,13 @@ export function applyFilters(items: BoardItemRow[], f: BoardFilters, statuses: S
       if (!ok) return false;
     }
     if (q) {
-      const owner = it.owner ? `${it.owner.firstName ?? ""} ${it.owner.lastName ?? ""}`.toLowerCase() : "";
+      const people = (it.assignees?.length ? it.assignees : it.owner ? [it.owner] : [])
+        .map((p) => `${p.firstName ?? ""} ${p.lastName ?? ""}`)
+        .join(" ")
+        .toLowerCase();
       const tagNames = (it.tags ?? []).map((t) => t.name.toLowerCase()).join(" ");
       const desc = typeof it.metadata?.description === "string" ? (it.metadata.description as string).toLowerCase() : "";
-      const hay = `${it.title.toLowerCase()} ${owner} ${tagNames} ${desc}`;
+      const hay = `${it.title.toLowerCase()} ${people} ${tagNames} ${desc}`;
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -317,12 +344,14 @@ interface FilterMenuProps {
   items: BoardItemRow[];
   /** Custom fields (Board.schema.fields) — each is filterable as text. */
   customFields?: FieldDef[];
+  /** Scopes the Assignee value dropdown to the people on this list. */
+  boardId?: string | null;
   savedFilters?: SavedFilter[];
   /** Absent → the Saved section is hidden (no view to persist into). */
   onSavedFiltersChange?: (next: SavedFilter[]) => void;
 }
 
-export function FilterMenu({ filters, onChange, statuses, items, customFields = [], savedFilters = [], onSavedFiltersChange }: FilterMenuProps) {
+export function FilterMenu({ filters, onChange, statuses, items, customFields = [], boardId, savedFilters = [], onSavedFiltersChange }: FilterMenuProps) {
   const [open, setOpen] = useState(false);
   const [saveName, setSaveName] = useState("");
   const ref = useRef<HTMLDivElement>(null);
@@ -342,18 +371,23 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Org members for the Assignee value dropdown — same endpoint the
-  // AssigneePicker searches ({ data: [...] } from /api/users).
+  // Candidates for the Assignee value dropdown — the same source the
+  // AssigneePicker uses, so the filter offers exactly the people who can
+  // hold a task on this list. Without a board in scope it falls back to
+  // /api/users, which is what this always called.
   const [members, setMembers] = useState<PersonRef[] | null>(null);
   useEffect(() => {
     if (!open || members !== null) return;
     let active = true;
-    fetch(`/api/users?${new URLSearchParams({ scope: "all", limit: "50" })}`, { cache: "no-store" })
+    const url = boardId
+      ? `/api/boards/${encodeURIComponent(boardId)}/assignable?limit=200`
+      : `/api/users?${new URLSearchParams({ scope: "all", limit: "200" })}`;
+    fetch(url, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : { data: [] }))
       .then((d) => { if (active) setMembers(Array.isArray(d?.data) ? (d.data as PersonRef[]) : []); })
       .catch(() => { if (active) setMembers([]); });
     return () => { active = false; };
-  }, [open, members]);
+  }, [open, members, boardId]);
 
   const tags = useMemo(() => {
     const map = new Map<string, ItemTag>();
@@ -467,7 +501,10 @@ export function FilterMenu({ filters, onChange, statuses, items, customFields = 
                       </select>
                     ) : rule.field === "assignee" ? (
                       <select value={rule.value} onChange={(e) => update(rule.id, { value: e.target.value })} className={`${selectCls} flex-1 min-w-0`} aria-label="Filter value">
-                        <option value="">{members === null ? "Loading…" : "Select…"}</option>
+                        {/* Not "Loading...": a <select> cannot hold a skeleton, so the
+                            empty option says what it IS, an empty option, and
+                            the list fills in when the people arrive. */}
+                        <option value="">Select…</option>
                         {(members ?? []).map((p) => (
                           <option key={p.id} value={p.id}>{`${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "Unknown"}</option>
                         ))}

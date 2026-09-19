@@ -19,6 +19,7 @@ import {
   CATALOG_APPS, CATEGORY_ORDER, ALWAYS_PINNED_KEYS, DEFAULT_PINNED_KEYS,
   canAccessApp, type AppEntry,
 } from "@/components/layout/os/apps-catalog";
+import { WORK_HOME_HREF } from "@/lib/nav/route-hub";
 
 interface DepartmentOption { id: string; label: string; description: string; Icon: LucideIcon; gradient: string }
 const DEPARTMENTS: DepartmentOption[] = [
@@ -87,7 +88,7 @@ export default function OnboardPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/setup").then((r) => r.json()).then((d) => { if (d.setupCompleted) router.push("/today"); }).catch(() => {});
+    fetch("/api/setup").then((r) => r.json()).then((d) => { if (d.setupCompleted) router.push(WORK_HOME_HREF); }).catch(() => {});
   }, [router]);
 
   const apps = useMemo<AppEntry[]>(
@@ -257,7 +258,7 @@ export default function OnboardPage() {
               ))}
             </ul>
           </div>
-          <button type="button" onClick={() => router.push("/today")} className="mt-7 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
+          <button type="button" onClick={() => router.push(WORK_HOME_HREF)} className="mt-7 inline-flex items-center gap-2 rounded-xl px-6 py-3 text-base font-semibold text-white shadow-lg transition hover:opacity-95 hover:shadow-xl" style={{ background: CTA }}>
             Go to my workspace <ArrowRight className="h-4 w-4" />
           </button>
         </div>

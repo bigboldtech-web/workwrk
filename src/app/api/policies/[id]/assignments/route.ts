@@ -103,7 +103,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     data: resolved.map((uid) => ({
       title: "Policy to acknowledge",
       message: `Please review & acknowledge "${policy.title}".`,
-      type: "POLICY",
+      type: "policy",
       link: `/policies/${id}`,
       userId: uid,
     })),

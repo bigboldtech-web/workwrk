@@ -16,6 +16,7 @@ import {
 import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
 import { NewViewTrigger } from "@/components/board-view/view-create-popover";
 import { ViewTabContextMenu } from "@/components/board-view/view-tab-menu";
+import { useOsToast } from "@/components/layout/os/toast";
 import type { ViewType } from "@/generated/prisma";
 
 const VIEW_ICONS: Record<ViewType, LucideIcon> = {
@@ -75,17 +76,25 @@ export function BoardViewTabs({
   activeViewId,
   defaultViewId,
   basePath,
+  canManage = true,
 }: {
   views: BoardViewItem[];
   boardId: string;
   boardSlug: string;
   activeViewId: string | null;
   defaultViewId: string | null;
-  /** URL the tabs link to (default `/boards/<slug>`). The Personal List passes
-   *  `/tasks/personal-list` so its tabs stay on that route. */
+  /** URL the tabs link to (default `/boards/<slug>`). The Personal list passes
+   *  `/my-work/personal` so its tabs stay on that route. */
   basePath?: string;
+  /**
+   * Full access on the List. Below it a person may still SWITCH views, which
+   * is reading, but not create or reorder them: "+ View" and the drag both
+   * write, and both answered 403 while still being rendered.
+   */
+  canManage?: boolean;
 }) {
   const router = useRouter();
+  const { toast } = useOsToast();
   // Local order so a drag reorders instantly; re-syncs when the server view set
   // changes (add / delete / refresh).
   const [order, setOrder] = useState<BoardViewItem[]>(views);
@@ -111,18 +120,36 @@ export function BoardViewTabs({
     });
   }
 
+  // ONE REQUEST, AND IT SAYS WHEN IT FAILS. This fired one PATCH per view
+  // inside a `Promise.all` whose every rejection was swallowed, so a drag on a
+  // List the person could not manage (and every drag on the space-less Personal
+  // List, where the per-view route answered 404) snapped back in silence.
+  // `PATCH /api/boards/[id]/views/order` writes the whole order in one
+  // transaction or none of it.
   function endDrag() {
     setDragId(null);
     if (!movedRef.current) return;
     movedRef.current = false;
-    // Persist the final order (displayOrder 0..n), then re-sync from server.
-    void Promise.all(order.map((v, i) =>
-      fetch(`/api/boards/${boardId}/views/${v.id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ displayOrder: i }),
-      }).catch(() => {}),
-    )).then(() => router.refresh());
+    const attempted = order.map((v) => v.id);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/boards/${boardId}/views/order`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ids: attempted }),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          setOrder(views);
+          toast(d?.error ?? "Couldn't save the view order");
+          return;
+        }
+        router.refresh();
+      } catch {
+        setOrder(views);
+        toast("Couldn't save the view order");
+      }
+    })();
   }
 
   return (
@@ -142,12 +169,12 @@ export function BoardViewTabs({
         return (
           <span
             key={v.id}
-            draggable
-            onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; setDragId(v.id); }}
-            onDragOver={(e) => { e.preventDefault(); liveReorder(v.id); }}
+            draggable={canManage}
+            onDragStart={(e) => { if (!canManage) return; e.dataTransfer.effectAllowed = "move"; setDragId(v.id); }}
+            onDragOver={(e) => { if (!canManage) return; e.preventDefault(); liveReorder(v.id); }}
             onDrop={(e) => e.preventDefault()}
             onDragEnd={endDrag}
-            className={`inline-flex items-stretch cursor-grab active:cursor-grabbing transition-[opacity] ${dragId === v.id ? "opacity-40" : ""}`}
+            className={`inline-flex items-stretch transition-[opacity] ${canManage ? "cursor-grab active:cursor-grabbing" : ""} ${dragId === v.id ? "opacity-40" : ""}`}
           >
             <ViewTabContextMenu boardId={boardId} view={v}>
               <ViewTab
@@ -161,10 +188,14 @@ export function BoardViewTabs({
           </span>
         );
       })}
-      <div className="w-px h-3.5 bg-zinc-300 mx-1 self-center" />
-      <span className="inline-flex items-center self-center">
-        <NewViewTrigger boardId={boardId} />
-      </span>
+      {canManage ? (
+        <>
+          <div className="w-px h-3.5 bg-line-strong mx-1 self-center" />
+          <span className="inline-flex items-center self-center">
+            <NewViewTrigger boardId={boardId} />
+          </span>
+        </>
+      ) : null}
     </ViewTabStrip>
   );
 }

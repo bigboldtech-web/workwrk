@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_STATUS_OPTIONS, type BoardItemRow } from "@/lib/board-items-shared";
+import { openTask } from "@/lib/nav/open-task";
 import {
   DEFAULT_WORKLOAD_SETTINGS,
   WorkloadGrid,
@@ -64,7 +65,7 @@ export function TeamWorkloadView({ items, people }: { items: BoardItemRow[]; peo
       settings={settings}
       canEdit
       onSettingsChange={handleSettingsChange}
-      onOpenItem={(id) => router.push(`/item/${id}`)}
+      onOpenItem={(id) => openTask(router, id)}
     />
   );
 }

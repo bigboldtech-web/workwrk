@@ -4,15 +4,15 @@
 //
 // Header ("Docs" + create button) is rendered by ClickSidebarBody; this is the
 // scrolling body: a fixed nav (All Docs / My Docs / Shared with me / Private /
-// Meeting Notes / Archived) that drives the main list via ?view=, then
-// Favorites, Recent Pages and Popular Wikis sections.
+// Meeting Notes) that drives the main list via ?view=, then Favorites, Recent
+// Pages and Popular Wikis sections, and one Trash row at the foot.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
-  FileText, User, Users, Lock, Archive, NotebookPen, Star, BookOpen,
+  FileText, User, Users, Lock, NotebookPen, Star, BookOpen,
   MoreHorizontal, ChevronRight, Plus, Brush, Folder, Video, ScrollText,
   ShieldCheck, FileSignature, Workflow, BarChart3, Trash2, type LucideIcon,
 } from "lucide-react";
@@ -69,7 +69,18 @@ const PROCESS_ROWS: Array<{
   { href: "/policies/compliance", label: "Policy compliance", Icon: BarChart3, hrAdminOnly: true },
   { href: "/agreements", label: "All contracts", Icon: FileSignature, match: "exact", hrAdminOnly: true },
   { href: "/agreements?view=templates", label: "Contract templates", Icon: Folder, hrAdminOnly: true },
-  { href: "/agreements?view=trash", label: "Contract trash", Icon: Trash2, hrAdminOnly: true },
+  // ONE Trash row, for every hub, with ONE label (naming-canon 2.12: "there
+  // is no second Trash row in any other hub sidebar"; sidebar-map section 6
+  // row 18 gives the Docs hub exactly `Trash` -> /trash?type=doc).
+  //
+  // This row used to read "Contract trash" and point at the contracts cut,
+  // which left a Docs person reaching for their own deleted docs looking at a
+  // row named after contracts, and left the docs cut with no row at all. The
+  // contracts cut is not lost: /agreements?view=trash still 308s to
+  // /trash?type=contract, and the Trash page's own type filter carries every
+  // type including Contracts. It is not hrAdminOnly either, because Trash is
+  // a Member's page and each row inside it is gated on its own.
+  { href: "/trash?type=doc", label: "Trash", Icon: Trash2 },
 ];
 
 const DOCS_HUB_ROWS = [...CONTENT_ROWS, ...PROCESS_ROWS];
@@ -163,7 +174,12 @@ export function DocsSidebar() {
     { key: "shared", label: "Shared with me", Icon: Users, badge: sharedCount },
     { key: "private", label: "Private", Icon: Lock },
     { key: "meeting", label: "Meeting Notes", Icon: NotebookPen },
-    { key: "archived", label: "Archived", Icon: Archive },
+    // No "Archived" row. /docs?view=archived now 308s to the one Trash, so
+    // this row ejected the reader out of the Docs hub into Work: the rail
+    // pill flipped, this sidebar was replaced, and the row could never go
+    // active because its URL no longer resolved to itself. Archived docs are
+    // reached from the Trash row at the foot of this sidebar, on its
+    // Archived tab.
   ];
 
   return (

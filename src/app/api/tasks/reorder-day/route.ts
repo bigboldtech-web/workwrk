@@ -1,51 +1,30 @@
-import { NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
+// /api/tasks/reorder-day, RETIRED (410 Gone).
+//
+// Phase 2 W4, docs/plans/ui-refresh/spec-work-home.md section 4. Every task in
+// this product is an `Item`. This route served the legacy `Task` table, whose
+// rows were copied onto Items by scripts/migrate-legacy-tasks.ts; the table
+// itself is kept readable for one release and is NOT deleted here.
+//
+// It answers 410 with a body naming its replacement for one release, so any
+// caller outside this repo is told where to go rather than being handed the
+// App Router's 404 HTML. The file comes out in the release after this one.
 
-/**
- * Batch-update Task.dayPosition for a within-day drag-reorder in the
- * week view. Body: `{ items: [{ id, dayPosition }, ...] }`.
- *
- * We restrict the batch to the caller's own assigned tasks — there's
- * no use case yet for reordering somebody else's day. Managers who
- * want to reschedule other people's work do it via the usual edit
- * surface, not drag-reorder.
- */
-export async function POST(req: NextRequest) {
-  const { error, session } = await getSessionOrFail();
-  if (error) return error;
-  const orgId = getOrgId(session);
-  const userId = getUserId(session);
+import { gone, RETIRED_TASK_ROUTES } from "@/lib/work/legacy-task-api";
 
-  const body = await req.json().catch(() => null);
-  const items = body?.items;
-  if (!Array.isArray(items) || items.length === 0) {
-    return jsonError("Provide a non-empty items array");
-  }
-  if (items.length > 500) return jsonError("Too many items in one reorder");
-  for (const it of items) {
-    if (typeof it?.id !== "string" || typeof it?.dayPosition !== "number") {
-      return jsonError("Each item must be { id: string, dayPosition: number }");
-    }
-  }
+const ROUTE = "/api/tasks/reorder-day";
+const R = RETIRED_TASK_ROUTES[ROUTE];
 
-  const ids = items.map((i: any) => i.id);
-  const owned = await prisma.task.findMany({
-    where: { id: { in: ids }, organizationId: orgId, assigneeId: userId },
-    select: { id: true },
-  });
-  if (owned.length !== items.length) {
-    return jsonError("One or more tasks aren't yours to reorder", 403);
-  }
-
-  await prisma.$transaction(
-    items.map((it: { id: string; dayPosition: number }) =>
-      prisma.task.update({
-        where: { id: it.id },
-        data: { dayPosition: it.dayPosition },
-      })
-    )
-  );
-
-  return jsonSuccess({ reordered: items.length });
+function retired() {
+  return gone(ROUTE, R.replacement, R.detail);
 }
+
+export const dynamic = "force-dynamic";
+
+export async function POST() {
+  return retired();
+}
+
+export async function PATCH() {
+  return retired();
+}
+

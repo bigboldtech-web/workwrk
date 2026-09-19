@@ -8,6 +8,7 @@ import { z } from "zod";
 import { canContributeBoard, canReadBoard, getBoardForReader } from "@/lib/board";
 import { createBoardItem, getBoardItemRow, listBoardItems, PRIORITY_OPTIONS } from "@/lib/board-items";
 import { notifyItemAssigned } from "@/lib/notify-item";
+import { unknownUserIds } from "@/lib/assignable";
 
 async function ctx() {
   const session = await getServerSession(authOptions);
@@ -36,8 +37,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 const createSchema = z.object({
   title: z.string().min(1).max(280),
   status: z.string().max(40).optional(),
-  ownerId: z.string().min(1).nullable().optional(),
-  assigneeIds: z.array(z.string().min(1)).max(50).optional(),
+  // Shape-checked here, existence-checked against the org below. These columns
+  // carry no foreign key, so nothing else refuses a typo or a 5000-character
+  // string. See the same pair in PATCH /api/items/[id].
+  ownerId: z.string().trim().min(1).max(64).nullable().optional(),
+  assigneeIds: z.array(z.string().trim().min(1).max(64)).max(50).optional(),
   groupKey: z.string().max(80).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   // Phase 58 — optional scheduling on create.
@@ -71,6 +75,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid body", issues: parsed.error.issues }, { status: 400 });
+  }
+  // A task may only be created FOR a real, live person in this org: the
+  // assignee columns have no foreign key, so an unchecked id lands in the row
+  // and, once owner-only patches started merging, never leaves it again.
+  const proposedUserIds = [
+    ...(parsed.data.assigneeIds ?? []),
+    ...(typeof parsed.data.ownerId === "string" ? [parsed.data.ownerId] : []),
+  ];
+  if (proposedUserIds.length > 0) {
+    const unknown = await unknownUserIds(proposedUserIds, c.organizationId);
+    if (unknown.length > 0) {
+      return NextResponse.json(
+        { error: "no_access", reason: "unknown_assignee", requestAccess: false },
+        { status: 400 },
+      );
+    }
   }
   try {
     const item = await createBoardItem({

@@ -13,6 +13,7 @@
 //   - apply({ orgId, userId }) → { created: { ...counts } }
 
 import { prisma } from "@/lib/prisma";
+import { createPersonalTask } from "@/lib/work/personal-task";
 
 export interface TemplateContext {
   orgId: string;
@@ -300,22 +301,42 @@ const personalTodoStarter: CatalogTemplate = {
   name: "Personal todo starter",
   tagline: "5 sample tasks across this week",
   productSlug: "workwrk-work",
+  // Phase 2 W4. These five rows were written into the legacy `Task` table,
+  // whose entire UI is deleted in this release, so a person who applied this
+  // template was told "5 tasks created" and then could not find one of them
+  // anywhere in the product. They are Items on the applier's Personal list
+  // now, which is where the template's own name says they belong and where
+  // /my-work and /my-work/personal both show them.
   apply: async (ctx) => {
     const today = new Date();
     const tomorrow = new Date(today.getTime() + 86400000);
     const inAWeek = new Date(today.getTime() + 7 * 86400000);
 
-    await prisma.task.createMany({
-      data: [
-        { organizationId: ctx.orgId, title: "Review pull request #421", description: "Review the new Sidekick agent persistence logic", priority: "HIGH", date: today, assigneeId: ctx.userId, source: "MANUAL" },
-        { organizationId: ctx.orgId, title: "1:1 prep — agenda for Friday", description: "Pull last week's action items + draft this week's topics", priority: "NORMAL", date: tomorrow, assigneeId: ctx.userId, source: "MANUAL" },
-        { organizationId: ctx.orgId, title: "Write retrospective notes from last sprint", description: "What went well · What didn't · What we'll try next sprint", priority: "NORMAL", date: tomorrow, assigneeId: ctx.userId, source: "MANUAL" },
-        { organizationId: ctx.orgId, title: "Update OKR mid-quarter check-in", description: "Confidence scores + risks for each KR", priority: "NORMAL", date: inAWeek, assigneeId: ctx.userId, source: "MANUAL" },
-        { organizationId: ctx.orgId, title: "Read 'High Output Management' chapter 4", description: "Continuing the weekly book habit", priority: "LOW", date: inAWeek, assigneeId: ctx.userId, source: "MANUAL" },
-      ],
-    });
+    const seed: Array<{ title: string; description: string; priority: string; dueAt: Date }> = [
+      { title: "Review pull request #421", description: "Review the new Sidekick agent persistence logic", priority: "HIGH", dueAt: today },
+      { title: "1:1 prep, agenda for Friday", description: "Pull last week's action items and draft this week's topics", priority: "NORMAL", dueAt: tomorrow },
+      { title: "Write retrospective notes from last sprint", description: "What went well · What didn't · What we'll try next sprint", priority: "NORMAL", dueAt: tomorrow },
+      { title: "Update OKR mid-quarter check-in", description: "Confidence scores and risks for each KR", priority: "NORMAL", dueAt: inAWeek },
+      { title: "Read 'High Output Management' chapter 4", description: "Continuing the weekly book habit", priority: "LOW", dueAt: inAWeek },
+    ];
 
-    return { tasks: 5 };
+    // Sequential on purpose: the first call provisions the Personal list if the
+    // person has never opened one, and five concurrent provisions race.
+    let tasks = 0;
+    for (const row of seed) {
+      await createPersonalTask({
+        organizationId: ctx.orgId,
+        assigneeId: ctx.userId,
+        title: row.title,
+        description: row.description,
+        priority: row.priority,
+        dueAt: row.dueAt,
+        actorId: ctx.userId,
+      });
+      tasks += 1;
+    }
+
+    return { tasks };
   },
 };
 

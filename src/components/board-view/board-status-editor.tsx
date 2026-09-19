@@ -13,8 +13,9 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { GripVertical, Loader2, Plus, RotateCcw, X } from "lucide-react";
+import { GripVertical, Plus, RotateCcw, X } from "lucide-react";
 import type { StatusGroup, StatusOption } from "@/lib/board-items-shared";
+import { Dots } from "@/components/ui/dots";
 
 // Same palette family the Space wizard presets draw from.
 const COLOR_CHOICES = [
@@ -288,7 +289,7 @@ export function BoardStatusEditor({ boardId, open, canEdit, statuses, onClose }:
               disabled={busy || !dirty || draft.length === 0}
               className="inline-flex items-center gap-1.5 h-8 px-4 rounded-lg text-base font-medium text-white bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50"
             >
-              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              {busy ? <Dots variant="pending" /> : null}
               Save
             </button>
           </div>

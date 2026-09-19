@@ -79,6 +79,14 @@ export const sidebarPatchSchema = z.strictObject({
   quickTools: stringList.optional(),
   collapsedSections: stringList.optional(),
   hiddenSections: stringList.optional(),
+  // 9.2 personal Spaces-tree state (spec-spaces-lists section 4). Today the
+  // tree keeps both in module-level Maps that a reload throws away, so an
+  // expanded Space collapses on every navigation. `expanded` holds the ids of
+  // open Space and Folder rows; `hiddenSpaceIds` holds the Spaces the viewer
+  // chose to hide from their own tree (never a grant, the Space stays
+  // reachable from /spaces, which is what "Show hidden Spaces" reopens).
+  expanded: stringList.optional(),
+  hiddenSpaceIds: stringList.optional(),
   // ORG-ONLY: the rail config lives on OrgPreference.sidebarDefault.apps and
   // getEffectivePreferences re-stamps it from the org row. Accepted here so
   // a typed client body that carries it is not a 400, then DROPPED by the
@@ -88,11 +96,32 @@ export const sidebarPatchSchema = z.strictObject({
 
 // ── home ──────────────────────────────────────────────────────────
 
-/** Inbox display prefs (was a stripped top-level `inbox` key; spec 7.3). */
+/**
+ * Inbox display prefs (was a stripped top-level `inbox` key; spec 7.3).
+ *
+ * Every switch in the Inbox's "…" > Inbox options writes here, and this is a
+ * `strictObject`, so a key the Inbox writes and this schema does not name is a
+ * 400 and a preference that silently never persists. That is exactly what used
+ * to happen: the page PATCHed a top-level `{ inbox }` that the schema stripped,
+ * so not one of its display switches survived a reload.
+ */
 export const inboxViewSchema = z.strictObject({
+  /** "Show everything in Other": Other also lists the Primary rows. */
   showAll: z.boolean().optional(),
   groupByDate: z.boolean().optional(),
   sortNewest: z.boolean().optional(),
+  /**
+   * Days after which READ rows are swept by the daily auto-clear cron
+   * (scripts/CRON-SETUP.md). `null` is "Never", which is the default: nothing
+   * deletes a person's notifications unless they asked for it.
+   */
+  autoClearDays: z.number().int().min(1).max(365).nullable().optional(),
+  /** Which tab the Inbox opens on. Only the three a person reads. */
+  defaultTab: z.enum(["primary", "other", "mentions"]).optional(),
+  /**
+   * Legacy: "Fullscreen vs Inline", two modes that rendered the same list.
+   * Accepted and ignored for one release (spec 9.3), then removed.
+   */
   mode: z.enum(["fullscreen", "inline"]).optional(),
 });
 
@@ -135,11 +164,59 @@ export const uiPatchSchema = z.strictObject({
   contrast: z.enum(["normal", "high"]).optional(),
 });
 
+/**
+ * `home.work.surface` is keyed by view id AND by a small set of reserved
+ * surface names (spec-work-home and spec-spaces-lists both write per-surface
+ * view options). Two writers share one namespace, so the reserved names are
+ * listed here and nowhere else; a view id can never collide with one because
+ * ids are cuids and every reserved name is a lowercase word.
+ */
+export const RESERVED_SURFACE_KEYS: readonly string[] = [
+  "home",
+  "my-work",
+  "everything",
+  "favorites",
+  "inbox",
+  "activity",
+  "spaces",
+  "space",
+  "folder",
+  "templates",
+  "trash",
+];
+
 export const workPatchSchema = z.strictObject({
   savedFilters: z.array(z.unknown()).optional(),
+  /**
+   * /everything's saved views, same shape as `savedFilters` (SavedWorkFilter).
+   *
+   * A separate key, not a shared one: /my-work is "tasks assigned to me" and
+   * /everything is "every task I can see", so a view saved on one describes a
+   * set the other does not have. spec-work-home section 2 (/everything) names
+   * `home.work.everythingFilters[]` for exactly that reason.
+   */
+  everythingFilters: z.array(z.unknown()).optional(),
   pinnedViews: stringList.optional(),
-  /** Per-view TaskListSurface options, keyed by view id. */
+  /**
+   * Per-surface and per-view options, keyed by view id or by one of
+   * RESERVED_SURFACE_KEYS. Loose values: each surface owns its own shape.
+   */
   surface: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Per-viewer overrides of a shared saved view (sort, group, columns) so one
+   * person re-sorting a shared view never re-sorts it for the team. Keyed by
+   * view id.
+   */
+  viewOverrides: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * Which task-detail fields the viewer keeps visible, per List
+   * (spec-task-detail section 2, the "+ Add field" door). Keyed by List id;
+   * the value is the checked field keys. A field that HAS a value is shown
+   * whether or not it is checked, that rule lives in the reader, not here.
+   */
+  itemFields: z.record(z.string(), stringList).optional(),
+  /** Task drawer width in pixels; the design system clamps it to 480..720. */
+  drawerWidth: z.number().int().min(480).max(720).optional(),
 });
 
 export const homePatchSchema = z.strictObject({

@@ -13,6 +13,8 @@ import { createEntityLink } from "@/lib/entity-link";
 import { legacyIsAdminLevel } from "@/lib/access/legacy-levels";
 import { legacyAllows } from "@/lib/access/parity";
 import { emptyLegacyInputs, loadSpaceInputs } from "@/lib/access/legacy-facts";
+import { spaceContainerRole, type ContainerRole } from "@/lib/work/container-menu";
+import { withArchivedBy } from "@/lib/archived-by";
 
 export interface SpaceSummary {
   id: string;
@@ -29,6 +31,13 @@ export interface SpaceSummary {
   memberCount: number;
   folderCount: number;
   boardCount: number;
+  /**
+   * The viewer's object role on this Space ("full" | "edit" | "view"), derived
+   * from the same membership `canEditSpace` / `canContributeSpace` read. Every
+   * surface that renders a container "…" needs it, and the sidebar cannot
+   * afford one async access call per row.
+   */
+  role: ContainerRole;
 }
 
 function toSlug(name: string): string {
@@ -39,6 +48,17 @@ function toSlug(name: string): string {
       .replace(/^-+|-+$/g, "")
       .slice(0, 50) || "space"
   );
+}
+
+/**
+ * A free Space slug for `name` in this org.
+ *
+ * Exported because `POST /api/spaces/[id]/duplicate` needs the same rule the
+ * create path uses; two copies of a uniqueness loop is how "Design (copy)" and
+ * "Design (copy)" end up fighting over one slug.
+ */
+export async function uniqueSpaceSlug(organizationId: string, name: string): Promise<string> {
+  return uniqueSlug(organizationId, toSlug(name));
 }
 
 async function uniqueSlug(organizationId: string, desired: string): Promise<string> {
@@ -122,6 +142,8 @@ export async function listSpacesForUser(
           boards: { where: { archivedAt: null } },
         },
       },
+      // The viewer's own membership row, for the per-Space role below.
+      members: { where: { userId }, select: { role: true }, take: 1 },
     },
   });
 
@@ -140,6 +162,7 @@ export async function listSpacesForUser(
     memberCount: s._count.members,
     folderCount: s._count.folders,
     boardCount: s._count.boards,
+    role: spaceContainerRole({ isOrgAdmin: isAdmin, memberRole: s.members[0]?.role ?? null }),
   }));
 }
 
@@ -341,6 +364,9 @@ export async function createSpace(input: CreateSpaceInput): Promise<SpaceSummary
     memberCount: ownerOverride ? 2 : 1,
     folderCount: 0,
     boardCount: 0,
+    // The creator is OWNER (or ADMIN when they named someone else), so either
+    // way they hold Full access on the Space they just made.
+    role: "full" as const,
   };
 }
 
@@ -385,11 +411,13 @@ export async function updateSpace(spaceId: string, patch: UpdateSpaceInput) {
 }
 
 /** Soft-archive. archivedAt is set; Phase 2 ships the trash bin UI for restore. */
-export async function archiveSpace(spaceId: string) {
-  return prisma.space.update({
-    where: { id: spaceId },
-    data: { archivedAt: new Date() },
-  });
+export async function archiveSpace(spaceId: string, actorId: string | null = null) {
+  // Who archived it, so Trash's "Archived by" names the archiver rather than
+  // the owner. Null when the caller has no actor: a blank cell is honest.
+  // withArchivedBy keeps the archive working if the column is not there yet.
+  return withArchivedBy(actorId, (extra) =>
+    prisma.space.update({ where: { id: spaceId }, data: { archivedAt: new Date(), ...extra } }),
+  );
 }
 
 export async function unarchiveSpace(spaceId: string) {

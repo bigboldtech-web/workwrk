@@ -92,7 +92,7 @@ export function BentoNav({ links = defaultLinks }: { links?: NavLink[] }) {
             <CurrencySwitcher />
           </div>
           {isLoggedIn ? (
-            <Link href="/dashboard" className="bento-btn bento-btn-lime">
+            <Link href="/home" className="bento-btn bento-btn-lime">
               {t("dashboard")} <span className="arr">→</span>
             </Link>
           ) : (

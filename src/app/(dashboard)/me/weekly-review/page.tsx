@@ -1,41 +1,67 @@
-// /me/weekly-review — the heartbeat surface.
+// /me/weekly-review: your weekly check-in.
 //
-// SSR page resolves the current-week review (auto-creates a DRAFT)
-// and hands it to a client form for editing. Sections:
-//   - KRA progress sliders (one per active KRA assignment)
-//   - KPI snapshot inputs (one per active KPI under those KRAs)
-//   - Highlights / Blockers / Plan text areas
-//   - Save draft / Submit / (if SUBMITTED) Reopen
+// Spec: docs/plans/ui-refresh/spec-work-home.md section 2 (/me/weekly-review).
 //
-// Status banner reflects DRAFT / SUBMITTED / ACKNOWLEDGED + manager
-// status (PENDING / APPROVED / CHANGES_REQUESTED).
+// WHAT CHANGED. The page had a hand-rolled "Today › Weekly review" breadcrumb
+// under a 2xl h1, no hub sidebar, no way back to any other week (so a review
+// written on Friday was unreachable on Monday: work-tasks 1.15, misc-apps
+// 1.25), a subline that told people the cadence was mandatory, an empty state
+// that printed a raw path ("/kra-kpi"), and an explicit "Save draft" button
+// with no autosave at all, on a form people type paragraphs into.
+//
+// Now: the standard header stack with a BackButton and the AutosaveIndicator,
+// eight week pills with a dot on the submitted ones, and every field saving on
+// blur and two seconds after the last keystroke.
+//
+// ONLY THE CURRENT WEEK AUTO-CREATES A DRAFT. Clicking back through the pills
+// reads; it never writes eight empty reviews into a manager's history.
 
-import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { gatePage } from "@/lib/access/gate";
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getOrCreateWeeklyReview, formatWeekRange } from "@/lib/weekly-review";
-import { WeeklyReviewForm } from "@/components/me/weekly-review-form";
-import Link from "next/link";
-import { ChevronRight, ClipboardCheck } from "lucide-react";
+import { getOrCreateWeeklyReview } from "@/lib/weekly-review";
+import { isCurrentWeek, parseWeekKey, weekKey, weekOptions, weekStartOf } from "@/lib/weeks";
+import { WeeklyReviewClient } from "./weekly-review-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function WeeklyReviewPage() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) redirect("/login");
-  const u = session.user as { id?: string; organizationId?: string };
-  if (!u.id || !u.organizationId) redirect("/login");
+const PILL_COUNT = 8;
 
-  const review = await getOrCreateWeeklyReview({
-    userId: u.id,
-    organizationId: u.organizationId,
-  });
+export default async function WeeklyReviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>;
+}) {
+  const { viewer } = await gatePage("view", { type: "app", key: "home" }, { callbackUrl: "/me/weekly-review" });
+  // A Guest has no KRAs, no manager chain and no heartbeat to file.
+  if (viewer.orgRole === "GUEST") notFound();
 
-  // Fetch the user's active KRAs (with their KPIs) so the form can
-  // render one row per KRA / KPI without a client round-trip.
+  const sp = await searchParams;
+  const asked = parseWeekKey(sp.week) ?? weekStartOf(new Date());
+  const askedKey = weekKey(asked);
+  const current = isCurrentWeek(askedKey);
+
+  const review = current
+    ? await getOrCreateWeeklyReview({ userId: viewer.userId, organizationId: viewer.organizationId })
+    : await prisma.weeklyReview
+        .findUnique({ where: { userId_periodStart: { userId: viewer.userId, periodStart: asked } } })
+        .then((row) => (row ? JSON.parse(JSON.stringify(row)) : null))
+        .catch(() => null);
+
+  const pills = weekOptions(new Date(), PILL_COUNT);
+  // Which pills carry a submitted dot: one query over the whole window, not
+  // one per pill.
+  const oldest = pills[pills.length - 1].start;
+  const rows = await prisma.weeklyReview
+    .findMany({
+      where: { userId: viewer.userId, periodStart: { gte: oldest } },
+      select: { periodStart: true, status: true },
+    })
+    .catch(() => []);
+  const byWeek = new Map(rows.map((r) => [weekKey(r.periodStart), r.status]));
+
   const assignments = await prisma.kRAAssignment.findMany({
-    where: { userId: u.id, status: "ACTIVE" },
+    where: { userId: viewer.userId, status: "ACTIVE" },
     include: {
       kra: {
         select: {
@@ -47,32 +73,23 @@ export default async function WeeklyReviewPage() {
     orderBy: { createdAt: "asc" },
   });
 
-  const kras = assignments.map((a) => ({
-    id: a.kra.id,
-    name: a.kra.name,
-    category: a.kra.category,
-    weightage: a.weightage,
-    kpis: a.kra.kpis,
-  }));
-
   return (
-    <div className="px-8 py-6 max-w-[920px]">
-      <header className="mb-5">
-        <div className="flex items-center gap-2 text-xs text-zinc-500 mb-2">
-          <Link href="/today" className="hover:text-zinc-900">Today</Link>
-          <ChevronRight className="w-3 h-3" />
-          <span>Weekly review</span>
-        </div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <ClipboardCheck className="w-5 h-5 text-[var(--os-brand)]" />
-          Weekly review
-        </h1>
-        <p className="text-xs text-zinc-500 mt-1">
-          {formatWeekRange(review.periodStart)} · the cadence is mandatory; your manager rolls this up.
-        </p>
-      </header>
-
-      <WeeklyReviewForm initialReview={review} kras={kras} />
-    </div>
+    <WeeklyReviewClient
+      weekKeyValue={askedKey}
+      weeks={pills.map((p) => ({
+        ...p,
+        hasReview: byWeek.has(p.key),
+        submitted: byWeek.get(p.key) === "SUBMITTED" || byWeek.get(p.key) === "ACKNOWLEDGED",
+      }))}
+      review={review}
+      editable={current}
+      kras={assignments.map((a) => ({
+        id: a.kra.id,
+        name: a.kra.name,
+        category: a.kra.category,
+        weightage: a.weightage,
+        kpis: a.kra.kpis,
+      }))}
+    />
   );
 }

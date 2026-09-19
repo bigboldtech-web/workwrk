@@ -23,11 +23,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  CalendarDays, CalendarPlus, Bell, Repeat, X, Loader2, Plus, Trash2, ChevronLeft, ChevronRight,
+  CalendarDays, CalendarPlus, Bell, Repeat, X, Plus, Trash2, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import type { BoardItemRow, StatusOption } from "@/lib/board-items-shared";
 import type { DetailPatch } from "./board-item-detail";
 import { useAnchorPos } from "./use-anchor-pos";
+import { Dots } from "@/components/ui/dots";
 import {
   parseRecurrence, buildRecurrenceSummary, isoWeekday, type RecurFreq, type RecurTrigger, type RecurrenceRule,
 } from "@/lib/recurrence";
@@ -336,7 +337,7 @@ export function DatePlanner({
                     <div className="pt-3 border-t border-zinc-100 space-y-1.5">
                       <span className={`block ${LABEL}`}>Scheduled</span>
                       {remLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-zinc-400 py-1"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading…</div>
+                        <div className="py-1"><Dots variant="pending" label="Loading reminders" className="text-ink-3" /></div>
                       ) : reminders.length === 0 ? (
                         <p className="text-sm text-zinc-400 py-1">No reminders set.</p>
                       ) : (
@@ -495,28 +496,44 @@ function DateTab({
               <span className="text-xs text-zinc-400 shrink-0">{quickHint(q.key)}</span>
             </button>
           ))}
+          {/* "No date" belongs in this column, where a person looking for a
+              date is already looking. The only way to clear one was a 12px X
+              that appears beside the Due label ONLY once a date is set, which
+              is not a control anybody finds. */}
+          {start || due ? (
+            <button
+              type="button"
+              onClick={() => { onDue(null); onStart(null); }}
+              className="mt-1 w-full h-7 px-2 rounded-md flex items-center gap-2 border-t border-zinc-100 pt-1 text-sm text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 transition-colors"
+            >
+              <X className="w-3 h-3 shrink-0" />
+              <span className="truncate">No date</span>
+            </button>
+          ) : null}
         </div>
         <div className="flex-1 min-w-0">
           <MonthCalendar due={due} onPickDay={onPickDay} />
         </div>
       </div>
 
-      {/* Set Recurring entry (ClickUp routes into the Repeat tab from here). */}
-      <div className="pt-2 border-t border-zinc-100">
-        <button
-          type="button"
-          onClick={onRepeat}
-          className="w-full flex items-center justify-between h-8 px-2 rounded-md text-base text-zinc-700 hover:bg-zinc-100 transition-colors"
-        >
-          <span className="inline-flex items-center gap-2 shrink-0"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Set Recurring</span>
-          <span
-            className="text-xs font-medium text-[var(--os-brand)] truncate min-w-0"
-            title={recurrence ? buildRecurrenceSummary(recurrence) : undefined}
+      {/* The current repeat rule, in words, so the Date tab says whether this
+          task repeats. It is a LABEL with a shortcut, not a second door: the
+          "Repeat" tab two rows above is the door, and a footer that opened the
+          same tab was one control saying the same thing twice. */}
+      {recurrence ? (
+        <div className="pt-2 border-t border-zinc-100">
+          <button
+            type="button"
+            onClick={onRepeat}
+            className="w-full flex items-center justify-between gap-2 h-8 px-2 rounded-md text-base text-zinc-700 hover:bg-zinc-100 transition-colors"
           >
-            {recurrence ? buildRecurrenceSummary(recurrence) : ""}
-          </span>
-        </button>
-      </div>
+            <span className="inline-flex items-center gap-2 shrink-0"><Repeat className="w-3.5 h-3.5 text-zinc-400" /> Repeats</span>
+            <span className="text-xs font-medium text-[var(--os-brand)] truncate min-w-0" title={buildRecurrenceSummary(recurrence)}>
+              {buildRecurrenceSummary(recurrence)}
+            </span>
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

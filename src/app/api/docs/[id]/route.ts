@@ -13,6 +13,7 @@ import { docAccessible } from "@/lib/doc-access";
 import { requireDocRole } from "@/lib/doc-sharing";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
+import { withArchivedBy } from "@/lib/archived-by";
 
 const putSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -229,9 +230,10 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (existing.archivedAt) return NextResponse.json({ ok: true, alreadyArchived: true });
 
   // Soft-archive only — the row stays, versions stay.
-  await prisma.doc.update({
-    where: { id },
-    data: { archivedAt: new Date() },
-  });
+  // archivedById is what Trash's "Archived by" column reads; the helper keeps
+  // the archive working if the column has not been added yet.
+  await withArchivedBy(ctx.userId, (extra) =>
+    prisma.doc.update({ where: { id }, data: { archivedAt: new Date(), ...extra } }),
+  );
   return NextResponse.json({ ok: true });
 }

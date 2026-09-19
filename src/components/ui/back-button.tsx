@@ -23,6 +23,22 @@ interface BackButtonProps {
   className?: string;
 }
 
+/**
+ * The history check, on its own, for the one control that needs it without
+ * being a BackButton: the task drawer's ✕ / scrim click / Esc, all three of
+ * which must "call router.back() when the previous entry is the host list,
+ * else router.replace(hostUrl)" (back-map section 1). Keeping it in this file
+ * is what keeps the rule true, `router.back()` lives here and nowhere else, 
+ * rather than spreading a second copy of the check into a drawer.
+ */
+export function goBackOr(
+  router: { back: () => void; replace: (href: string) => void },
+  fallbackHref: string,
+): void {
+  if (navStackHasBack()) router.back();
+  else router.replace(fallbackHref);
+}
+
 export function BackButton({ fallbackHref, label, className }: BackButtonProps) {
   const router = useRouter();
   const goBack = () => {

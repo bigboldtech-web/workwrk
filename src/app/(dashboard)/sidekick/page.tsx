@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles, Plus, Search, Trash2, Paperclip, ArrowUp,
-  Wrench, Pin, MessageSquare,
+  Wrench, Pin, PinOff, MessageSquare,
 } from "lucide-react";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 
@@ -165,6 +165,33 @@ export default function SidekickPage() {
     toast("Chat archived");
   }
 
+  /**
+   * Pin and unpin a chat.
+   *
+   * /favorites used to render this control on every pinned card and every
+   * recent row, and that page became the star list, so the PATCH lost its only
+   * caller: the app DREW a pin glyph on pinned rows and had no way to add or
+   * remove one. spec-work-home section 0 keeps the control explicitly ("the
+   * same PATCH /api/sidekick/sessions/[id] { pinned } the AI unit keeps"), so
+   * it lives here, beside the list it acts on.
+   */
+  async function togglePin(id: string, pinned: boolean, e: React.MouseEvent) {
+    e.stopPropagation();
+    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, pinned } : s)));
+    try {
+      const res = await fetch(`/api/sidekick/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pinned }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      toast(pinned ? "Chat pinned" : "Chat unpinned");
+    } catch {
+      toast("Couldn't update the pin");
+      await loadSessions();
+    }
+  }
+
   async function send(text: string) {
     if (!text.trim() || sending) return;
     let sessionId = activeId;
@@ -319,7 +346,7 @@ export default function SidekickPage() {
               <>
                 <div className="os-chat__group-title">Today</div>
                 {grouped.today.map((s) => (
-                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} />
+                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} onTogglePin={(e) => togglePin(s.id, !s.pinned, e)} />
                 ))}
               </>
             ) : null}
@@ -327,7 +354,7 @@ export default function SidekickPage() {
               <>
                 <div className="os-chat__group-title">This week</div>
                 {grouped.week.map((s) => (
-                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} />
+                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} onTogglePin={(e) => togglePin(s.id, !s.pinned, e)} />
                 ))}
               </>
             ) : null}
@@ -335,7 +362,7 @@ export default function SidekickPage() {
               <>
                 <div className="os-chat__group-title">Older</div>
                 {grouped.older.map((s) => (
-                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} />
+                  <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => setActiveId(s.id)} onDelete={(e) => deleteSession(s.id, e)} onTogglePin={(e) => togglePin(s.id, !s.pinned, e)} />
                 ))}
               </>
             ) : null}
@@ -428,24 +455,45 @@ export default function SidekickPage() {
 }
 
 function SessionRow({
-  s, active, onSelect, onDelete,
+  s, active, onSelect, onDelete, onTogglePin,
 }: {
-  s: Session; active: boolean; onSelect: () => void; onDelete: (e: React.MouseEvent) => void;
+  s: Session; active: boolean; onSelect: () => void;
+  onDelete: (e: React.MouseEvent) => void;
+  onTogglePin: (e: React.MouseEvent) => void;
 }) {
+  // A row, not a <button>: the pin and the archive are buttons of their own and
+  // a button cannot nest inside a button. The pin used to be a decorative glyph
+  // with nothing behind it, so a pinned chat could never be unpinned.
   return (
-    <button type="button" className={`os-chat__item ${active ? "is-active" : ""}`} onClick={onSelect}>
+    <div
+      role="button"
+      tabIndex={0}
+      className={`os-chat__item ${active ? "is-active" : ""}`}
+      onClick={onSelect}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); } }}
+    >
       <span className="os-chat__item-title">{s.title ?? "Untitled chat"}</span>
       <span className="os-chat__item-meta">
         <MessageSquare style={{ width: 11, height: 11 }} />
         {fmtRelative(s.updatedAt)}
         {s.lastModel ? <span style={{ color: "var(--os-ink-4)" }}>· {s.lastModel.replace("claude-", "").replace(/-4-6$/, " 4.6").replace(/-4-7$/, " 4.7")}</span> : null}
       </span>
-      {s.pinned ? <span className="os-chat__item-pin"><Pin /></span> : (
-        <button type="button" className="os-chat__item-del" onClick={onDelete} aria-label="Archive">
+      <span className="os-chat__item-actions">
+        <button
+          type="button"
+          className={`os-chat__item-act ${s.pinned ? "is-on" : ""}`}
+          onClick={onTogglePin}
+          aria-pressed={s.pinned}
+          title={s.pinned ? "Unpin chat" : "Pin chat"}
+          aria-label={s.pinned ? "Unpin chat" : "Pin chat"}
+        >
+          {s.pinned ? <PinOff /> : <Pin />}
+        </button>
+        <button type="button" className="os-chat__item-act os-chat__item-act--danger" onClick={onDelete} aria-label="Archive chat" title="Archive chat">
           <Trash2 />
         </button>
-      )}
-    </button>
+      </span>
+    </div>
   );
 }
 

@@ -8,6 +8,7 @@
 
 import { LayoutGrid } from "lucide-react";
 import { isDoneStatus, type BoardItemRow, type StatusOption } from "@/lib/board-items-shared";
+import { descriptionPreview } from "@/lib/markdown-lite";
 import { PersonAvatar } from "./assignee-picker";
 import { PriorityFlag } from "./priority-picker";
 import { TagChip } from "./tag-picker";
@@ -47,7 +48,13 @@ export function BoardCardsView({ boardId, initialItems, statuses, canEdit = fals
         const opt = it.status ? statuses.find((o) => o.value === it.status) : null;
         const due = it.dueAt ? new Date(it.dueAt) : null;
         const overdue = !!due && due < new Date() && !isDoneStatus(statuses, it.status);
-        const desc = typeof it.metadata?.description === "string" ? (it.metadata.description as string) : "";
+        // A card gets a PREVIEW, not a render. The stored body is markdown
+        // now, and a two-line clamp would otherwise print raw "- " and "**"
+        // at the reader. descriptionPreview spends the markers and flattens
+        // the newlines a <p> would have collapsed anyway.
+        const desc = descriptionPreview(
+          typeof it.metadata?.description === "string" ? (it.metadata.description as string) : "",
+        );
         const tags = it.tags ?? [];
         return (
           <button
