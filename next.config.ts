@@ -4,6 +4,26 @@ import createNextIntlPlugin from "next-intl/plugin";
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
 const nextConfig: NextConfig = {
+  // BUILD MEMORY. The production box has 3921 MB of RAM, and two deploys died
+  // there without printing anything at all: not a build error, a kill. Next 16
+  // builds with Turbopack, which runs the build across SEPARATE PROCESSES
+  // (build-main, the Turbopack compilation workers, and a child process per
+  // prerendered route), and `--max-old-space-size` caps EACH of them rather
+  // than the total. So lowering that cap from 4096 to 3072 changed nothing:
+  // several workers were still free to add up past physical memory, the kernel
+  // OOM killer took the build, and it took the SSH session with it, which is
+  // why no handler ever reported.
+  //
+  // `cpus: 1` is the knob that actually bounds the total, because it is the
+  // worker count the build scales by. The build gets slower on that box and it
+  // fits, which is the trade worth making on a machine this size.
+  experimental: {
+    cpus: 1,
+    // Scale what workers there are by memory actually free at the time rather
+    // than by core count, so a busier box builds with less rather than dying.
+    memoryBasedWorkersCount: true,
+  },
+
   // Comms Hub was briefly shipped under /chat before the Room rename —
   // stored notification links and bookmarks keep working.
   async redirects() {
@@ -96,10 +116,13 @@ const nextConfig: NextConfig = {
       // Phase 2 Stage E, step 8: the four Trash surfaces become one
       // (docs/plans/ui-refresh/spec-spaces-lists.md section 2, /trash).
       //
-      // All three land on the ARCHIVED tab, not the default Deleted one,
-      // because all three listed rows carrying `archivedAt` and that is where
-      // those rows are now. Sending them to `?type=doc` alone would land on a
-      // tab their rows are not on, which is the same as losing them.
+      // All three carry rows that live under `archivedAt`, not under a
+      // TrashItem snapshot, so all three belong on the ARCHIVED tab. Phase 3
+      // moved that decision out of the URL and into `resolveTrashTab`
+      // (src/lib/trash-view.ts), which reads the requested `?type=` and picks
+      // Archived for the five types that have no deleted source. So these
+      // rows now carry the clean `?type=` the specs write, and still land on
+      // the tab their rows are on.
       //
       //   /docs/trash            the Notes trash: GET /api/docs?archived=1,
       //                          restore via POST /api/docs/[id]/restore. The
@@ -113,25 +136,118 @@ const nextConfig: NextConfig = {
       // appends the source URL's query string to the destination on every
       // redirect, including the parameter the `has` clause matched. So the two
       // query-matched rows below actually land on
-      // /trash?view=archived&tab=archived&type=doc, not the clean pair the
-      // list above names. `view` is not a parameter /trash owns, so it is
-      // inert today; it is written down because the day Trash gains a view
-      // switcher, a stray `view=archived` in the address bar is a collision
-      // and this is the line that explains where it came from. The literal
-      // /docs/trash row has no query to carry and lands clean.
-      { source: "/docs/trash", destination: "/trash?tab=archived&type=doc", permanent: true },
+      // /trash?view=archived&type=doc, not the clean pair the list above
+      // names. `view` is not a parameter /trash owns, so it is inert today; it
+      // is written down because the day Trash gains a view switcher, a stray
+      // `view=archived` in the address bar is a collision and this is the line
+      // that explains where it came from. The literal /docs/trash row has no
+      // query to carry and lands clean.
+      //
+      // IT IS ALSO WHY THREE RETIRED VIEWS ARE NOT REDIRECTS AT ALL.
+      // /docs?view=meeting -> /docs, /docs?view=private -> /docs?view=my and
+      // /notetaker?mine=1 -> /notetaker?view=my all keep the SAME path, so the
+      // ride-along query would re-match the rule on the very next request and
+      // the browser would loop until it gave up. Those three are normalised by
+      // the page instead (src/lib/nav/retired-views.ts, one pure table, and a
+      // router.replace on mount), which is linkable, restorable and loop-free.
+      // PHASE 3 retune: the `&tab=archived` half is gone from all three.
+      // `resolveTrashTab` (src/lib/trash-view.ts) now picks the Archived tab
+      // for a Doc, a Canvas or a Contract, because those three are archived
+      // in place and have no TrashItem row, so the tab no longer has to be
+      // spelled into the URL. The specs write these three targets as the
+      // clean `?type=doc` and `?type=contract`, and now they are.
+      { source: "/docs/trash", destination: "/trash?type=doc", permanent: true },
       {
         source: "/docs",
         has: [{ type: "query", key: "view", value: "archived" }],
-        destination: "/trash?tab=archived&type=doc",
+        destination: "/trash?type=doc",
         permanent: true,
       },
       {
         source: "/agreements",
         has: [{ type: "query", key: "view", value: "trash" }],
-        destination: "/trash?tab=archived&type=contract",
+        destination: "/trash?type=contract",
         permanent: true,
       },
+      //
+      // Phase 3 Stage A, docs-knowledge section 0 and section 4 step 1.
+      //
+      // /library was a four-tab page listing the same rows as four other
+      // pages: its Notes tab IS /docs, its Whiteboards tab IS /canvas, its
+      // Files tab IS /files, and its Tables tab was the one copy of the
+      // Tables list that never checked the spreadsheets module. Each tab
+      // keeps its destination; the Tables one gains the module gate it never
+      // had, because /tables has it at its own hub layout.
+      //
+      // ORDER MATTERS. The four `has` rows are matched in order and the bare
+      // /library row is last, so an unknown ?tab= value lands on /docs rather
+      // than 404ing on a tab that no longer exists.
+      {
+        source: "/library",
+        has: [{ type: "query", key: "tab", value: "whiteboards" }],
+        destination: "/canvas",
+        permanent: true,
+      },
+      {
+        source: "/library",
+        has: [{ type: "query", key: "tab", value: "files" }],
+        destination: "/files",
+        permanent: true,
+      },
+      {
+        source: "/library",
+        has: [{ type: "query", key: "tab", value: "tables" }],
+        destination: "/tables",
+        permanent: true,
+      },
+      // Notes and every other value, including none.
+      { source: "/library", destination: "/docs", permanent: true },
+      //
+      // One URL per SOP kind (spec-process section 0). /sops/new?type=X used
+      // to POST a row on click and then route, which is where the abandoned
+      // "Untitled written SOP" rows came from. The kind routes create on the
+      // first real change instead, and these four rows keep every stored
+      // ?type= link, sidebar action and bookmark landing on the right editor.
+      {
+        source: "/sops/new",
+        has: [{ type: "query", key: "type", value: "[Ss][Tt][Ee][Pp][Ss]" }],
+        destination: "/sops/new/steps",
+        permanent: true,
+      },
+      {
+        source: "/sops/new",
+        has: [{ type: "query", key: "type", value: "[Ww][Rr][Ii][Tt][Tt][Ee][Nn]" }],
+        destination: "/sops/new/text",
+        permanent: true,
+      },
+      {
+        source: "/sops/new",
+        has: [{ type: "query", key: "type", value: "[Cc][Hh][Ee][Cc][Kk][Ll][Ii][Ss][Tt]" }],
+        destination: "/sops/new/checklist",
+        permanent: true,
+      },
+      {
+        source: "/sops/new",
+        has: [{ type: "query", key: "type", value: "[Rr][Ee][Cc][Oo][Rr][Dd][Ee][Dd]" }],
+        destination: "/sops/new/record",
+        permanent: true,
+      },
+      //
+      // DELIBERATELY NOT HERE, and it is a loop, not an oversight:
+      //
+      //   /sops/new/text?id=X     -> /sops/X?edit=1
+      //   /sops/new/checklist?id=X -> /sops/X?edit=1
+      //
+      // spec-process section 0 asks for both, and both are written and ready
+      // (the named capture in a `has` value is Next's own mechanism for
+      // reading a query value into a destination). They cannot ship until
+      // step 3 teaches /sops/[id] to edit a Written SOP in place, because
+      // TODAY that page sends Written SOPs straight back out:
+      // sops/[id]/page.tsx:902 does router.replace(`/sops/new/text?id=X`)
+      // the moment it sees ?edit=1 on written content. With the redirect on,
+      // those two lines chase each other and a Written SOP can never be
+      // opened for editing at all. The redirect is half of one change; the
+      // other half is the editor, and they ship together.
       // Whiteboards were renamed to Canvas — keep old links/bookmarks working.
       { source: "/whiteboards", destination: "/canvas", permanent: false },
       { source: "/whiteboards/:id", destination: "/canvas/:id", permanent: false },
