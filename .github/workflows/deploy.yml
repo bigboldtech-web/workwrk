@@ -45,12 +45,32 @@ jobs:
             export PATH="/www/server/nodejs/v20.20.0/bin:$PATH"
             cd "${DEPLOY_PATH:-/www/wwwroot/workwrk.com}"
 
+            # DIAGNOSTICS. Downloading an Actions log needs admin rights on the
+            # repo, so a failing deploy shows only "exit code 1" to anyone
+            # without them. GitHub DOES turn ::error:: and ::notice:: lines on
+            # stdout into annotations, and annotations are readable through the
+            # public API, so every failure below reports its own reason there.
+            # `fail` prints the tail of the step's log as annotation lines and
+            # exits, which is what makes a remote failure legible.
+            fail () {
+              echo "::error::DEPLOY FAILED at: $1"
+              if [ -n "${2:-}" ] && [ -f "$2" ]; then
+                tail -25 "$2" | while IFS= read -r l; do echo "::error::| $l"; done
+              fi
+              exit 1
+            }
+
+            echo "::notice::preflight disk: $(df -h / | tail -1 | tr -s ' ')"
+            echo "::notice::preflight inodes: $(df -i / | tail -1 | tr -s ' ')"
+            echo "::notice::preflight node $(node -v 2>&1) npm $(npm -v 2>&1)"
+            echo "::notice::preflight free: $(free -m 2>/dev/null | sed -n 2p | tr -s ' ' || echo n/a)"
+
             echo "==> Fetching latest main"
-            git fetch --prune origin main
-            git reset --hard origin/main
+            git fetch --prune origin main > /tmp/wd-git.log 2>&1 || fail "git fetch" /tmp/wd-git.log
+            git reset --hard origin/main >> /tmp/wd-git.log 2>&1 || fail "git reset" /tmp/wd-git.log
 
             echo "==> Installing dependencies"
-            npm ci
+            npm ci > /tmp/wd-npmci.log 2>&1 || fail "npm ci" /tmp/wd-npmci.log
 
             # Build runs scripts/deploy-migrations.mjs (prisma migrate deploy
             # with advisory-lock retry) + prisma generate + next build.
@@ -58,7 +78,8 @@ jobs:
             # even without the Actions logs. pipefail keeps the real exit code so
             # script_stop still aborts the deploy (no pm2 reload) on failure.
             echo "==> Building (includes DB migrations)"
-            npm run build 2>&1 | tee /www/wwwroot/workwrk.com/deploy-build.log
+            npm run build > /www/wwwroot/workwrk.com/deploy-build.log 2>&1 \
+              || fail "npm run build (deploy-migrations + prisma generate + next build)" /www/wwwroot/workwrk.com/deploy-build.log
 
             # Legacy Task -> Item data migration.
             #
