@@ -42,7 +42,7 @@ export function LandingFAQ() {
   return (
     <section className="bg-white py-24 lg:py-32">
       <div className="max-w-7xl mx-auto px-6 lg:px-10">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-12 lg:gap-16">
+        <div className="grid lg:grid-cols-[1fr_2fr] gap-12 lg:gap-16">
           {/* Left rail */}
           <motion.div
             initial={{ opacity: 0, y: 18 }}

@@ -162,8 +162,8 @@ export function AIAgents() {
             of <span style={{ color: "var(--brand-yellow)" }}>AI agents.</span>
           </h2>
           <p className="mt-6 text-lg leading-relaxed text-white/70 max-w-2xl">
-            Agents that learn your business and do real work, not
-            chatbots. They run alongside your team across every block,
+            Agents that learn your business and do real work &mdash; not
+            chatbots. They run alongside your team across all 7 hubs,
             trigger real actions, and let you train your own from a
             simple builder.
           </p>
@@ -429,7 +429,7 @@ function AgentsAtWork() {
             exit={{ opacity: 0, y: -14 }}
             transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
           >
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="grid lg:grid-cols-3 gap-4">
               {active.steps.map((s, i) => (
                 <motion.div
                   key={s.agent}
@@ -483,7 +483,7 @@ function AgentsAtWork() {
 function TrainYourOwn() {
   return (
     <div id="train-your-own" className="mt-32 lg:mt-40">
-      <div className="grid grid-cols-1 lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
+      <div className="grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
         <motion.div
           initial={{ opacity: 0, y: 18 }}
           whileInView={{ opacity: 1, y: 0 }}

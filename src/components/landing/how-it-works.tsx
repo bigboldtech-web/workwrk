@@ -1,32 +1,21 @@
-// "How it works": section 6.
+// "How it works" — section 6.
 //
 // Three numbered steps in a row, each with a mini product mock showing
 // what happens at that step. Between the cards, an animated dashed
 // path connects them and draws itself as the section enters view.
 //
 // Step content:
-//   01 · Sign up            sign-up form, brand red
-//   02 · Pick your blocks   block picker with auto-checking animation, brand blue
-//   03 · Invite your team   avatar tiles filling in, brand yellow
-//
-// This is a client component, so the free-tier sentence arrives as a PROP
-// from the server. It is the one the pricing source builds from the seat cap
-// the product actually enforces, never a number typed into this file.
+//   01 · Sign up           — sign-up form, "started in 60s", brand red
+//   02 · Pick your hubs    — hub picker with auto-checking animation, brand blue
+//   03 · Invite your team — avatar tiles filling in + AI auto-assign, brand yellow
 
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { motion, useInView } from "framer-motion";
 import { ArrowRight, Check, Sparkles } from "lucide-react";
 
-export function HowItWorks({
-  freeLine,
-  primary,
-}: {
-  freeLine: string;
-  primary: { label: string; href: string; dataCta: string };
-}) {
+export function HowItWorks() {
   return (
     <section className="relative bg-white py-24 lg:py-32 overflow-hidden">
       <div className="relative max-w-7xl mx-auto px-6 lg:px-10">
@@ -59,25 +48,25 @@ export function HowItWorks({
             className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
-            No sales call. No paperwork. Pick the blocks you need today,
-            invite your team, and the workspace starts working with you on
-            the same afternoon.
+            No sales call. No SOW. Pick the hubs you need today, invite
+            your team, and the workspace starts working with you on the
+            same afternoon.
           </p>
         </motion.div>
 
         {/* Steps row */}
         <div className="mt-16 lg:mt-20 relative">
-          {/* Connecting dashed path (desktop), animated draw */}
+          {/* Connecting dashed path (desktop) — animated draw */}
           <ConnectorPath />
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 relative">
+          <div className="grid lg:grid-cols-3 gap-6 lg:gap-8 relative">
             <Step
               num="01"
               hue="var(--brand-red)"
               hueSoft="var(--brand-red-soft)"
               title="Sign up free"
-              body="Start free in about a minute. No card, no demo gate, no sales paperwork."
-              footer={<SignupCounter freeLine={freeLine} />}
+              body="Get started in 60 seconds. Free forever for up to 5 people. No card, no demo gate, no sales SOW."
+              footer={<SignupCounter />}
               mock={<SignupMock />}
               delay={0.05}
             />
@@ -85,8 +74,8 @@ export function HowItWorks({
               num="02"
               hue="var(--brand-blue)"
               hueSoft="var(--brand-blue-soft)"
-              title="Pick your blocks"
-              body="Turn on the blocks you need today. Work, Planner, AI, Talk, Teams, Docs, Tables, Goals. Pick three, pick all eight, add more whenever."
+              title="Pick your hubs"
+              body="Turn on the hubs you need today. People, Work, Money, Talent, Culture, Growth — pick three, pick seven, add more whenever."
               footer={<HubsCounter />}
               mock={<HubPickerMock />}
               delay={0.2}
@@ -96,7 +85,7 @@ export function HowItWorks({
               hue="var(--brand-yellow)"
               hueSoft="var(--brand-yellow-soft)"
               title="Invite your team"
-              body="Drop in emails or invite by link. Your team lands on a workspace that already has its roles, its SOPs and its first tasks in place."
+              body="Drop in emails or paste from SCIM. WorkwrK AI assigns the first batch of tasks on day one — your team lands on a workspace already moving."
               footer={<AIAssignChip />}
               mock={<InviteMock />}
               delay={0.35}
@@ -112,20 +101,15 @@ export function HowItWorks({
           viewport={{ once: true, margin: "-60px" }}
           transition={{ duration: 0.7, delay: 0.2 }}
         >
-          {/* The canon's label and the config's destination, resolved on
-              the server and passed in, so this button cannot drift from the
-              one in the nav. It was a bare anchor to a hardcoded /signup
-              reading "Start your workspace". */}
-          <Link
-            href={primary.href}
-            data-cta={primary.dataCta}
-            className="inline-flex items-center gap-2 h-12 px-7 rounded-full text-white font-semibold text-[15px] transition-colors"
+          <a
+            href="/signup"
+            className="inline-flex items-center gap-2 h-12 px-7 rounded-full text-white font-semibold text-[15px] shadow-[0_8px_24px_-8px_rgba(255,61,87,0.45)] hover:shadow-[0_12px_32px_-8px_rgba(255,61,87,0.6)] hover:-translate-y-0.5 transition-all"
             style={{ backgroundColor: "var(--brand-red)" }}
           >
-            {primary.label} <ArrowRight size={15} />
-          </Link>
+            Start your workspace <ArrowRight size={15} />
+          </a>
           <p className="mt-4 text-base" style={{ color: "var(--m-text-soft)" }}>
-            {freeLine}
+            Free forever up to 5 people · 60-second signup
           </p>
         </motion.div>
       </div>
@@ -134,7 +118,7 @@ export function HowItWorks({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Connector path: dashed line that draws between the three step cards
+// Connector path — dashed line that draws between the three step cards
 // ════════════════════════════════════════════════════════════════════
 
 function ConnectorPath() {
@@ -243,7 +227,7 @@ function Step({
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Step 1 mock: signup form plus the free-tier line
+// Step 1 mock — Signup form + counter
 // ════════════════════════════════════════════════════════════════════
 
 function SignupMock() {
@@ -305,24 +289,28 @@ function SignupMock() {
   );
 }
 
-// What was here: "31,247 signups this quarter", ticking up by one every five
-// and a half seconds. The number was a literal, the tick was a setInterval,
-// and neither came from anything. A counter is a claim with a decimal point
-// on it, so this one prints what is true instead: what the free plan costs.
-function SignupCounter({ freeLine }: { freeLine: string }) {
+function SignupCounter() {
+  const [n, setN] = useState(31247);
+  useEffect(() => {
+    const t = setInterval(() => setN((c) => c + 1), 5500);
+    return () => clearInterval(t);
+  }, []);
   return (
     <div className="flex items-center gap-2 text-[12.5px]" style={{ color: "var(--m-text-muted)" }}>
       <span
         className="w-1.5 h-1.5 rounded-full"
         style={{ backgroundColor: "var(--brand-red)" }}
       />
-      {freeLine}
+      <span className="font-bold tabular-nums" style={{ color: "var(--m-text)" }}>
+        {n.toLocaleString()}
+      </span>{" "}
+      signups this quarter
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Step 2 mock: block picker with auto-checking
+// Step 2 mock — Hub picker with auto-checking
 // ════════════════════════════════════════════════════════════════════
 
 const HUBS = [
@@ -414,16 +402,16 @@ function HubsCounter() {
         className="w-1.5 h-1.5 rounded-full"
         style={{ backgroundColor: "var(--brand-blue)" }}
       />
-      Add or remove blocks anytime. No re-platforming.
+      Add or remove hubs anytime &mdash; no re-platforming.
     </div>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// Step 3 mock: invite team with avatars filling in
+// Step 3 mock — Invite team with avatars filling in
 // ════════════════════════════════════════════════════════════════════
 
-// Clean illustrated avatars via DiceBear's "notionists" style: the
+// Clean illustrated avatars via DiceBear's "notionists" style — the
 // Notion-style line illustrations of people on soft pastel backgrounds.
 // Looks designed, not stocky. Stable, predictable, and reads well at
 // thumbnail size. Swap for real photography when shot.
