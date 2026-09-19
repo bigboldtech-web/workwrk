@@ -9,7 +9,7 @@
 // together, so that shape reaches this function for real.
 
 import { describe, expect, it } from "vitest";
-import { resolveAssignees } from "@/lib/board-items";
+import { resolveAssignees } from "@/lib/board-items-shared";
 
 describe("resolveAssignees", () => {
   it("obeys an explicit ownerId sent with a set, instead of silently overriding it", () => {

@@ -418,18 +418,16 @@ export interface CreateBoardItemInput {
  * of the set; if they are not in it they are ADDED, never swapped in for
  * somebody, so no assignee the caller listed is lost either way.
  */
-export function resolveAssignees(
-  assigneeIds: string[] | undefined,
-  ownerId: string | null | undefined,
-): { assigneeIds: string[]; ownerId: string | null } {
-  const clean = (xs: string[]) =>
-    xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
-  let ids = Array.isArray(assigneeIds) ? clean(assigneeIds) : undefined;
-  if (ids === undefined) ids = ownerId ? clean([ownerId]) : [];
-  if (ownerId && ids.length > 0) ids = [ownerId, ...ids];
-  ids = Array.from(new Set(ids));
-  return { assigneeIds: ids, ownerId: ids[0] ?? null };
-}
+// The body moved to board-items-shared.ts, which imports nothing impure, and
+// is re-exported here so every existing `from "@/lib/board-items"` import keeps
+// working. It lived here while this file was its only caller, and that was
+// enough to break CI: a unit test for a PURE function had to import this
+// module, which imports the Prisma client from src/generated/prisma, which is
+// generated rather than committed. It exists locally and did not resolve on a
+// clean checkout, so the suite passed here and failed there. A pure function
+// belongs in the pure module.
+import { resolveAssignees } from "./board-items-shared";
+export { resolveAssignees };
 
 /**
  * Append a new item to the end of a board. Position = max + 1024 to

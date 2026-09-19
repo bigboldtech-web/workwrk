@@ -384,3 +384,33 @@ export function applyHandoverAssignees(
   );
   return Array.from(new Set([recipientId, ...rest]));
 }
+
+/**
+ * Normalise an assignee set. Every WRITE path runs through this: create, the
+ * multi-picker, /api/items/bulk.
+ *
+ * The rule: ownerId IS assigneeIds[0], and nobody the caller listed is ever
+ * dropped on the way in. An explicit ownerId sent ALONGSIDE assigneeIds used
+ * to be ignored whenever the array was non-empty, so
+ * `{ assigneeIds: ["b","c"], ownerId: "c" }` answered 200 and quietly made "b"
+ * the DRI. /api/items/bulk forwards both fields together, so that shape
+ * reaches the writer for real. The named owner moves to the FRONT of the set;
+ * if they are not in it they are ADDED, never swapped in for somebody, so no
+ * assignee the caller listed is lost either way.
+ *
+ * Lives here, not in board-items.ts, because it is pure: that module imports
+ * the Prisma client, and a unit test importing it through there failed on a
+ * clean checkout where src/generated/prisma has not been generated yet.
+ */
+export function resolveAssignees(
+  assigneeIds: string[] | undefined,
+  ownerId: string | null | undefined,
+): { assigneeIds: string[]; ownerId: string | null } {
+  const clean = (xs: string[]) =>
+    xs.filter((x): x is string => typeof x === "string" && x.trim().length > 0);
+  let ids = Array.isArray(assigneeIds) ? clean(assigneeIds) : undefined;
+  if (ids === undefined) ids = ownerId ? clean([ownerId]) : [];
+  if (ownerId && ids.length > 0) ids = [ownerId, ...ids];
+  ids = Array.from(new Set(ids));
+  return { assigneeIds: ids, ownerId: ids[0] ?? null };
+}
