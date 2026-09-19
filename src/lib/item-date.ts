@@ -49,10 +49,20 @@ function parts(date: Date, zone: string | undefined): Record<string, string> {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    // hourCycle h23, NOT `hour12: false`. They look equivalent and are not:
+    // under `hour12: false` the ICU shipped with Node 20 answers "24" for
+    // midnight, while Node 24 answers "00" (verified on both). "24" then feeds
+    // Date.UTC(y, m, d, 24, ...) in zonedIso below, which rolls into the next
+    // day, so the correction lands a day early and every date written at
+    // midnight is off by one. It broke only on the CI runner, because that is
+    // where Node 20 lives. h23 is defined as 00 to 23, so it cannot say 24.
+    hourCycle: "h23",
   });
   const out: Record<string, string> = {};
   for (const p of fmt.formatToParts(date)) out[p.type] = p.value;
+  // Belt and braces: if any future runtime still answers "24", read it as the
+  // midnight that starts the day rather than letting it roll the date over.
+  if (out.hour === "24") out.hour = "00";
   return out;
 }
 

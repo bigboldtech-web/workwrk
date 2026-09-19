@@ -130,3 +130,32 @@ describe("relativeTime", () => {
     expect(relativeTime(new Date("2026-09-12T10:00:05.000Z"), { timezone: "UTC" }, now)).not.toContain("-");
   });
 });
+
+describe("the midnight hour-cycle trap", () => {
+  // This suite exists because five date tests passed on a developer machine
+  // and failed in CI, and the difference was the Node version rather than
+  // anything in this repo. Under `hour12: false` the ICU in Node 20 answers
+  // "24" for midnight; Node 24 answers "00". A "24" fed to Date.UTC rolls into
+  // the next day, so every midnight write landed a day early on CI only.
+  it("never reports midnight as hour 24, whatever the runtime", () => {
+    for (const zone of ["Asia/Kolkata", "America/New_York", "UTC", "Australia/Sydney"]) {
+      const iso = localDayIso("2026-09-12", { timezone: zone });
+      expect(iso).not.toBeNull();
+      const hour = new Intl.DateTimeFormat("en-CA", {
+        timeZone: zone,
+        hour: "2-digit",
+        hourCycle: "h23",
+      }).formatToParts(new Date(iso!)).find((p) => p.type === "hour")?.value;
+      expect(hour).toBe("00");
+    }
+  });
+
+  it("writes the day it was asked for, not the day before", () => {
+    // The exact shape of the CI failure: one day early, midnight only.
+    for (const zone of ["Asia/Kolkata", "America/New_York", "UTC", "Pacific/Auckland"]) {
+      for (const day of ["2026-01-01", "2026-03-29", "2026-09-12", "2026-12-31"]) {
+        expect(dayKeyInZone(localDayIso(day, { timezone: zone })!, { timezone: zone })).toBe(day);
+      }
+    }
+  });
+});
