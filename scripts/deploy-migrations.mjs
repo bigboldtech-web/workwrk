@@ -20,6 +20,13 @@ import "dotenv/config";
 
 const PRISMA_LOCK_ID = 72707369;
 
+const url = process.env.DIRECT_URL || process.env.DATABASE_URL;
+
+if (!url) {
+  console.error("deploy-migrations: no DATABASE_URL / DIRECT_URL set");
+  process.exit(1);
+}
+
 // ── Hand-written SQL (prisma/sql) ─────────────────────────────────────
 //
 // WHY THIS EXISTS. `prisma migrate deploy` reads prisma/migrations and
@@ -39,9 +46,9 @@ const PRISMA_LOCK_ID = 72707369;
 // NOT IN THE MANIFEST, on purpose:
 //   2026-07-21-operating-core.sql — 35 DDL statements with ZERO
 //   IF NOT EXISTS guards, so it is additive but NOT idempotent, and it
-//   belongs to the Operating Core work which is deliberately gated. The
-//   ledger below would apply it exactly once and safely, but nobody has
-//   asked for that feature to ship. Leave it to a decision, not a glob.
+//   belongs to the Operating Core work which is deliberately gated. Since
+//   everything here runs on EVERY deploy, a non-idempotent file would fail
+//   the second one. Leave it to a decision, not a glob.
 const SQL_MANIFEST = [
   "2026-09-18-task-detail-phase2.sql",
   "2026-09-18-notification-cleared-at.sql",
@@ -89,6 +96,66 @@ function applyHandWrittenSql() {
     console.log(`deploy-migrations: applied ${name}`);
   }
   return true;
+}
+
+function runPrismaDeploy() {
+  const r = spawnSync("npx", ["prisma", "migrate", "deploy"], { stdio: "inherit" });
+  return r.status === 0;
+}
+
+// Mirrors scripts/unstick-migrate-lock.mjs. Returns the number of
+// holder sessions we terminated. Safe to call when the lock is free
+// (returns 0). Best-effort: if the cleanup query itself errors we log
+// and let the retry try anyway — we don't want a transient pg blip
+// here to fail the whole build.
+async function clearStuckLockHolders() {
+  const client = new Client({ connectionString: url, statement_timeout: 15_000 });
+  try {
+    await client.connect();
+    const holders = await client.query(
+      `SELECT a.pid, a.state, a.application_name, a.query_start
+       FROM pg_locks l
+       JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE l.locktype = 'advisory'
+         AND l.objid = $1
+         AND l.pid <> pg_backend_pid()`,
+      [PRISMA_LOCK_ID],
+    );
+    if (holders.rows.length === 0) return 0;
+    console.log(`deploy-migrations: clearing ${holders.rows.length} orphaned migration-lock holder(s):`);
+    for (const row of holders.rows) {
+      console.log(`  pid=${row.pid} state=${row.state} app=${row.application_name} since=${row.query_start}`);
+    }
+    const killed = await client.query(
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+       WHERE pid IN (SELECT l.pid FROM pg_locks l
+                     WHERE l.locktype = 'advisory'
+                       AND l.objid = $1
+                       AND l.pid <> pg_backend_pid())`,
+      [PRISMA_LOCK_ID],
+    );
+    return killed.rowCount ?? 0;
+  } catch (err) {
+    console.log(`deploy-migrations: clear-holders failed (${err.code || err.message}); continuing`);
+    return 0;
+  } finally {
+    try { await client.end(); } catch {}
+  }
+}
+
+async function runPrismaDeployWithRetry(attempts = 3, delayMs = 15_000) {
+  for (let i = 1; i <= attempts; i++) {
+    console.log(`deploy-migrations: running prisma migrate deploy (attempt ${i}/${attempts})`);
+    if (runPrismaDeploy()) return true;
+    if (i < attempts) {
+      // Clear stuck holders before sleeping so a release has time to
+      // propagate before we try again.
+      await clearStuckLockHolders();
+      console.log(`deploy-migrations: retrying in ${delayMs / 1000}s...`);
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
 }
 
 // Hand-written SQL first: the new release's code depends on these objects,
