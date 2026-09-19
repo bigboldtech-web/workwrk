@@ -1,22 +1,18 @@
-// Enterprise Control: governance for a security review.
+// Enterprise Control — Workday-grade governance section.
 //
 // Six-pillar grid of capabilities required by an enterprise security
 // review: agent activity tracking, scoped permissions, human-in-the-
 // loop, AI cost ledger, content ownership, no-data-training. Below it,
-// a compliance badge strip, which renders only the certifications that
-// are actually held. See the note above ALL_BADGES.
+// a compliance badge strip (SOC 2 / ISO 27001 / GDPR / DPDP / HIPAA /
+// PCI-DSS) — the credibility row a CISO actually scans for.
 
 "use client";
 
-import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Eye, Lock, UserCheck, BarChart3, FileCheck, ShieldCheck,
   ArrowRight,
 } from "lucide-react";
-// flags.ts imports nothing, so a client component can read a claim flag
-// without pulling the Tuesday fixture and the pricing table in with it.
-import { flags } from "@/components/marketing/flags";
 
 interface Pillar {
   icon: React.ComponentType<{ size?: number; strokeWidth?: number; className?: string; style?: React.CSSProperties }>;
@@ -64,22 +60,14 @@ const PILLARS: readonly Pillar[] = [
   },
 ];
 
-// Certification badges are legal claims, not decoration. Six of them were
-// hardcoded here (SOC 2 Type II, ISO 27001 Certified, GDPR, DPDP, HIPAA,
-// PCI-DSS) while every corresponding flag in the marketing config reads
-// false. A badge is the shortest possible lie: six words that a buyer's
-// security review will check. The strip renders the ones that are held, and
-// when none are held it does not render.
-const ALL_BADGES: ReadonlyArray<{ label: string; sub: string; flag: keyof typeof flags }> = [
-  { label: "SOC 2",   sub: "Type II",    flag: "soc2" },
-  { label: "ISO 27001", sub: "Certified", flag: "iso27001" },
-  { label: "GDPR",    sub: "Compliant",  flag: "gdpr" },
-  { label: "DPDP",    sub: "India",      flag: "dpdp" },
-  { label: "HIPAA",   sub: "BAA",        flag: "hipaaBaa" },
-  { label: "PCI-DSS", sub: "Compliant",  flag: "pciDss" },
+const BADGES: readonly { label: string; sub: string }[] = [
+  { label: "SOC 2",       sub: "Type II"  },
+  { label: "ISO 27001",   sub: "Certified"  },
+  { label: "GDPR",         sub: "Compliant"  },
+  { label: "DPDP",         sub: "India"      },
+  { label: "HIPAA",        sub: "Ready"      },
+  { label: "PCI-DSS",      sub: "Compliant"  },
 ];
-
-const BADGES = ALL_BADGES.filter((b) => flags[b.flag]);
 
 export function EnterpriseControl() {
   return (
@@ -114,21 +102,20 @@ export function EnterpriseControl() {
             className="mt-5 text-lg lg:text-lg leading-relaxed max-w-2xl"
             style={{ color: "var(--m-text-muted)" }}
           >
-            Every guardrail your CISO will ask for: agent activity
+            Every guardrail your CISO will ask for &mdash; agent activity
             tracking, permission scoping, human-in-the-loop, content
             ownership. Built in. Not an enterprise add-on.
           </p>
         </motion.div>
 
         {/* Six pillars */}
-        <div className="mt-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6">
+        <div className="mt-14 grid md:grid-cols-2 lg:grid-cols-3 gap-5 lg:gap-6">
           {PILLARS.map((p, i) => (
             <PillarCard key={p.title} pillar={p} delay={i * 0.06} />
           ))}
         </div>
 
-        {/* Compliance badges. Nothing held, nothing shown. */}
-        {BADGES.length === 0 ? null : (
+        {/* Compliance badges */}
         <motion.div
           className="mt-16 lg:mt-20 rounded-2xl p-7 lg:p-9"
           style={{
@@ -159,7 +146,7 @@ export function EnterpriseControl() {
                 Audited, attested, and ready for review.
               </p>
               <p className="mt-3 text-[14px] leading-relaxed" style={{ color: "var(--m-text-muted)" }}>
-                Reports and DPAs available on request, usually one email
+                Reports + DPAs available on request &mdash; usually one email
                 to{" "}
                 <a
                   href="mailto:security@workwrk.com"
@@ -178,7 +165,6 @@ export function EnterpriseControl() {
             </div>
           </div>
         </motion.div>
-        )}
 
         {/* Bottom CTA strip */}
         <motion.div
@@ -192,15 +178,13 @@ export function EnterpriseControl() {
             Need a Pen test letter or a custom MSA?{" "}
             <span style={{ color: "var(--m-text)", fontWeight: 600 }}>We&apos;ve got you.</span>
           </p>
-          {/* next/link, not a bare anchor: an internal anchor does a full
-              document reload and throws away the client router. */}
-          <Link
+          <a
             href="/security"
             className="inline-flex items-center gap-1.5 text-base font-semibold transition-colors"
             style={{ color: "var(--m-text)" }}
           >
             Visit our trust portal <ArrowRight size={14} />
-          </Link>
+          </a>
         </motion.div>
       </div>
     </section>
