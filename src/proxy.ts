@@ -42,14 +42,23 @@ const MARKETING_PREFIXES = new Set([
 // onboarding route segments. ONLY these redirect off the marketing host; an
 // unknown path is NOT assumed to be an app route, so a typo / deleted page on
 // workwrk.com shows the marketing 404 instead of being bounced to app.
+// KEEP THIS LIST IN STEP WITH THE ROUTE FOLDERS. A new segment under
+// src/app/(dashboard) that is missing here does not 404: under the hard host
+// split it is taken for a MARKETING route and served the marketing site on the
+// app host. Phase 2 added /home and /my-work as the product's landings and
+// pointed /today, /dashboard, /tasks and /tasks/personal-list at them, while
+// this list still ended at "folders" and "meetings": the landing page of the
+// product answered with the marketing page in production, and the old
+// bookmarks redirected straight into it.
+// scripts/check-app-prefixes.mjs fails CI if they drift apart again.
 const APP_PREFIXES = new Set([
   // (dashboard)
   "account", "activity", "agents", "agreements", "ai", "analytics", "announcements",
   "assets", "assigned-comments", "automation", "autopilot", "boards", "build",
   "calendar", "candor", "canvas", "clock", "dashboard", "docs", "everything",
-  "favorites", "files", "folders", "forms", "ideas", "imports", "inbox",
+  "favorites", "files", "folders", "forms", "home", "ideas", "imports", "inbox",
   "integrations", "item", "kra-kpi", "kudos", "library", "marketing", "me",
-  "meetings", "notetaker", "okrs", "organization", "people", "planner", "policies",
+  "meetings", "my-work", "notetaker", "okrs", "organization", "people", "planner", "policies",
   "process-runs", "reviews", "settings", "sidekick", "sops", "spaces", "store",
   "surveys", "tables", "talent", "tasks", "team", "templates", "timesheets",
   "tlk", "today", "tools", "trash",

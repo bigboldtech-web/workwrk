@@ -45,5 +45,11 @@ jobs:
       - name: Validate Prisma schema
         run: npx prisma validate
 
+      # A route segment missing from the proxy's APP_PREFIXES is served the
+      # MARKETING site on the app host under the hard split, with no error
+      # anywhere. That shipped /home and /my-work broken in production.
+      - name: Proxy route allowlist is in step with the route folders
+        run: node scripts/check-app-prefixes.mjs
+
       - name: Unit tests
         run: npx vitest run
