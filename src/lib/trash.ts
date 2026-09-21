@@ -12,7 +12,12 @@ import { TRASH_ROW_HREF, trashRowHref, type TrashTypeKey } from "@/lib/trash-vie
 export type TrashType =
   | "note" | "sop" | "whiteboard" | "table" | "file" | "policy" | "contract"
   // Project hierarchy — "board" is the ClickUp "List", "item" is a Task.
-  | "space" | "folder" | "board" | "item";
+  | "space" | "folder" | "board" | "item"
+  // A drive folder (FileFolder) with its subfolders and files as one snapshot.
+  | "file_folder";
+
+/** The trash kinds whose snapshot names file blobs (freed on permanent delete). */
+export const BLOB_TRASH_TYPES: readonly string[] = ["file", "file_folder"];
 
 // Best-effort: free the underlying file blob (local dev file or S3 object) so
 // storage is actually reclaimed on PERMANENT deletion. Never throws.
@@ -32,15 +37,22 @@ async function freeFileBlob(url: unknown): Promise<void> {
 // Free any external storage a trashed item references (currently file blobs).
 // Call before permanently deleting a TrashItem.
 export async function freeTrashStorage(entityType: string, snapshot: unknown): Promise<void> {
-  if (entityType !== "file") return;
-  const url = (snapshot as { row?: { url?: unknown } } | null)?.row?.url;
-  await freeFileBlob(url);
+  if (entityType === "file") {
+    const url = (snapshot as { row?: { url?: unknown } } | null)?.row?.url;
+    await freeFileBlob(url);
+    return;
+  }
+  if (entityType === "file_folder") {
+    const files = (snapshot as { children?: { files?: { url?: unknown }[] } } | null)?.children?.files ?? [];
+    for (const f of files) await freeFileBlob(f?.url);
+  }
 }
 
 export const TRASH_LABEL: Record<TrashType, string> = {
   note: "Note", sop: "SOP", whiteboard: "Canvas", table: "Table",
   file: "File", policy: "Policy", contract: "Contract",
   space: "Space", folder: "Folder", board: "List", item: "Task",
+  file_folder: "Folder",
 };
 
 /**
@@ -73,6 +85,9 @@ const REGISTRY_TO_KEY: Record<TrashType, TrashTypeKey> = {
   folder: "folder",
   board: "list",
   item: "task",
+  // A drive folder files under the Folder pill with the Space Folders; it is
+  // reached from /files, so its restore href is informational like theirs.
+  file_folder: "folder",
 };
 
 export const TRASH_HREF: Record<TrashType, string> = Object.fromEntries(
@@ -131,6 +146,26 @@ const createItemsParentsFirst = (rows: Row[]) =>
 const createFoldersParentsFirst = (rows: Row[]) =>
   createTreeParentsFirst(rows, "parentFolderId", (batch) =>
     prisma.folder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
+
+const createDriveFoldersParentsFirst = (rows: Row[]) =>
+  createTreeParentsFirst(rows, "parentId", (batch) =>
+    prisma.fileFolder.createMany({ data: asData(batch), skipDuplicates: true }).then(() => {}));
+
+// Every descendant drive folder of a FileFolder (BFS, parents before children).
+async function captureDriveFolderSubtree(rootId: string): Promise<Row[]> {
+  const out: Row[] = [];
+  const seen = new Set<string>([rootId]);
+  let frontier = [rootId];
+  while (frontier.length) {
+    const kids = await prisma.fileFolder.findMany({ where: { parentId: { in: frontier } } });
+    const fresh = kids.filter((k) => !seen.has(k.id));
+    if (!fresh.length) break;
+    for (const k of fresh) seen.add(k.id);
+    out.push(...(fresh as unknown as Row[]));
+    frontier = fresh.map((k) => k.id);
+  }
+  return out;
+}
 
 // Capture every descendant subtask of an item (BFS, level by level so the
 // returned array is already parent-before-child).
@@ -311,6 +346,33 @@ const REGISTRY: Record<TrashType, Entry> = {
       await restoreBoardChildren(s);
     },
   },
+
+  // A DRIVE folder (FileFolder) with everything under it: its descendant
+  // folders (BFS on parentId) and every FileEntry in any of them, as ONE
+  // restorable snapshot (spec-docs-knowledge section 2, /files: "a trashed
+  // folder carries its files to Trash as one restorable snapshot"). Both FKs
+  // are onDelete:SetNull, so the live delete removes files and folders
+  // explicitly in a transaction rather than scattering files to the root.
+  file_folder: {
+    capture: async (id) => {
+      const row = await prisma.fileFolder.findUnique({ where: { id } });
+      if (!row) return null;
+      const folders = await captureDriveFolderSubtree(id);
+      const ids = [id, ...folders.map((f) => f.id as string)];
+      const files = await prisma.fileEntry.findMany({ where: { folderId: { in: ids } } });
+      return {
+        label: row.name || "Untitled folder",
+        snapshot: { row, children: { folders, files: files as unknown as Row[] } },
+      };
+    },
+    restore: async (s) => {
+      await prisma.fileFolder.create({ data: asData(s.row) });
+      const folders = s.children?.folders ?? [];
+      if (folders.length) await createDriveFoldersParentsFirst(folders);
+      const files = s.children?.files ?? [];
+      if (files.length) await prisma.fileEntry.createMany({ data: asData(files), skipDuplicates: true });
+    },
+  },
 };
 
 // Snapshot the row (+ children) into TrashItem and delete it from its table.
@@ -361,6 +423,18 @@ export async function moveToTrash(
         await tx.space.delete({ where: { id } });
       });
       break;
+    // Drive folder: files and subfolders reference it with SetNull, so remove
+    // the files, then every folder in the subtree, then the root, in one
+    // transaction. The ids come from the snapshot just captured.
+    case "file_folder": {
+      const snap = captured.snapshot as { children?: { folders?: Row[] } };
+      const ids = [id, ...(snap.children?.folders ?? []).map((f) => f.id as string)];
+      await prisma.$transaction(async (tx) => {
+        await tx.fileEntry.deleteMany({ where: { folderId: { in: ids } } });
+        await tx.fileFolder.deleteMany({ where: { id: { in: ids } } });
+      });
+      break;
+    }
   }
   return true;
 }
@@ -379,7 +453,7 @@ export async function purgeExpiredTrash(organizationId: string): Promise<void> {
   const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
   // Free blobs for expiring files first (snapshot holds the url).
   const expiringFiles = await prisma.trashItem.findMany({
-    where: { organizationId, deletedAt: { lt: cutoff }, entityType: "file" },
+    where: { organizationId, deletedAt: { lt: cutoff }, entityType: { in: [...BLOB_TRASH_TYPES] } },
     select: { entityType: true, snapshot: true },
   });
   for (const it of expiringFiles) await freeTrashStorage(it.entityType, it.snapshot);

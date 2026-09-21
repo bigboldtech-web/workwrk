@@ -282,9 +282,15 @@ async function archivedByColumnAvailable(): Promise<boolean> {
     const rows = await prisma.$queryRaw<Array<{ n: bigint }>>`
       SELECT count(*)::bigint AS n
       FROM information_schema.columns
-      WHERE table_name = 'Space' AND column_name = 'archivedById'
+      WHERE table_name IN ('Space', 'Agreement') AND column_name = 'archivedById'
     `;
-    archivedByColumn = Number(rows[0]?.n ?? 0) > 0;
+    // Both must be there. Space's column ships in
+    // prisma/sql/2026-09-19-archived-by.sql and Agreement's in
+    // prisma/sql/2026-09-21-agreement-archived-by.sql, so a database can hold
+    // one and not the other. Asking for a column that is not there fails the
+    // whole read, and the fallback shape is per-read, not per-table, so the
+    // honest probe is "are all of them here".
+    archivedByColumn = Number(rows[0]?.n ?? 0) >= 2;
   } catch {
     archivedByColumn = false;
   }
@@ -536,7 +542,7 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
     // per-doc ACL to widen it with, and org-wide would be wider than the rule.
     prisma.doc.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, archivedAt: true, createdById: true, entityType: true, entityId: true, ...withActor } }),
     prisma.whiteboard.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, name: true, archivedAt: true, spaceId: true, ownerId: true, ...withActor } }),
-    prisma.agreement.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, isTemplate: true, archivedAt: true } }),
+    prisma.agreement.findMany({ where: { organizationId, archivedAt: { not: null } }, select: { id: true, title: true, isTemplate: true, archivedAt: true, ...withActor } }),
   ]);
 
   type Archived = Awaited<ReturnType<typeof read>>;
@@ -602,7 +608,7 @@ async function readArchived(organizationId: string): Promise<{ rows: RawRow[]; c
       name: c.title || "Untitled contract",
       anchor: none,
       ownId: c.id,
-      deletedById: null,
+      deletedById: actor(c),
       deletedByName: null,
       scopeOwnerId: null,
       deletedAt: c.archivedAt!,

@@ -48,7 +48,7 @@ export function HubSidebar({ overlay, onClose }: { overlay?: boolean; onClose?: 
 }
 
 function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () => void }) {
-  const { toggleSidebar, openCustomize, hubSidebarApp, sidebarWidth, setSidebarWidth } = useOsShell();
+  const { toggleSidebar, openCustomize, hubSidebarApp, sidebarWidth, setSidebarWidth, launcherApps } = useOsShell();
   const { boot } = useBoot();
   const pathname = usePathname() || "";
   const { query, setQuery } = useSidebarSearch();
@@ -90,15 +90,20 @@ function HubSidebarBody({ overlay, onClose }: { overlay?: boolean; onClose?: () 
   // enforces. While the matrix is still loading a permission-gated row is
   // withheld, so a dead door is never on screen even for a moment.
   const { can: canDo, loading: permsLoading } = usePermissions();
+  // Rail PLUS folded: `library` and `clips` live inside a hub sidebar rather
+  // than on the rail, so railApps never lists them.
+  const appKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
   const createActions = useMemo<CreateAction[]>(() => {
     if (!Array.isArray(app.createActions)) return [];
     return app.createActions.filter((a) => {
       if (!canAccessTier(a.requiredAccess, accessLevel)) return false;
+      // The destination's own app gate, so a row never lands on AppOff.
+      if (a.requiredApps && !a.requiredApps.every((k) => appKeys.has(k))) return false;
       if (!a.requiredPermission) return true;
       if (permsLoading) return false;
       return canDo(a.requiredPermission.module, a.requiredPermission.action);
     });
-  }, [app, accessLevel, canDo, permsLoading]);
+  }, [app, accessLevel, canDo, permsLoading, appKeys]);
   const createMode: "custom" | "global" | "menu" | "single" | "none" =
     app.CreateMenu ? "custom"
     : app.createActions === "global" ? "global"

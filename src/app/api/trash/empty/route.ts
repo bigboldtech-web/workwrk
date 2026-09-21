@@ -10,7 +10,7 @@ import { z } from "zod";
 import { AccessError, requireCan } from "@/lib/access/gate";
 import { jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { prisma } from "@/lib/prisma";
-import { freeTrashStorage } from "@/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorage } from "@/lib/trash";
 
 const schema = z.object({ confirm: z.literal("DELETE") });
 
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     // Free the blobs before the rows that name them are gone, or the storage
     // is orphaned with no way left to find it.
     const files = await prisma.trashItem.findMany({
-      where: { organizationId: orgId, entityType: "file" },
+      where: { organizationId: orgId, entityType: { in: [...BLOB_TRASH_TYPES] } },
       select: { entityType: true, snapshot: true },
     });
     for (const f of files) await freeTrashStorage(f.entityType, f.snapshot);

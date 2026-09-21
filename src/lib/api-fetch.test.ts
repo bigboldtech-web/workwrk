@@ -82,6 +82,34 @@ describe("apiFetch", () => {
     expect(r).toEqual({ ok: true, status: 200, data: { a: 1 } });
   });
 
+  it("refuses an HTML page served at 200 from an /api/ path", async () => {
+    // The dashboard catch-all renders its not-found PAGE at HTTP 200 for any
+    // path it does not know, /api/** included. Reporting that as success let
+    // a write to a missing route answer ok:true while nothing was written.
+    globalThis.fetch = vi.fn(async () => respond(200, "<!DOCTYPE html><html lang=\"en\"></html>", "text/html")) as typeof fetch;
+    const r = await apiFetch("/api/agreements/x/parties/y", { method: "DELETE" });
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(200);
+  });
+
+  it("catches the HTML page even when the content type is missing", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("<html><body>nope</body></html>", { status: 200 })) as typeof fetch;
+    const r = await apiFetch("/api/nope");
+    expect(r.ok).toBe(false);
+  });
+
+  it("still returns a plain-text API body as data", async () => {
+    globalThis.fetch = vi.fn(async () => respond(200, "pong", "text/plain")) as typeof fetch;
+    const r = await apiFetch<string>("/api/ping");
+    expect(r).toEqual({ ok: true, status: 200, data: "pong" });
+  });
+
+  it("leaves non-API URLs alone", async () => {
+    globalThis.fetch = vi.fn(async () => respond(200, "<!DOCTYPE html><html></html>", "text/html")) as typeof fetch;
+    const r = await apiFetch<string>("/share/doc/abc");
+    expect(r.ok).toBe(true);
+  });
+
   it("JSON-encodes the json option and sets the content type", async () => {
     const spy = vi.fn(async () => respond(200, "{}"));
     globalThis.fetch = spy as unknown as typeof fetch;

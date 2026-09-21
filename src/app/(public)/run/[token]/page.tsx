@@ -1,64 +1,31 @@
 "use client";
 
-import { useState, useEffect } from "react";
+/* /run/[token] (spec-process section 2): run a checklist from a link, on any
+ * device, with no sign-in. The token is the credential.
+ *
+ *   strip     the org logo + name, "Run" at the right (PublicPageFrame)
+ *   header    run title 22/600, "From the SOP: {title}", the assignee and
+ *             due date on one line, a 4px progress bar "5 of 9 steps · 56%"
+ *   body      ChecklistRunner: every tick saves immediately with a 6px
+ *             saving dot on the row; a failed save reads "Not saved,
+ *             retrying" on the row and retries; typed values save on blur;
+ *             file inputs upload through POST /api/upload with the run token
+ *   bottom    when every step is done, a sticky bar "All steps done" with
+ *             the one blue "Finish run"; after completion "Completed on
+ *             {date}" and the steps stay visible read-only
+ *
+ * Unknown or expired token: the public 404 "This link is no longer available".
+ * Cancelled run: "This run was cancelled."
+ */
+
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
-import {
-  CheckCircle2,
-  Circle,
-  AlertCircle,
-  Clock,
-  ChevronDown,
-  ChevronRight,
-  Upload,
-} from "lucide-react";
-
-// ============================================
-// Types
-// ============================================
-
-interface InputField {
-  id: string;
-  type: string;
-  label: string;
-  required: boolean;
-  placeholder?: string;
-  options?: string[];
-}
-
-interface ContentBlock {
-  id: string;
-  type: "text" | "horizontal_line" | "image" | "video";
-  content: string;
-}
-
-interface Step {
-  id: string;
-  title: string;
-  description?: string;
-  type: "task" | "approval";
-  inputs?: InputField[];
-  contentBlocks?: ContentBlock[];
-}
-
-interface Section {
-  id: string;
-  title: string;
-  steps: Step[];
-}
-
-interface StepData {
-  [stepId: string]: {
-    completedAt?: string;
-    completedBy?: string;
-    inputValues?: Record<string, unknown>;
-  };
-}
+import { PublicPageFrame } from "@/components/process/public-page-frame";
+import { ChecklistRunner, type RowState } from "@/components/sops/checklist-runner";
+import type { ReadChecklistSection, ReadChecklistStep } from "@/components/sops/sop-read-view";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { formatDate } from "@/lib/format/date";
+import { allRequiredDone, runProgress } from "@/lib/sop-kind";
 
 interface RunData {
   id: string;
@@ -68,550 +35,188 @@ interface RunData {
   progress: number;
   status: string;
   dueDate: string | null;
-  sections: Section[];
+  completedAt: string | null;
+  assignee: string | null;
+  sections: ReadChecklistSection[];
   completedSteps: string[];
-  stepData: StepData;
+  stepData: Record<string, { completedAt?: string; completedBy?: string; inputValues?: Record<string, unknown> | null }>;
+  org: { name: string; logo: string | null } | null;
 }
 
-// ============================================
-// Component
-// ============================================
+const RETRY_MS = [800, 1600, 3200];
 
 export default function ProcessRunPage() {
-  const { token } = useParams();
+  const { token } = useParams<{ token: string }>();
   const [data, setData] = useState<RunData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [completing, setCompleting] = useState<string | null>(null);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
-  // Track input values per step
-  const [inputValues, setInputValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [error, setError] = useState<"gone" | "cancelled" | "failed" | null>(null);
+  const [values, setValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [rowState, setRowState] = useState<Record<string, RowState>>({});
+  const [finishing, setFinishing] = useState(false);
+  const [finishFailed, setFinishFailed] = useState(false);
+  const valuesRef = useRef(values);
+  valuesRef.current = values;
 
-  useEffect(() => {
-    fetch(`/api/public/run/${token}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Process not found or link expired");
-        return res.json();
-      })
-      .then((json) => {
-        const d = json.data || json;
-        setData(d);
-        setExpandedSections(new Set(d.sections?.map((s: Section) => s.id) || []));
-        // Load existing input values from stepData
-        if (d.stepData) {
-          const existing: Record<string, Record<string, unknown>> = {};
-          for (const [stepId, sd] of Object.entries(d.stepData as StepData)) {
-            if (sd.inputValues) {
-              existing[stepId] = sd.inputValues as Record<string, unknown>;
-            }
-          }
-          setInputValues(existing);
-        }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [token]);
-
-  function setStepInputValue(stepId: string, fieldId: string, value: unknown) {
-    setInputValues((prev) => ({
-      ...prev,
-      [stepId]: { ...(prev[stepId] || {}), [fieldId]: value },
-    }));
-  }
-
-  function validateRequiredInputs(step: Step): boolean {
-    if (!step.inputs || step.inputs.length === 0) return true;
-    const vals = inputValues[step.id] || {};
-    for (const input of step.inputs) {
-      if (input.required) {
-        const v = vals[input.id];
-        if (v === undefined || v === null || v === "") return false;
-      }
-    }
-    return true;
-  }
-
-  async function toggleStep(step: Step) {
-    if (!data) return;
-    const stepId = step.id;
-    setCompleting(stepId);
-
-    const isCompleted = data.completedSteps.includes(stepId);
-    const action = isCompleted ? "uncomplete_step" : "complete_step";
-
-    // Validate required inputs before completing
-    if (!isCompleted && !validateRequiredInputs(step)) {
-      setCompleting(null);
-      return;
-    }
-
+  const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/public/run/${token}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          stepId,
-          inputValues: inputValues[stepId] || null,
-        }),
-      });
-
-      if (res.ok) {
-        const result = await res.json();
-        const r = result.data || result;
-        setData({
-          ...data,
-          progress: r.progress,
-          completedSteps: r.completedSteps,
-          status: r.status,
-        });
-      }
-    } catch {} finally {
-      setCompleting(null);
+      const res = await fetch(`/api/public/run/${token}`, { cache: "no-store" });
+      if (res.status === 410) { setError("cancelled"); return; }
+      if (res.status === 404) { setError("gone"); return; }
+      if (!res.ok) { setError("failed"); return; }
+      const json = await res.json();
+      const d: RunData = json.data ?? json;
+      setData(d);
+      const existing: Record<string, Record<string, unknown>> = {};
+      for (const [stepId, sd] of Object.entries(d.stepData ?? {})) if (sd?.inputValues) existing[stepId] = sd.inputValues;
+      setValues(existing);
+      setError(null);
+    } catch {
+      setError("failed");
     }
-  }
+  }, [token]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
 
-  function toggleSection(sectionId: string) {
-    setExpandedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(sectionId)) next.delete(sectionId);
-      else next.add(sectionId);
-      return next;
-    });
-  }
+  const patch = useCallback(async (body: Record<string, unknown>): Promise<RunData | null> => {
+    const res = await fetch(`/api/public/run/${token}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (res.status === 410) { setError("cancelled"); return null; }
+    // 409 = the run is already complete (or not every step is ticked): the
+    // answer is the server's state, so reload it rather than retry a write
+    // that will never be accepted.
+    if (res.status === 409) { await load(); return null; }
+    if (!res.ok) throw new Error(`PATCH ${res.status}`);
+    const json = await res.json();
+    const r = json.data ?? json;
+    setData((prev) => (prev ? { ...prev, progress: r.progress ?? prev.progress, completedSteps: r.completedSteps ?? prev.completedSteps, status: r.status ?? prev.status, completedAt: r.completedAt ?? prev.completedAt, stepData: r.stepData ?? prev.stepData } : prev));
+    return r;
+  }, [token, load]);
 
-  // ============================================
-  // Loading / Error states
-  // ============================================
+  /** A row-level save with retries and the saving dot; never silent. */
+  const saveRow = useCallback(async (stepId: string, body: Record<string, unknown>) => {
+    setRowState((s) => ({ ...s, [stepId]: "saving" }));
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await patch(body);
+        setRowState((s) => ({ ...s, [stepId]: "idle" }));
+        return true;
+      } catch {
+        if (attempt >= RETRY_MS.length) { setRowState((s) => ({ ...s, [stepId]: "failed" })); return false; }
+        setRowState((s) => ({ ...s, [stepId]: "retrying" }));
+        await new Promise((r) => setTimeout(r, RETRY_MS[attempt]));
+      }
+    }
+  }, [patch]);
 
-  if (loading) {
+  const onToggle = (step: ReadChecklistStep, next: boolean) => {
+    void saveRow(step.id, { action: next ? "complete_step" : "uncomplete_step", stepId: step.id, inputValues: valuesRef.current[step.id] ?? null });
+  };
+  const inputTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const onInput = (stepId: string, inputId: string, value: unknown) => {
+    setValues((prev) => ({ ...prev, [stepId]: { ...(prev[stepId] ?? {}), [inputId]: value } }));
+    if (inputTimers.current[stepId]) clearTimeout(inputTimers.current[stepId]);
+    inputTimers.current[stepId] = setTimeout(() => {
+      void saveRow(stepId, { action: "input", stepId, inputValues: { ...(valuesRef.current[stepId] ?? {}), [inputId]: value } });
+    }, 600);
+  };
+  const onUpload = async (stepId: string, _inputId: string, file: File): Promise<string | null> => {
+    void _inputId;
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("runToken", token);
+    setRowState((s) => ({ ...s, [stepId]: "saving" }));
+    try {
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!res.ok) throw new Error();
+      const j = await res.json();
+      setRowState((s) => ({ ...s, [stepId]: "idle" }));
+      return typeof j.url === "string" ? j.url : null;
+    } catch {
+      setRowState((s) => ({ ...s, [stepId]: "failed" }));
+      return null;
+    }
+  };
+  const finish = async () => {
+    setFinishing(true);
+    setFinishFailed(false);
+    try { await patch({ action: "complete" }); } catch { setFinishFailed(true); }
+    setFinishing(false);
+  };
+
+  if (error === "gone" || error === "cancelled") {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" />
-      </div>
+      <PublicPageFrame org={null} label="Run" footer={<>WorkwrK</>}>
+        <div className="flex flex-col items-center gap-2 py-16 text-center">
+          <p className="text-row text-ink">{error === "cancelled" ? "This run was cancelled." : "This link is no longer available"}</p>
+          <p className="text-sm text-ink-2">{error === "cancelled" ? "Ask the person who started it if a new one is needed." : "It may have expired or been turned off."}</p>
+        </div>
+      </PublicPageFrame>
     );
   }
-
-  if (error || !data) {
+  if (error === "failed") {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center px-4">
-        <Card className="max-w-md w-full border-border bg-surface">
-          <CardContent className="p-8 text-center">
-            <AlertCircle size={40} className="mx-auto text-red-400 mb-4" />
-            <h1 className="text-lg font-semibold mb-2">Process Not Found</h1>
-            <p className="text-base text-muted">{error || "This link may have expired or been removed."}</p>
-          </CardContent>
-        </Card>
-      </div>
+      <PublicPageFrame org={null} label="Run">
+        <div className="flex flex-col items-center gap-2 py-16 text-center" role="alert">
+          <p className="text-row text-ink">Couldn&apos;t load this run</p>
+          <button type="button" onClick={() => void load()} className="text-base font-medium text-brand-deep hover:underline">Retry</button>
+        </div>
+      </PublicPageFrame>
+    );
+  }
+  if (!data) {
+    return (
+      <PublicPageFrame org={null} label="Run">
+        <div className="pt-2"><span className="block h-6 w-2/3 rounded bg-skeleton os-skeleton-pulse" /><div className="mt-6"><SkeletonLines lines={6} /></div></div>
+      </PublicPageFrame>
     );
   }
 
   const isComplete = data.status === "COMPLETED";
-
-  // ============================================
-  // Render input field
-  // ============================================
-
-  function renderInput(stepId: string, input: InputField, isStepComplete: boolean) {
-    const value = (inputValues[stepId] || {})[input.id] ?? "";
-    const disabled = isStepComplete;
-
-    const common = {
-      disabled,
-      className: `bg-transparent border-border text-base ${disabled ? "opacity-50" : ""}`,
-    };
-
-    switch (input.type) {
-      case "short_text":
-        return (
-          <Input
-            {...common}
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || input.label}
-          />
-        );
-      case "long_text":
-        return (
-          <Textarea
-            {...common}
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || input.label}
-            rows={3}
-          />
-        );
-      case "number":
-        return (
-          <Input
-            {...common}
-            type="number"
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || "0"}
-          />
-        );
-      case "email":
-        return (
-          <Input
-            {...common}
-            type="email"
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || "email@example.com"}
-          />
-        );
-      case "website":
-        return (
-          <Input
-            {...common}
-            type="url"
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || "https://"}
-          />
-        );
-      case "date":
-        return (
-          <Input
-            {...common}
-            type="date"
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-          />
-        );
-      case "checkbox":
-        return (
-          <label className="flex items-center gap-2 text-base cursor-pointer">
-            <input
-              type="checkbox"
-              disabled={disabled}
-              checked={!!value}
-              onChange={(e) => setStepInputValue(stepId, input.id, e.target.checked)}
-              className="rounded"
-            />
-            <span className={disabled ? "opacity-50" : ""}>{input.label}</span>
-          </label>
-        );
-      case "dropdown":
-        return (
-          <select
-            disabled={disabled}
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            className={`w-full rounded-md border px-3 py-2 text-base bg-transparent border-border ${disabled ? "opacity-50" : ""}`}
-          >
-            <option value="">Select...</option>
-            {(input.options || []).map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        );
-      case "multichoice": {
-        const selected = (value || []) as string[];
-        return (
-          <div className="space-y-1">
-            {(input.options || []).map((opt) => (
-              <label key={opt} className="flex items-center gap-2 text-base cursor-pointer">
-                <input
-                  type="checkbox"
-                  disabled={disabled}
-                  checked={selected.includes(opt)}
-                  onChange={(e) => {
-                    const newVal = e.target.checked
-                      ? [...selected, opt]
-                      : selected.filter((s) => s !== opt);
-                    setStepInputValue(stepId, input.id, newVal);
-                  }}
-                  className="rounded"
-                />
-                <span className={disabled ? "opacity-50" : ""}>{opt}</span>
-              </label>
-            ))}
-          </div>
-        );
-      }
-      case "file_upload": {
-        const fileUrl = value as string;
-        return (
-          <div className={`${disabled ? "opacity-50" : ""}`}>
-            {fileUrl ? (
-              <div className="flex items-center gap-2 p-2 rounded border border-border bg-surface">
-                <Upload size={14} className="text-green-400" />
-                <a href={fileUrl} target="_blank" rel="noopener" className="text-sm text-[#d4ff2e] hover:underline truncate flex-1">
-                  {fileUrl.split("/").pop()}
-                </a>
-              </div>
-            ) : (
-              <label className={`flex items-center gap-2 p-3 rounded border border-dashed border-border cursor-pointer hover:border-[#d4ff2e] transition-colors ${disabled ? "pointer-events-none" : ""}`}>
-                <Upload size={16} className="text-muted" />
-                <span className="text-sm text-muted">Click to upload file (max 10MB)</span>
-                <input type="file" className="hidden" disabled={disabled} onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const fd = new FormData();
-                  fd.append("file", file);
-                  try {
-                    const res = await fetch("/api/upload", { method: "POST", body: fd });
-                    if (res.ok) {
-                      const data = await res.json();
-                      setStepInputValue(stepId, input.id, data.url);
-                    }
-                  } catch {}
-                }} />
-              </label>
-            )}
-          </div>
-        );
-      }
-      default:
-        return (
-          <Input
-            {...common}
-            value={value as string}
-            onChange={(e) => setStepInputValue(stepId, input.id, e.target.value)}
-            placeholder={input.placeholder || input.label}
-          />
-        );
-    }
-  }
-
-  // ============================================
-  // Main render
-  // ============================================
+  const progress = runProgress(data.sections, data.completedSteps);
+  const allDone = allRequiredDone(data.sections, data.completedSteps);
+  const total = progress.total;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <div className="border-b border-border bg-surface">
-        <div className="mx-auto max-w-3xl px-6 py-6">
-          <div className="flex items-center gap-2 text-sm text-muted mb-2">
-            <span className="bg-gradient-to-r text-[#d4ff2e] font-semibold text-base">
-              WorkwrK
-            </span>
-            <span>/</span>
-            <span>{data.sopTitle}</span>
-          </div>
-          <h1 className="text-xl font-semibold text-foreground">{data.title}</h1>
-          {data.description && (
-            <p className="text-base text-muted mt-1">{data.description}</p>
-          )}
-          <div className="flex items-center gap-4 mt-4">
-            <div className="flex-1">
-              <Progress value={data.progress} className="h-2.5" />
-            </div>
-            <span className="text-base font-semibold text-[#d4ff2e]">{data.progress}%</span>
-          </div>
-          {data.dueDate && (
-            <div className="flex items-center gap-1 mt-2 text-sm text-muted">
-              <Clock size={12} />
-              Due: {new Date(data.dueDate).toLocaleDateString()}
-            </div>
-          )}
-          {isComplete && (
-            <div className="mt-3 rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-base text-green-400 text-center">
-              Process completed!
-            </div>
-          )}
+    <PublicPageFrame org={data.org} label="Run">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-xl font-semibold text-ink">{data.title}</h1>
+        <p className="text-sm text-ink-2">From the SOP: {data.sopTitle}</p>
+        <p className="text-sm text-ink-2">
+          {data.assignee ? `Assigned to ${data.assignee}` : "Anyone with the link"}
+          {data.dueDate ? ` · Due ${formatDate(data.dueDate, null, "date")}` : ""}
+        </p>
+        <div className="mt-2 flex items-center gap-3">
+          <span className="h-1 flex-1 overflow-hidden rounded-full bg-active"><span className="block h-full bg-brand" style={{ width: `${progress.pct}%` }} /></span>
+          <span className="shrink-0 text-xs font-medium tabular-nums text-ink-2">{progress.done} of {total} steps · {progress.pct}%</span>
         </div>
+        {isComplete ? (
+          <p className="inline-flex items-center gap-2 text-sm text-ink"><span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-success-solid" />Completed{data.completedAt ? ` on ${formatDate(data.completedAt, null, "datetime")}` : ""}</p>
+        ) : null}
       </div>
 
-      {/* Sections & Steps */}
-      <div className="mx-auto max-w-3xl px-6 py-6 space-y-4">
-        {data.sections?.map((section) => {
-          const sectionCompleted = section.steps.every((s) =>
-            data.completedSteps.includes(s.id)
-          );
-          const completedCount = section.steps.filter((s) =>
-            data.completedSteps.includes(s.id)
-          ).length;
-          const sectionProgress =
-            section.steps.length > 0
-              ? Math.round((completedCount / section.steps.length) * 100)
-              : 0;
-          const isExpanded = expandedSections.has(section.id);
-
-          return (
-            <Card key={section.id} className="border-border bg-surface overflow-hidden">
-              <button
-                onClick={() => toggleSection(section.id)}
-                className="w-full flex items-center justify-between p-4 hover:bg-surface-2 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  {sectionCompleted ? (
-                    <CheckCircle2 size={20} className="text-green-400" />
-                  ) : (
-                    <div className="h-5 w-5 rounded-full border-2 border-muted-2 flex items-center justify-center">
-                      <span className="text-xs text-muted">{sectionProgress}%</span>
-                    </div>
-                  )}
-                  <span className="font-medium text-base">{section.title}</span>
-                  <span className="text-sm text-muted-2">
-                    {completedCount}/{section.steps.length}
-                  </span>
-                </div>
-                {isExpanded ? (
-                  <ChevronDown size={16} className="text-muted" />
-                ) : (
-                  <ChevronRight size={16} className="text-muted" />
-                )}
-              </button>
-
-              {isExpanded && (
-                <div className="border-t border-border">
-                  {section.steps.map((step, idx) => {
-                    const isStepComplete = data.completedSteps.includes(step.id);
-                    const isApproval = step.type === "approval";
-                    const hasInputs = step.inputs && step.inputs.length > 0;
-                    const hasContent = step.contentBlocks && step.contentBlocks.length > 0;
-                    const hasRequiredInputs = step.inputs?.some((i) => i.required) || false;
-                    const canComplete = !hasRequiredInputs || validateRequiredInputs(step);
-
-                    return (
-                      <div
-                        key={step.id}
-                        className={`border-b border-surface-2 last:border-b-0 ${
-                          isStepComplete ? "bg-surface-3/50" : ""
-                        }`}
-                      >
-                        {/* Step header */}
-                        <div className="flex items-start gap-3 px-4 py-3">
-                          <button
-                            onClick={() => toggleStep(step)}
-                            disabled={completing === step.id || (!isStepComplete && !canComplete)}
-                            className="mt-0.5 shrink-0"
-                            title={
-                              !canComplete && !isStepComplete
-                                ? "Fill in required fields first"
-                                : undefined
-                            }
-                          >
-                            {completing === step.id ? (
-                              <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#d4ff2e] border-t-transparent" />
-                            ) : isStepComplete ? (
-                              <CheckCircle2 size={20} className="text-green-400" />
-                            ) : isApproval ? (
-                              <AlertCircle size={20} className="text-amber-400" />
-                            ) : (
-                              <Circle
-                                size={20}
-                                className={`transition-colors ${
-                                  canComplete
-                                    ? "text-border hover:text-[#d4ff2e]"
-                                    : "text-border"
-                                }`}
-                              />
-                            )}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p
-                                className={`text-base ${
-                                  isStepComplete
-                                    ? "line-through text-muted-2"
-                                    : "text-foreground"
-                                }`}
-                              >
-                                {step.title}
-                              </p>
-                              {isApproval && !isStepComplete && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                  Approval
-                                </span>
-                              )}
-                              {hasRequiredInputs && !isStepComplete && (
-                                <span className="text-xs px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                                  Has required fields
-                                </span>
-                              )}
-                            </div>
-                            {step.description && (
-                              <p className="text-sm text-muted-2 mt-0.5">
-                                {step.description}
-                              </p>
-                            )}
-                          </div>
-                          <span className="text-sm text-muted-2 mt-0.5 shrink-0">
-                            {idx + 1}
-                          </span>
-                        </div>
-
-                        {/* Content blocks */}
-                        {hasContent && (
-                          <div className="px-12 pb-3 space-y-2">
-                            {step.contentBlocks!.map((cb) => {
-                              if (cb.type === "horizontal_line") {
-                                return (
-                                  <hr
-                                    key={cb.id}
-                                    className="border-border"
-                                  />
-                                );
-                              }
-                              if (cb.type === "text") {
-                                return (
-                                  <p
-                                    key={cb.id}
-                                    className="text-sm text-muted whitespace-pre-wrap"
-                                  >
-                                    {cb.content}
-                                  </p>
-                                );
-                              }
-                              if (cb.type === "image" && cb.content) {
-                                return (
-                                  <img
-                                    key={cb.id}
-                                    src={cb.content}
-                                    alt=""
-                                    className="max-w-full rounded border border-border"
-                                  />
-                                );
-                              }
-                              if (cb.type === "video" && cb.content) {
-                                return (
-                                  <video
-                                    key={cb.id}
-                                    src={cb.content}
-                                    controls
-                                    className="max-w-full rounded"
-                                  />
-                                );
-                              }
-                              return null;
-                            })}
-                          </div>
-                        )}
-
-                        {/* Input fields */}
-                        {hasInputs && (
-                          <div className="px-12 pb-4 space-y-3">
-                            {step.inputs!.map((input) => (
-                              <div key={input.id} className="space-y-1">
-                                {input.type !== "checkbox" && (
-                                  <Label className="text-sm text-muted">
-                                    {input.label}
-                                    {input.required && (
-                                      <span className="text-red-400 ml-0.5">*</span>
-                                    )}
-                                  </Label>
-                                )}
-                                {renderInput(step.id, input, isStepComplete)}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Card>
-          );
-        })}
+      <div className="mt-6">
+        {total === 0 ? (
+          <p className="py-8 text-center text-row text-ink-2">This checklist has no steps yet.</p>
+        ) : (
+          <ChecklistRunner
+            sections={data.sections}
+            completedSteps={data.completedSteps}
+            values={values}
+            rowState={rowState}
+            readOnly={isComplete}
+            onToggle={onToggle}
+            onInput={onInput}
+            onUpload={onUpload}
+            approvedLine={(stepId) => { const sd = data.stepData?.[stepId]; return sd?.completedAt ? `Approved on ${formatDate(sd.completedAt, null, "datetime")}` : null; }}
+          />
+        )}
       </div>
-    </div>
+
+      {!isComplete && allDone ? (
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-raised">
+          <div className="mx-auto flex h-16 w-full max-w-[720px] items-center gap-3 px-4 sm:px-6">
+            <span className="min-w-0 flex-1 truncate text-row font-medium text-ink">{finishFailed ? "Not saved · try again" : "All steps done"}</span>
+            <button type="button" onClick={() => void finish()} disabled={finishing} className="inline-flex h-9 items-center rounded-md bg-brand px-3 text-base font-medium text-white hover:bg-brand-hover disabled:bg-active disabled:text-ink-4">Finish run</button>
+          </div>
+        </div>
+      ) : null}
+    </PublicPageFrame>
   );
 }

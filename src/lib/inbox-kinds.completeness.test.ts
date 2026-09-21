@@ -91,6 +91,7 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   number: "an automation action config field type",
   status: "an automation action config field type",
   "asset.create": "an ActivityLog action, not a notification",
+  "policy.publish": "an ActivityLog action beside the publish notification in api/policies/[id]",
   message: "the SSE realtime event name in api/conversations/[id]/messages",
   notification: "the SSE realtime event name in the same handler",
   kudos_given: "an ActivityLog action beside the KUDOS notification",
@@ -100,6 +101,9 @@ const NOT_NOTIFICATION_TYPES: Readonly<Record<string, string>> = {
   bulk_update: "an ActivityLog action in api/people/bulk-update",
   task_created: "an ActivityLog action in api/tasks (legacy Task model)",
   task_completed: "an ActivityLog action in api/tasks (legacy Task model)",
+  process_run_started: "an ActivityLog action beside the run.assigned notification in api/process-runs",
+  process_run_cancelled: "an ActivityLog action in api/process-runs/[id]",
+  process_run_deleted: "an ActivityLog action in api/process-runs/[id]",
 };
 
 /**

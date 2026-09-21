@@ -158,12 +158,14 @@ const nextConfig: NextConfig = {
       // clean `?type=doc` and `?type=contract`, and now they are.
       { source: "/docs/trash", destination: "/trash?type=doc", permanent: true },
       {
-        // Next appends the matched query to the destination, so this lands on
-        // /trash?view=archived&type=doc. `view` is inert there (resolveTrashTab
-        // reads `tab` and `type` only) and there is no config-level way to drop
-        // it: the ride-along is documented Next behaviour. The alternative, a
-        // page-level normalisation, would render /docs and its whole doc list
-        // before bouncing, which is worse than an extra parameter.
+        // Next appends the matched query to the destination, so this arrives
+        // as /trash?view=archived&type=doc: the ride-along is documented Next
+        // behaviour with no config-level way to drop it. The Trash page
+        // (src/app/(dashboard)/trash/page.tsx) redirects server-side to the
+        // canonical /trash?type=doc before rendering anything, so the URL a
+        // person keeps is clean and /docs never renders on the way. The four
+        // /sops/new?type= rows below get the same treatment from
+        // SopCreateRoute (one router.replace that drops `type`).
         source: "/docs",
         has: [{ type: "query", key: "view", value: "archived" }],
         destination: "/trash?type=doc",
@@ -230,21 +232,39 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
       //
-      // DELIBERATELY NOT HERE, and it is a loop, not an oversight:
+      // The two "new" URLs that were used to EDIT (spec-process section 0):
       //
-      //   /sops/new/text?id=X     -> /sops/X?edit=1
+      //   /sops/new/text?id=X      -> /sops/X?edit=1
       //   /sops/new/checklist?id=X -> /sops/X?edit=1
       //
-      // spec-process section 0 asks for both, and both are written and ready
-      // (the named capture in a `has` value is Next's own mechanism for
-      // reading a query value into a destination). They cannot ship until
-      // step 3 teaches /sops/[id] to edit a Written SOP in place, because
-      // TODAY that page sends Written SOPs straight back out:
-      // sops/[id]/page.tsx:902 does router.replace(`/sops/new/text?id=X`)
-      // the moment it sees ?edit=1 on written content. With the redirect on,
-      // those two lines chase each other and a Written SOP can never be
-      // opened for editing at all. The redirect is half of one change; the
-      // other half is the editor, and they ship together.
+      // The named capture in the `has` value is Next's own mechanism for
+      // reading a query value into a destination. These two were held back
+      // by a loop: /sops/[id] used to send Written SOPs straight back out to
+      // /sops/new/text?id= the moment it saw ?edit=1. It hosts the written
+      // editor itself now (src/components/sops/sop-editor-page.tsx), so
+      // the redirect has somewhere to land. Both create doors also normalise
+      // a stored ?id= link on the page (src/lib/nav/retired-views.ts
+      // `legacySopEditorTarget`), the twin that answers on a process that
+      // predates this config edit.
+      //
+      // Next passes the whole request query on to a redirect destination,
+      // the matched `id` included, so the browser first lands on
+      // /sops/X?id=X&edit=1. The SOP page drops the residue with one
+      // router.replace on arrival (the same-path normalisation pattern
+      // retired-views.ts describes), so the URL a person copies from the
+      // editor is the canonical /sops/X?edit=1.
+      {
+        source: "/sops/new/text",
+        has: [{ type: "query", key: "id", value: "(?<id>[A-Za-z0-9_-]+)" }],
+        destination: "/sops/:id?edit=1",
+        permanent: true,
+      },
+      {
+        source: "/sops/new/checklist",
+        has: [{ type: "query", key: "id", value: "(?<id>[A-Za-z0-9_-]+)" }],
+        destination: "/sops/:id?edit=1",
+        permanent: true,
+      },
       // Whiteboards were renamed to Canvas — keep old links/bookmarks working.
       { source: "/whiteboards", destination: "/canvas", permanent: false },
       { source: "/whiteboards/:id", destination: "/canvas/:id", permanent: false },

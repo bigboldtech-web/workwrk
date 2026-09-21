@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
+import { viewerFromSessionObject } from "@/lib/access/viewer";
 
 export async function GET() {
   const { error, session } = await getSessionOrFail();
@@ -16,12 +17,18 @@ export async function GET() {
     where: { organizationId: orgId },
     orderBy: { name: "asc" },
     select: {
-      id: true, name: true, parentId: true, createdAt: true, updatedAt: true,
+      id: true, name: true, parentId: true, createdAt: true, updatedAt: true, createdById: true,
       _count: { select: { files: true, children: true } },
     },
   });
 
-  return jsonSuccess(folders);
+  // `canManage` is what the folder row menu gates Move to Trash on (Full
+  // access = creator or org admin until the drive has grant rows), so the
+  // menu never offers a row the DELETE below would 403.
+  const orgRole = viewerFromSessionObject(session)?.orgRole;
+  const admin = orgRole === "OWNER" || orgRole === "ADMIN";
+  const userId = getUserId(session);
+  return jsonSuccess(folders.map((f) => ({ ...f, canManage: admin || f.createdById === userId })));
 }
 
 export async function POST(req: NextRequest) {

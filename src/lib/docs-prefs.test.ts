@@ -57,9 +57,9 @@ describe("Docs hub preference readers default PER FIELD", () => {
 });
 
 describe("view type readers", () => {
-  it("default to the grid on Canvases and Files", () => {
+  it("default to the grid on Canvases and the list on Files", () => {
     expect(readCanvasViewType({})).toBe("grid");
-    expect(readFilesViewType({})).toBe("grid");
+    expect(readFilesViewType({})).toBe("list");
   });
 
   it("read a stored value back", () => {

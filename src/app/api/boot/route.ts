@@ -15,11 +15,13 @@
 // apiFetch turns it into the Session-expired dialog); a failure is a 500 the
 // boot screen renders as ErrorState, never a trip to /onboard.
 
+import { retentionDays } from "@/lib/trash-view";
 import { NextResponse, type NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { getToken } from "next-auth/jwt";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { countPoliciesToAck } from "@/lib/policies-to-ack";
 import { unreadWhere, withClearedAtFallback } from "@/lib/inbox-query";
 import { getEffectivePreferences, type EffectivePreferences } from "@/lib/preferences";
 import { parseOrgAppsConfig, visibleRailApps } from "@/lib/rail-apps";
@@ -83,6 +85,13 @@ export interface BootPayload {
     logo: string | null;
     plan: string;
     culture: { mission: string; values: string[]; splash: SplashPolicy };
+    /**
+     * `settings.retention.trashDays` resolved through retentionDays(), so the
+     * Move-to-Trash confirms can say "restore within N days" from the org's
+     * real value and never a number typed into copy (spec-docs-knowledge
+     * section 2, /docs and /canvas confirm copy).
+     */
+    trashDays: number;
   };
   counts: BootCounts;
   timer: ActiveTimer | null;
@@ -137,14 +146,9 @@ async function counts(userId: string, orgId: string): Promise<BootCounts> {
         },
       })
       .catch((e: unknown) => { console.error("boot counts: mySops", e); return 0; }),
-    prisma.policyAssignment
-      .count({
-        where: {
-          userId,
-          status: { not: "COMPLETED" },
-          policy: { organizationId: orgId },
-        },
-      })
+    // ONE rule with the /policies "Needs my acknowledgement" pill
+    // (lib/policies-to-ack), so the badge and the pill never disagree.
+    countPoliciesToAck(userId, orgId)
       .catch((e: unknown) => { console.error("boot counts: policiesToAck", e); return 0; }),
   ]);
   return {
@@ -304,6 +308,7 @@ export async function GET(req: NextRequest) {
         logo: org.logo ?? null,
         plan: String(org.plan),
         culture: { mission, values, splash },
+        trashDays: retentionDays((settings as { retention?: { trashDays?: unknown } }).retention?.trashDays),
       },
       counts: c,
       timer,

@@ -40,9 +40,9 @@ function genId() {
 }
 
 const TYPE_META: Record<ProcessFlowStepType, { label: string; tone: string }> = {
-  action: { label: "Action", tone: "#d4ff2e" },
-  decision: { label: "Decision", tone: "#ff9933" },
-  handoff: { label: "Handoff", tone: "#4a9eff" },
+  action: { label: "Action", tone: "var(--os-brand)" },
+  decision: { label: "Decision", tone: "var(--os-warning-solid)" },
+  handoff: { label: "Handoff", tone: "var(--os-success-solid)" },
 };
 
 export function ProcessFlowBuilder({
@@ -166,7 +166,7 @@ export function ProcessFlowBuilder({
                   )}
                   <div
                     className="flex items-center justify-center w-8 h-8 rounded-full text-xs font-semibold"
-                    style={{ background: `${meta.tone}14`, color: meta.tone }}
+                    style={{ background: `color-mix(in srgb, ${meta.tone} 10%, transparent)`, color: meta.tone }}
                   >
                     {idx + 1}
                   </div>
@@ -186,7 +186,7 @@ export function ProcessFlowBuilder({
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <Badge
                       variant="outline"
-                      style={{ borderColor: `${meta.tone}55`, color: meta.tone }}
+                      style={{ borderColor: `color-mix(in srgb, ${meta.tone} 35%, transparent)`, color: meta.tone }}
                       className="text-micro uppercase tracking-wide"
                     >
                       {meta.label}

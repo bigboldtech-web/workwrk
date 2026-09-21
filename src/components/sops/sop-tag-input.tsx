@@ -1,16 +1,20 @@
 "use client";
 
-// SopTagInput — chip input for SOP.tags with org-wide autocomplete.
+// SopTagInput: chip input for SOP.tags with org-wide autocomplete.
 //
 // Tags exist only ON SOPs (the tag list is derived from usage), so this input
 // is where tags are born: type and press Enter (or comma) to add, pick from
 // the suggestions to reuse an existing label and avoid "HR" vs "Hr" drift.
 // Suggestions come from GET /api/sop-tags. The dropdown is position:absolute
-// inside the component's own relative wrapper on purpose — it must survive
+// inside the component's own relative wrapper on purpose: it must survive
 // transformed ancestors (dialogs) without a body portal.
+//
+// Tokens only (design-system 2.2): dark mode is the rebinding of --os-*, so
+// the `dark:` variants this file carried are gone with the zinc literals.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { X, Tag as TagIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface SopTagInputProps {
   value: string[];
@@ -19,7 +23,7 @@ interface SopTagInputProps {
   placeholder?: string;
 }
 
-export function SopTagInput({ value, onChange, disabled, placeholder = "Add a tag…" }: SopTagInputProps) {
+export function SopTagInput({ value, onChange, disabled, placeholder = "Add a tag" }: SopTagInputProps) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [known, setKnown] = useState<Array<{ name: string; count: number }>>([]);
@@ -68,28 +72,16 @@ export function SopTagInput({ value, onChange, disabled, placeholder = "Add a ta
 
   return (
     <div ref={wrapRef} className="relative">
-      <div
-        className={`flex min-h-8 flex-wrap items-center gap-1 rounded-lg border bg-white px-2 py-1 dark:bg-zinc-900 ${
-          disabled ? "border-zinc-100 opacity-60 dark:border-zinc-800" : "border-zinc-200 focus-within:border-[#0073EA] dark:border-zinc-700"
-        }`}
-      >
-        <TagIcon size={12} className="shrink-0 text-zinc-400" />
+      <div className={cn("flex min-h-9 flex-wrap items-center gap-1 rounded-md border bg-raised px-2 py-1", disabled ? "border-line opacity-60" : "border-line-strong focus-within:border-brand")}>
+        <TagIcon className="h-3.5 w-3.5 shrink-0 text-ink-3" strokeWidth={1.5} aria-hidden />
         {value.map((tag) => (
-          <span
-            key={tag}
-            className="inline-flex items-center gap-1 rounded bg-zinc-100 px-1.5 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-          >
+          <span key={tag} className="inline-flex h-6 items-center gap-1 rounded-md bg-active px-1.5 text-xs font-medium text-ink">
             {tag}
-            {!disabled && (
-              <button
-                type="button"
-                onClick={() => remove(tag)}
-                aria-label={`Remove tag ${tag}`}
-                className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-              >
-                <X size={10} />
+            {!disabled ? (
+              <button type="button" onClick={() => remove(tag)} aria-label={`Remove tag ${tag}`} className="inline-flex h-4 w-4 items-center justify-center rounded text-ink-2 hover:text-ink">
+                <X className="h-3 w-3" strokeWidth={1.5} aria-hidden />
               </button>
-            )}
+            ) : null}
           </span>
         ))}
         <input
@@ -102,25 +94,23 @@ export function SopTagInput({ value, onChange, disabled, placeholder = "Add a ta
             else if (e.key === "Backspace" && !query && value.length > 0) remove(value[value.length - 1]);
           }}
           placeholder={value.length === 0 ? placeholder : ""}
-          className="min-w-[90px] flex-1 bg-transparent text-xs text-zinc-800 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+          aria-label="Tags"
+          className="h-6 min-w-[90px] flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-3"
         />
       </div>
 
-      {focused && !disabled && suggestions.length > 0 && (
-        <div className="absolute left-0 top-full z-[200] mt-1 w-full max-w-[280px] overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+      {focused && !disabled && suggestions.length > 0 ? (
+        <ul className="absolute start-0 top-full z-[200] mt-1 w-full max-w-[280px] overflow-hidden rounded-md border border-line bg-raised py-1 shadow-[var(--os-shadow-pop)]" role="listbox">
           {suggestions.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              onClick={() => add(t.name)}
-              className="flex w-full items-center justify-between px-2.5 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-50 dark:text-zinc-200 dark:hover:bg-white/5"
-            >
-              <span className="truncate">{t.name}</span>
-              <span className="ml-2 shrink-0 text-xs text-zinc-400">{t.count}</span>
-            </button>
+            <li key={t.name}>
+              <button type="button" onClick={() => add(t.name)} className="flex h-8 w-full items-center justify-between px-2.5 text-start text-sm text-ink hover:bg-hover">
+                <span className="truncate">{t.name}</span>
+                <span className="ms-2 shrink-0 text-xs tabular-nums text-ink-3">{t.count}</span>
+              </button>
+            </li>
           ))}
-        </div>
-      )}
+        </ul>
+      ) : null}
     </div>
   );
 }

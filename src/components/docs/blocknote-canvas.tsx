@@ -43,7 +43,7 @@ import { FileText, Lightbulb, ListTree, Sigma, Bookmark, Columns2, AtSign, Link 
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 
-import type { Block as LegacyBlock } from "./block-editor";
+import type { Block as LegacyBlock } from "./block-types";
 import { subpageBlockSpec } from "./blocknote-blocks/subpage-block";
 import { calloutBlockSpec } from "./blocknote-blocks/callout-block";
 import { tocBlockSpec } from "./blocknote-blocks/toc-block";

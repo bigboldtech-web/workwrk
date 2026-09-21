@@ -33,17 +33,16 @@
  * from EMPLOYEE and AGENT (src/lib/permissions.ts). Until the access step
  * grants "every Member may create an unfiled SOP" (spec-process section 1 row
  * `/sops/new/*` and section 2), a viewer without that capability who typed
- * this URL got three live cards, every one of which ended on a locked page
- * one navigation later. The chooser asks the same question the route answers,
+ * this URL got three live cards, every one of which ended on a refusal one
+ * navigation later. The chooser asks the same question the route answers,
  * so the denial arrives at the door instead of behind it, and the page holds
- * no control the viewer cannot use.
- *
- * The sentence is word for word the one the four kind routes show, so the
- * same refusal does not read as two different refusals.
+ * no control the viewer cannot use. The denial is the in-shell 404 (spec-
+ * process section 1, shape 1): New SOP is not offered to this viewer, so the
+ * URL is not discoverable, and LockedPage is not a shape this unit renders.
  */
 
 import { OsPageHeader } from "@/components/layout/os/page-header";
-import { LockedPage } from "@/components/access";
+import { NotFoundView } from "@/components/access/not-found-view";
 import { SopKindCards } from "@/components/sops/sop-kind-chooser";
 import { useRole } from "@/hooks/use-role";
 
@@ -54,21 +53,16 @@ export default function NewSopPage() {
   // refused. It is the same hook /sops uses for its own "New SOP" primary.
   const { canManageSOPs } = useRole();
 
-  if (!canManageSOPs) {
-    return (
-      <LockedPage
-        name="New SOP"
-        sentence="Creating SOPs is limited to people who can manage SOPs."
-        back={{ fallbackHref: "/sops", label: "SOPs" }}
-      />
-    );
-  }
+  // No create right: the in-shell 404 (spec-process section 1, denial shape
+  // 1). New SOP is not offered to this viewer anywhere, so the URL is not
+  // discoverable, and there is no object a Request access could ask for.
+  if (!canManageSOPs) return <NotFoundView />;
 
   return (
     <>
       <OsPageHeader title="New SOP" back={{ fallbackHref: "/sops", label: "SOPs" }} />
-      <div className="mx-auto w-full max-w-[720px] px-6 pb-12">
-        <p className="mb-4 text-sm text-ink-2">How do you want to document this?</p>
+      <div className="os-chrome mx-auto w-full max-w-[720px] px-6 pb-12 pt-2">
+        <p className="mb-4 text-base text-ink-2">How do you want to document this?</p>
         <SopKindCards />
       </div>
     </>

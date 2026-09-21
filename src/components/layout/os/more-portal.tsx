@@ -13,8 +13,9 @@
 //   - If panel would extend past viewport right, flip to anchor left side
 //   - Vertical: align top with anchor top, push up if it would overflow
 
-import { useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import { useLayer } from "./shell-context";
 
 /**
  * Imperative handle exposed by the "…" MoreTrigger components (Space / Folder /
@@ -37,6 +38,12 @@ interface Props {
    * clamp math keeps it on-screen. Null/omitted = anchor-relative (default).
    */
   point?: { x: number; y: number } | null;
+  /**
+   * When given, the portal dismisses itself: Esc through the shell's
+   * LayerStack (so only the topmost overlay closes) and a pointer-down outside
+   * the panel and its anchor. Hosts that own their own listeners omit it.
+   */
+  onClose?: () => void;
 }
 
 export function MorePortal({
@@ -47,9 +54,25 @@ export function MorePortal({
   children,
   placement = "right",
   point = null,
+  onClose,
 }: Props) {
   const localRef = useRef<HTMLDivElement>(null);
   const ref = panelRef ?? localRef;
+
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+  useLayer(open && !!onClose, { kind: "popover", close: () => onCloseRef.current?.() });
+  useEffect(() => {
+    if (!open || !onClose) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (ref.current?.contains(t) || anchorRef.current?.contains(t)) return;
+      onCloseRef.current?.();
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open, onClose, ref, anchorRef]);
 
   // Positioning is DOM-measurement-driven, so it bypasses React state and
   // writes the panel node's style directly. The old version seeded coords

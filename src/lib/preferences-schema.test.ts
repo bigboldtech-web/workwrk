@@ -406,9 +406,21 @@ describe("Phase 3 preference keys (spec-docs-knowledge G22a)", () => {
     expect(preferencesPatchSchema.safeParse({ sidebar: { collapsedSections: ["docs.docs"] } }).success).toBe(true);
   });
 
+  it("home.sops.columns persists the SOP library's Display options (spec-process)", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { sops: { columns: { folder: true, tags: false } } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { sops: { column: {} } } }).success).toBe(false);
+    expect(preferencesPatchSchema.safeParse({ home: { sops: { columns: { folder: "yes" } } } }).success).toBe(false);
+  });
+
   it("home.ui.sopDetailsCollapsed persists the SOP Details strip (spec-process)", () => {
     expect(preferencesPatchSchema.safeParse({ home: { ui: { sopDetailsCollapsed: true } } }).success).toBe(true);
     expect(preferencesPatchSchema.safeParse({ home: { ui: { sopDetailsCollapsed: "yes" } } }).success).toBe(false);
+  });
+
+  it("home.ui.policiesViewType and contractsViewType persist the list / cards switch (spec-process)", () => {
+    expect(preferencesPatchSchema.safeParse({ home: { ui: { policiesViewType: "cards" } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { ui: { contractsViewType: "list" } } }).success).toBe(true);
+    expect(preferencesPatchSchema.safeParse({ home: { ui: { policiesViewType: "grid" } } }).success).toBe(false);
   });
 
   it("a typo inside a new Docs namespace is a 400 that names the key", () => {

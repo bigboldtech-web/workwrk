@@ -1,0 +1,22 @@
+-- 2026-09-21 - process unit - Trash can say who archived a contract.
+--
+-- Spec: docs/plans/ui-refresh/spec-spaces-lists.md section 2, /trash:
+-- "Archived tab: the same columns with 'Archived by' and 'Archived'".
+--
+-- THE GAP THIS CLOSES. 2026-09-19-archived-by.sql added "archivedById" to the
+-- six tables the Archived tab read at the time. Contracts were merged into the
+-- one Trash afterwards, and Agreement was never given the column, so every
+-- contract row on the Archived tab printed a blank "Archived by" cell while a
+-- Doc row beside it named a person.
+--
+-- One nullable column. Nullable on purpose and forever: every contract
+-- archived before today has no recorded archiver, and the page renders those
+-- as a blank cell rather than guessing.
+--
+-- The reader tolerates the column being absent for one release: src/lib/
+-- trash-server.ts asks for it inside a try and falls back to the same
+-- "unknown archiver" blank the null case produces.
+--
+-- Idempotent: ADD COLUMN IF NOT EXISTS is a no-op on a second run.
+
+ALTER TABLE "Agreement" ADD COLUMN IF NOT EXISTS "archivedById" TEXT;

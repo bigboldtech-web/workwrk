@@ -33,10 +33,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
       archivedAt: true,
       updatedAt: true,
       organizationId: true,
-      organization: { select: { settings: true } },
+      organization: { select: { settings: true, name: true, logo: true } },
     },
   });
   if (!doc || doc.archivedAt) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+
+  // Toggle 10 ("Public links", settings.access.publicLinks): "off" for the
+  // org kills every live link at once; the per-doc secret alone is not
+  // enough (spec-docs-knowledge section 2, the public route's new check).
+  // Absent = "view", today's behaviour, so no org changes on deploy.
+  const access = (doc.organization?.settings as { access?: { publicLinks?: string } } | null)?.access;
+  if (access?.publicLinks === "off") {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 
@@ -49,8 +58,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ token: 
   // like the authed GET /api/docs/[id] does.
   const content = await presignBlocksImagesAndFiles(doc.content);
 
+  // The org name and logo for the page header; never members, emails or the
+  // sharing entry.
   return NextResponse.json(
-    { title: doc.title, content, updatedAt: doc.updatedAt },
+    { title: doc.title, content, updatedAt: doc.updatedAt, org: { name: doc.organization?.name ?? "", logo: doc.organization?.logo ?? null } },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

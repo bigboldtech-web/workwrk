@@ -96,6 +96,12 @@ export interface OsToolbarProps {
 
 export interface OsPageHeaderProps {
   title: string;
+  /**
+   * Replaces the h1 with a caller-drawn title (an input with the same
+   * metrics in edit mode, or the title followed by its status and kind
+   * chips). `title` stays the accessible name and the document title.
+   */
+  titleSlot?: ReactNode;
   /** `EntityTile size="lg"` before the title (Space and List pages). */
   tile?: EntityTileProps;
   /** Full pages reached from a list: the parent name and where to land with no history. */
@@ -165,6 +171,7 @@ function AskAiSlot({ prompt }: { prompt?: string }) {
 
 export function OsPageHeader({
   title,
+  titleSlot,
   tile,
   back,
   actions,
@@ -186,7 +193,11 @@ export function OsPageHeader({
       <div className="flex h-12 items-center gap-2 px-6">
         {back ? <BackButton fallbackHref={back.fallbackHref} label={back.label} className="me-0.5" /> : null}
         {tile ? <EntityTile size="lg" {...tile} /> : null}
-        <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{title}</h1>
+        {titleSlot ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2" aria-label={title}>{titleSlot}</div>
+        ) : (
+          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold text-ink">{title}</h1>
+        )}
         {autosave ? <div className="shrink-0">{autosave}</div> : null}
         {actions ? <div className="os-head__actions flex shrink-0 items-center gap-1">{actions}</div> : null}
         {more && more.length > 0 ? <HeaderMenu entries={more} variant="ghost" label="More page actions" /> : null}
@@ -381,7 +392,10 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
   const primaryHidden = topLayerKind === "modal" || topLayerKind === "drawer" || topLayerKind === "dialog";
   const shownPrimary = primaryHidden ? undefined : primary;
   return (
-    <div className={cn("os-toolbar flex h-11 min-w-0 items-center gap-2 px-6", className)}>
+    // Under 768 the right cluster (search, the primary, "...") wraps onto a
+    // second line instead of painting over the Filter and Sort chips: the
+    // header may grow, it may never overlap itself (spec 1, Mobile / narrow).
+    <div className={cn("os-toolbar flex h-11 min-w-0 items-center gap-2 px-6 max-md:h-auto max-md:min-h-11 max-md:flex-wrap max-md:py-1", className)}>
       {hasLeft ? (
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {filter ? (
@@ -440,7 +454,7 @@ export function OsToolbar({ filter, sort, group, switcher, left, right, primary,
         <div className="min-w-0 flex-1" />
       )}
       {right || shownPrimary || menu ? (
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 max-md:ms-auto">
           {right}
           {shownPrimary ? <PrimaryButton action={shownPrimary} /> : null}
           {menu && menu.length > 0 ? <HeaderMenu entries={menu} /> : null}

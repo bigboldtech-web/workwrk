@@ -22,6 +22,7 @@
 // retired labels Today, My tasks, My Priorities, AI Notetaker.
 
 import { useRouter } from "next/navigation";
+import { useRole } from "@/hooks/use-role";
 import {
   useCallback,
   useEffect,
@@ -61,6 +62,7 @@ import { shortcutHint } from "@/lib/shortcuts";
 import { HUB_LABELS, SHELL_LABELS } from "@/lib/nav/labels";
 import { isHubKey, WORK_HOME_HREF } from "@/lib/nav/route-hub";
 import {
+  filterSettingsEntries,
   filterSettingsPages,
   settingsHrefToday,
 } from "@/lib/settings-registry";
@@ -232,6 +234,11 @@ function PaletteBody() {
   } = useOsShell();
   const { boot } = useBoot();
   const { isAdmin, isGuest } = useViewerRole();
+  // The `manage_process` rule (Owner, Admin, People team) the acknowledgement
+  // default entries carry as their externalGate: today's admin tier in
+  // hooks/use-role (SUPER_ADMIN, COMPANY_ADMIN, C_LEVEL, HR), the same set
+  // lib/process-scope canManageProcess checks on the server.
+  const { isAdmin: canManageProcess } = useRole();
   const { openSettings } = useSettingsNav();
   const { toast } = useOsToast();
   const router = useRouter();
@@ -437,7 +444,7 @@ function PaletteBody() {
   const settingsRows = useCallback(
     (text: string): Row[] => {
       const pages = filterSettingsPages(text, isAdmin ? undefined : "me");
-      return pages
+      const pageRows: Row[] = pages
         .map((p) => ({ p, href: settingsHrefToday(p) }))
         .filter((x): x is { p: (typeof pages)[number]; href: string } =>
           Boolean(x.href),
@@ -452,8 +459,22 @@ function PaletteBody() {
           glyph: <Glyph icon={Settings2} />,
           action: () => openSettings(href),
         }));
+      // Per-SETTING entries that live outside the settings door (the three
+      // acknowledgement defaults on /sops/manage). Listed only for a viewer
+      // who passes the entry's org gate, and only against a typed query, so
+      // the empty-query Settings group stays the pages list.
+      const entryRows: Row[] = text.trim()
+        ? filterSettingsEntries(text, { allowedExternalGates: canManageProcess ? ["manage_process"] : [] }).map((e) => ({
+            id: `setting-${e.id}`,
+            label: e.label,
+            secondary: e.description,
+            glyph: <Glyph icon={Settings2} />,
+            action: () => router.push(e.href),
+          }))
+        : [];
+      return [...pageRows, ...entryRows];
     },
-    [isAdmin, openSettings],
+    [isAdmin, canManageProcess, openSettings, router],
   );
 
   const sections = useMemo<Section[]>(() => {

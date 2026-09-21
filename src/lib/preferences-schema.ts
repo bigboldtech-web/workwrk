@@ -186,6 +186,9 @@ export const uiPatchSchema = z.strictObject({
    * so it takes no settings-registry entry.
    */
   sopDetailsCollapsed: z.boolean().optional(),
+  /** The Policies and Contracts lists' view-type switcher (spec-process section 2). */
+  policiesViewType: z.enum(["list", "cards"]).optional(),
+  contractsViewType: z.enum(["list", "cards"]).optional(),
 });
 
 // ── Docs hub per-surface options (change request G22a) ────────────
@@ -220,6 +223,15 @@ export const canvasSurfaceSchema = z.strictObject({
 
 export const filesSurfaceSchema = z.strictObject({
   viewType: viewType.optional(),
+  columns: columnToggles.optional(),
+});
+
+/**
+ * The SOP library's Display options (spec-process section 2 `/sops`: Show
+ * folder path, Show tags, Show owner, Show assigned count) and the Run
+ * history's remembered drawer width rides `home.work.drawerWidth`.
+ */
+export const sopsSurfaceSchema = z.strictObject({
   columns: columnToggles.optional(),
 });
 
@@ -311,6 +323,8 @@ export const homePatchSchema = z.strictObject({
   canvas: canvasSurfaceSchema.optional(),
   files: filesSurfaceSchema.optional(),
   notetaker: notetakerSurfaceSchema.optional(),
+  // The SOP library's Display options (spec-process section 2 `/sops`).
+  sops: sopsSurfaceSchema.optional(),
 });
 
 // ── theme, density ────────────────────────────────────────────────

@@ -10,6 +10,8 @@ import {
   requirePermission,
 } from "@/lib/api-helpers";
 import { canWriteToFolder } from "@/lib/sop-access";
+import { parseAccessSettings } from "@/lib/access/settings";
+import { publicLinkRole } from "@/lib/access/guards";
 
 /**
  * POST / DELETE /api/sops/[id]/share — mint or revoke the public share token
@@ -70,6 +72,14 @@ export async function POST(
   // Idempotent: reuse the existing token if one is already minted.
   let shareToken = sop.shareToken;
   if (!shareToken) {
+    // Toggle 10 (spec-process section 2 `/share/sop/[token]`): a NEW link is
+    // refused while the workspace's Public links are Off. Revoking (DELETE)
+    // never reads the toggle, so an admin can always switch a link off.
+    const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { settings: true } });
+    const access = parseAccessSettings((org?.settings as { access?: unknown } | null)?.access);
+    if (!publicLinkRole(access)) {
+      return jsonError("Public links are turned off for this workspace. An admin can turn them on in Settings > Access (Public links).", 409);
+    }
     shareToken = crypto.randomBytes(16).toString("hex");
     await prisma.sOP.update({ where: { id }, data: { shareToken } });
   }

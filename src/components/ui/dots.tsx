@@ -8,12 +8,17 @@
 //   presence  8px --os-presence with a 2px ring in the parent surface.
 //   live      6px --os-brand, 1.6s opacity pulse (co-presence, recording).
 //   status    6px in a *.solid colour, inside a pale chip beside a word.
+//   quad-steps  discrete progress with at most 4 stages: 8px dots, 4px gap,
+//             done --os-brand filled, pending hollow 1.5px --os-line-strong,
+//             failed --os-danger-solid. The hollow-versus-filled grammar
+//             exists only here (and steps-n), where the step words
+//             disambiguate it; an empty state never fills a dot.
 //
 // Server-safe: no hooks. The pending animation is `.os-pending` in os.css.
 
 import { cn } from "@/lib/utils";
 
-type Variant = "pending" | "unread" | "presence" | "live" | "status";
+type Variant = "pending" | "unread" | "presence" | "live" | "status" | "quad-steps";
 
 export function Dots({
   variant = "pending",
@@ -23,6 +28,9 @@ export function Dots({
   offline,
   className,
   label,
+  done = 0,
+  total = 4,
+  failed = false,
 }: {
   variant?: Variant;
   /** Read the chrome tokens (the navy rail and bar) instead of the canvas ones. */
@@ -33,9 +41,39 @@ export function Dots({
   away?: boolean;
   offline?: boolean;
   className?: string;
-  /** Accessible name for the pending loader. */
+  /** Accessible name for the pending loader, or the "{done} of {total}" text for quad-steps. */
   label?: string;
+  /** `quad-steps` only: stages done, stages in all (clamped to 4), and whether the current one failed. */
+  done?: number;
+  total?: number;
+  failed?: boolean;
 }) {
+  if (variant === "quad-steps") {
+    const n = Math.max(1, Math.min(4, Math.round(total)));
+    const d = Math.max(0, Math.min(n, Math.round(done)));
+    return (
+      <span className={cn("inline-flex items-center gap-1", className)} role="img" aria-label={label ?? `${d} of ${n} steps`} title={label ?? `${d} of ${n} steps`}>
+        {Array.from({ length: n }).map((_, i) => {
+          const isDone = i < d;
+          const isFailed = failed && i === d;
+          return (
+            <span
+              key={i}
+              aria-hidden
+              className="inline-block h-2 w-2 shrink-0 rounded-full transition-colors duration-[160ms]"
+              style={
+                isFailed
+                  ? { background: "var(--os-danger-solid)" }
+                  : isDone
+                    ? { background: "var(--os-brand)" }
+                    : { boxShadow: "inset 0 0 0 1.5px var(--os-line-strong)" }
+              }
+            />
+          );
+        })}
+      </span>
+    );
+  }
   if (variant === "pending") {
     return (
       <span className={cn("os-pending", className)} role="status" aria-label={label ?? "Working"}>

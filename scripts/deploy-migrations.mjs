@@ -55,6 +55,15 @@ const SQL_MANIFEST = [
   "2026-09-19-archived-by.sql",
   "2026-09-19-canvas-folder.sql",
   "2026-09-19-template-key.sql",
+  // Phase 3 (knowledge unit). Both are ADD COLUMN IF NOT EXISTS only. The
+  // contract routes select the new Agreement / AgreementParty columns on
+  // every read, so a release that shipped without this line would 500 on
+  // every contract list, open, send and sign until the file was applied by
+  // hand; the doc-lock columns are read through a raw query that tolerates
+  // their absence, but they belong here for the same reason.
+  "2026-09-21-doc-lock.sql",
+  "2026-09-21-contract-send-decline.sql",
+  "2026-09-21-agreement-archived-by.sql",
 ];
 
 /**

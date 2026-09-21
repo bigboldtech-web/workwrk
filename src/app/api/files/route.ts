@@ -13,12 +13,101 @@ import {
 import { visibleSpaceIds } from "@/lib/space";
 import { accessibleFolderIds } from "@/lib/folder";
 import { canReadBoard } from "@/lib/board";
+import { getEffectivePreferences } from "@/lib/preferences";
+import { matchesFilesFilters, matchesFilesView, parseFilesListQuery, sortFiles, type FileCandidate } from "@/lib/files-list";
+import { sliceByCursor } from "@/lib/list-query";
+
+/**
+ * Space-visibility gate over a set of files, one visibleSpaceIds call: a file
+ * with no Space is org-wide; a Space file shows if the viewer reads the Space
+ * or holds a grant on the Space folder it lives in (their own folder's files,
+ * and ONLY those).
+ */
+async function gateFiles<T extends { spaceId: string | null; spaceFolderId: string | null }>(files: T[], userId: string, accessLevel: string): Promise<T[]> {
+  const scopedIds = [...new Set(files.map((f) => f.spaceId).filter((s): s is string => Boolean(s)))];
+  const [visible, accessibleFolders] = scopedIds.length > 0
+    ? await Promise.all([visibleSpaceIds(scopedIds, userId, accessLevel), accessibleFolderIds(userId)])
+    : [new Set<string>(), new Set<string>()];
+  return files.filter((f) => !f.spaceId || visible.has(f.spaceId) || (!!f.spaceFolderId && accessibleFolders.has(f.spaceFolderId)));
+}
+
+/**
+ * GET /api/files?view=all|starred|recent|spaces&folderId=&q=&type=&uploadedBy=
+ *   &from=&to=&sort=name|uploaded|size|type&dir=&cursor=&limit=40
+ *   -> { data: FileRow[], total, totalBytes, nextCursor }
+ *
+ * The /files list page (spec-docs-knowledge section 2). Filters COMPOSE
+ * (search inside a folder, starred of one type), the gate runs before the
+ * page slice so the total is real, and the 500-row cap is gone. The legacy
+ * array shape survives for the callers that pass none of the list params
+ * (Space file cards, attachments).
+ */
+async function pagedList(req: NextRequest, session: { user: unknown }, orgId: string) {
+  const q = parseFilesListQuery(new URL(req.url).searchParams);
+  const userId = getUserId(session as Parameters<typeof getUserId>[0]);
+  const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+
+  const [rows, prefs] = await Promise.all([
+    prisma.fileEntry.findMany({
+      where: { organizationId: orgId },
+      select: { id: true, name: true, mimeType: true, size: true, folderId: true, spaceId: true, spaceFolderId: true, uploadedById: true, starred: true, createdAt: true, updatedAt: true },
+    }),
+    getEffectivePreferences(userId, orgId),
+  ]);
+  const gated = await gateFiles(rows, userId, accessLevel);
+  const home = prefs.home as { favoriteFileIds?: string[] };
+  const facts = { favoriteIds: new Set<string>(Array.isArray(home.favoriteFileIds) ? home.favoriteFileIds : []) };
+
+  const filtered: FileCandidate[] = gated.filter((f) => matchesFilesView(f, q, facts) && matchesFilesFilters(f, q));
+  const sorted = sortFiles(filtered, q.sort, q.dir);
+  const totalBytes = sorted.reduce((acc, f) => acc + (f.size || 0), 0);
+  const { page, nextCursor } = sliceByCursor(sorted, q.cursor, q.limit);
+
+  const pageIds = page.map((f) => f.id);
+  const full = pageIds.length ? await prisma.fileEntry.findMany({ where: { id: { in: pageIds } } }) : [];
+  const byId = new Map(full.map((f) => [f.id, f]));
+  const ordered = pageIds.map((id) => byId.get(id)).filter((f): f is NonNullable<typeof f> => !!f);
+
+  const uploaderIds = [...new Set(ordered.map((f) => f.uploadedById))];
+  const sfIds = [...new Set(ordered.map((f) => f.spaceFolderId).filter((x): x is string => !!x))];
+  const spIds = [...new Set(ordered.map((f) => f.spaceId).filter((x): x is string => !!x))];
+  const folderIds = [...new Set(ordered.map((f) => f.folderId).filter((x): x is string => !!x))];
+  const [users, sfs, sps, folders, fresh] = await Promise.all([
+    uploaderIds.length ? prisma.user.findMany({ where: { id: { in: uploaderIds } }, select: { id: true, firstName: true, lastName: true, avatar: true } }) : Promise.resolve([]),
+    sfIds.length ? prisma.folder.findMany({ where: { id: { in: sfIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
+    spIds.length ? prisma.space.findMany({ where: { id: { in: spIds } }, select: { id: true, name: true, slug: true, icon: true, color: true } }) : Promise.resolve([]),
+    folderIds.length ? prisma.fileFolder.findMany({ where: { id: { in: folderIds } }, select: { id: true, name: true } }) : Promise.resolve([]),
+    withFreshFileUrls(ordered),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const sfById = new Map(sfs.map((f) => [f.id, f]));
+  const spById = new Map(sps.map((x) => [x.id, x]));
+  const folderById = new Map(folders.map((f) => [f.id, f]));
+
+  const data = fresh.map((f) => {
+    const u = userById.get(f.uploadedById);
+    const sp = f.spaceId ? spById.get(f.spaceId) : undefined;
+    const sf = f.spaceFolderId ? sfById.get(f.spaceFolderId) : undefined;
+    const fo = f.folderId ? folderById.get(f.folderId) : undefined;
+    return {
+      ...f,
+      favorite: facts.favoriteIds.has(f.id),
+      uploadedBy: u ? { id: u.id, name: `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || null, avatar: u.avatar, firstName: u.firstName, lastName: u.lastName } : null,
+      folder: fo ? { id: fo.id, name: fo.name } : null,
+      spaceFolder: sf ? { id: sf.id, name: sf.name } : null,
+      space: sp ? { id: sp.id, name: sp.name, slug: sp.slug, icon: sp.icon, color: sp.color } : null,
+    };
+  });
+  return jsonSuccess({ data, total: sorted.length, totalBytes, nextCursor });
+}
 
 export async function GET(req: NextRequest) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
   const orgId = getOrgId(session);
   const sp = new URL(req.url).searchParams;
+
+  if (parseFilesListQuery(sp).paged && !sp.get("boardId")) return pagedList(req, session, orgId);
 
   // ?boardId= — files attached to this board's items via EntityLink
   // (BOARD_ITEM → FILE). Powers the board File-gallery view. Gated by

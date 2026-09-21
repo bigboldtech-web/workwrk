@@ -7,10 +7,79 @@ import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { visibleSpaceIds, canEditSpace, getSpaceForReader } from "@/lib/space";
 import { folderReadable } from "@/lib/folder";
+import { getEffectivePreferences } from "@/lib/preferences";
+import { matchesCanvasFilters, matchesCanvasView, parseCanvasListQuery, sortCanvases, type CanvasCandidate } from "@/lib/canvas-list";
+import { sliceByCursor } from "@/lib/list-query";
+
+/**
+ * GET /api/whiteboards?view=all|recent|my|favorites&q=&location=&owner=
+ *   &editedFrom=&editedTo=&sort=edited|name|owner|created&dir=&cursor=&limit=40
+ *   -> { data: CanvasRow[], total, nextCursor }
+ *
+ * The /canvas list page (spec-docs-knowledge section 2). The gate (Space
+ * visibility) runs over every candidate BEFORE the page slice, so the total
+ * is real and a viewer can reach canvas 201. The legacy `{ whiteboards }`
+ * shape (200 newest) survives for the callers that pass none of these params
+ * (the card pickers, the Space tree).
+ */
+async function pagedList(req: Request, ctx: { orgId: string; userId: string; accessLevel: string | null | undefined }) {
+  const q = parseCanvasListQuery(new URL(req.url).searchParams);
+  const [rows, prefs] = await Promise.all([
+    prisma.whiteboard.findMany({
+      where: { organizationId: ctx.orgId, archivedAt: null },
+      select: { id: true, name: true, description: true, thumbnail: true, ownerId: true, lastEditedAt: true, spaceId: true, folderId: true, createdAt: true, updatedAt: true },
+    }),
+    getEffectivePreferences(ctx.userId, ctx.orgId),
+  ]);
+  const scopedIds = [...new Set(rows.map((w) => w.spaceId).filter((x): x is string => !!x))];
+  const visible = scopedIds.length ? await visibleSpaceIds(scopedIds, ctx.userId, ctx.accessLevel ?? "EMPLOYEE") : new Set<string>();
+  const gated = rows.filter((w) => !w.spaceId || visible.has(w.spaceId));
+
+  const home = prefs.home as { favoriteWhiteboardIds?: string[] };
+  const facts = { userId: ctx.userId, favoriteIds: new Set<string>(Array.isArray(home.favoriteWhiteboardIds) ? home.favoriteWhiteboardIds : []) };
+
+  const ownerIds = [...new Set(gated.map((w) => w.ownerId).filter((x): x is string => !!x))];
+  const [users, spaces] = await Promise.all([
+    ownerIds.length ? prisma.user.findMany({ where: { id: { in: ownerIds } }, select: { id: true, firstName: true, lastName: true, avatar: true } }) : Promise.resolve([]),
+    scopedIds.length ? prisma.space.findMany({ where: { id: { in: scopedIds } }, select: { id: true, name: true, slug: true, icon: true, color: true } }) : Promise.resolve([]),
+  ]);
+  const userById = new Map(users.map((u) => [u.id, u]));
+  const spaceById = new Map(spaces.map((sp) => [sp.id, sp]));
+  const nameOf = (id: string | null) => { const u = id ? userById.get(id) : undefined; return u ? `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() : ""; };
+
+  const filtered: (CanvasCandidate & typeof gated[number])[] = gated
+    .map((w) => ({ ...w, ownerName: nameOf(w.ownerId) }))
+    .filter((w) => matchesCanvasView(w, q.view, facts) && matchesCanvasFilters(w, q));
+  const sorted = sortCanvases(filtered, q.sort, q.dir);
+  const { page, nextCursor } = sliceByCursor(sorted, q.cursor, q.limit);
+
+  const data = page.map((w) => {
+    const u = w.ownerId ? userById.get(w.ownerId) : undefined;
+    const sp = w.spaceId ? spaceById.get(w.spaceId) : undefined;
+    return {
+      id: w.id,
+      name: w.name,
+      description: w.description,
+      thumbnail: w.thumbnail,
+      ownerId: w.ownerId,
+      owner: u ? { id: u.id, name: nameOf(u.id) || null, avatar: u.avatar, firstName: u.firstName, lastName: u.lastName } : null,
+      spaceId: w.spaceId,
+      folderId: w.folderId ?? null,
+      location: sp ? { type: "SPACE", id: sp.id, name: sp.name, icon: sp.icon, color: sp.color, href: `/spaces/${sp.slug}` } : null,
+      lastEditedAt: w.lastEditedAt,
+      createdAt: w.createdAt,
+      updatedAt: w.updatedAt,
+      favorite: facts.favoriteIds.has(w.id),
+    };
+  });
+  return NextResponse.json({ data, total: sorted.length, nextCursor });
+}
 
 export async function GET(req: Request) {
   const ctx = await resolveSuiteContext();
   if ("error" in ctx) return ctx.error;
+
+  if (parseCanvasListQuery(new URL(req.url).searchParams).paged) return pagedList(req, ctx);
 
   // Optional ?spaceId filter for the Library Space chip strip. "unscoped"
   // is a sentinel: return only whiteboards with spaceId IS NULL.

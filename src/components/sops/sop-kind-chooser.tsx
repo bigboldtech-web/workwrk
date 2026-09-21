@@ -1,6 +1,6 @@
 "use client";
 
-// SopKindChooser — the "New SOP" modal behind the Docs hub "+" row.
+// SopKindChooser: the "New SOP" modal behind the Docs hub "+" row.
 //
 // Spec: docs/plans/ui-refresh/spec-process.md section 2 (`/sops/new`, the four
 // kind cards and their sentences) and section 1 (the Docs header "+").
@@ -74,32 +74,51 @@ export const SOP_RECORDING_KIND = {
  * disagreed on all three.
  */
 export function SopKindCards({ onPick }: { onPick?: () => void }) {
+  // Keys 1 to 4 pick a card (spec-process section 2 `/sops/new` Keyboard),
+  // when nothing is being typed.
+  const kinds = sopKinds();
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = Number(e.key);
+      if (!Number.isInteger(n) || n < 1 || n > kinds.length) return;
+      const card = document.querySelector<HTMLAnchorElement>(`[data-sop-kind-card="${n}"]`);
+      if (card) { e.preventDefault(); card.click(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [kinds]);
   return (
     <>
-      <ul className="flex flex-col gap-1.5">
-        {sopKinds().map((k) => (
+      {/* Four bordered cards in a 2x2 grid (340x120 in the 720 column and the
+          560 modal): 20px glyph, name 16/600, one 13/400 sentence. Hover is
+          --os-surface-hov only: no transform, no shadow. */}
+      <ul className="grid gap-3 sm:grid-cols-2">
+        {kinds.map((k, i) => (
           <li key={k.href}>
             <Link
               href={k.href}
               onClick={onPick}
-              className="flex items-start gap-3 rounded-lg border border-line p-3 text-start hover:bg-hover"
+              data-sop-kind-card={i + 1}
+              className="flex min-h-[120px] flex-col gap-2 rounded-lg border border-line bg-raised p-4 text-start hover:bg-hover"
             >
-              <k.icon className="mt-0.5 h-5 w-5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
-              <span className="min-w-0">
-                <span className="block text-base font-medium text-ink">{k.label}</span>
-                <span className="block text-sm text-ink-2">{k.blurb}</span>
-              </span>
+              <k.icon className="h-5 w-5 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+              <span className="block text-lg font-semibold text-ink">{k.label}</span>
+              <span className="block text-sm text-ink-2">{k.blurb}</span>
             </Link>
           </li>
         ))}
       </ul>
       {RECORDER_URL ? null : (
         <UpcomingOnly>
-          <div className="mt-1.5">
+          <div className="mt-3">
             <ComingSoonRow label="Recording" icon={MousePointerClick} />
           </div>
         </UpcomingOnly>
       )}
+      <p className="mt-3 text-sm text-ink-2">You can change the folder, tags and who it&apos;s for after creating it.</p>
     </>
   );
 }
@@ -107,7 +126,7 @@ export function SopKindCards({ onPick }: { onPick?: () => void }) {
 export function SopKindChooser({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-[520px]">
+      <DialogContent className="max-w-[560px]">
         <DialogTitle>New SOP</DialogTitle>
         <DialogDescription>How do you want to document this?</DialogDescription>
         <div className="mt-4">

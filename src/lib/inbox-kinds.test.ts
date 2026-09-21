@@ -104,7 +104,12 @@ describe("tabs", () => {
     for (const type of Object.keys(KINDS)) {
       expect(primary.has(type) !== other.has(type)).toBe(true);
     }
-    expect(primary.size + other.size).toBe(Object.keys(KINDS).length);
+    // The lists also carry every alias spelling of a routed kind, so a row
+    // stored under the dotted form is queried into the same tab.
+    const aliasCount = Object.entries(TYPE_ALIASES).filter(([, target]) => target in KINDS).length;
+    expect(primary.size + other.size).toBe(Object.keys(KINDS).length + aliasCount);
+    expect(primary.has("run.assigned")).toBe(true);
+    expect(other.has("run.assigned")).toBe(false);
   });
 
   it("mention is the only kind that is also in the Mentions tab", () => {

@@ -42,7 +42,7 @@ import { EntityTile } from "@/components/ui/entity-tile";
 import { ContainerMenuTrigger } from "./container-menu";
 import { CreateInsideTrigger } from "./space-create-popover";
 import type { ContainerRole } from "@/lib/work/container-menu";
-import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
+import { DocRowMenuHost, useDocRowMenu } from "@/components/docs/doc-row-menu";
 import { TableMoreTrigger } from "./table-more-menu";
 import { type ContextMenuHandle } from "./more-portal";
 import { CanvasMoreTrigger } from "./canvas-more-menu";
@@ -788,7 +788,7 @@ function TableTreeRow({
 function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
-  const noteMenu = useNoteMenu();
+  const noteMenu = useDocRowMenu();
   const isActive = pathname === `/docs/${doc.id}`;
   return (
     <li className="group/docrow relative">
@@ -810,7 +810,7 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
           <SidebarQuickStar kind="doc" id={doc.id} />
           <button
             type="button"
-            aria-label="Note actions"
+            aria-label="Doc actions"
             onClick={(e) => { e.stopPropagation(); noteMenu.open(e, { id: doc.id, title: doc.title }); }}
             className="w-5 h-5 grid place-items-center rounded text-ink-3 hover:bg-hover hover:text-ink"
           >
@@ -818,15 +818,7 @@ function DocTreeRow({ doc, onChanged }: { doc: DocChild; onChanged?: () => void 
           </button>
         </span>
       </div>
-      {noteMenu.menu ? (
-        <NoteActionMenu
-          target={noteMenu.menu.target}
-          x={noteMenu.menu.x}
-          y={noteMenu.menu.y}
-          onClose={noteMenu.close}
-          onChanged={() => { noteMenu.close(); onChanged?.(); refreshSidebar(); router.refresh(); }}
-        />
-      ) : null}
+      <DocRowMenuHost menu={noteMenu} context="tree" onChanged={() => { noteMenu.close(); onChanged?.(); refreshSidebar(); router.refresh(); }} />
     </li>
   );
 }

@@ -1,376 +1,432 @@
 "use client";
 
-/* Policies library — clean card/list grid grouped by category, mirroring the
- * SOP library's design language (toolbar + status-pill filter + grid/list).
+/* /policies, "Policies" (spec-process section 2): the company's policies,
+ * which ones I still have to acknowledge, and (for the People team and
+ * admins) the drafts.
  *
- *  GET   /api/policies            list policies (with my-ack state)
- *  POST  /api/policies            { title, content, status? }
+ *   header   views All · Needs my acknowledgement (count) · Published ·
+ *            Drafts · Archived (the last two for FULL viewers; a pasted
+ *            ?view= a Member cannot hold renders All with the parameter
+ *            stripped and one notice line, never a 404); toolbar Filter
+ *            (search, Category, Status, Effective date, Acknowledged by me),
+ *            Sort, Group (Category · None), list / cards; the one blue
+ *            "New policy" (FULL) opening the New policy modal; "…" Display,
+ *            Organize categories, Export CSV
+ *   body     TableCard: Name · Category · Status · Effective · Acknowledged
+ *            (org rate, FULL) · My acknowledgement · Updated · row "…"
+ *            (Open, Edit, Assign…, Acknowledgements, Copy link, Archive,
+ *            Delete); an inline "Acknowledge" on Needs-view rows
+ *
+ *   GET /api/policies?view=&category=&q=&sort=&dir=&page=
+ *
+ * Every Member reaches it; Guests get the in-shell 404.
  */
 
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import {
-  Search,
-  ChevronRight,
-  ChevronDown,
-  FileText,
-  CheckCircle2,
-  Archive,
-  Edit3,
-  AlertTriangle,
-  Activity,
-  LayoutGrid,
-  List as ListIcon,
-  Calendar as CalendarIcon,
-  Users,
-} from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Archive, BookOpenCheck, Download, Edit3, ExternalLink, LayoutGrid, Link2, List as ListIcon, ShieldCheck, SlidersHorizontal, Trash2, UserPlus } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
-import { useRole } from "@/hooks/use-role";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
+import { NotFoundView } from "@/components/access/not-found-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Picker } from "@/components/ui/picker";
+import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { RowMoreButton, TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatusChip } from "@/components/ui/chip";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { Dots } from "@/components/ui/dots";
+import { DateField } from "@/components/ui/date-field";
+import { AssignDialog } from "@/components/process/assign-dialog";
+import { NewPolicyDialog } from "@/components/policies/new-policy-dialog";
+import { useRole } from "@/hooks/use-role";
+import { apiFetch } from "@/lib/api-fetch";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import {
+  POLICIES_SORTS, POLICIES_VIEW_LABEL, POLICY_STATUS_COLOR, POLICY_STATUS_LABEL, allowedPolicyViews, defaultSortDir, myAckState, parsePoliciesGroup, parsePoliciesSort, resolvePolicyView,
+  type PoliciesView, type PolicyStatus,
+} from "@/lib/policies-list";
+import { cn } from "@/lib/utils";
 
-type PolStatus = "DRAFT" | "PUBLISHED" | "ARCHIVED";
-
-type ApiPolicy = {
-  id: string;
-  title: string;
-  category?: string | null;
-  version: number;
-  status: PolStatus;
-  requiresAck: boolean;
-  effectiveDate?: string | null;
-  createdAt: string;
-  updatedAt: string;
-  acknowledged?: boolean;
-  ackRate?: number;
-  totalAcks?: number;
-  totalUsers?: number;
+type Row = {
+  id: string; title: string; category: string | null; version: number; status: PolicyStatus; requiresAck: boolean;
+  effectiveDate: string | null; updatedAt: string; acknowledged: boolean; needsMyAck: boolean;
+  myAssignment: { id: string; status: string; dueDate: string | null; mandatory: boolean } | null;
+  ackRate: number | null; totalAcks: number | null; totalUsers: number | null; assignedCount: number | null;
 };
-
-const STATUS_LABEL: Record<PolStatus, string> = { DRAFT: "Draft", PUBLISHED: "Published", ARCHIVED: "Archived" };
-const STATUS_ICON: Record<PolStatus, typeof Edit3> = { DRAFT: Edit3, PUBLISHED: CheckCircle2, ARCHIVED: Archive };
-const STATUS_PILL: Record<PolStatus, string> = {
-  DRAFT: "bg-zinc-100 text-zinc-600",
-  PUBLISHED: "bg-emerald-50 text-emerald-700",
-  ARCHIVED: "bg-zinc-100 text-zinc-400",
-};
-const STATUS_FILTERS: Array<"ALL" | PolStatus> = ["ALL", "PUBLISHED", "DRAFT"];
-
-const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-function rateHue(pct: number): string {
-  if (pct >= 90) return "var(--os-c-green)";
-  if (pct >= 70) return "var(--os-c-teal)";
-  if (pct >= 40) return "var(--os-c-orange)";
-  return "var(--os-c-red)";
-}
+type Payload = { data: Row[]; pagination: { total: number; totalPages: number }; counts: { all: number; published: number; drafts: number; archived: number; needsAck: number }; canManage: boolean; view: PoliciesView };
 
 export default function PoliciesPage() {
   const router = useRouter();
-  const [rows, setRows] = useState<ApiPolicy[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"ALL" | PolStatus>("ALL");
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
-  const [view, setView] = useState<"grid" | "list">("grid");
-  const { rowVersion } = useOsShell();
+  const params = useSearchParams();
+  const { rowVersion, bumpRowVersion, prefs, patchPrefs } = useOsShell();
+  const { boot } = useBoot();
   const { toast } = useOsToast();
+  const confirm = useConfirm();
+  const fmt = useFormat();
+  const { isManager, isAdmin, canManagePolicies } = useRole();
 
+  const isGuest = boot.viewer.orgRole === "GUEST";
+  const [payload, setPayload] = useState<Payload | null>(null);
+  const canManage = payload?.canManage ?? isManager;
+  const requestedView = params.get("view");
+  const resolved = useMemo(() => resolvePolicyView(requestedView, canManage), [requestedView, canManage]);
+  const view = resolved.view;
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!resolved.strip || payload === null) return;
+    const t = setTimeout(() => {
+      if (resolved.notice) setNotice(resolved.notice);
+      const next = new URLSearchParams(params.toString());
+      next.delete("view");
+      const s = next.toString();
+      router.replace(s ? `/policies?${s}` : "/policies");
+    }, 0);
+    return () => clearTimeout(t);
+  }, [resolved.strip, resolved.notice, params, router, payload]);
+
+  const q = params.get("q") ?? "";
+  const category = params.get("category");
+  const status = params.get("status");
+  const effFrom = params.get("effFrom"); const effTo = params.get("effTo");
+  const ackedByMe = params.get("acked") === "1";
+  const sort = parsePoliciesSort(params.get("sort"));
+  const dir: "asc" | "desc" = params.get("dir") === "asc" || params.get("dir") === "desc" ? (params.get("dir") as "asc" | "desc") : defaultSortDir(sort);
+  const group = parsePoliciesGroup(params.get("group"));
+  const page = Math.max(1, Number(params.get("page")) || 1);
+  const viewType = prefs.home.ui?.policiesViewType === "cards" ? "cards" : "list";
+  const setParams = useCallback((patch: Record<string, string | null>, opts?: { keepPage?: boolean }) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") next.delete(k); else next.set(k, v); }
+    if (!opts?.keepPage) next.delete("page");
+    const s = next.toString();
+    router.push(s ? `/policies?${s}` : "/policies");
+  }, [params, router]);
+  const activeFilters = [q, category, status, effFrom || effTo ? "e" : null, ackedByMe ? "a" : null].filter(Boolean).length;
+
+  const [loadError, setLoadError] = useState(false);
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ view, sort, dir, page: String(page), pageSize: "40" });
+    if (q) p.set("q", q);
+    if (category) p.set("category", category);
+    if (status) p.set("status", status);
+    if (effFrom) p.set("effFrom", effFrom);
+    if (effTo) p.set("effTo", effTo);
+    if (ackedByMe) p.set("acked", "1");
+    return p.toString();
+  }, [view, sort, dir, page, q, category, status, effFrom, effTo, ackedByMe]);
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/policies");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRows(data.data ?? (Array.isArray(data) ? data : []));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
+    const r = await apiFetch<Payload | { data: Payload }>(`/api/policies?${qs}`, { cache: "no-store" });
+    if (!r.ok) { setLoadError(true); return; }
+    setLoadError(false);
+    const d = r.data as Payload & { data: Payload | Row[] };
+    setPayload(Array.isArray(d.data) ? (d as Payload) : (d.data as Payload));
+  }, [qs]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  const rv = rowVersion("policies");
+  useEffect(() => { if (rv <= 0) return; const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [rv, load]);
+  useEffect(() => {
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
+
+  /* New policy (?new=1 from the Docs "+" menu) */
+  const [newOpen, setNewOpen] = useState(false);
+
+  /* Filter panel, categories */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [catOpen, setCatOpen] = useState(false);
+  const [categories, setCategories] = useState<string[] | null>(null);
+  const loadCategories = useCallback(async () => {
+    const r = await apiFetch<{ process?: { policyCategories?: string[] } }>("/api/settings/process", { cache: "no-store" });
+    setCategories(r.ok ? r.data.process?.policyCategories ?? [] : []);
   }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("policies");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
-
-  // `policies`/`create` is the right POST /api/policies asks for, and
-  // `isManager` is the tier the compliance ledger's own route now enforces.
-  const { isManager, canManagePolicies: canCreatePolicy } = useRole();
-
-  async function quickAdd() {
-    try {
-      const res = await fetch("/api/policies", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled policy", content: "", status: "DRAFT" }),
-      });
-      if (!res.ok) { toast(res.status === 403 ? "Manager access required" : "Couldn't create"); return; }
-      const data = await res.json();
-      const created = data.data ?? data;
-      if (created?.id) router.push(`/policies/${created.id}?edit=1`);
-      else { toast("Policy created"); void load(); }
-    } catch { toast("Couldn't create"); }
-  }
-
-  const stats = useMemo(() => {
-    const list = rows ?? [];
-    const counts: Record<PolStatus, number> = { DRAFT: 0, PUBLISHED: 0, ARCHIVED: 0 };
-    for (const p of list) counts[p.status] = (counts[p.status] ?? 0) + 1;
-    const pendingMyAck = list.filter((p) => p.requiresAck && !p.acknowledged).length;
-    return { total: list.length, counts, pendingMyAck };
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    let list = rows ?? [];
-    if (!showArchived) list = list.filter((p) => p.status !== "ARCHIVED");
-    if (statusFilter !== "ALL") list = list.filter((p) => p.status === statusFilter);
-    if (activeCategory) list = list.filter((p) => (p.category ?? "Uncategorized") === activeCategory);
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter((p) =>
-      p.title.toLowerCase().includes(q) || (p.category ?? "").toLowerCase().includes(q));
-    return list;
-  }, [rows, search, statusFilter, activeCategory, showArchived]);
-
-  const categories = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const p of rows ?? []) {
-      if (!showArchived && p.status === "ARCHIVED") continue;
-      const cat = p.category ?? "Uncategorized";
-      m.set(cat, (m.get(cat) ?? 0) + 1);
+  useEffect(() => { const t = setTimeout(() => void loadCategories(), 0); return () => clearTimeout(t); }, [loadCategories]);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if ((e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && !typing)) {
+        e.preventDefault(); setFilterOpen(true); setTimeout(() => searchRef.current?.focus(), 50);
+      }
+      if (e.key === "n" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && canManagePolicies) { e.preventDefault(); setNewOpen(true); }
     }
-    return Array.from(m.entries()).sort(([, a], [, b]) => b - a);
-  }, [rows, showArchived]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canManagePolicies]);
 
-  const grouped = useMemo(() => {
-    const m = new Map<string, ApiPolicy[]>();
-    for (const p of filtered) {
-      const cat = p.category ?? "Uncategorized";
-      if (!m.has(cat)) m.set(cat, []);
-      m.get(cat)!.push(p);
-    }
-    return Array.from(m.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, items]) => ({ name, items: items.slice().sort((a, b) => a.title.localeCompare(b.title)) }));
-  }, [filtered]);
+  const newArmed = useRef(true);
+  useEffect(() => {
+    if (params.get("new") !== "1") { newArmed.current = true; return; }
+    if (!newArmed.current || !canManagePolicies) return;
+    newArmed.current = false;
+    const next = new URLSearchParams(params.toString()); next.delete("new");
+    const s = next.toString();
+    const t = setTimeout(() => { router.replace(s ? `/policies?${s}` : "/policies", { scroll: false }); setNewOpen(true); }, 0);
+    return () => clearTimeout(t);
+  }, [params, router, canManagePolicies]);
+
+  /* Row menu and actions */
+  const [menu, setMenu] = useState<{ row: Row; anchor: React.RefObject<HTMLElement | null>; point?: { x: number; y: number } } | null>(null);
+  const [assignFor, setAssignFor] = useState<Row | null>(null);
+  const [display, setDisplay] = useState<{ effective: boolean; rate: boolean }>({ effective: true, rate: true });
+  const copyLink = (r: Row) => { void navigator.clipboard.writeText(`${window.location.origin}/policies/${r.id}`).then(() => toast("Link copied"), () => toast("Couldn't copy the link", { tone: "danger" })); };
+  const archive = async (r: Row) => {
+    const ok = await confirm({ title: `Archive "${r.title}"?`, description: "It leaves the list people see. Acknowledgements are kept, and you can find it under Archived.", confirmLabel: "Archive", destructive: true });
+    if (!ok) return;
+    const res = await apiFetch(`/api/policies/${r.id}`, { method: "PATCH", json: { status: "ARCHIVED" } });
+    if (!res.ok) { toast(res.error || "Couldn't archive", { tone: "danger" }); return; }
+    toast("Policy archived"); bumpRowVersion("policies"); void load();
+  };
+  const remove = async (r: Row) => {
+    const ok = await confirm({ title: `Delete "${r.title}"?`, description: `It moves to Trash and can be restored within ${boot.org.trashDays} days.`, confirmLabel: "Delete", destructive: true });
+    if (!ok) return;
+    const res = await apiFetch(`/api/policies/${r.id}`, { method: "DELETE" });
+    if (!res.ok) { toast(res.error || "Couldn't delete", { tone: "danger" }); return; }
+    toast("Moved to Trash"); bumpRowVersion("policies"); void load();
+  };
+  const exportCsv = () => {
+    const header = ["Policy", "Category", "Status", "Version", "Effective", "Updated", "Acknowledged"];
+    const lines = (payload?.data ?? []).map((r) => [r.title, r.category ?? "", POLICY_STATUS_LABEL[r.status], String(r.version), r.effectiveDate ?? "", r.updatedAt, r.totalAcks !== null && r.totalUsers !== null ? `${r.totalAcks} of ${r.totalUsers}` : ""]);
+    const csv = [header, ...lines].map((l) => l.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = "policies.csv"; a.click(); URL.revokeObjectURL(url);
+  };
+
+  // Every facet is server-side (spec-process section 1): the rows and the
+  // footer total are the API's answer, never a client filter over one page.
+  const rows = payload?.data ?? null;
+  const total = payload?.pagination.total ?? 0;
+  const from = total === 0 ? 0 : (page - 1) * 40 + 1;
+  const to = Math.min(total, (page - 1) * 40 + (rows?.length ?? 0));
+  const allowed = allowedPolicyViews(canManage);
+  const countFor = (v: PoliciesView) => { const c = payload?.counts; if (!c) return null; return v === "all" ? c.all : v === "needs-ack" ? c.needsAck : v === "published" ? c.published : v === "drafts" ? c.drafts : c.archived; };
+
+  const columns = useMemo<TableColumn<Row>[]>(() => {
+    const cols: TableColumn<Row>[] = [
+      { key: "name", label: "Name", title: true, width: "minmax(220px,2fr)", render: (r) => <span className="inline-flex min-w-0 items-center gap-2"><EntityTile size="sm" fallbackIcon={BookOpenCheck} name={r.title} /><span className="truncate">{r.title}</span></span> },
+    ];
+    if (group === "none") cols.push({ key: "category", label: "Category", width: "minmax(120px,1fr)", render: (r) => r.category ? <span className="truncate text-ink-2">{r.category}</span> : <span className="text-ink-3">None</span> });
+    cols.push({ key: "status", label: "Status", width: "110px", render: (r) => <StatusChip color={POLICY_STATUS_COLOR[r.status]} label={POLICY_STATUS_LABEL[r.status]} disabled /> });
+    if (display.effective) cols.push({ key: "effective", label: "Effective", sortable: true, width: "110px", render: (r) => r.effectiveDate ? <span className="tabular-nums text-ink-2" title={fmt.title(r.effectiveDate)}>{fmt.date(r.effectiveDate, "date")}</span> : <span className="text-ink-3">Not set</span> });
+    if (canManage && display.rate) cols.push({ key: "acked", label: "Acknowledged", width: "120px", numeric: true, render: (r) => r.requiresAck && r.totalAcks !== null && r.totalUsers !== null && r.status === "PUBLISHED" ? <span className="tabular-nums">{r.totalAcks} of {r.totalUsers}</span> : "" });
+    cols.push({
+      key: "mine", label: "My acknowledgement", width: "170px",
+      render: (r) => {
+        const s = myAckState({ requiresAck: r.requiresAck, status: r.status, assigned: !!r.myAssignment, acknowledged: r.acknowledged });
+        if (!s.required) return <span className="text-ink-3">Not required</span>;
+        return <span className="inline-flex items-center gap-2"><Dots variant="quad-steps" done={s.done} total={2} label={s.done === 2 ? "Acknowledged" : s.done === 1 ? "Assigned, not acknowledged" : "Not acknowledged"} /><span className="text-sm text-ink-2">{s.done === 2 ? "Acknowledged" : s.done === 1 ? "Assigned" : "Open"}</span></span>;
+      },
+    });
+    cols.push({ key: "updated", label: "Updated", sortable: true, width: "110px", render: (r) => <span className="tabular-nums text-ink-2" title={fmt.title(r.updatedAt)}>{fmt.date(r.updatedAt)}</span> });
+    if (view === "needs-ack") cols.push({ key: "action", label: "", width: "120px", render: (r) => <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/policies/${r.id}#acknowledge`); }} className="inline-flex h-7 items-center rounded-md border border-line bg-raised px-2.5 text-sm font-medium text-ink hover:bg-hover">Acknowledge</button> });
+    return cols;
+  }, [group, display, canManage, view, fmt, router]);
+
+  const groups = useMemo(() => {
+    if (!rows || group === "none") return null;
+    const m = new Map<string, Row[]>();
+    for (const r of rows) { const k = r.category || "Uncategorized"; (m.get(k) ?? m.set(k, []).get(k)!).push(r); }
+    return Array.from(m.entries()).sort(([a], [b]) => (a === "Uncategorized" ? 1 : b === "Uncategorized" ? -1 : a.localeCompare(b)));
+  }, [rows, group]);
+
+  if (isGuest) return <NotFoundView />;
+
+  const filteredEmpty = activeFilters > 0;
+  const clearAll = () => setParams({ q: null, category: null, status: null, effFrom: null, effTo: null, acked: null });
+  const emptyNode = filteredEmpty
+    ? <span className="inline-flex items-center gap-2">No results · <button type="button" onClick={clearAll} className="font-medium text-brand-deep hover:underline">Clear filters</button></span>
+    : view === "needs-ack" ? "You're up to date." : "No policies published yet.";
+  const showQuietEmpty = rows !== null && rows.length === 0 && !filteredEmpty && view === "all";
+  const menuEntries = [
+    { label: display.effective ? "Hide effective date" : "Show effective date", icon: SlidersHorizontal, onClick: () => setDisplay((d) => ({ ...d, effective: !d.effective })) },
+    ...(canManage ? [{ label: display.rate ? "Hide acknowledgement rate" : "Show acknowledgement rate", icon: SlidersHorizontal, onClick: () => setDisplay((d) => ({ ...d, rate: !d.rate })) }] : []),
+    ...(canManage ? [{ separator: true as const }, { label: "Organize categories", icon: ShieldCheck, href: "/sops/manage?tab=policy-categories" }] : []),
+    ...(!boot.viewer.isAgent ? [{ label: "Export CSV", icon: Download, onClick: exportCsv }] : []),
+  ];
+
+  // One card, whatever the grouping. Ungrouped it is a plain TableCard;
+  // grouped, each group's TableCard is drawn flush (rounded-none border-0)
+  // inside ONE bordered card under its own group bar, exactly as /sops does
+  // it. Two list surfaces in the same hub must not answer the same question
+  // with two different shapes (master plan section 2, one page pattern).
+  const table = (list: Row[] | null, ariaLabel: string, withFooter: boolean, flush = false) => (
+    <TableCard<Row>
+      className={flush ? "rounded-none border-0" : undefined}
+      ariaLabel={ariaLabel}
+      columns={columns}
+      rows={list}
+      rowKey={(r) => r.id}
+      rowHref={(r) => `/policies/${r.id}`}
+      sort={{ key: sort === "effective" ? "effective" : sort === "updated" ? "updated" : sort, dir }}
+      onSort={(key) => { const k = key === "effective" ? "effective" : "updated"; setParams(sort === k ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: k === "updated" ? null : k, dir: null }); }}
+      onRowContextMenu={(r, e) => { e.preventDefault(); setMenu({ row: r, anchor: { current: e.currentTarget as HTMLElement }, point: { x: e.clientX, y: e.clientY } }); }}
+      rowMenu={(r) => <RowMenuTrigger open={menu?.row.id === r.id} onOpen={(ref) => setMenu({ row: r, anchor: ref })} />}
+      empty={emptyNode}
+      footer={withFooter ? { total, noun: "policies", from, to, onPrev: page > 1 ? () => setParams({ page: page > 2 ? String(page - 1) : null }, { keepPage: true }) : undefined, onNext: to < total ? () => setParams({ page: String(page + 1) }, { keepPage: true }) : undefined } : undefined}
+    />
+  );
 
   return (
     <>
-      {/* Phase 3 opened this page to every Member (the sidebar row and the
-          layout gate both did), but its controls were left ungated, so a
-          Member saw a blue "New policy" whose POST answers 403 and a
-          "Compliance" link to a page that is a manager's. Both now ask the
-          same rights their destinations enforce: spec-process section 1
-          ("/policies | every Member ... no New policy") and section 2's
-          "'New policy' renders only for people who can create". */}
+      <Breadcrumb items={[{ label: "Policies" }]} />
       <OsPageHeader
         title="Policies"
-        actions={
-          <div className="flex items-center gap-1">
-            <Link href="/sops" className="os-head__link"><FileText /> SOPs</Link>
-            {isManager ? (
-              <Link href="/policies/compliance" className="os-head__link"><Activity /> Compliance</Link>
-            ) : null}
-          </div>
-        }
-        primary={canCreatePolicy ? { label: "New policy", onClick: quickAdd } : undefined}
+        views={allowed.map((v) => (
+          <ViewTab key={v} label={POLICIES_VIEW_LABEL[v]} active={view === v} onClick={() => { setNotice(null); setParams({ view: v === "all" ? null : v }); }}
+            trailing={v === "needs-ack" && countFor(v) ? <span className="text-xs font-medium tabular-nums text-ink-2">{fmt.count(countFor(v))}</span> : undefined} />
+        ))}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeFilters },
+          sort: { onClick: () => setSortOpen((o) => !o), label: POLICIES_SORTS.find((s) => s.key === sort)?.label, active: sort !== "updated" },
+          group: { onClick: () => setGroupOpen((o) => !o), label: group === "category" ? "Category" : "None", active: group !== "none" },
+          switcher: { value: viewType, options: [{ key: "list", label: "List", icon: ListIcon }, { key: "cards", label: "Cards", icon: LayoutGrid }], onChange: (k) => void patchPrefs({ home: { ui: { policiesViewType: k === "cards" ? "cards" : "list" } } }) },
+          left: (
+            <span className="relative">
+              <Picker open={sortOpen} onClose={() => setSortOpen(false)} ariaLabel="Sort policies" selected={sort} onSelect={(v) => { setSortOpen(false); setParams(v === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: v === "updated" ? null : v, dir: null }); }} sections={[{ options: POLICIES_SORTS.map((s) => ({ value: s.key, label: s.label })) }]} width={200} />
+              <Picker open={groupOpen} onClose={() => setGroupOpen(false)} ariaLabel="Group policies" selected={group} onSelect={(v) => { setGroupOpen(false); setParams({ group: v === "category" ? null : v }); }} sections={[{ options: [{ value: "category", label: "Category" }, { value: "none", label: "None" }] }]} width={200} />
+            </span>
+          ),
+          primary: canManagePolicies ? { label: "New policy", onClick: () => setNewOpen(true) } : undefined,
+          menu: menuEntries,
+        }}
       />
+      {notice ? <p className="os-chrome px-6 pt-1 text-sm text-ink-2">{notice}</p> : null}
 
-      <div className="px-6 py-5">
-        {/* Toolbar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex h-9 min-w-[200px] flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3">
-            <Search className="h-4 w-4 shrink-0 text-zinc-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search title, category…"
-              className="h-full w-full bg-transparent text-base text-zinc-900 outline-none placeholder:text-zinc-400"
-            />
-          </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="policies" activeCount={activeFilters} onClearAll={clearAll}>
+          <li className="pb-2"><SearchField inputRef={searchRef} value={q} onChange={(v) => setParams({ q: v || null })} placeholder="Search policies" /></li>
+          <FilterGroup label="Category">
+            <FilterRow label="Filter by category" checked={!!category} onCheckedChange={(on) => { if (!on) setParams({ category: null }); else setCatOpen(true); }}>
+              <span className="relative block">
+                <button type="button" onClick={() => setCatOpen((o) => !o)} className="inline-flex h-8 max-w-full items-center rounded-md border border-line-strong bg-raised px-2 text-sm text-ink"><span className="truncate">{category ? (category === "__none__" ? "Uncategorized" : category) : <span className="text-ink-3">Choose a category</span>}</span></button>
+                <Picker open={catOpen} onClose={() => setCatOpen(false)} ariaLabel="Category" searchPlaceholder="Find a category" selected={category} onSelect={(v) => { setParams({ category: v }); setCatOpen(false); }} sections={[{ options: [{ value: "__none__", label: "Uncategorized" }, ...(categories ?? []).map((c) => ({ value: c, label: c }))] }]} />
+              </span>
+            </FilterRow>
+          </FilterGroup>
+          {canManage ? (
+            <FilterGroup label="Status">
+              {(["PUBLISHED", "DRAFT", "ARCHIVED"] as PolicyStatus[]).map((s) => <FilterRow key={s} label={POLICY_STATUS_LABEL[s]} checked={status === s} onCheckedChange={(on) => setParams({ status: on ? s : null })} />)}
+            </FilterGroup>
+          ) : null}
+          <FilterGroup label="Effective date">
+            <FilterRow label="Date range" checked={!!(effFrom || effTo)} onCheckedChange={(on) => { if (!on) setParams({ effFrom: null, effTo: null }); else setParams({ effFrom: new Date().toISOString().slice(0, 10) }); }}>
+              <div className="flex flex-col gap-1.5">
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">From</span><DateField size="sm" value={effFrom} onChange={(v) => setParams({ effFrom: v })} placeholder="Any" ariaLabel="From" className="min-w-0 flex-1" /></span>
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">To</span><DateField size="sm" value={effTo} onChange={(v) => setParams({ effTo: v })} placeholder="Any" ariaLabel="To" className="min-w-0 flex-1" /></span>
+              </div>
+            </FilterRow>
+          </FilterGroup>
+          <FilterGroup label="Acknowledged by me">
+            <FilterRow label="Only policies I acknowledged" checked={ackedByMe} onCheckedChange={(on) => setParams({ acked: on ? "1" : null })} />
+          </FilterGroup>
+        </FilterPanel>
 
-          {categories.length > 0 && (
-            <div className="relative">
-              <select
-                value={activeCategory ?? ""}
-                onChange={(e) => setActiveCategory(e.target.value || null)}
-                className="h-9 cursor-pointer appearance-none rounded-lg border border-zinc-200 bg-white pl-3 pr-8 text-base text-zinc-700 outline-none hover:bg-zinc-50"
-              >
-                <option value="">All categories ({stats.total})</option>
-                {categories.map(([cat, n]) => (
-                  <option key={cat} value={cat}>{cat} ({n})</option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
-            </div>
-          )}
-
-          <div className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5">
-            <button type="button" onClick={() => setView("grid")} title="Card view"
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${view === "grid" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}>
-              <LayoutGrid className="h-4 w-4" />
-            </button>
-            <button type="button" onClick={() => setView("list")} title="List view"
-              className={`inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors ${view === "list" ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-800"}`}>
-              <ListIcon className="h-4 w-4" />
-            </button>
-          </div>
-
-          <button type="button" onClick={() => setShowArchived((x) => !x)}
-            title={showArchived ? "Showing archived policies" : "Show archived policies"}
-            className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-base transition-colors ${showArchived ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50"}`}>
-            <Archive className="h-3.5 w-3.5" /> Archived{showArchived ? " ✓" : ""}
-          </button>
-        </div>
-
-        {/* Status filter pills (inline styles survive the .workwrk-os button reset) */}
-        <div className="mt-3 flex flex-wrap items-center" style={{ gap: "8px" }}>
-          {STATUS_FILTERS.map((s) => {
-            const active = statusFilter === s;
-            const count = s === "ALL" ? stats.total : stats.counts[s as PolStatus];
-            return (
-              <button key={s} type="button" onClick={() => setStatusFilter(s)}
-                style={{
-                  display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px",
-                  borderRadius: "9999px", fontSize: "13px", fontWeight: active ? 600 : 400,
-                  border: active ? "1px solid var(--os-line-strong)" : "1px solid var(--os-line)",
-                  background: active ? "var(--os-surface-2)" : "var(--os-surface)",
-                  color: active ? "var(--os-ink)" : "var(--os-ink-2)", cursor: "pointer", transition: "all .12s",
-                }}>
-                {s === "ALL" ? "All" : STATUS_LABEL[s as PolStatus]}
-                <span style={{ color: "var(--os-ink-3)", fontVariantNumeric: "tabular-nums" }}>{count}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Body */}
-        <div className="mt-5">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           {loadError ? (
-            <OsEmptyView variant="error" title="Couldn't load policies" hint={loadError} action={{ label: "Try again", onClick: () => void load() }} />
-          ) : rows === null ? (
-            <SkeletonRows />
-          ) : stats.total === 0 ? (
-            /* THE EMPTY STATE ASKS THE SAME QUESTION THE HEADER DOES.
-               The header primary is gated on `canCreatePolicy`, but this
-               action was not, so the one viewer guaranteed to see it (a
-               Member, who sees no policies at all because GET /api/policies
-               returns PUBLISHED rows only) got a blue "New policy" whose POST
-               answers 403. An empty list is where a dead create hurts most:
-               it is the only control on the screen.
-
-               The hint changes with it. "Policies ask for acknowledgement..."
-               is advice for the person who will write one; a Member needs to
-               know the list is empty because nothing is published yet, not
-               that they should go and create something they may not. */
-            <OsEmptyView
-              context="docs"
-              title="No policies yet"
-              hint={
-                canCreatePolicy
-                  ? "Policies ask for acknowledgement and version automatically as you edit."
-                  : "Published policies show up here, and anything you need to acknowledge comes with a reminder."
-              }
-              action={canCreatePolicy ? { label: "New policy", onClick: quickAdd } : undefined}
-            />
-          ) : grouped.length === 0 ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-xs text-zinc-400">
-              <AlertTriangle className="h-4 w-4" /> No policies match the current filter.
-            </div>
-          ) : (
-            <div className="space-y-7">
-              {grouped.map((g) => (
-                <section key={g.name}>
-                  <header className="mb-2.5 flex items-center gap-2">
-                    <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">{g.name}</h2>
-                    <span className="rounded-full bg-zinc-100 px-1.5 text-xs tabular-nums text-zinc-500">{g.items.length}</span>
-                    <span className="h-px flex-1 bg-zinc-100" />
-                  </header>
-                  {view === "list" ? (
-                    <div className="divide-y divide-zinc-100 overflow-hidden rounded-xl border border-zinc-200 bg-white">
-                      {g.items.map((p) => <PolicyRow key={p.id} p={p} />)}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {g.items.map((p) => <PolicyCard key={p.id} p={p} />)}
-                    </div>
-                  )}
-                </section>
+            <OsEmptyView variant="error" context="docs" title="Couldn't load policies" action={{ label: "Retry", onClick: () => void load() }} />
+          ) : showQuietEmpty ? (
+            <OsEmptyView context="docs" title="No policies published yet." action={canManagePolicies ? { label: "Create a policy", onClick: () => setNewOpen(true) } : undefined} />
+          ) : viewType === "cards" ? (
+            <CardsGrid rows={rows} groups={groups} empty={emptyNode} onMenu={(r, ref) => setMenu({ row: r, anchor: ref })} fmt={fmt} />
+          ) : groups && groups.length > 1 ? (
+            <div className="overflow-hidden rounded-lg border border-line bg-raised">
+              {groups.map(([name, list], i, all) => (
+                <div key={name} className={cn("flex flex-col", i > 0 ? "border-t border-line" : "")}>
+                  <div className="flex h-11 items-center gap-2 bg-subtle px-3">
+                    <span className="min-w-0 truncate text-row font-medium text-ink">{name}</span>
+                    <span className="text-xs font-medium tabular-nums text-ink-2">{list.length}</span>
+                  </div>
+                  {table(list, name, i === all.length - 1, true)}
+                </div>
               ))}
             </div>
+          ) : (
+            table(rows, POLICIES_VIEW_LABEL[view], true)
           )}
         </div>
       </div>
+
+      {menu ? (
+        <MorePortal anchorRef={menu.anchor} width={240} open onClose={() => setMenu(null)} placement="below" point={menu.point ?? null}>
+          <MenuList onClick={() => setMenu(null)}>
+            <MenuItem icon={ExternalLink} label="Open" onClick={() => router.push(`/policies/${menu.row.id}`)} />
+            {canManage ? <MenuItem icon={Edit3} label="Edit" onClick={() => router.push(`/policies/${menu.row.id}?edit=1`)} /> : null}
+            {canManage ? <MenuItem icon={UserPlus} label="Assign…" onClick={() => setAssignFor(menu.row)} /> : null}
+            {canManage ? <MenuItem icon={ShieldCheck} label="Acknowledgements" onClick={() => router.push(`/policies/${menu.row.id}/compliance`)} /> : null}
+            <MenuItem icon={Link2} label="Copy link" onClick={() => copyLink(menu.row)} />
+            {canManage && menu.row.status !== "ARCHIVED" ? <><MenuSeparator /><MenuItem icon={Archive} label="Archive" onClick={() => void archive(menu.row)} /></> : null}
+            {isAdmin ? <MenuItem icon={Trash2} label="Delete" destructive onClick={() => void remove(menu.row)} /> : null}
+          </MenuList>
+        </MorePortal>
+      ) : null}
+      {assignFor ? <AssignDialog open onClose={() => setAssignFor(null)} object={{ type: "policy", id: assignFor.id, title: assignFor.title }} onAssigned={() => { bumpRowVersion("policies"); void load(); }} /> : null}
+      <NewPolicyDialog open={newOpen} onClose={() => setNewOpen(false)} categories={categories ?? []} onCreated={() => bumpRowVersion("policies")} />
     </>
   );
 }
 
-function PolicyCard({ p }: { p: ApiPolicy }) {
-  const Icon = STATUS_ICON[p.status];
-  const ackRate = p.ackRate ?? 0;
+function CardsGrid({ rows, groups, empty, onMenu, fmt }: { rows: Row[] | null; groups: Array<[string, Row[]]> | null; empty: React.ReactNode; onMenu: (r: Row, ref: React.RefObject<HTMLButtonElement | null>) => void; fmt: ReturnType<typeof useFormat> }) {
+  if (rows === null) return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-[120px] rounded-lg border border-line bg-raised" />)}</div>;
+  if (rows.length === 0) return <div className="flex h-11 items-center rounded-lg border border-line bg-raised px-4 text-row text-ink-2">{empty}</div>;
+  const sections = groups ?? [["", rows] as [string, Row[]]];
   return (
-    <Link href={`/policies/${p.id}`} className="group flex flex-col rounded-xl border border-zinc-200 bg-white p-4 transition-all hover:border-zinc-300 hover:shadow-[0_2px_12px_-6px_rgba(0,0,0,0.15)]">
-      <div className="flex items-center justify-between gap-2">
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[p.status]}`}>
-          <Icon className="h-3 w-3" /> {STATUS_LABEL[p.status]}
-        </span>
-        <span className="text-xs text-zinc-400">v{p.version}</span>
-      </div>
-
-      <h3 className="mt-2.5 line-clamp-2 text-base font-semibold text-zinc-900 group-hover:text-zinc-950">{p.title}</h3>
-
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-        {p.requiresAck && (
-          p.acknowledged ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-medium text-emerald-700"><CheckCircle2 className="h-3 w-3" /> You&apos;ve acked</span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700"><AlertTriangle className="h-3 w-3" /> Ack required</span>
-          )
-        )}
-        {p.effectiveDate && (
-          <span className="inline-flex items-center gap-1 text-zinc-400"><CalendarIcon className="h-3 w-3" /> Eff {new Date(p.effectiveDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-3 border-t border-zinc-100 pt-2.5 text-xs text-zinc-400">
-        {p.requiresAck && (
-          <span className="inline-flex items-center gap-1" title="Org acknowledgement rate">
-            <Users className="h-3 w-3" />
-            <span style={{ color: rateHue(ackRate) }}>{ackRate}%</span>
-            {p.totalAcks != null && p.totalUsers != null && <span>· {p.totalAcks}/{p.totalUsers}</span>}
-          </span>
-        )}
-        <span className="ml-auto inline-flex items-center gap-1">
-          <FileText className="h-3 w-3" /> {fmtDate(p.updatedAt)}
-          <ChevronRight className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
-        </span>
-      </div>
-    </Link>
+    <div className="flex flex-col gap-4">
+      {sections.map(([name, list]) => (
+        <section key={name || "all"} className="flex flex-col gap-2">
+          {name ? <h2 className="flex items-center gap-2 text-row font-medium text-ink">{name}<span className="text-xs font-medium tabular-nums text-ink-2">{list.length}</span></h2> : null}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {list.map((r) => <PolicyCard key={r.id} r={r} onMenu={onMenu} fmt={fmt} />)}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
-function PolicyRow({ p }: { p: ApiPolicy }) {
-  const Icon = STATUS_ICON[p.status];
-  const ackRate = p.ackRate ?? 0;
+function PolicyCard({ r, onMenu, fmt }: { r: Row; onMenu: (r: Row, ref: React.RefObject<HTMLButtonElement | null>) => void; fmt: ReturnType<typeof useFormat> }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const s = myAckState({ requiresAck: r.requiresAck, status: r.status, assigned: !!r.myAssignment, acknowledged: r.acknowledged });
   return (
-    <Link href={`/policies/${p.id}`} className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-zinc-50">
-      <span className={`inline-flex w-[92px] shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_PILL[p.status]}`}>
-        <Icon className="h-3 w-3" /> {STATUS_LABEL[p.status]}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-base font-medium text-zinc-900">{p.title}</span>
-        {p.effectiveDate && <span className="block truncate text-sm text-zinc-400">Effective {new Date(p.effectiveDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>}
-      </span>
-      {p.requiresAck && (
-        p.acknowledged
-          ? <span className="hidden shrink-0 items-center gap-1 text-xs text-emerald-600 sm:inline-flex"><CheckCircle2 className="h-3 w-3" /> Acked</span>
-          : <span className="hidden shrink-0 items-center gap-1 text-xs text-amber-600 sm:inline-flex"><AlertTriangle className="h-3 w-3" /> Ack</span>
-      )}
-      {p.requiresAck && (
-        <span className="hidden shrink-0 items-center gap-1 text-xs tabular-nums sm:inline-flex" style={{ color: rateHue(ackRate) }} title="Org ack rate"><Users className="h-3 w-3" /> {ackRate}%</span>
-      )}
-      <span className="shrink-0 text-xs tabular-nums text-zinc-400">v{p.version}</span>
-      <span className="shrink-0 text-xs tabular-nums text-zinc-400">{fmtDate(p.updatedAt)}</span>
-      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 group-hover:text-zinc-500" />
-    </Link>
+    <div className="group/card relative flex min-h-[120px] flex-col gap-2 rounded-lg border border-line bg-raised p-3 hover:bg-hover">
+      <Link href={`/policies/${r.id}`} className="flex min-w-0 items-start gap-2">
+        <EntityTile size="sm" fallbackIcon={BookOpenCheck} name={r.title} />
+        <span className="line-clamp-2 min-w-0 flex-1 text-row font-medium text-ink">{r.title}</span>
+      </Link>
+      <span className="text-sm text-ink-2">{r.category ?? "Uncategorized"}{r.effectiveDate ? ` · Effective ${fmt.date(r.effectiveDate, "date")}` : ""}</span>
+      <div className="mt-auto flex items-center gap-2">
+        <StatusChip color={POLICY_STATUS_COLOR[r.status]} label={POLICY_STATUS_LABEL[r.status]} disabled />
+        <span className="ms-auto">{s.required ? <Dots variant="quad-steps" done={s.done} total={2} label={s.done === 2 ? "Acknowledged" : "Not acknowledged"} /> : null}</span>
+        <span className={cn("os-tc__more")}><RowMoreButton buttonRef={ref} onClick={() => onMenu(r, ref)} label="Policy actions" /></span>
+      </div>
+    </div>
   );
+}
+
+function SearchField({ value, onChange, placeholder, inputRef }: { value: string; onChange: (v: string) => void; placeholder: string; inputRef: React.MutableRefObject<HTMLInputElement | null> }) {
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) { setSeen(value); setDraft(value); }
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft.trim()), 300);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
+  return <input ref={inputRef} type="search" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } }} placeholder={placeholder} aria-label={placeholder} className="h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand" />;
+}
+
+function RowMenuTrigger({ onOpen, open }: { onOpen: (ref: React.RefObject<HTMLButtonElement | null>) => void; open?: boolean }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return <RowMoreButton buttonRef={ref} open={open} onClick={() => onOpen(ref)} label="Policy actions" />;
 }

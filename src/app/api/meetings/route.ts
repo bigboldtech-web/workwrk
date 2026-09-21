@@ -17,6 +17,13 @@ export async function GET(req: NextRequest) {
 
   const where: any = { organizationId: getOrgId(session) };
   if (type) where.type = type;
+  // ?mine=1: the Notetaker's "Mine" view (spec-docs-knowledge section 2,
+  // /notetaker: "meetings the viewer created or attends"). The Meeting model
+  // records no creator, so attendance is the whole of the rule the product
+  // can answer honestly today.
+  if (searchParams.get("mine") === "1") {
+    where.attendees = { some: { userId: getUserId(session) } };
+  }
   if (pagination.search) {
     where.title = { contains: pagination.search, mode: "insensitive" };
   }

@@ -64,6 +64,17 @@ export function resolveDocRole(
   return "edit";
 }
 
+/**
+ * Full access on a doc = its creator or an org admin: the two parties
+ * resolveDocRole can never lock out. This is the bar for Share, Lock page,
+ * Save as template and Move to Trash until the access flip replaces it with
+ * can(FULL) (spec-docs-knowledge section 4 step 6).
+ */
+export function isDocFull(viewer: { userId: string; accessLevel: string | null | undefined }, doc: { createdById: string | null }): boolean {
+  if (doc.createdById && viewer.userId === doc.createdById) return true;
+  return ADMIN_LEVELS.includes(viewer.accessLevel ?? "");
+}
+
 /** Bundled org-settings fetch + role resolution, so every doc subroute
  *  gates with one mechanical call after its docAccessible() check. */
 export async function requireDocRole(

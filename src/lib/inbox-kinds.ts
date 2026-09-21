@@ -127,6 +127,22 @@ export const KINDS: Readonly<Record<string, InboxKind>> = {
   // ── Other ─────────────────────────────────────────────────────────
   sop: k("sop", "SOP assigned", "BookOpen", "other", "announcements"),
   sop_published: k("sop_published", "SOP updated", "BookOpen", "other", "announcements"),
+  // The nine process kinds spec-process section 4 expects the Inbox to
+  // render. Registered here BEFORE most of their writers exist (the same
+  // reason the review kinds above are), because an unregistered dotted type
+  // falls through to `fallbackKind` and reads "Sop.assigned" on a grey Bell.
+  // The dotted spellings the writers use are aliased in TYPE_ALIASES.
+  sop_assigned: k("sop_assigned", "SOP assigned", "BookOpen", "primary", "tasks"),
+  sop_due_soon: k("sop_due_soon", "SOP due soon", "BookOpen", "primary", "tasks"),
+  run_assigned: k("run_assigned", "Run assigned to you", "ListChecks", "primary", "tasks"),
+  run_completed: k("run_completed", "Run completed", "ListChecks", "other", "announcements"),
+  policy_assigned: k("policy_assigned", "Policy to acknowledge", "ScrollText", "primary", "announcements"),
+  policy_reacknowledge: k("policy_reacknowledge", "Policy changed, acknowledge again", "ScrollText", "primary", "announcements"),
+  contract_signed: k("contract_signed", "Contract signed", "FileSignature", "other", "announcements"),
+  contract_declined: k("contract_declined", "Contract declined", "FileSignature", "primary", "announcements"),
+  contract_completed: k("contract_completed", "Contract completed", "FileSignature", "other", "announcements"),
+  /** An internal party's own signing link (lib/contract-notify.ts). */
+  contract_sent: k("contract_sent", "Contract to sign", "FileSignature", "primary", "tasks"),
   task_status_changed: k("task_status_changed", "Task status changed", "CircleDot", "other", "tasks"),
   kudos: k("kudos", "Kudos", "Heart", "other", "kudos"),
   /** The fifth contract kind (see the block in Primary above). */
@@ -161,6 +177,17 @@ export const TYPE_ALIASES: Readonly<Record<string, string>> = {
   "access.request": "access_request",
   "access.granted": "access_granted",
   "access.expiring": "access_expiring",
+  // The process unit's dotted forms (spec-process section 4).
+  "sop.assigned": "sop_assigned",
+  "sop.due_soon": "sop_due_soon",
+  "run.assigned": "run_assigned",
+  "run.completed": "run_completed",
+  "policy.assigned": "policy_assigned",
+  "policy.reacknowledge": "policy_reacknowledge",
+  "contract.signed": "contract_signed",
+  "contract.declined": "contract_declined",
+  "contract.completed": "contract_completed",
+  "contract.sent": "contract_sent",
 };
 
 /** The stored type in its canonical, lowercase, underscore form. */
@@ -201,9 +228,18 @@ export function isMentionType(type: string | null | undefined): boolean {
   return kindFor(type).inMentions === true;
 }
 
-/** Every normalised type that routes to a tab. Used to build SQL `in` lists. */
+/**
+ * Every type that routes to a tab, in the canonical form AND every alias
+ * spelling that resolves to it. Used to build SQL `in` lists, where a row
+ * written as "run.assigned" by an older release must land in the same tab
+ * as "run_assigned" (the alias table is otherwise applied at render time,
+ * after the query has already sorted the row into Other).
+ */
 export function typesForTab(tab: KindTab): string[] {
-  return Object.values(KINDS).filter((x) => x.tab === tab).map((x) => x.type);
+  const canonical = Object.values(KINDS).filter((x) => x.tab === tab).map((x) => x.type);
+  const set = new Set(canonical);
+  for (const [alias, target] of Object.entries(TYPE_ALIASES)) if (set.has(target)) set.add(alias);
+  return Array.from(set);
 }
 
 /** Every normalised type in a Filter group. */

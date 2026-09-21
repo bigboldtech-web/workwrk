@@ -70,12 +70,30 @@ deleting the Items it made.
 An agent may run `--write` **only** against the local database named in
 `.env.local`, and only after the local dry-run report has been saved.
 
-Note that `scripts/deploy-migrations.mjs` now also applies the hand-written
-schema files in `prisma/sql` from an explicit manifest, recording each one in a
-`_sql_migrations` ledger table with its checksum, so each applies exactly once
-and an edited file is reported rather than silently re-run. That closed a real
-gap: `prisma migrate deploy` reads only `prisma/migrations`, so before this a
+Note that `scripts/deploy-migrations.mjs` also applies the hand-written schema
+files in `prisma/sql`, from an explicit `SQL_MANIFEST`, before the build. That
+closed a real gap: `prisma migrate deploy` reads only `prisma/migrations`, so a
 missed file meant the new release met a database without its tables.
+
+Two things about how it applies them, both learned the hard way:
+
+- It shells out to `npx prisma db execute`, NOT a second `pg` client. The first
+  version opened its own connection and the deploy died before the build with
+  nothing in the log; `prisma db execute` resolves its datasource the same way
+  `prisma migrate deploy` does, which is the path that has been working on that
+  box for months.
+- There is no ledger. Every manifest file runs on EVERY deploy, so every file
+  in the manifest MUST be idempotent (`IF NOT EXISTS` on every statement, and a
+  backfill guarded on its own effect). `2026-07-21-operating-core.sql` is
+  deliberately excluded for exactly this reason: 39 statements, no guards.
+
+`scripts/check-schema-sql.mjs` runs in CI and fails the build when
+`schema.prisma` declares a table or column that no migration and no manifest
+file creates, measured against `scripts/schema-sql-baseline.json` (the objects
+production already carries from the `db push` era). It exists because Phase 2
+added `archivedById` to six models, wrote the SQL file, and never listed it in
+the manifest: the generated client selected a column production did not have,
+so every task read threw and the page said "could not load".
 
 ## The scripts
 
@@ -114,10 +132,9 @@ npx tsx scripts/<script>.ts --write                               # only after a
 
 ## The migration scripts, and their order
 
-Four of the five are written. The one that is not is listed so its order and
-its dependencies are on the record before anyone writes it. A struck-through
-name means the script exists; **written is not the same as run in production**,
-which is the founder's step every time (see the approval gate above).
+All six are written. A struck-through name means the script exists; **written
+is not the same as run in production**, which is the founder's step every time
+(see the approval gate above).
 
 | Script | What it moves | Ships with | Depends on |
 |---|---|---|---|
@@ -126,6 +143,7 @@ which is the founder's step every time (see the approval gate above).
 | ~~`migrate-legacy-tasks.ts`~~ **WRITTEN, Stage F** | every live `Task` and `TaskComment` into `Item` / `ItemUpdate` on the assignee's Personal list, with `metadata.legacyTaskId` and a `LegacyRedirect` row | work-home W4 | `LegacyRedirect` (shipped in `prisma/sql/2026-09-18-task-detail-phase2.sql`); every Personal list existing (the script creates a missing one); the consumer re-points, which shipped with it |
 | ~~`migrate-ideas.ts`~~ **WRITTEN, Stage F** | every `Idea` into an Item on the seeded Ideas list, with a `LegacyRedirect` row | work-home W5 | the Ideas list template (seeded: `list.ideas-board`); **must run before the `/ideas` 308**, or the redirect is a delete. The redirect is deliberately NOT in `next.config.ts` yet |
 | ~~`migrate-preference-keys.ts`~~ **WRITTEN, Stage F** | every `home.topPins` entry folded into the `favorite<Kind>Ids` array for its kind, so the rows behind the deleted top-pins strip become ordinary favorites | work-home W1 and W2 | the strict-schema keys existing (they do, as of Phase 2 Stage A); nothing else |
+| ~~`migrate-public-sop-links.ts`~~ **WRITTEN, Phase 3 process unit** | `settings.access.publicLinks = "view"` for every org holding a PUBLISHED SOP with a `shareToken`, plus one `access.settings.migrated` audit row per org | the `/share/sop/[token]` toggle-10 fold (Phase 3 Stage D) | nothing in `prisma/sql` (it writes a JSON key on `Organization.settings`); run automatically by `.github/workflows/deploy.yml` between the build and the pm2 reload, see its section below |
 
 ## Stage C: the two that are written, and what the founder has to do
 
@@ -483,3 +501,81 @@ none of them lands on a 410 or on a table nobody writes:
 | the seven `/tasks/*` list pages | deleted with no redirect (a soft 404 through the `/tasks/[id]` dynamic sibling) | a 308 each, in `next.config.ts` and as a route-handler twin beside the deleted page |
 | `/tasks/[id]` | a page whose `redirect()` streamed, so it answered 200 with no `Location` and opened the task as a drawer over a blank host | a route handler: a real 308 to the migrated Item, or a 307 to `/item/<id>?from=legacy-task` on a miss |
 | workload heatmap | `GET /api/tasks/workload` | already on Items: `workload-grid.tsx` takes rows as props. The route and its only caller (`components/tasks/workload-heatmap.tsx`) are both deleted; the capability lives on any List's Workload view and at `/team/workload` |
+
+## `migrate-public-sop-links.ts` (Phase 3, process unit)
+
+Carries every existing public SOP link over access toggle 10. For each
+organization holding at least one PUBLISHED SOP with a `shareToken`, it sets
+`settings.access.publicLinks = "view"` and writes one `access.settings.migrated`
+ActivityLog row naming the count. Orgs with no public SOP stay on the Off
+default; orgs already on "view" are reported and not written. It ships with the
+change that makes `/share/sop/[token]` read the toggle, and it must be run
+BEFORE that build serves traffic, or every public SOP link answers "This link is
+no longer available" until it is.
+
+**When, exactly. The deploy now does this for you.**
+`.github/workflows/deploy.yml` runs the dry run and then the write between the
+successful build and the `pm2 reload`, in the same slot
+`migrate-legacy-tasks.ts` occupies. That window is the whole requirement: the
+old release is still the one answering, so the links never stop resolving. Its
+two logs land beside the build log on the box:
+`/www/wwwroot/workwrk.com/public-sop-links-dryrun.log` and
+`-write.log`. A failure there does not abort the deploy, so grep the job output
+for `PUBLIC-SOP-WRITE-FAILED` and, if it is there, run the write by hand from
+the deployed checkout. The commands below are that by-hand run, and are also
+how to verify what the deploy did.
+
+Running it earlier, from a separate checkout with the production
+`DATABASE_URL`, is also safe: the write only sets a JSON key the old code never
+reads. Running it late is the outage.
+
+It depends on nothing in `prisma/sql` (the two Stage D SQL files are
+unrelated to it), and it is idempotent, so a second run reports zero to flip.
+
+Dry run first, on the production box:
+
+```
+npx tsx scripts/migrate-public-sop-links.ts --report /tmp/public-sop-links-dryrun.txt
+```
+
+Then the write, once the report reads as expected (the "would flip" count is the
+number of orgs with public SOPs that are still on "off"):
+
+```
+npx tsx scripts/migrate-public-sop-links.ts --write --report /tmp/public-sop-links-write.txt
+```
+
+Verification, against an independent query rather than the report's own sum:
+
+```
+SELECT o.id, o.name, o.settings->'access'->>'publicLinks' AS public_links,
+       COUNT(s.id) AS public_sops
+FROM "Organization" o
+LEFT JOIN "SOP" s ON s."organizationId" = o.id AND s."shareToken" IS NOT NULL AND s.status = 'PUBLISHED'
+GROUP BY o.id, o.name, public_links
+ORDER BY public_sops DESC;
+```
+
+Every row with `public_sops > 0` must read `public_links = view` after the
+write, the per-org counts must match the report's, and a spot check of one live
+token in a flipped org opens the page rather than the 404.
+
+## `prisma/seed-templates.ts`: the eight built-in Doc templates (Phase 3, docs unit)
+
+The retired `src/components/docs/note-templates.tsx` rows (Meeting notes, 1:1
+meeting, Project brief, Weekly review, Daily standup, SOP draft, Decision log,
+Post-mortem) are now built-in `DOC` rows in the same key-upserted seed as the
+Space presets (`doc.meeting-notes` and so on, spec-docs-knowledge section 4
+step 9). Until it runs, "New doc > From template" and `/templates?kind=doc`
+show only the org's own saved templates; nothing else depends on it, and it
+never touches a customer's rows (a key adopted by a non-built-in row is
+reported and skipped). Idempotent: a second run reports every row unchanged.
+
+```
+npx tsx prisma/seed-templates.ts            # report only
+npx tsx prisma/seed-templates.ts --write    # upsert the 17 built-in rows
+```
+
+Verification: `GET /api/template-center?kind=DOC` as any member lists the eight
+with `builtIn: true`, and applying one creates a Doc whose body carries the
+template's headings.

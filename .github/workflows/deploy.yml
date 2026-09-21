@@ -110,6 +110,33 @@ jobs:
             echo "==> Legacy task migration (write)"
             npx tsx scripts/migrate-legacy-tasks.ts --write 2>&1 | tee /www/wwwroot/workwrk.com/legacy-tasks-write.log || echo "MIGRATION-WRITE-FAILED"
 
+            # Carry existing public SOP links over access toggle 10.
+            #
+            # WHY IT RUNS HERE, AND ONLY HERE. /share/sop/[token] now answers
+            # only while the org's settings.access.publicLinks is "view", and
+            # that toggle's default is Off. SOP.shareToken was minted before
+            # the toggle existed, so without this step every public SOP link
+            # in every org reads "This link is no longer available" the moment
+            # the new build serves traffic. spec-process section 4 step 8 says
+            # it ships with the page "never after it": between a successful
+            # build and the pm2 reload is exactly that window, because the old
+            # code is still the one answering.
+            #
+            # WHY IT IS SAFE ON EVERY DEPLOY. Dry-run by default, so --write is
+            # deliberate. It works per organization in a transaction, reads the
+            # value back as its own assertion, touches no key of settings other
+            # than access.publicLinks, counts SOP rows without changing one,
+            # and leaves an org with no public SOP on the Off default. A second
+            # run reports "already migrated" and writes nothing.
+            #
+            # A failure does NOT abort the deploy: it is recoverable by
+            # re-running, and losing the reload over it would be worse. Loud
+            # marker to grep for.
+            echo "==> Public SOP link carry-over (dry run first)"
+            npx tsx scripts/migrate-public-sop-links.ts 2>&1 | tee /www/wwwroot/workwrk.com/public-sop-links-dryrun.log || echo "PUBLIC-SOP-DRYRUN-FAILED"
+            echo "==> Public SOP link carry-over (write)"
+            npx tsx scripts/migrate-public-sop-links.ts --write 2>&1 | tee /www/wwwroot/workwrk.com/public-sop-links-write.log || echo "PUBLIC-SOP-WRITE-FAILED"
+
             # Build ran as root; the app runs as www. Hand ownership back so
             # the runtime can read/write .next, node_modules, uploads, etc.
             echo "==> Restoring ownership to www"

@@ -12,7 +12,7 @@ import dynamic from "next/dynamic";
 import { useSession } from "next-auth/react";
 import { X, Plus, ChevronLeft, FileText } from "lucide-react";
 import type { BnDocJSON } from "@/components/docs/blocknote-canvas";
-import type { Block as LegacyBlock } from "@/components/docs/block-editor";
+import type { Block as LegacyBlock } from "@/components/docs/block-types";
 import { useLayer } from "./shell-context";
 import { SkeletonLines } from "@/components/ui/skeleton";
 

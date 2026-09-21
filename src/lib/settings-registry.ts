@@ -325,7 +325,7 @@ export const SETTINGS_ENTRY_LIST: readonly SettingEntry[] = [
   entry({
     id: "process.ack.statement",
     door: "workspace",
-    label: "Acknowledgement statement",
+    label: "Attestation statement",
     description: "The sentence a person confirms when they acknowledge a SOP or a policy.",
     href: "/sops/manage?tab=defaults#process.ack.statement",
     keywords: ["acknowledge", "attestation", "sop", "policy", "statement", "confirm", "process"],

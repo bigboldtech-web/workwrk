@@ -10,7 +10,13 @@
 //   - Action items: assigneeEmail > assigneeName fuzzy match against
 //     org users. Falls back to the calling user. ActionItem.assigneeId
 //     is required (non-null), so we always need someone.
-//   - Optionally spawns a Task for each ActionItem (toggle from client).
+//   - Optionally creates an ITEM (the ClickUp-chassis task) for each
+//     ActionItem (toggle from client). With `listId` the Items land in that
+//     List, through the same createBoardItem path POST /api/boards/[id]/items
+//     uses, after the same Can-edit check; without it they land on each
+//     assignee's Personal list. Never the legacy Task table (critic #3).
+//   - Action items and attendees are the EDITED values the person saved,
+//     including owners chosen in the picker (assigneeId wins over the name).
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -18,6 +24,9 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { z } from "zod";
 import { createPersonalTask } from "@/lib/work/personal-task";
+import { canContributeBoard, getBoardForReader } from "@/lib/board";
+import { createBoardItem } from "@/lib/board-items";
+import { getBoardStatuses } from "@/lib/board-items-shared";
 
 const ALLOWED_TYPES = ["DAILY_STANDUP", "WEEKLY_REVIEW", "ONE_ON_ONE", "QUARTERLY_REVIEW", "ANNUAL_PLANNING", "ADHOC"] as const;
 
@@ -29,13 +38,21 @@ const inputSchema = z.object({
   attendees: z.array(z.object({
     name: z.string().max(160),
     email: z.string().email().nullable().optional(),
+    /** A directory match the person confirmed in the picker. */
+    userId: z.string().max(64).nullable().optional(),
   })).optional(),
   actionItems: z.array(z.object({
     title: z.string().min(1).max(200),
     assigneeName: z.string().max(160).optional(),
     assigneeEmail: z.string().email().nullable().optional(),
+    /** The owner chosen in the picker; wins over the name and email. */
+    assigneeId: z.string().max(64).nullable().optional(),
     deadlineDays: z.number().int().min(0).max(365).nullable().optional(),
+    /** An explicit due date (ISO), from the date picker; wins over deadlineDays. */
+    dueAt: z.string().datetime().nullable().optional(),
   })).optional(),
+  /** The List the action items become tasks in. Needs Can edit on it. */
+  listId: z.string().max(64).nullable().optional(),
   scheduledAt: z.string().optional(),       // ISO; defaults to now
   duration: z.number().int().min(1).max(720).optional(),
   spawnTasks: z.boolean().optional(),
@@ -56,7 +73,14 @@ export async function POST(req: Request) {
 
   // Helper: resolve a User in this org by email (preferred) or name
   // (case-insensitive contains on firstName / lastName / email).
-  async function resolveUserId(name?: string, email?: string | null): Promise<{ userId: string; matched: boolean }> {
+  async function resolveUserId(name?: string, email?: string | null, chosenId?: string | null): Promise<{ userId: string; matched: boolean }> {
+    if (chosenId) {
+      const u = await prisma.user.findFirst({
+        where: { id: chosenId, organizationId: user!.organizationId },
+        select: { id: true },
+      });
+      if (u) return { userId: u.id, matched: true };
+    }
     if (email) {
       const u = await prisma.user.findFirst({
         where: { email, organizationId: user!.organizationId },
@@ -84,6 +108,16 @@ export async function POST(req: Request) {
   const matchedAttendees: { userId: string }[] = [];
   const unmatchedAttendeeLabels: string[] = [];
   for (const a of parsed.data.attendees ?? []) {
+    if (a.userId) {
+      const u = await prisma.user.findFirst({
+        where: { id: a.userId, organizationId: user.organizationId },
+        select: { id: true },
+      });
+      if (u) {
+        matchedAttendees.push({ userId: u.id });
+        continue;
+      }
+    }
     if (a.email) {
       const u = await prisma.user.findFirst({
         where: { email: a.email, organizationId: user.organizationId },
@@ -126,6 +160,22 @@ export async function POST(req: Request) {
     ? (parsed.data.decisions ?? []).map((d) => `• ${d}`).join("\n")
     : null;
 
+  // 2b. The destination List, checked BEFORE anything is written so a List
+  // shared away between opening the page and saving refuses the whole save
+  // with the one denial toast, rather than writing a meeting whose tasks then
+  // vanish (spec-docs-knowledge section 2, /notetaker: "re-checks can(viewer,
+  // create_child, list)"; canContributeBoard is that check's delegate today).
+  let listBoard: { id: string; statuses?: unknown } | null = null;
+  if (parsed.data.spawnTasks && parsed.data.listId) {
+    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
+    const board = await getBoardForReader(parsed.data.listId, user.id, accessLevel);
+    if (!board) return NextResponse.json({ error: "That list no longer exists" }, { status: 404 });
+    if (!(await canContributeBoard(parsed.data.listId, user.id, accessLevel))) {
+      return NextResponse.json({ error: "You need Can edit on that list. Ask its owner." }, { status: 403 });
+    }
+    listBoard = board as { id: string; statuses?: unknown };
+  }
+
   // 3. Persist meeting
   const meeting = await prisma.meeting.create({
     data: {
@@ -150,12 +200,15 @@ export async function POST(req: Request) {
 
   // 5. Action items + optional Tasks
   const createdActionItems: { id: string; title: string; assigneeId: string }[] = [];
+  const createdItems: { id: string; boardId: string }[] = [];
   let tasksSpawned = 0;
   for (const ai of parsed.data.actionItems ?? []) {
-    const { userId: assigneeId } = await resolveUserId(ai.assigneeName, ai.assigneeEmail);
-    const deadline = ai.deadlineDays != null
-      ? new Date(Date.now() + ai.deadlineDays * 86400000)
-      : null;
+    const { userId: assigneeId } = await resolveUserId(ai.assigneeName, ai.assigneeEmail, ai.assigneeId);
+    const deadline = ai.dueAt
+      ? new Date(ai.dueAt)
+      : ai.deadlineDays != null
+        ? new Date(Date.now() + ai.deadlineDays * 86400000)
+        : null;
     const created = await prisma.actionItem.create({
       data: {
         meetingId: meeting.id,
@@ -167,7 +220,26 @@ export async function POST(req: Request) {
     });
     createdActionItems.push(created);
 
-    if (parsed.data.spawnTasks) {
+    if (parsed.data.spawnTasks && listBoard) {
+      // The chosen List: the same code path as POST /api/boards/[id]/items,
+      // opening in the List's own first active status. A failure must not lose
+      // the action items already written, so it is caught and counted.
+      const statuses = getBoardStatuses(listBoard);
+      const opening = statuses.length > 0 ? (statuses.find((st) => st.group === "ACTIVE") ?? statuses[0]).value : undefined;
+      const spawned = await createBoardItem({
+        organizationId: user.organizationId,
+        boardId: listBoard.id,
+        title: ai.title.slice(0, 280),
+        status: opening,
+        ownerId: assigneeId,
+        assigneeIds: [assigneeId],
+        dueAt: deadline,
+        priority: "NORMAL",
+        metadata: { description: `From meeting: ${meeting.title}`, legacyTask: { source: "MEETING", sourceRef: meeting.id } },
+        actorId: user.id,
+      }).catch(() => null);
+      if (spawned) { tasksSpawned++; createdItems.push({ id: spawned.id, boardId: listBoard.id }); }
+    } else if (parsed.data.spawnTasks) {
       // Phase 2 W4. This wrote the legacy `Task` table, whose UI is deleted in
       // this release, so "+ N tasks spawned" named work nobody could open. The
       // task lands on the assignee's Personal list now, which is what /my-work
@@ -183,13 +255,14 @@ export async function POST(req: Request) {
         legacy: { source: "MEETING", sourceRef: meeting.id },
         actorId: user.id,
       }).catch(() => null);
-      if (spawned) tasksSpawned++;
+      if (spawned) { tasksSpawned++; createdItems.push({ id: spawned.id, boardId: spawned.boardId }); }
     }
   }
 
   return NextResponse.json({
     ok: true,
     meeting,
+    items: createdItems,
     counts: {
       attendees: uniqueMatched.length,
       attendeesUnmatched: unmatchedAttendeeLabels.length,

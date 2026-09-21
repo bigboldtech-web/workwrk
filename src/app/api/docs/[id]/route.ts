@@ -10,10 +10,12 @@ import { prisma } from "@/lib/prisma";
 import { resolveSuiteContext } from "@/lib/suites/auth";
 import { z } from "zod";
 import { docAccessible } from "@/lib/doc-access";
-import { requireDocRole } from "@/lib/doc-sharing";
+import { isDocFull, requireDocRole } from "@/lib/doc-sharing";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
 import { withArchivedBy } from "@/lib/archived-by";
+import { resolveDocLocation } from "@/lib/doc-location";
+import { readDocLock } from "@/lib/doc-lock";
 
 const putSchema = z.object({
   title: z.string().min(1).max(300).optional(),
@@ -67,7 +69,39 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // viewing fast and the URL always usable, mirroring the SOP
   // screenshot enrichment pattern.
   const enriched = { ...doc, content: await presignBlocksImagesAndFiles(doc.content) };
-  return NextResponse.json({ doc: enriched, myRole: role });
+
+  // Lock page (change request A4): while lockedById is set everyone below
+  // Full access reads as view-only on the CONTENT; comments keep working, which
+  // is the point of locking rather than restricting. The lock row rides back
+  // so the editor can name who locked it and offer Unlock to a Full holder.
+  const lockRow = await readDocLock(doc.id);
+  let lock: { byId: string; byName: string | null; at: Date | null } | null = null;
+  if (lockRow?.lockedById) {
+    const by = await prisma.user.findFirst({ where: { id: lockRow.lockedById }, select: { firstName: true, lastName: true } });
+    lock = { byId: lockRow.lockedById, byName: by ? `${by.firstName ?? ""} ${by.lastName ?? ""}`.trim() || null : null, at: lockRow.lockedAt };
+  }
+  // A4: below Full access a locked doc resolves to COMMENT, not view. The
+  // content is read-only, the comment composer stays, and the chip reads
+  // "Can comment". A Can view holder stays at view: a lock never widens.
+  const full = isDocFull(ctx, { createdById: doc.createdById });
+  const myRole: "edit" | "comment" | "view" = lock && !full ? (role === "view" ? "view" : "comment") : role;
+  // The anchor as a Location (spec-docs-knowledge section 1, Back / close):
+  // the editor's BackButton falls back to the anchor page for an anchored
+  // doc, and the breadcrumb names it.
+  const [location, parent, owner] = await Promise.all([
+    resolveDocLocation(doc),
+    doc.parentId ? prisma.doc.findFirst({ where: { id: doc.parentId, organizationId: ctx.orgId }, select: { id: true, title: true } }) : Promise.resolve(null),
+    doc.createdById ? prisma.user.findFirst({ where: { id: doc.createdById }, select: { id: true, firstName: true, lastName: true, avatar: true } }) : Promise.resolve(null),
+  ]);
+  return NextResponse.json({
+    doc: enriched,
+    myRole,
+    lock,
+    canManage: full,
+    location,
+    parent,
+    owner: owner ? { id: owner.id, name: `${owner.firstName ?? ""} ${owner.lastName ?? ""}`.trim() || null, avatar: owner.avatar } : null,
+  });
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -96,6 +130,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const role = await requireDocRole(ctx, { id, createdById: existing.createdById });
   if (!role) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (role === "view") return NextResponse.json({ error: "read-only" }, { status: 403 });
+  // Lock page (change request A4): a locked doc takes content from Full
+  // access holders only. Everyone else gets the one 403 the editor already
+  // renders as read-only; nothing is silently dropped.
+  const lockRow = await readDocLock(id);
+  if (lockRow?.lockedById && !isDocFull(ctx, { createdById: existing.createdById })) {
+    return NextResponse.json({ error: "locked", message: "This doc is locked. Ask the person who locked it to unlock it." }, { status: 403 });
+  }
 
   // Fast-path: a pure tree update (move / reorder / mark-folder) carries no
   // title/content/excerpt — apply it directly without snapshotting a version

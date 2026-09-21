@@ -9,7 +9,7 @@ import {
   getSessionOrFail, getOrgId, getUserId, jsonError, jsonSuccess,
 } from "@/lib/api-helpers";
 import { moveToTrash } from "@/lib/trash";
-import { getSpaceForReader } from "@/lib/space";
+import { canReadFile } from "@/lib/file-access";
 
 /**
  * One file row.
@@ -18,8 +18,8 @@ import { getSpaceForReader } from "@/lib/space";
  * sidebar and a restored file in Trash both point (`TRASH_HREF.file`). The
  * page needs the file's folder to open the right folder around it, and there
  * was no way to ask for one file: every other reader took a list. Same
- * org scope and same Space-visibility rule as PATCH below, so a file the
- * viewer may not see answers 404 rather than confirming it exists.
+ * org scope and the one file read gate (src/lib/file-access.ts) as the list,
+ * so a file the viewer may not see answers 404 rather than confirming it exists.
  */
 export async function GET(
   _req: NextRequest,
@@ -35,13 +35,25 @@ export async function GET(
   });
   if (!file) return jsonError("not found", 404);
 
-  if (file.spaceId) {
-    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-    const space = await getSpaceForReader(file.spaceId, getUserId(session), accessLevel);
-    if (!space) return jsonError("not found", 404);
-  }
+  // The one read gate, shared with the /files list and /[id]/url
+  // (src/lib/file-access.ts): a folder-only grantee who sees the row in the
+  // list can open it here too.
+  if (!(await canReadFile(file, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
 
-  return jsonSuccess(await withFreshFileUrl(file));
+  const [fresh, uploader, folder, sf, sp] = await Promise.all([
+    withFreshFileUrl(file),
+    prisma.user.findFirst({ where: { id: file.uploadedById }, select: { id: true, firstName: true, lastName: true, avatar: true } }),
+    file.folderId ? prisma.fileFolder.findFirst({ where: { id: file.folderId }, select: { id: true, name: true } }) : Promise.resolve(null),
+    file.spaceFolderId ? prisma.folder.findFirst({ where: { id: file.spaceFolderId }, select: { id: true, name: true } }) : Promise.resolve(null),
+    file.spaceId ? prisma.space.findFirst({ where: { id: file.spaceId }, select: { id: true, name: true, slug: true, icon: true, color: true } }) : Promise.resolve(null),
+  ]);
+  return jsonSuccess({
+    ...fresh,
+    uploadedBy: uploader ? { id: uploader.id, name: `${uploader.firstName ?? ""} ${uploader.lastName ?? ""}`.trim() || null, avatar: uploader.avatar, firstName: uploader.firstName, lastName: uploader.lastName } : null,
+    folder: folder ? { id: folder.id, name: folder.name } : null,
+    spaceFolder: sf ? { id: sf.id, name: sf.name } : null,
+    space: sp ? { id: sp.id, name: sp.name, slug: sp.slug, icon: sp.icon, color: sp.color } : null,
+  });
 }
 
 export async function PATCH(
@@ -62,11 +74,7 @@ export async function PATCH(
   // Phase 22b — gate by Space visibility. Hide existence (404 not 403)
   // so a viewer can't probe for the presence of files in Spaces they
   // shouldn't see.
-  if (existing.spaceId) {
-    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-    const space = await getSpaceForReader(existing.spaceId, getUserId(session), accessLevel);
-    if (!space) return jsonError("not found", 404);
-  }
+  if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
 
   const data: Record<string, unknown> = {};
   if (typeof body.name === "string") data.name = body.name.trim().slice(0, 200);
@@ -127,11 +135,7 @@ export async function DELETE(
   });
   if (!existing) return jsonError("not found", 404);
 
-  if (existing.spaceId) {
-    const accessLevel = (session.user as { accessLevel?: string }).accessLevel ?? "EMPLOYEE";
-    const space = await getSpaceForReader(existing.spaceId, getUserId(session), accessLevel);
-    if (!space) return jsonError("not found", 404);
-  }
+  if (!(await canReadFile(existing, getUserId(session), (session.user as { accessLevel?: string }).accessLevel))) return jsonError("not found", 404);
 
   await moveToTrash("file", id, { organizationId: orgId, userId: getUserId(session), userName: (session.user as { name?: string }).name ?? null });
   return jsonSuccess({ deleted: true });

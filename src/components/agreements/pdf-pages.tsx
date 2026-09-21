@@ -7,11 +7,25 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import * as pdfjsLib from "pdfjs-dist";
+import { SkeletonLines } from "@/components/ui/skeleton";
 
-// Worker from CDN matching the installed version (avoids Turbopack worker-bundling friction).
-if (typeof window !== "undefined") {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// pdfjs-dist is loaded INSIDE the effect, never at module scope: its display
+// layer evaluates `new DOMMatrix()` on import, which does not exist on the
+// server, so a top-level import made the server render of every page that
+// imports this file throw (the public /sign/[token] answered HTTP 500 for
+// every token, including the 404 cases, and logged a React console error on
+// the client). The worker comes from the CDN matching the installed version
+// (avoids Turbopack worker-bundling friction).
+type PdfJs = typeof import("pdfjs-dist");
+let pdfjsPromise: Promise<PdfJs> | null = null;
+function loadPdfJs(): Promise<PdfJs> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import("pdfjs-dist").then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${lib.version}/build/pdf.worker.min.mjs`;
+      return lib;
+    });
+  }
+  return pdfjsPromise;
 }
 
 export type PageDims = { w: number; h: number };
@@ -33,6 +47,7 @@ export function PdfPages({
     (async () => {
       setDims([]); setErr(null);
       try {
+        const pdfjsLib = await loadPdfJs();
         const doc = await pdfjsLib.getDocument({ url }).promise;
         const out: PageDims[] = [];
         for (let i = 1; i <= doc.numPages; i++) {
@@ -66,13 +81,13 @@ export function PdfPages({
     return () => { cancelled = true; };
   }, [url, width]);
 
-  if (err) return <div className="mx-auto max-w-[760px] rounded-md border border-red-200 bg-red-50 px-3 py-2 text-base text-red-700">{err}</div>;
-  if (dims.length === 0) return <div className="flex items-center justify-center py-16 text-xs text-zinc-400">Rendering PDF…</div>;
+  if (err) return <div role="alert" className="mx-auto max-w-[760px] rounded-md border border-line bg-danger-soft px-3 py-2 text-base text-danger-text">{err}</div>;
+  if (dims.length === 0) return <div className="mx-auto max-w-[760px] rounded-lg border border-line bg-raised px-10 py-7" style={{ width }}><SkeletonLines lines={8} /></div>;
 
   return (
     <div className="space-y-4">
       {dims.map((d, i) => (
-        <div key={i} className="relative mx-auto overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm" style={{ width: d.w, height: d.h }}>
+        <div key={i} className="relative mx-auto overflow-hidden rounded-lg border border-line bg-raised" style={{ width: d.w, height: d.h }}>
           <canvas ref={(el) => { canvasRefs.current[i] = el; }} className="block" style={{ width: d.w, height: d.h }} />
           {renderPage ? <div className="absolute inset-0">{renderPage(i, d)}</div> : null}
         </div>

@@ -8,6 +8,7 @@ import {
 } from "@/lib/email-templates";
 import { filterNotifyUsers } from "@/lib/notify-prefs";
 import { isDoneStatus, getBoardStatuses } from "@/lib/board-items-shared";
+import { remindPolicyAssignmentsDue } from "@/lib/policy-remind";
 
 // Triggered by cron: 1st of month (monthly-evaluation, kpi-recording) + every Monday (overdue, policy-ack)
 // Authorization: Bearer CRON_SECRET
@@ -305,6 +306,14 @@ export async function POST(req: NextRequest) {
     );
     const reminded = perPolicyCounts.reduce((a, b) => a + b, 0);
     results.push(`Policy ack reminders: ${reminded} users`);
+  }
+
+  // ──────────────────────────────────────
+  // 6. "REMIND BEFORE DUE" (daily): Organize › Defaults process.ack.remindDays
+  // ──────────────────────────────────────
+  if (type === "all" || type === "policy-ack-due") {
+    const r = await remindPolicyAssignmentsDue(now);
+    results.push(`Policy due-soon reminders: ${r.reminded} people across ${r.orgs} orgs`);
   }
 
   return NextResponse.json({ success: true, results });

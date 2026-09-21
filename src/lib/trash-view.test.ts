@@ -29,6 +29,7 @@ import {
 const WRITTEN_ENTITY_TYPES = [
   "note", "sop", "whiteboard", "table", "file", "policy", "contract",
   "space", "folder", "board", "item",
+  "file_folder",
 ] as const;
 
 describe("the trash type table", () => {

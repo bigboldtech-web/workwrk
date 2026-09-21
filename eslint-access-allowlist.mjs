@@ -93,6 +93,18 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/agents/\\[slug\\]/install/route.ts",
   "src/app/api/agents/\\[slug\\]/schedule/route.ts",
   "src/app/api/agents/route.ts",
+  // Phase 3 Stage D (2026-09-21): the contracts and policies routes the process
+  // spec adds (resend, rename-folder, rename-category, the two CSV exports,
+  // the assignment PATCH/DELETE and reminders) gate the way their siblings
+  // beside them do (isManager, the person scope in lib/process-scope.ts, the
+  // AGENT check on export), because this stage keeps the engine inert. They
+  // leave with the rest of the family when the process routes flip to can().
+  "src/app/api/agreements/\\[id\\]/parties/\\[partyId\\]/resend/route.ts",
+  "src/app/api/agreements/rename-folder/route.ts",
+  "src/app/api/policies/\\[id\\]/acknowledge/route.ts",
+  "src/app/api/policies/compliance/export/route.ts",
+  "src/app/api/policies/rename-category/route.ts",
+  "src/app/api/sop-assignments/compliance/export/route.ts",
   "src/app/api/agreements/\\[id\\]/parties/route.ts",
   "src/app/api/agreements/\\[id\\]/route.ts",
   "src/app/api/agreements/\\[id\\]/save-as-template/route.ts",
@@ -150,6 +162,15 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/docs/\\[id\\]/mention/route.ts",
   "src/app/api/docs/\\[id\\]/restore/route.ts",
   "src/app/api/docs/\\[id\\]/route.ts",
+  // Phase 3 stage B (docs-knowledge): four routes that gate through the same
+  // legacy delegates their siblings use (canContributeBoard, getSpaceForReader,
+  // canEditSpace). They leave this list with those delegates at access step 6.
+  "src/app/api/docs/\\[id\\]/lock/route.ts",
+  "src/app/api/files/\\[id\\]/url/route.ts",
+  "src/app/api/lists/pick/route.ts",
+  "src/app/api/notetaker/save/route.ts",
+  "src/app/api/whiteboards/\\[id\\]/duplicate/route.ts",
+  "src/app/api/whiteboards/\\[id\\]/thumbnail/route.ts",
   "src/app/api/docs/\\[id\\]/sharing/route.ts",
   "src/app/api/docs/\\[id\\]/summarize/route.ts",
   "src/app/api/docs/\\[id\\]/versions/\\[versionId\\]/route.ts",
@@ -254,6 +275,28 @@ export const ACCESS_LEGACY_ALLOWLIST = [
   "src/app/api/policies/compliance/route.ts",
   "src/app/api/policies/route.ts",
   "src/app/api/process-runs/route.ts",
+  // Phase 3 Stage C (2026-09-21) adds three NEW routes the process spec asks
+  // for, each gating EXACTLY like the sibling already on this list: the
+  // per-run route (drawer payload, cancel / reassign / due, delete) beside
+  // api/process-runs/route.ts; the People tab payload beside
+  // api/sop-assignments/route.ts (same own-row / report-tree / org-wide
+  // scope); and the reminder beside api/sop-assignments/[id]/route.ts. The
+  // brief keeps the access engine inert in this unit, so nothing is flipped
+  // to can() here; all three leave this list in the batch their siblings do.
+  "src/app/api/process-runs/\\[id\\]/route.ts",
+  // Stage C findings pass: the run gate (assignee / report tree / org-wide)
+  // that api/process-runs/route.ts and api/process-runs/[id]/route.ts each
+  // wrote inline now lives ONCE in src/lib/process-run-access.ts, so the two
+  // paths cannot disagree. Same tier reads as before, in one file instead of
+  // two; it leaves this list with its two callers.
+  "src/lib/process-run-access.ts",
+  // Phase 3 Stage D: the person scope of the policy ledgers and compliance
+  // dashboards, and the one manage_process rule, live ONCE in
+  // src/lib/process-scope.ts (the same transcription as its sibling above).
+  // They leave the list when the process routes flip to can().
+  "src/lib/process-scope.ts",
+  "src/app/api/sops/\\[id\\]/people/route.ts",
+  "src/app/api/sop-assignments/\\[id\\]/remind/route.ts",
   "src/app/api/products/installations/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/export/route.ts",
   "src/app/api/pulse-surveys/\\[id\\]/responses/route.ts",

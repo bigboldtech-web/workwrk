@@ -180,6 +180,14 @@ export interface WhiteboardCanvasProps {
   loadEntities?: () => Promise<TaskSummary[]>;
   /** Open a card's target (double-click) — receives its href. Omit = non-navigable. */
   onOpenEntity?: (href: string) => void;
+  /**
+   * View-only: pan and zoom only. The tool strip, the style bar, the context
+   * menu, drawing, keyboard edits, paste and drop are all off; double-click
+   * still opens a linked card, because following a link is a read. Used for
+   * a Can view viewer and for narrow screens (spec-docs-knowledge section 1,
+   * Mobile / narrow).
+   */
+  readOnly?: boolean;
 }
 
 /** Imperative handle — lets the page drop an AI-generated diagram onto the board. */
@@ -191,14 +199,27 @@ export interface WhiteboardCanvasHandle {
   replaceGenerated: (oldIds: string[], generated: CanvasScene) => string[];
   /** The live scene — used by the AI panel to explain / critique the board. */
   getScene: () => CanvasScene;
+  /**
+   * Render the board to a PNG and hand it to the browser.
+   *
+   * Exporting is a READ, so it belongs to anyone who can open the canvas. The
+   * page used to reach it by finding and clicking the hidden toolbar button,
+   * which only exists when the toolbar does: not for a Can view viewer, and
+   * not under 768px, where the whole canvas is view-only. Both of those
+   * people got a toast saying the canvas had not loaded, on a canvas that
+   * had. Returns false only when there is nothing on the board to draw.
+   */
+  exportPng: () => boolean;
 }
 
 export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCanvasProps>(function WhiteboardCanvas(
-  { initialScene, onChange, loadEntities, onOpenEntity },
+  { initialScene, onChange, loadEntities, onOpenEntity, readOnly = false },
   ref,
 ) {
   const [scene, setScene] = useState<CanvasScene>(initialScene);
-  const [tool, setTool] = useState<Tool>("select");
+  const [toolState, setTool] = useState<Tool>("select");
+  // Read-only pins the tool to Pan: every pointer path below then only pans.
+  const tool: Tool = readOnly ? "hand" : toolState;
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [marquee, setMarquee] = useState<Box | null>(null);
   const [hoverBindId, setHoverBindId] = useState<string | null>(null); // shape a connector-in-progress will bind to
@@ -1438,6 +1459,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       // Hold Space = temporary pan (returns to your tool on release). Not while typing.
       if (e.key === " " && !typing) { e.preventDefault(); spaceRef.current = true; setSpaceDown(true); return; }
       if (typing) return;
+      // Read-only keeps the zoom chords and nothing that edits.
+      if (readOnly) {
+        const mod = e.metaKey || e.ctrlKey;
+        if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); zoomBy(1.2); }
+        else if (mod && e.key === "-") { e.preventDefault(); zoomBy(1 / 1.2); }
+        else if (mod && e.key === "0") { e.preventDefault(); fitView(); }
+        return;
+      }
       // Enter / Escape finish an in-progress multi-point arrow.
       if ((e.key === "Enter" || e.key === "Escape") && multiRef.current) { e.preventDefault(); finishMultiArrow(); return; }
       const mod = e.metaKey || e.ctrlKey;
@@ -1476,12 +1505,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("keyup", onKeyUp); };
-  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow, groupSelected, ungroupSelected]);
+  }, [undo, redo, deleteSelected, duplicateSelected, copySelected, nudge, selectedIds, scene.elements, finishMultiArrow, groupSelected, ungroupSelected, readOnly, zoomBy, fitView]);
 
   // Native paste: an OS-clipboard image inserts an image; otherwise our
   // internal element copy (from ⌘C) is pasted. Ignored while editing text.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
+      if (readOnly) return;
       const t = document.activeElement;
       if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT")) return;
       const items = e.clipboardData?.items;
@@ -1498,7 +1528,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [addImageAt, pasteElements, centreWorld]);
+  }, [addImageAt, pasteElements, centreWorld, readOnly]);
 
   // text-edit commit
   const commitText = useCallback((value: string) => {
@@ -1575,6 +1605,11 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
   // Drop an AI-generated diagram onto the board: replace an empty board, else
   // place it to the right of what's there, select it, and fit the view.
   useImperativeHandle(ref, () => ({
+    exportPng: () => {
+      if (!sceneBounds(scene)) return false;
+      exportPng();
+      return true;
+    },
     insertScene: (generated: CanvasScene) => {
       const snapshot = cloneScene(scene);
       let incoming = generated.elements;
@@ -1611,7 +1646,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       return incoming.map((el) => el.id);
     },
     getScene: () => scene,
-  }), [scene, commit, fitView]);
+  }), [scene, commit, fitView, exportPng]);
 
   return (
     <div ref={wrapRef} className="wbcanvas" style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
@@ -1621,13 +1656,20 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerLeave={onPointerUp}
-        onContextMenu={onContextMenu}
+        onContextMenu={readOnly ? (e) => e.preventDefault() : onContextMenu}
         onWheel={onWheel}
         onDoubleClick={(e) => {
           if (multiRef.current) { finishMultiArrow(); return; }
           const rect = canvasRef.current!.getBoundingClientRect();
           const world = toWorld(e.clientX - rect.left, e.clientY - rect.top);
           const hit = hitTopElement(scene, world.x, world.y, 8 / vp.zoom);
+          if (readOnly) {
+            // Following a card's link is a read; everything else double-click
+            // does here is an edit.
+            if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
+            else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
+            return;
+          }
           if (hit && (hit.type === "text" || hit.type === "sticky" || hit.type === "frame" || hit.type === "line" || hit.type === "arrow" || hit.type === "table" || SHAPE_LABEL_TYPES.has(hit.type))) { selectOne(hit.id); setEditing({ id: hit.id }); }
           else if (hit && hit.type === "taskCard" && onOpenEntity) onOpenEntity(hit.href ?? `/item/${hit.itemId}`);
           else if (hit && hit.type === "canvasCard" && onOpenEntity) onOpenEntity(`/canvas/${hit.whiteboardId}`);
@@ -1643,6 +1685,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         }}
         onDragOver={(e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); }}
         onDrop={(e) => {
+          if (readOnly) return;
           const file = e.dataTransfer?.files?.[0];
           if (file && file.type.startsWith("image/")) {
             e.preventDefault();
@@ -1850,7 +1893,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
       ) : null}
 
       {/* right-click context menu */}
-      {ctxMenu ? (
+      {ctxMenu && !readOnly ? (
         <>
           <div style={{ position: "fixed", inset: 0, zIndex: 19 }} onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }} aria-hidden />
           <div style={{ position: "absolute", left: ctxMenu.x, top: ctxMenu.y, zIndex: 20, minWidth: 176, background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)", borderRadius: 10, boxShadow: "0 12px 36px rgba(20,34,60,.16)", padding: 5 }}>
@@ -1874,7 +1917,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
 
       {/* contextual style bar — fixed compact panel at the top-left
           (Excalidraw-style), opens on selection or an active drawing tool */}
-      {showStyleBar ? (
+      {showStyleBar && !readOnly ? (
         <div style={styleBarStyleTopLeft}>
           {secStroke ? (
             <PanelSection label="Stroke">
@@ -2011,13 +2054,16 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         </div>
       ) : null}
 
-      {/* toolbar */}
+      {/* toolbar: absent, not disabled, for a viewer who cannot draw */}
+      {readOnly ? null : (
       <div className="wbcanvas__tools" style={toolbarStyle}>
         {TOOLS.map(({ tool: t, Icon, label, key, num }) => {
           const active = tool === t;
-          const hint = num ?? key;
+          // Both the letter and the number select the tool; the letter is the
+          // one people know from every canvas, so it is the one shown.
+          const hint = key ?? num;
           return (
-            <button key={t} type="button" title={`${label}${num ? ` (${num})` : key ? ` (${key})` : ""}`} onClick={() => setTool(t)}
+            <button key={t} type="button" title={`${label}${key ? ` (${key})` : num ? ` (${num})` : ""}`} onClick={() => setTool(t)}
               style={{ ...toolBtn(active), position: "relative" }}>
               <Icon style={{ width: 17, height: 17 }} />
               {hint ? (
@@ -2062,6 +2108,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasHandle, WhiteboardCan
         <span style={{ width: 1, height: 22, background: "var(--os-line, #e5e7eb)", margin: "0 2px" }} />
         <button type="button" title="Export as PNG" onClick={exportPng} style={toolBtn(false)}><Download style={{ width: 16, height: 16 }} /></button>
       </div>
+
+      )}
 
       {/* zoom */}
       <div className="wbcanvas__zoom" style={zoomStyle}>
@@ -2380,8 +2428,11 @@ const taskPanelStyle: React.CSSProperties = {
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)",
   borderRadius: 12, boxShadow: "0 12px 36px rgba(20,34,60,.16)", overflow: "hidden",
 };
+// The zoom cluster sits at the bottom INLINE-END. The bottom-start corner is
+// where the shell's toasts appear (.os-toasts, inset-inline-start 24px), so a
+// control parked there is covered by the first toast the page raises.
 const zoomStyle: React.CSSProperties = {
-  position: "absolute", bottom: 16, left: 16, display: "flex", alignItems: "center", gap: 2, padding: 4,
+  position: "absolute", bottom: 16, insetInlineEnd: 16, display: "flex", alignItems: "center", gap: 2, padding: 4,
   background: "var(--os-surface, #fff)", border: "1px solid var(--os-line, #e5e7eb)", borderRadius: 10,
   boxShadow: "0 4px 16px rgba(20,34,60,.10)", zIndex: 5,
 };

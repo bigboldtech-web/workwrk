@@ -1,10 +1,11 @@
-// GET /api/me/policies — policies assigned to the current user that still need
-// acknowledgement, for the "Policies to acknowledge" section on /today.
+// GET /api/me/policies: the policies the current user still has to
+// acknowledge, for the "Policies to acknowledge" section on /today. The same
+// rule as the sidebar badge and the /policies Needs view (lib/policies-to-ack).
 
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { listPoliciesToAck } from "@/lib/policies-to-ack";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -16,17 +17,12 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const assignments = await prisma.policyAssignment.findMany({
-    where: { userId: u.id, status: { not: "COMPLETED" } },
-    include: { policy: { select: { id: true, title: true } } },
-    orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
-  });
-
+  const rows = await listPoliciesToAck(u.id, u.organizationId);
   return NextResponse.json({
-    policies: assignments.map((a) => ({
-      assignmentId: a.id,
+    policies: rows.map((a) => ({
+      assignmentId: a.assignmentId,
       policyId: a.policyId,
-      title: a.policy?.title ?? "Policy",
+      title: a.title,
       mandatory: a.mandatory,
       dueDate: a.dueDate,
       status: a.status,

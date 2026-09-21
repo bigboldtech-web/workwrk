@@ -76,3 +76,50 @@ export function normaliseRetiredView(pathname: string, search: string): string |
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
 }
+
+// ── The two "new" URLs that were used to EDIT ─────────────────────
+//
+// spec-process section 0: `/sops/new/text?id=X` and `/sops/new/checklist?id=X`
+// 308 to `/sops/X?edit=1`. A "new" URL was the only door to editing a Written
+// or Checklist SOP (knowledge 1.12, 1.13); every kind edits on the SOP page
+// now, and the two create doors mint a row and land there.
+//
+// next.config.ts carries the real 308 (named capture `(?<id>…)` in the `has`
+// value, which Next reads into the destination). This is the page-level twin
+// for the same reason `/docs/trash` has a route-handler twin: a config row is
+// read once at server start, so the page normalises the URL as well and a
+// stored link lands even on a process that predates the config edit.
+//
+// Pure, and separate from `normaliseRetiredView` because it changes the PATH:
+// that function is the same-path table, kept loop-free by construction, and
+// mixing a path change into it would break the idempotence test it relies on.
+
+/** The paths whose `?id=` meant "edit this existing SOP". */
+export const LEGACY_SOP_EDITOR_PATHS: readonly string[] = ["/sops/new/text", "/sops/new/checklist"];
+
+/** `/sops/X?edit=1` for a legacy editor URL that names an id; `null` otherwise. */
+export function legacySopEditorTarget(pathname: string, search: string): string | null {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (!LEGACY_SOP_EDITOR_PATHS.includes(path)) return null;
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const id = (params.get("id") ?? "").trim();
+  // An id is a cuid; anything else is a malformed link and stays where it is.
+  // The create door then shows a broken-link error (`isMalformedLegacySopId`)
+  // rather than minting a fresh "Untitled" row nobody asked for.
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+  return `/sops/${encodeURIComponent(id)}?edit=1`;
+}
+
+/**
+ * True when a legacy editor URL names an `?id=` that is not an id (a mangled
+ * bookmark such as `?id=a%20b`). The create door renders an error with a way
+ * back for these instead of creating a row: a broken edit link is not a
+ * request to make something new.
+ */
+export function isMalformedLegacySopId(pathname: string, search: string): boolean {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (!LEGACY_SOP_EDITOR_PATHS.includes(path)) return false;
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  const id = (params.get("id") ?? "").trim();
+  return id.length > 0 && legacySopEditorTarget(pathname, search) === null;
+}

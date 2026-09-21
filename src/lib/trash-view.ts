@@ -31,7 +31,9 @@ export interface TrashTypeDef {
  */
 export const TRASH_TYPES: readonly TrashTypeDef[] = [
   { key: "space", label: "Space", entityTypes: ["space"] },
-  { key: "folder", label: "Folder", entityTypes: ["folder"] },
+  // "file_folder" is a DRIVE folder trashed from /files with its files as one
+  // snapshot (src/lib/trash.ts); it files under the same Folder pill.
+  { key: "folder", label: "Folder", entityTypes: ["folder", "file_folder"] },
   { key: "list", label: "List", entityTypes: ["board"] },
   { key: "task", label: "Task", entityTypes: ["item"] },
   // "note" is what the Doc registry entry has always been called on disk.

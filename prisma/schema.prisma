@@ -2528,6 +2528,18 @@ model Agreement {
   category       String? // folder/bifurcation — e.g. NDA, Vendor, Employment, Partner
   isTemplate     Boolean          @default(false) // reusable template vs a live agreement
   archivedAt     DateTime? // soft-archive; purged 60 days after this timestamp
+  // Who archived it, so /trash's "Archived by" column names the archiver
+  // instead of leaving a blank cell on every contract row. Nullable and
+  // staying nullable: everything archived before this column existed has no
+  // recorded archiver, and the page renders that as a blank rather than
+  // guessing. Mirrors the six columns in prisma/sql/2026-09-19-archived-by.sql.
+  archivedById   String?
+  // Send for signature options (spec-process section 2 `/agreements/[id]`):
+  // parties sign one after another, and the note that goes in the email.
+  signingOrder   Boolean          @default(false)
+  sendMessage    String?
+  sentAt         DateTime?
+  voidedAt       DateTime?
   templateId     String?
   createdById    String?
   createdAt      DateTime         @default(now())
@@ -2556,6 +2568,13 @@ model AgreementParty {
   values      Json      @default("{}") // { fieldId: text | date | signatureDataUrl }
   signedAt    DateTime?
   ipAddress   String?
+  // The signer's browser, recorded beside the IP at sign and decline time so
+  // the signature evidence carries the same pair a policy acknowledgement does.
+  userAgent   String?
+  // Decline evidence (spec-process section 2 `/sign/[token]`): when and why.
+  declinedAt    DateTime?
+  declineReason String?
+  viewedAt      DateTime?
   createdAt   DateTime  @default(now())
 
   @@index([agreementId])
@@ -5962,6 +5981,14 @@ model Doc {
   // doc is about without opening it.
   summary      String?   @db.Text
   summarizedAt DateTime?
+
+  /// "Lock page" (spec-docs-knowledge change request A4): while set, everyone
+  /// below Full access resolves to Can comment on this doc. Set and cleared
+  /// through POST /api/docs/[id]/lock by a Full-access holder. Both nullable
+  /// and additive (prisma/sql/2026-09-21-doc-lock.sql); readers tolerate the
+  /// columns being absent for one release.
+  lockedById String?
+  lockedAt   DateTime?
 
   versions DocVersion[]
 

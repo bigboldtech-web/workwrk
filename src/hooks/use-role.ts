@@ -43,6 +43,10 @@ export function useRole() {
     isExecutive,
     canManagePeople: loading ? isMgr : can("people", "edit"),
     canManageSOPs: loading ? isMgr : can("sops", "create"),
+    // PATCH /api/sops/[id] asks for sops.edit, and the permission matrix
+    // shows "Edit SOPs" as its own cell, so the edit doors on the SOP page
+    // ask the same question instead of borrowing sops.create.
+    canEditSOPs: loading ? isMgr : can("sops", "edit"),
     // POST /api/policies asks for exactly this, so the "New policy" primary
     // can ask the same question the route answers instead of guessing a tier.
     canManagePolicies: loading ? isMgr : can("policies", "create"),

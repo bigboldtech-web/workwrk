@@ -30,7 +30,7 @@
 
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { freeTrashStorage } from "@/lib/trash";
+import { BLOB_TRASH_TYPES, freeTrashStorage } from "@/lib/trash";
 import { retentionDays } from "@/lib/trash-view";
 
 export const dynamic = "force-dynamic";
@@ -80,7 +80,7 @@ export async function POST(req: NextRequest) {
       }
 
       const expiringFiles = await prisma.trashItem.findMany({
-        where: { ...where, entityType: "file" },
+        where: { ...where, entityType: { in: [...BLOB_TRASH_TYPES] } },
         select: { entityType: true, snapshot: true },
       });
       for (const f of expiringFiles) await freeTrashStorage(f.entityType, f.snapshot);

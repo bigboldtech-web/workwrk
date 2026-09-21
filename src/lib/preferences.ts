@@ -121,6 +121,9 @@ export interface HomePref {
     contrast?: "normal" | "high";
     /** The SOP page's Details strip, collapsed or not (spec-process section 2). */
     sopDetailsCollapsed?: boolean;
+    /** The Policies and Contracts lists' view-type switcher (spec-process section 2). */
+    policiesViewType?: "list" | "cards";
+    contractsViewType?: "list" | "cards";
   };
   // Docs hub per-surface display options (spec-docs-knowledge section 4,
   // change request G22a). READ PER FIELD, never by spreading the namespace:
@@ -131,6 +134,8 @@ export interface HomePref {
   canvas?: { viewType?: "grid" | "list"; columns?: Record<string, boolean> };
   files?: { viewType?: "grid" | "list"; columns?: Record<string, boolean> };
   notetaker?: { lastListId?: string | null };
+  /** The SOP library's Display options (spec-process section 2 `/sops`). */
+  sops?: { columns?: Record<string, boolean> };
   work?: {
     savedFilters?: unknown[];
     pinnedViews?: string[];

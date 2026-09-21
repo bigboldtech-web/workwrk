@@ -3,12 +3,17 @@
 // Body: { transcript, hint? }
 //
 // Sends the transcript to Claude with a structured extraction prompt.
-// Returns:
-//   { summary, decisions: string[], actionItems: [{title, assigneeName, deadlineDays?}],
-//     attendees: [{name, email?}] }
+// Returns the app's { data } envelope (spec-docs-knowledge section 2,
+// /notetaker, "Fix (the result envelope)"):
 //
-// This is read-only — it does NOT persist anything. The user reviews
-// the extraction in the UI, edits as needed, then POSTs to /save.
+//   200 { data: { title, type, summary, decisions, actionItems, attendees } | null,
+//         rawText: string | null, usage: { tokensIn, tokensOut } }
+//   500 { error }
+//
+// `data` is null and `rawText` carries the model's reply when the reply was
+// not JSON, so the page can show what came back instead of an empty form.
+// This is read-only: it does NOT persist anything. The user reviews the
+// extraction in the UI, edits as needed, then POSTs to /save.
 
 import { NextResponse } from "next/server";
 import { getAnthropicForOrg, modelFor } from "@/lib/ai-client";
@@ -105,10 +110,12 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({
-      extraction: extracted,
+      data: extracted,
       rawText: extracted ? null : text,
-      tokensIn: result.usage?.input_tokens ?? 0,
-      tokensOut: result.usage?.output_tokens ?? 0,
+      usage: {
+        tokensIn: result.usage?.input_tokens ?? 0,
+        tokensOut: result.usage?.output_tokens ?? 0,
+      },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Claude request failed";

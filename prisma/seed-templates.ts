@@ -25,6 +25,13 @@
 // Plus "Ideas board", the List template spec-work-home W5 needs before /ideas
 // can be merged away. Its statuses and fields are fixed by the spec so the
 // ideas migration has something defined to map onto.
+//
+// Plus the eight Doc templates (Meeting notes, 1:1, Project brief, Weekly
+// review, Daily standup, SOP draft, Decision log, Post-mortem): the rows of
+// the retired src/components/docs/note-templates.tsx, which
+// spec-docs-knowledge section 4 step 9 hands over as built-in DOC template
+// definitions so "New doc > From template" and /templates?kind=doc have a
+// gallery in a fresh org.
 
 import type { Prisma, PrismaClient } from "../src/generated/prisma";
 import { scriptPrisma } from "../scripts/lib/script-prisma";
@@ -169,6 +176,232 @@ function spacePreset(args: {
   };
 }
 
+/* ─────────────────── the eight Doc templates ─────────────────── */
+
+// A Doc's content is the block-editor document exactly as the Doc column
+// holds it: `{ blocks: Block[], meta: { icon } }` (src/components/docs/
+// block-editor.tsx `Block`). Block ids only need to be unique inside one doc,
+// so they are deterministic here: applyDocTemplate copies the payload as the
+// new doc's content, and the seed's canonical compare stays "unchanged" on a
+// second run because nothing in the payload is random.
+
+type DocBlockInput = { kind: string } & Record<string, unknown>;
+type DocBlock = DocBlockInput & { id: string };
+
+function docBlocks(key: string, rows: DocBlockInput[]): DocBlock[] {
+  return rows.map((row, i) => ({ ...row, id: `${key}.${i + 1}` }));
+}
+const P = (text = "") => ({ kind: "paragraph", text });
+const H2 = (text = "") => ({ kind: "h2", text });
+const H3 = (text = "") => ({ kind: "h3", text });
+const Bul = (text = "") => ({ kind: "bullet", text });
+const Num = (text = "") => ({ kind: "numbered", text });
+const Todo = (text = "") => ({ kind: "todo", text, done: false });
+const Quote = (text = "") => ({ kind: "quote", text });
+const Callout = (text: string, tone: "info" | "warn" | "success" = "info") => ({ kind: "callout", text, tone });
+const Toggle = (text: string, body = "") => ({ kind: "toggle", text, open: true, body });
+
+function docTemplate(args: {
+  key: string;
+  name: string;
+  description: string;
+  icon: string;
+  useCases: string[];
+  title: string;
+  blocks: DocBlockInput[];
+}): SeedRow {
+  return {
+    key: `doc.${args.key}`,
+    kind: "DOC",
+    name: args.name,
+    description: args.description,
+    complexity: "BEGINNER",
+    category: "Docs",
+    useCases: args.useCases,
+    tags: ["built-in", "doc"],
+    payload: {
+      title: args.title,
+      content: { blocks: docBlocks(args.key, args.blocks), meta: { icon: args.icon } },
+    } as Prisma.InputJsonValue,
+  };
+}
+
+const DOC_TEMPLATES: SeedRow[] = [
+  docTemplate({
+    key: "meeting-notes",
+    name: "Meeting notes",
+    description: "Attendees, agenda, decisions and action items, with a notes section for the rest.",
+    icon: "🗒️",
+    useCases: ["meetings", "notes"],
+    title: "Meeting notes",
+    blocks: [
+      Callout("Fill the gaps as the conversation goes.", "info"),
+      H2("Attendees"),
+      Bul("Add who is in the room"),
+      H2("Agenda"),
+      Num("Topic 1"),
+      Num("Topic 2"),
+      H2("Decisions"),
+      Bul(""),
+      H2("Action items"),
+      Todo("Owner, task, due date"),
+      Todo(""),
+      H2("Notes"),
+      P(""),
+    ],
+  }),
+  docTemplate({
+    key: "one-on-one",
+    name: "1:1 meeting",
+    description: "A manager and report sync: what is on your mind, blockers, highlights, feedback and next steps.",
+    icon: "🤝",
+    useCases: ["meetings", "people"],
+    title: "1:1",
+    blocks: [
+      Callout("Confidential between manager and report.", "warn"),
+      H2("What is on your mind?"),
+      P(""),
+      H2("Blockers and where I need help"),
+      Bul(""),
+      H2("Highlights this week"),
+      Bul(""),
+      H2("Feedback for me"),
+      P(""),
+      H2("Goals and next steps"),
+      Todo(""),
+    ],
+  }),
+  docTemplate({
+    key: "project-brief",
+    name: "Project brief",
+    description: "One page: goal, scope in and out, deliverables, milestones, risks and owners.",
+    icon: "🚀",
+    useCases: ["projects", "planning"],
+    title: "Project brief",
+    blocks: [
+      Callout("One-page brief. If it does not fit, it is not a brief.", "info"),
+      H2("Goal"),
+      P("In one sentence: what does success look like?"),
+      H2("Scope"),
+      Toggle("In scope", ""),
+      Toggle("Out of scope", ""),
+      H2("Deliverables"),
+      Bul(""),
+      H2("Milestones"),
+      Num(""),
+      H2("Risks and assumptions"),
+      Bul(""),
+      H2("Owners"),
+      P("Project owner:\nReviewers:\nStakeholders:"),
+    ],
+  }),
+  docTemplate({
+    key: "weekly-review",
+    name: "Weekly review",
+    description: "Wins, lowlights, the numbers that matter, next week's plan and the help you need.",
+    icon: "📈",
+    useCases: ["reviews", "reporting"],
+    title: "Weekly review",
+    blocks: [
+      Callout("Be specific. Numbers beat adjectives.", "info"),
+      H2("Wins"),
+      Bul(""),
+      H2("Lowlights"),
+      Bul(""),
+      H2("Numbers that matter"),
+      P("KPI 1: last week to this week\nKPI 2:"),
+      H2("Next week's plan"),
+      Num(""),
+      H2("Help needed"),
+      P(""),
+    ],
+  }),
+  docTemplate({
+    key: "daily-standup",
+    name: "Daily standup",
+    description: "Yesterday, today, blockers. Three headings and nothing else.",
+    icon: "⏰",
+    useCases: ["meetings", "engineering"],
+    title: "Standup",
+    blocks: [
+      H3("Yesterday"),
+      Bul(""),
+      H3("Today"),
+      Bul(""),
+      H3("Blockers"),
+      P("Nothing right now."),
+    ],
+  }),
+  docTemplate({
+    key: "sop-draft",
+    name: "SOP draft",
+    description: "Draft a process in a doc first: when to use it, owners, steps, pitfalls and related work.",
+    icon: "📚",
+    useCases: ["process", "operations"],
+    title: "SOP draft",
+    blocks: [
+      Callout("Draft the process here, then create the SOP under Docs > SOPs when it is ready.", "info"),
+      H2("When to use this"),
+      P(""),
+      H2("Owners"),
+      P("Process owner:\nApprover:"),
+      H2("Steps"),
+      Num("Step one"),
+      Num("Step two"),
+      Num("Step three"),
+      H2("Pitfalls"),
+      Bul(""),
+      H2("Related"),
+      P("Link the lists, KRAs and tasks this process touches (use the @ menu)."),
+    ],
+  }),
+  docTemplate({
+    key: "decision-log",
+    name: "Decision log",
+    description: "Context, the options considered, a recommendation, the decision and its follow-ups.",
+    icon: "🧭",
+    useCases: ["decisions", "planning"],
+    title: "Decision",
+    blocks: [
+      H2("Context"),
+      P("What problem are we deciding on?"),
+      H2("Options considered"),
+      Toggle("Option A: pros and cons", ""),
+      Toggle("Option B: pros and cons", ""),
+      Toggle("Option C: pros and cons", ""),
+      H2("Recommendation"),
+      Quote(""),
+      H2("Decision"),
+      P("Decided by:\nDate:\nReview by:"),
+      H2("Follow-ups"),
+      Todo(""),
+    ],
+  }),
+  docTemplate({
+    key: "post-mortem",
+    name: "Post-mortem",
+    description: "Blameless incident review: summary, timeline, root cause, what worked, what did not, action items.",
+    icon: "🛠️",
+    useCases: ["incidents", "engineering"],
+    title: "Post-mortem",
+    blocks: [
+      Callout("Blameless. Focus on systems, not people.", "warn"),
+      H2("Summary"),
+      P(""),
+      H2("Timeline"),
+      Num("HH:MM, event"),
+      H2("Root cause"),
+      P(""),
+      H2("What worked"),
+      Bul(""),
+      H2("What did not"),
+      Bul(""),
+      H2("Action items"),
+      Todo(""),
+    ],
+  }),
+];
+
 export const SEED_TEMPLATES: SeedRow[] = [
   spacePreset({
     key: "space.starter",
@@ -300,6 +533,11 @@ export const SEED_TEMPLATES: SeedRow[] = [
       ],
     } as Prisma.InputJsonValue,
   },
+
+  // The eight Doc templates (spec-docs-knowledge section 4 step 9: the rows
+  // of the retired src/components/docs/note-templates.tsx, handed over as
+  // built-in DOC template definitions). "Blank" is not here: New doc is blank.
+  ...DOC_TEMPLATES,
 ];
 
 /* ───────────────────────────── the run ───────────────────────────── */

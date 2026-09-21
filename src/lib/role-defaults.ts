@@ -177,7 +177,8 @@ const STARTER_KRAS: StarterKra[] = [
 
 const STARTER_SOP_TITLE = "Welcome — how we work here";
 // Written-SOP blocks shape — the legacy `blocks` mirror BlockNoteCanvas
-// accepts as legacyBlocks (see sops/new/text/page.tsx). The previous
+// accepts as legacyBlocks (see src/components/sops/sop-editor-page.tsx,
+// the editor /sops/[id] hosts in edit mode). The previous
 // TipTap { type: "doc" } shape had no renderer and isSOPContentEmpty
 // judged it empty, so the starter SOP showed up blank.
 const STARTER_SOP_CONTENT = {

@@ -145,7 +145,35 @@ export async function apiFetch<T = unknown>(url: string, init: ApiFetchInit = {}
     }
   }
   const text = await res.text().catch(() => "");
+  // AN API PATH THAT DOES NOT EXIST ANSWERS 200 WITH A RENDERED PAGE.
+  //
+  // The dashboard catch-all renders its not-found PAGE for anything it does
+  // not recognise, including paths under /api/, and it does so at HTTP 200.
+  // Reporting that as success is worse here than anywhere else: a write to a
+  // mistyped or renamed route would come back { ok: true } with an HTML
+  // string as its data, and the caller would tell the person their change was
+  // saved when nothing was written. No real API route answers 2xx with an
+  // HTML document, so this can only ever catch the broken case.
+  if (isApiPath(url) && looksLikeHtml(contentType, text)) {
+    return { ok: false, status: res.status, error: defaultErrorFor(404) };
+  }
   return { ok: true, status: res.status, data: text as unknown as T };
+}
+
+/** Does this URL address our own API (absolute or relative)? */
+function isApiPath(url: string): boolean {
+  if (url.startsWith("/api/")) return true;
+  try {
+    return new URL(url, typeof window === "undefined" ? "http://localhost" : window.location.href).pathname.startsWith("/api/");
+  } catch {
+    return false;
+  }
+}
+
+/** An HTML document rather than an API payload. */
+function looksLikeHtml(contentType: string, body: string): boolean {
+  if (contentType.includes("text/html")) return true;
+  return /^\s*<(!doctype html|html)\b/i.test(body);
 }
 
 // ── Retry helper (draft-preserving) ───────────────────────────────

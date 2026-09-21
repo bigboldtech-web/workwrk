@@ -1,249 +1,277 @@
 "use client";
 
-/* SOPs · Compliance — org compliance dashboard.
+/* /sops/compliance, "SOP compliance" (spec-process section 2): how my people
+ * are doing on the SOPs assigned to them.
  *
- * Reads: GET /api/sop-assignments/compliance
+ *   header   views Overview · By person · By SOP · Overdue; toolbar Filter
+ *            (the search field first, then Department and Mandatory only);
+ *            "…" Export CSV, Open Policy compliance. No blue button.
+ *   body     Overview = StatRow (Assigned, Completed, In progress, Overdue),
+ *            a "By department" TableCard with the 4px completion bar, then
+ *            two half-width cards (lowest completion, overdue) with "View
+ *            all" links that switch views. The other three views are one
+ *            TableCard each. Every row opens somewhere: a person to their
+ *            page, a SOP to its People tab, a department to By person.
+ *
+ *   GET /api/sop-assignments/compliance?q=&departmentId=&mandatory=1
+ *
+ * Denied = the in-shell 404 from layout.tsx (a Member without reports never
+ * sees the sidebar row and never lands here).
  */
 
-import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import {
-  AlertCircle,
-  TrendingUp,
-  TrendingDown,
-  Users as UsersIcon,
-  Building,
-  Activity,
-  Hash,
-  ClipboardCheck,
-  BookCopy,
-  CheckCircle2,
-  Clock,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { BarChart3, Download } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
-import { SkeletonRows } from "@/components/ui/skeleton";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Picker } from "@/components/ui/picker";
+import { StatRow } from "@/components/ui/stat-row";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { apiFetch } from "@/lib/api-fetch";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { getSopKind, SOP_KIND_LABEL } from "@/lib/sop-kind";
+import { cn } from "@/lib/utils";
+
+type View = "overview" | "people" | "sops" | "overdue";
+const VIEWS: View[] = ["overview", "people", "sops", "overdue"];
+const VIEW_LABEL: Record<View, string> = { overview: "Overview", people: "By person", sops: "By SOP", overdue: "Overdue" };
 
 type Overview = { total: number; completed: number; inProgress: number; overdue: number; overallRate: number };
-type DeptRow = { departmentId: string; name: string; total: number; completed: number; rate: number };
+type DeptRow = { departmentId: string; name: string; people: number; total: number; completed: number; overdue: number; rate: number };
 type PersonRow = { userId: string; name: string; department: string; total: number; completed: number; overdue: number; rate: number; avgScore: number | null };
-type SopRow = { sopId: string; title: string; category: string | null; total: number; completed: number; rate: number };
-type OverdueRow = { id: string; sopTitle: string; userName: string; department: string; dueDate: string; stepsCompleted: number; stepsTotal: number };
-
-type ApiData = {
-  overview: Overview;
-  departmentCompliance: DeptRow[];
-  personScores: PersonRow[];
-  sopCompliance: SopRow[];
-  overdueList: OverdueRow[];
-};
+type SopRow = { sopId: string; title: string; category: string | null; sopType: string; total: number; completed: number; overdue: number; rate: number };
+type OverdueRow = { id: string; sopId: string; sopTitle: string; userId: string; userName: string; department: string; dueDate: string; mandatory: boolean; stepsCompleted: number; stepsTotal: number };
+type ApiData = { overview: Overview; departmentCompliance: DeptRow[]; personScores: PersonRow[]; sopCompliance: SopRow[]; overdueList: OverdueRow[] };
+type Department = { id: string; name: string };
 
 const MS_DAY = 86_400_000;
-function rateHue(pct: number) {
-  if (pct >= 90) return "var(--os-c-green)";
-  if (pct >= 70) return "var(--os-c-teal)";
-  if (pct >= 40) return "var(--os-c-orange)";
-  return "var(--os-c-red)";
+
+function Completion({ rate }: { rate: number }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      <span className="h-1 w-16 overflow-hidden rounded-full bg-active"><span className="block h-full bg-brand" style={{ width: `${Math.max(0, Math.min(100, rate))}%` }} /></span>
+      <span className="tabular-nums text-ink-2">{rate}%</span>
+    </span>
+  );
 }
 
-const AV_PALETTE = ["var(--os-brand)", "var(--os-c-green)", "var(--os-c-orange)", "var(--os-c-yellow)", "var(--os-c-teal)", "var(--os-c-brown)", "var(--os-c-blue)", "var(--os-c-red)"];
-function avColor(s: string) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return AV_PALETTE[h % AV_PALETTE.length]; }
-function initials(name: string) { const [a = "", b = ""] = name.split(/\s+/); return (((a[0] ?? "") + (b[0] ?? "")) || "?").toUpperCase(); }
-
-export default function SopComplianceDashboard() {
-  const [data, setData] = useState<ApiData | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [showAllBottom, setShowAllBottom] = useState(false);
-  const [showAllTop, setShowAllTop] = useState(false);
-  const [showAllOverdue, setShowAllOverdue] = useState(false);
+export default function SopCompliancePage() {
+  const router = useRouter();
+  const params = useSearchParams();
   const { rowVersion } = useOsShell();
+  const { boot } = useBoot();
+  const fmt = useFormat();
 
+  const view: View = VIEWS.includes(params.get("view") as View) ? (params.get("view") as View) : "overview";
+  const q = params.get("q") ?? "";
+  const departmentId = params.get("departmentId");
+  const mandatory = params.get("mandatory") === "1";
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") next.delete(k); else next.set(k, v); }
+    const s = next.toString();
+    router.push(s ? `/sops/compliance?${s}` : "/sops/compliance");
+  }, [params, router]);
+  const activeFilters = [q, departmentId, mandatory ? "m" : null].filter(Boolean).length;
+
+  const [data, setData] = useState<ApiData | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const qs = useMemo(() => {
+    const p = new URLSearchParams();
+    if (q) p.set("q", q);
+    if (departmentId) p.set("departmentId", departmentId);
+    if (mandatory) p.set("mandatory", "1");
+    return p.toString();
+  }, [q, departmentId, mandatory]);
   const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/sop-assignments/compliance");
-      if (res.status === 403) { setLoadError("Manager access required."); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      setData(d.data ?? d);
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("sops");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+    const r = await apiFetch<ApiData | { data: ApiData }>(`/api/sop-assignments/compliance${qs ? `?${qs}` : ""}`, { cache: "no-store" });
+    if (!r.ok) { setLoadError(true); return; }
+    setLoadError(false);
+    setData("data" in r.data && r.data.data ? r.data.data : (r.data as ApiData));
+  }, [qs]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  const rv = rowVersion("sops");
+  useEffect(() => { if (rv <= 0) return; const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [rv, load]);
+  useEffect(() => {
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
 
-  const bottomSopsAll = (data?.sopCompliance ?? []).filter((s) => s.total > 0);
-  const topPeopleAll = (data?.personScores ?? []).filter((p) => p.total > 0);
-  const overdueAll = data?.overdueList ?? [];
-  const bottomSops = showAllBottom ? bottomSopsAll : bottomSopsAll.slice(0, 6);
-  const topPeople = showAllTop ? topPeopleAll : topPeopleAll.slice(0, 8);
-  const overdue = showAllOverdue ? overdueAll : overdueAll.slice(0, 10);
+  /* Filter panel */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [deptOpen, setDeptOpen] = useState(false);
+  const [departments, setDepartments] = useState<Department[] | null>(null);
+  useEffect(() => {
+    if (!filterOpen || departments !== null) return;
+    let live = true;
+    void apiFetch<Department[] | { data?: Department[] }>("/api/departments", { cache: "no-store" }).then((r) => {
+      if (!live) return;
+      setDepartments(r.ok ? (Array.isArray(r.data) ? r.data : r.data?.data ?? []) : []);
+    });
+    return () => { live = false; };
+  }, [filterOpen, departments]);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if ((e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && !typing)) {
+        e.preventDefault(); setFilterOpen(true); setTimeout(() => searchRef.current?.focus(), 50);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Export is the server route, so the file carries the same scoped and
+  // filtered rows the page shows (spec-process section 2: GET
+  // /api/sop-assignments/compliance/export).
+  const exportHref = `/api/sop-assignments/compliance/export?view=${view === "sops" ? "sops" : view === "overdue" ? "overdue" : "people"}${qs ? `&${qs}` : ""}`;
+
+  /* Columns */
+  const deptColumns = useMemo<TableColumn<DeptRow>[]>(() => [
+    { key: "name", label: "Department", title: true, width: "minmax(180px,2fr)", render: (r) => <span className="truncate">{r.name}</span> },
+    { key: "people", label: "People", width: "90px", numeric: true, render: (r) => r.people },
+    { key: "assigned", label: "Assigned", width: "100px", numeric: true, render: (r) => r.total },
+    { key: "completed", label: "Completed", width: "110px", numeric: true, render: (r) => r.completed },
+    { key: "overdue", label: "Overdue", width: "90px", numeric: true, render: (r) => <span className={r.overdue > 0 ? "text-danger-text" : ""}>{r.overdue}</span> },
+    { key: "rate", label: "Completion", width: "150px", render: (r) => <Completion rate={r.rate} /> },
+  ], []);
+  const personColumns = useMemo<TableColumn<PersonRow>[]>(() => [
+    { key: "name", label: "Person", title: true, width: "minmax(180px,2fr)", render: (r) => <span className="truncate">{r.name}</span> },
+    { key: "department", label: "Department", width: "minmax(120px,1fr)", render: (r) => <span className="truncate text-ink-2">{r.department}</span> },
+    { key: "assigned", label: "Assigned", width: "100px", numeric: true, render: (r) => r.total },
+    { key: "completed", label: "Completed", width: "110px", numeric: true, render: (r) => r.completed },
+    { key: "overdue", label: "Overdue", width: "90px", numeric: true, render: (r) => <span className={r.overdue > 0 ? "text-danger-text" : ""}>{r.overdue}</span> },
+    { key: "rate", label: "Rate", width: "150px", render: (r) => <Completion rate={r.rate} /> },
+    { key: "score", label: "Average score", width: "120px", numeric: true, render: (r) => (r.avgScore === null ? "" : r.avgScore) },
+  ], []);
+  const sopColumns = useMemo<TableColumn<SopRow>[]>(() => [
+    { key: "title", label: "SOP", title: true, width: "minmax(200px,2fr)", render: (r) => <span className="truncate">{r.title}</span> },
+    { key: "kind", label: "Kind", width: "120px", render: (r) => <span className="text-ink-2">{SOP_KIND_LABEL[getSopKind(r.sopType, null)]}</span> },
+    { key: "assigned", label: "Assigned", width: "100px", numeric: true, render: (r) => r.total },
+    { key: "completed", label: "Completed", width: "110px", numeric: true, render: (r) => r.completed },
+    { key: "overdue", label: "Overdue", width: "90px", numeric: true, render: (r) => <span className={r.overdue > 0 ? "text-danger-text" : ""}>{r.overdue}</span> },
+    { key: "rate", label: "Rate", width: "150px", render: (r) => <Completion rate={r.rate} /> },
+  ], []);
+  const overdueColumns = useMemo<TableColumn<OverdueRow>[]>(() => [
+    { key: "person", label: "Person", title: true, width: "minmax(160px,1.5fr)", render: (r) => <span className="truncate">{r.userName}</span> },
+    { key: "sop", label: "SOP", width: "minmax(180px,2fr)", render: (r) => <span className="truncate text-ink-2">{r.sopTitle}</span> },
+    { key: "due", label: "Due", width: "110px", render: (r) => <span className="tabular-nums text-danger-text" title={fmt.title(r.dueDate)}>{fmt.date(r.dueDate, "date")}</span> },
+    { key: "late", label: "Days late", width: "100px", numeric: true, render: (r) => Math.max(0, Math.floor((Date.now() - new Date(r.dueDate).getTime()) / MS_DAY)) },
+    { key: "mandatory", label: "Mandatory", width: "100px", render: (r) => (r.mandatory ? "Yes" : "No") },
+  ], [fmt]);
+
+  const filteredEmpty = activeFilters > 0;
+  const emptyRow = filteredEmpty
+    ? <span className="inline-flex items-center gap-2">No results · <button type="button" onClick={() => setParams({ q: null, departmentId: null, mandatory: null })} className="font-medium text-brand-deep hover:underline">Clear filters</button></span>
+    : "Nothing here yet";
+  const showQuietEmpty = data !== null && data.overview.total === 0 && !filteredEmpty;
+  const o = data?.overview;
+  const lowest = (data?.sopCompliance ?? []).filter((s) => s.total > 0).slice(0, 5);
+  const overdueTop = (data?.overdueList ?? []).slice(0, 5);
+  const deptName = departmentId ? departments?.find((d) => d.id === departmentId)?.name ?? "1 department" : null;
 
   return (
     <>
+      <Breadcrumb items={[{ label: "SOPs", href: "/sops" }, { label: "SOP compliance" }]} />
       <OsPageHeader
         title="SOP compliance"
-        actions={
-          <div className="flex items-center gap-1">
-            <Link href="/sops" className="os-head__link"><Hash /> SOPs</Link>
-            <Link href="/sops/my-sops" className="os-head__link"><ClipboardCheck /> My SOPs</Link>
-          </div>
-        }
+        views={VIEWS.map((v) => <ViewTab key={v} label={VIEW_LABEL[v]} active={view === v} href={v === "overview" ? "/sops/compliance" : `/sops/compliance?view=${v}`} />)}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((x) => !x), count: activeFilters },
+          menu: [
+            ...(!boot.viewer.isAgent ? [{ label: "Export CSV", icon: Download, onClick: () => { window.location.href = exportHref; } }] : []),
+            { label: "Open Policy compliance", icon: BarChart3, href: "/policies/compliance" },
+          ],
+        }}
       />
 
-      <div className="cmpl">
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load compliance" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
-        ) : data === null ? (
-          <SkeletonRows />
-        ) : (
-          <>
-            <div className="cmpl__kpis">
-              <KpiTile accent={rateHue(data.overview.overallRate)} Icon={Activity}     label="Org rate"    value={`${data.overview.overallRate}%`} sub={`${data.overview.completed} of ${data.overview.total}`} />
-              <KpiTile accent="var(--os-c-blue)"                  Icon={BookCopy}     label="Assignments" value={`${data.overview.total}`}        sub="across SOPs" />
-              <KpiTile accent="var(--os-c-orange)"                Icon={Clock}        label="In progress" value={`${data.overview.inProgress}`}   sub="active work" />
-              <KpiTile accent={data.overview.overdue > 0 ? "var(--os-c-red)" : "var(--os-c-green)"} Icon={data.overview.overdue > 0 ? AlertCircle : CheckCircle2} label="Overdue" value={`${data.overview.overdue}`} sub={data.overview.overdue > 0 ? "needs attention" : "all on time"} />
-            </div>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="compliance" activeCount={activeFilters} onClearAll={() => setParams({ q: null, departmentId: null, mandatory: null })}>
+          <li className="pb-2"><SearchField inputRef={searchRef} value={q} onChange={(v) => setParams({ q: v || null })} placeholder="Search people and SOPs" /></li>
+          <FilterGroup label="Department">
+            <FilterRow label="Filter by department" checked={!!departmentId} onCheckedChange={(on) => { if (!on) setParams({ departmentId: null }); else setDeptOpen(true); }}>
+              <span className="relative block">
+                <button type="button" onClick={() => setDeptOpen((x) => !x)} className="inline-flex h-8 max-w-full items-center rounded-md border border-line-strong bg-raised px-2 text-sm text-ink"><span className="truncate">{deptName ?? <span className="text-ink-3">Choose a department</span>}</span></button>
+                <Picker open={deptOpen} onClose={() => setDeptOpen(false)} ariaLabel="Department" searchPlaceholder="Find a department" selected={departmentId} onSelect={(v) => { setParams({ departmentId: v }); setDeptOpen(false); }} sections={[{ options: (departments ?? []).map((d) => ({ value: d.id, label: d.name })) }]} />
+              </span>
+            </FilterRow>
+          </FilterGroup>
+          <FilterGroup label="Mandatory">
+            <FilterRow label="Mandatory only" checked={mandatory} onCheckedChange={(on) => setParams({ mandatory: on ? "1" : null })} />
+          </FilterGroup>
+        </FilterPanel>
 
-            <div className="cmpl__grid">
-              <section className="cmpl__card">
-                <header className="cmpl__card-head">
-                  <h2><Building /> By department</h2>
-                  <span className="cmpl__card-count">{data.departmentCompliance.length}</span>
-                </header>
-                {data.departmentCompliance.length === 0 ? (
-                  <div className="cmpl__card-empty">No department data yet.</div>
-                ) : (
-                  <div className="cmpl__heatmap">
-                    {data.departmentCompliance.map((d) => (
-                      <div key={d.departmentId} className="cmpl__bar">
-                        <div className="cmpl__bar-label">
-                          <span>{d.name}</span>
-                          <strong style={{ color: rateHue(d.rate) }}>{d.rate}%</strong>
-                        </div>
-                        <div className="cmpl__bar-track">
-                          <div className="cmpl__bar-fill" style={{ width: `${d.rate}%`, background: rateHue(d.rate) }} />
-                        </div>
-                        <div className="cmpl__bar-sub">{d.completed} / {d.total}</div>
-                      </div>
-                    ))}
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {loadError ? (
+            <OsEmptyView variant="error" context="docs" title="Couldn't load compliance" action={{ label: "Retry", onClick: () => void load() }} />
+          ) : showQuietEmpty ? (
+            <OsEmptyView context="docs" title="No SOPs assigned to your people yet" action={{ label: "Open SOPs", href: "/sops" }} />
+          ) : view === "overview" ? (
+            <>
+              <StatRow
+                loading={data === null}
+                cards={[
+                  { label: "Assigned", value: o ? fmt.count(o.total) : "", sub: o ? `${o.overallRate}% completion` : undefined },
+                  { label: "Completed", value: o ? fmt.count(o.completed) : "" },
+                  { label: "In progress", value: o ? fmt.count(o.inProgress) : "" },
+                  { label: "Overdue", value: o ? fmt.count(o.overdue) : "", sub: o && o.overdue > 0 ? "overdue" : "nothing overdue", dot: o && o.overdue > 0 ? "danger" : undefined },
+                ]}
+              />
+              <TableCard<DeptRow>
+                ariaLabel="By department"
+                columns={deptColumns}
+                rows={data ? data.departmentCompliance : null}
+                rowKey={(r) => r.departmentId}
+                rowHref={(r) => (r.departmentId === "unassigned" ? "/sops/compliance?view=people" : `/sops/compliance?view=people&departmentId=${r.departmentId}`)}
+                skeletonRows={4}
+                empty={emptyRow}
+              />
+              <div className="grid gap-4 lg:grid-cols-2">
+                <section className="flex min-w-0 flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="min-w-0 flex-1 truncate text-row font-medium text-ink">SOPs with the lowest completion</h2>
+                    <button type="button" onClick={() => setParams({ view: "sops" })} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">View all</button>
                   </div>
-                )}
-              </section>
-
-              <section className="cmpl__card">
-                <header className="cmpl__card-head">
-                  <h2><TrendingDown style={{ color: "var(--os-c-red)" }} /> Lowest-completion SOPs</h2>
-                  <span className="cmpl__card-count">{bottomSops.length}</span>
-                </header>
-                {bottomSops.length === 0 ? (
-                  <div className="cmpl__card-empty">No SOPs with completion data yet.</div>
-                ) : (
-                  <div className="cmpl__list">
-                    {bottomSops.map((s) => (
-                      <div key={s.sopId} className="cmpl__sop">
-                        <div className="cmpl__sop-title">{s.title}{s.category && <em> · {s.category}</em>}</div>
-                        <div className="cmpl__sop-bar">
-                          <div className="cmpl__sop-bar-fill" style={{ width: `${s.rate}%`, background: rateHue(s.rate) }} />
-                        </div>
-                        <span className="cmpl__sop-rate" style={{ color: rateHue(s.rate) }}>{s.rate}% <em>· {s.completed}/{s.total}</em></span>
-                      </div>
-                    ))}
-                    {bottomSopsAll.length > 6 && (
-                      <MoreToggle open={showAllBottom} total={bottomSopsAll.length} onClick={() => setShowAllBottom((v) => !v)} />
-                    )}
+                  <TableCard<SopRow> ariaLabel="SOPs with the lowest completion" columns={sopColumns.filter((c) => c.key !== "kind" && c.key !== "overdue")} rows={data ? lowest : null} rowKey={(r) => r.sopId} rowHref={(r) => `/sops/${r.sopId}`} skeletonRows={3} empty="No SOPs with completion data yet" />
+                </section>
+                <section className="flex min-w-0 flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <h2 className="min-w-0 flex-1 truncate text-row font-medium text-ink">Overdue</h2>
+                    <button type="button" onClick={() => setParams({ view: "overdue" })} className="shrink-0 text-sm font-medium text-brand-deep hover:underline">View all</button>
                   </div>
-                )}
-              </section>
-
-              <section className="cmpl__card">
-                <header className="cmpl__card-head">
-                  <h2><TrendingUp style={{ color: "var(--os-c-green)" }} /> Top performers</h2>
-                  <span className="cmpl__card-count">{topPeople.length}</span>
-                </header>
-                {topPeople.length === 0 ? (
-                  <div className="cmpl__card-empty">No person data yet.</div>
-                ) : (
-                  <div className="cmpl__list">
-                    {topPeople.map((p) => (
-                      <div key={p.userId} className="cmpl__person">
-                        <span className="cmpl__person-av" style={{ background: avColor(p.userId) }}>{initials(p.name)}</span>
-                        <div className="cmpl__person-main">
-                          <div className="cmpl__person-name">{p.name}</div>
-                          <div className="cmpl__person-meta">{p.department}{p.avgScore != null && ` · avg score ${p.avgScore}`}</div>
-                        </div>
-                        <span className="cmpl__person-rate" style={{ color: rateHue(p.rate) }}>{p.rate}%</span>
-                      </div>
-                    ))}
-                    {topPeopleAll.length > 8 && (
-                      <MoreToggle open={showAllTop} total={topPeopleAll.length} onClick={() => setShowAllTop((v) => !v)} />
-                    )}
-                  </div>
-                )}
-              </section>
-
-              <section className="cmpl__card">
-                <header className="cmpl__card-head">
-                  <h2><AlertCircle style={{ color: "var(--os-c-red)" }} /> Overdue</h2>
-                  <span className="cmpl__card-count">{data.overdueList.length}</span>
-                </header>
-                {data.overdueList.length === 0 ? (
-                  <div className="cmpl__card-empty">
-                    <UsersIcon /> All assignments are on time.
-                  </div>
-                ) : (
-                  <div className="cmpl__list">
-                    {overdue.map((o) => {
-                      const days = Math.floor((Date.now() - new Date(o.dueDate).getTime()) / MS_DAY);
-                      return (
-                        <div key={o.id} className="cmpl__over">
-                          <div className="cmpl__over-main">
-                            <div className="cmpl__over-title">{o.sopTitle}</div>
-                            <div className="cmpl__over-meta">{o.userName} · {o.department}</div>
-                          </div>
-                          <span className="cmpl__over-days">{days}d late</span>
-                        </div>
-                      );
-                    })}
-                    {overdueAll.length > 10 && (
-                      <MoreToggle open={showAllOverdue} total={overdueAll.length} onClick={() => setShowAllOverdue((v) => !v)} />
-                    )}
-                  </div>
-                )}
-              </section>
-            </div>
-          </>
-        )}
+                  <TableCard<OverdueRow> ariaLabel="Overdue" columns={overdueColumns.filter((c) => c.key !== "mandatory")} rows={data ? overdueTop : null} rowKey={(r) => r.id} rowHref={(r) => `/sops/${r.sopId}`} skeletonRows={3} empty="Nothing overdue" />
+                </section>
+              </div>
+            </>
+          ) : view === "people" ? (
+            <TableCard<PersonRow> ariaLabel="By person" columns={personColumns} rows={data ? data.personScores : null} rowKey={(r) => r.userId} rowHref={(r) => `/people/${r.userId}`} empty={emptyRow} footer={data ? { total: data.personScores.length, noun: "people", from: data.personScores.length ? 1 : 0, to: data.personScores.length } : undefined} />
+          ) : view === "sops" ? (
+            <TableCard<SopRow> ariaLabel="By SOP" columns={sopColumns} rows={data ? data.sopCompliance : null} rowKey={(r) => r.sopId} rowHref={(r) => `/sops/${r.sopId}`} empty={emptyRow} footer={data ? { total: data.sopCompliance.length, noun: "SOPs", from: data.sopCompliance.length ? 1 : 0, to: data.sopCompliance.length } : undefined} />
+          ) : (
+            <TableCard<OverdueRow> ariaLabel="Overdue" columns={overdueColumns} rows={data ? data.overdueList : null} rowKey={(r) => r.id} rowHref={(r) => `/sops/${r.sopId}`} empty={filteredEmpty ? emptyRow : "Nothing overdue"} footer={data ? { total: data.overdueList.length, noun: "assignments", from: data.overdueList.length ? 1 : 0, to: data.overdueList.length } : undefined} />
+          )}
+        </div>
       </div>
     </>
   );
 }
 
-function MoreToggle({ open, total, onClick }: { open: boolean; total: number; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-1 text-sm text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
-    >
-      {open ? "Show less" : `View all ${total}`}
-    </button>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof Activity; label: string; value: string; sub: string }) {
-  return (
-    <div className="cmpl__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="cmpl__kpi-accent" aria-hidden="true" />
-      <div className="cmpl__kpi-row">
-        <div className="cmpl__kpi-icon"><Icon /></div>
-        <div className="cmpl__kpi-label">{label}</div>
-      </div>
-      <div className="cmpl__kpi-value">{value}</div>
-      <div className="cmpl__kpi-sub">{sub}</div>
-    </div>
-  );
+function SearchField({ value, onChange, placeholder, inputRef }: { value: string; onChange: (v: string) => void; placeholder: string; inputRef: React.MutableRefObject<HTMLInputElement | null> }) {
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) { setSeen(value); setDraft(value); }
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft.trim()), 300);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
+  return <input ref={inputRef} type="search" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } }} placeholder={placeholder} aria-label={placeholder} className={cn("h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand")} />;
 }

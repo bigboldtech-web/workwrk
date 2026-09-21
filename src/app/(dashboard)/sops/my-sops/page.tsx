@@ -1,266 +1,271 @@
 "use client";
 
-/* SOPs · Mine — assigned SOPs for the current user.
+/* /sops/my-sops (spec-process section 2): the SOPs I have to read, run or
+ * acknowledge, and the ones I've done, in ONE hop.
  *
- * GET /api/sop-assignments?userId=me
+ *   header   "My SOPs" · views To do · Done · All · toolbar Filter (search,
+ *            Kind, Mandatory, Due, Status), Sort (Due, Assigned on, Name);
+ *            no blue button (there is nothing for me to create here)
+ *   body     one summary line "3 to do · 1 overdue · 12 done"; TableCard:
+ *            Name · Kind · Due · Mandatory · Status · Progress · Action
+ *            ("Acknowledge", or "Start run" / "Continue run" on a Checklist)
+ *
+ *   GET  /api/me/sops?view=&q=&kind=&mandatory=1&status=&dueFrom=&dueTo=&sort=&dir=
+ *   POST /api/me/sops/[assignmentId]/ack, DELETE the same (the Undo toast)
  */
 
-import { Dots } from "@/components/ui/dots";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import {
-  BookCopy,
-  Clock,
-  AlertCircle,
-  CheckCircle2,
-  FileText,
-  ListChecks,
-  Video,
-  BadgeAlert,
-  Hash,
-  Activity,
-  Layers,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Check, FileText, ListChecks, ListOrdered, MousePointerClick, Play, SlidersHorizontal } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
 import { OsPageHeader } from "@/components/layout/os/page-header";
 import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useOsToast } from "@/components/layout/os/toast";
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { useRole } from "@/hooks/use-role";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Picker } from "@/components/ui/picker";
+import { TableCard, type TableColumn } from "@/components/ui/table-card";
+import { StatusChip } from "@/components/ui/chip";
+import { Dots } from "@/components/ui/dots";
+import { DateField } from "@/components/ui/date-field";
+import { StartRunDialog } from "@/components/sops/start-run-dialog";
+import { apiFetch } from "@/lib/api-fetch";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { SOP_KIND_LABEL, isSopKind, type SopKind } from "@/lib/sop-kind";
+import { cn } from "@/lib/utils";
 
+type View = "todo" | "done" | "all";
 type Status = "ASSIGNED" | "IN_PROGRESS" | "COMPLETED" | "OVERDUE";
-type SopType = "WRITTEN" | "RECORDED" | "CHECKLIST";
+type Row = {
+  id: string;
+  status: Status;
+  mandatory: boolean;
+  dueDate: string | null;
+  assignedAt: string;
+  completedAt: string | null;
+  stepsTotal: number;
+  stepsCompleted: number;
+  sop: { id: string; title: string; kind: SopKind; sectionCount: number; status: string; version: number };
+  run: { id: string; shareToken: string | null; progress: number; status: string } | null;
+};
+type Payload = { data: Row[]; total: number; count: number; summary: { todo: number; overdue: number; done: number } };
 
-type ApiAssignment = {
-  id: string; status: Status; mandatory: boolean;
-  dueDate?: string | null; stepsTotal: number; stepsCompleted: number; score?: number | null;
-  createdAt: string;
-  sop?: { id: string; title: string; category?: string | null; status?: string; sopType?: SopType; version?: number } | null;
-};
-
-const TYPE_ICON: Record<SopType, React.ComponentType<{ className?: string }>> = {
-  WRITTEN: FileText, CHECKLIST: ListChecks, RECORDED: Video,
-};
-const TYPE_HUE: Record<SopType, string> = {
-  WRITTEN: "var(--os-c-teal)", CHECKLIST: "var(--os-c-blue)", RECORDED: "var(--os-c-orange)",
-};
-const TYPE_LABEL: Record<SopType, string> = {
-  WRITTEN: "Written", CHECKLIST: "Checklist", RECORDED: "Screen recording",
-};
-
-const MS_DAY = 86_400_000;
-function dueChip(a: ApiAssignment): { label: string; tone: "danger" | "warn" | "muted" | "good" } | null {
-  if (a.status === "COMPLETED") return { label: "Done", tone: "good" };
-  if (!a.dueDate) return null;
-  const days = Math.ceil((new Date(a.dueDate).getTime() - Date.now()) / MS_DAY);
-  if (days < 0) return { label: `${-days}d late`, tone: "danger" };
-  if (days === 0) return { label: "Due today", tone: "warn" };
-  if (days <= 3) return { label: `Due in ${days}d`, tone: "warn" };
-  return { label: `Due ${new Date(a.dueDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`, tone: "muted" };
-}
+const VIEW_LABEL: Record<View, string> = { todo: "To do", done: "Done", all: "All" };
+const SORTS = [{ key: "due", label: "Due date" }, { key: "assigned", label: "Assigned on" }, { key: "name", label: "Name" }] as const;
+const STATUS_COLOR: Record<Status, string> = { ASSIGNED: "#6B7280", IN_PROGRESS: "#B45309", COMPLETED: "#1F8F4E", OVERDUE: "#B42318" };
+const STATUS_LABEL: Record<Status, string> = { ASSIGNED: "Assigned", IN_PROGRESS: "In progress", COMPLETED: "Completed", OVERDUE: "Overdue" };
+const KIND_ICON: Record<SopKind, typeof FileText> = { written: FileText, steps: ListOrdered, checklist: ListChecks, recording: MousePointerClick };
 
 export default function MySopsPage() {
-  const [items, setItems] = useState<ApiAssignment[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [showAllDone, setShowAllDone] = useState(false);
-  // Assignment id currently being acknowledged (one at a time).
-  const [ackingId, setAckingId] = useState<string | null>(null);
+  const router = useRouter();
+  const params = useSearchParams();
   const { rowVersion } = useOsShell();
+  const { boot } = useBoot();
   const { toast } = useOsToast();
-  const { isManager } = useRole();
+  const fmt = useFormat();
 
+  // To do is the default and the first pill; Done and All are the URL views.
+  const view: View = params.get("view") === "all" || params.get("view") === "done" ? (params.get("view") as View) : "todo";
+  const q = params.get("q") ?? "";
+  const kind = isSopKind(params.get("kind")) ? (params.get("kind") as SopKind) : null;
+  const mandatory = params.get("mandatory") === "1";
+  const status = params.get("status");
+  const dueFrom = params.get("dueFrom");
+  const dueTo = params.get("dueTo");
+  const sort = SORTS.some((s) => s.key === params.get("sort")) ? (params.get("sort") as (typeof SORTS)[number]["key"]) : "due";
+  const dir: "asc" | "desc" = params.get("dir") === "desc" ? "desc" : "asc";
+  const setParams = useCallback((patch: Record<string, string | null>) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(patch)) { if (v === null || v === "") next.delete(k); else next.set(k, v); }
+    const s = next.toString();
+    router.push(s ? `/sops/my-sops?${s}` : "/sops/my-sops");
+  }, [params, router]);
+  const activeFilters = [q, kind, mandatory ? "m" : null, status, dueFrom || dueTo ? "d" : null].filter(Boolean).length;
+
+  const [payload, setPayload] = useState<Payload | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ view, sort, dir });
+    if (q) p.set("q", q);
+    if (kind) p.set("kind", kind);
+    if (mandatory) p.set("mandatory", "1");
+    if (status) p.set("status", status);
+    if (dueFrom) p.set("dueFrom", dueFrom);
+    if (dueTo) p.set("dueTo", dueTo);
+    return p.toString();
+  }, [view, sort, dir, q, kind, mandatory, status, dueFrom, dueTo]);
   const load = useCallback(async () => {
-    try {
-      const meRes = await fetch("/api/me");
-      const me = meRes.ok ? await meRes.json() : null;
-      const myId = me?.user?.id ?? null;
-      if (!myId) { setLoadError("Couldn't resolve your account."); return; }
-      const res = await fetch(`/api/sop-assignments?userId=${encodeURIComponent(myId)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setItems(data.data ?? (Array.isArray(data) ? data : []));
-      setLoadError(null);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
+    const r = await apiFetch<Payload>(`/api/me/sops?${qs}`, { cache: "no-store" });
+    if (!r.ok) { setLoadError(true); return; }
+    setLoadError(false);
+    setPayload(r.data);
+  }, [qs]);
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  const rv = rowVersion("sops");
+  useEffect(() => { if (rv <= 0) return; const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [rv, load]);
+  useEffect(() => {
+    const onFocus = () => { void load(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [load]);
+
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+      if ((e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && !typing)) {
+        e.preventDefault(); setFilterOpen(true); setTimeout(() => searchRef.current?.focus(), 50);
+      }
     }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("sops");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
 
-  // Quick acknowledge straight from the row — same endpoint the SOP
-  // detail page uses. Reloads so the row moves to Completed.
-  const ack = useCallback(async (assignmentId: string) => {
-    setAckingId(assignmentId);
-    try {
-      const res = await fetch(`/api/me/sops/${encodeURIComponent(assignmentId)}/ack`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      toast("Acknowledged");
-      await load();
-    } catch {
-      toast("Couldn't acknowledge");
-    } finally {
-      setAckingId(null);
-    }
-  }, [load, toast]);
+  const [acking, setAcking] = useState<string | null>(null);
+  const acknowledge = async (row: Row) => {
+    setAcking(row.id);
+    const r = await apiFetch(`/api/me/sops/${row.id}/ack`, { method: "POST", json: {} });
+    setAcking(null);
+    if (!r.ok) { toast(r.error || "Couldn't acknowledge", { tone: "danger" }); return; }
+    void load();
+    toast("Acknowledged", { onUndo: () => { void apiFetch(`/api/me/sops/${row.id}/ack`, { method: "DELETE" }).then((u) => { if (!u.ok) toast("Couldn't undo", { tone: "danger" }); void load(); }); } });
+  };
+  const [runFor, setRunFor] = useState<Row | null>(null);
 
-  const today0 = Date.now();
-  const overdue = useMemo(() => (items ?? []).filter((a) => a.status !== "COMPLETED" && a.dueDate && new Date(a.dueDate).getTime() < today0), [items, today0]);
-  const active = useMemo(() => (items ?? []).filter((a) => a.status !== "COMPLETED" && (!a.dueDate || new Date(a.dueDate).getTime() >= today0)), [items, today0]);
-  const done = useMemo(() => (items ?? []).filter((a) => a.status === "COMPLETED"), [items]);
+  const rows = payload?.data ?? null;
+  const columns = useMemo<TableColumn<Row>[]>(() => [
+    { key: "name", label: "Name", title: true, width: "minmax(240px,2fr)", render: (r) => { const Icon = KIND_ICON[r.sop.kind]; return <span className="flex min-w-0 items-center gap-2"><Icon className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden /><span className="truncate">{r.sop.title || "Untitled SOP"}</span></span>; } },
+    { key: "kind", label: "Kind", width: "120px", render: (r) => <span className="text-ink-2">{SOP_KIND_LABEL[r.sop.kind]}</span> },
+    { key: "due", label: "Due", width: "120px", render: (r) => r.dueDate ? <span className={cn("tabular-nums", r.status === "OVERDUE" ? "text-danger-text" : "text-ink-2")} title={fmt.title(r.dueDate)}>{fmt.date(r.dueDate, "date")}</span> : <span className="text-ink-3">None</span> },
+    { key: "mandatory", label: "Mandatory", width: "100px", render: (r) => (r.mandatory ? "Yes" : "") },
+    { key: "status", label: "Status", width: "130px", render: (r) => <StatusChip color={STATUS_COLOR[r.status]} label={STATUS_LABEL[r.status]} disabled /> },
+    {
+      key: "progress", label: "Progress", width: "140px",
+      render: (r) => {
+        if (r.sop.kind === "checklist") {
+          const total = r.stepsTotal;
+          const done = r.run ? Math.round((r.run.progress / 100) * total) : r.stepsCompleted;
+          if (total === 0) return <span className="text-ink-3">No steps</span>;
+          if (r.sop.sectionCount <= 4 && total <= 4) return <Dots variant="quad-steps" done={done} total={total} label={`${done} of ${total} steps`} />;
+          return <span className="tabular-nums text-ink-2">{done} of {total}</span>;
+        }
+        const step = r.status === "COMPLETED" ? 3 : r.status === "IN_PROGRESS" ? 2 : 1;
+        return <Dots variant="quad-steps" done={step} total={3} label={`${step} of 3: Assigned, Opened, Acknowledged`} />;
+      },
+    },
+    {
+      key: "action", label: "", width: "150px", align: "end",
+      render: (r) => {
+        if (r.status === "COMPLETED") return null;
+        if (r.sop.kind === "checklist") {
+          if (r.run?.shareToken) return <ActionButton icon={Play} label="Continue run" busy={false} onClick={() => window.open(`/run/${r.run!.shareToken}`, "_blank", "noopener")} />;
+          if (r.sop.status === "PUBLISHED") return <ActionButton icon={Play} label="Start run" busy={false} onClick={() => setRunFor(r)} />;
+          return null;
+        }
+        return <ActionButton icon={Check} label="Acknowledge" busy={acking === r.id} onClick={() => void acknowledge(r)} />;
+      },
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [fmt, acking]);
 
-  const overdueMand = overdue.filter((a) => a.mandatory).length;
-  const totalSteps = (items ?? []).reduce((a, x) => a + (x.stepsTotal ?? 0), 0);
-  const completedSteps = (items ?? []).reduce((a, x) => a + (x.stepsCompleted ?? 0), 0);
-  const overallPct = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0;
+  const summary = payload ? `${payload.summary.todo} to do · ${payload.summary.overdue} overdue · ${payload.summary.done} done` : null;
+  const filteredEmpty = activeFilters > 0;
+  const emptyNode = filteredEmpty
+    ? <span className="inline-flex items-center gap-2">No results · <button type="button" onClick={() => setParams({ q: null, kind: null, mandatory: null, status: null, dueFrom: null, dueTo: null })} className="font-medium text-brand-deep hover:underline">Clear filters</button></span>
+    : view === "done" ? "Nothing done yet" : "Nothing to do. When someone assigns you a SOP it shows up here.";
 
   return (
     <>
+      <Breadcrumb items={[{ label: "SOPs", href: "/sops" }, { label: "My SOPs" }]} />
       <OsPageHeader
         title="My SOPs"
-        actions={
-          <div className="flex items-center gap-1">
-            <Link href="/sops" className="os-head__link"><Hash /> SOPs</Link>
-            {/* The compliance ledger is a manager's page (spec-process
-                section 1), and its route 404s everyone else now. A Member was
-                being offered the link the sidebar deliberately hides. */}
-            {isManager ? (
-              <Link href="/sops/compliance" className="os-head__link"><Activity /> Compliance</Link>
-            ) : null}
-          </div>
-        }
+        views={(["todo", "done", "all"] as View[]).map((v) => (
+          <ViewTab key={v} label={VIEW_LABEL[v]} active={view === v} href={v === "todo" ? "/sops/my-sops" : `/sops/my-sops?view=${v}`} />
+        ))}
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeFilters },
+          sort: { onClick: () => setSortOpen((o) => !o), label: SORTS.find((s) => s.key === sort)?.label, active: true },
+          left: (
+            <span className="relative">
+              <Picker open={sortOpen} onClose={() => setSortOpen(false)} ariaLabel="Sort" selected={sort} onSelect={(v) => { setSortOpen(false); setParams(v === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: v, dir: null }); }}
+                sections={[{ options: SORTS.map((s) => ({ value: s.key, label: s.label })) }]} width={220} />
+            </span>
+          ),
+          menu: [{ label: mandatory ? "Show all" : "Show mandatory only", icon: SlidersHorizontal, onClick: () => setParams({ mandatory: mandatory ? null : "1" }) }],
+        }}
       />
 
-      <div className="mys">
-        <div className="mys__kpis">
-          <KpiTile accent="var(--os-c-red)"    Icon={AlertCircle}   label="Overdue"   value={`${overdue.length}`} sub={overdueMand > 0 ? `${overdueMand} mandatory` : "none mandatory"} />
-          <KpiTile accent="var(--os-c-orange)" Icon={Clock}         label="Active"    value={`${active.length}`}  sub="in progress" />
-          <KpiTile accent="var(--os-c-green)"  Icon={CheckCircle2}  label="Completed" value={`${done.length}`}    sub="this cycle" />
-          <KpiTile accent="var(--os-c-blue)"   Icon={Layers}        label="Step %"    value={`${overallPct}%`}    sub={`${completedSteps} of ${totalSteps}`} />
-        </div>
-
-        {loadError ? (
-          <OsEmptyView variant="error" title="Couldn't load" hint={loadError} action={{ label: "Try again", onClick: () => { void load(); } }} />
-        ) : items === null ? (
-          <SkeletonRows />
-        ) : (items ?? []).length === 0 ? (
-          <OsEmptyView
-            context="docs"
-            title="No SOPs assigned to you yet"
-            hint="When a manager assigns a procedure to you, it shows up here with a checklist of steps and a due date."
-          />
-        ) : (
-          <>
-            {overdue.length > 0 && (
-              <div className={`mys__banner ${overdueMand > 0 ? "is-danger" : "is-warn"}`}>
-                <AlertCircle />
-                <span>
-                  {overdueMand > 0
-                    ? <><strong>{overdueMand} mandatory SOP{overdueMand === 1 ? "" : "s"} overdue.</strong> Address ASAP.</>
-                    : <>{overdue.length} SOP{overdue.length === 1 ? "" : "s"} past due date.</>}
-                </span>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
+        <FilterPanel open={filterOpen} onClose={() => setFilterOpen(false)} objects="my SOPs" activeCount={activeFilters} onClearAll={() => setParams({ q: null, kind: null, mandatory: null, status: null, dueFrom: null, dueTo: null })}>
+          <li className="pb-2"><SearchField inputRef={searchRef} value={q} onChange={(v) => setParams({ q: v || null })} placeholder="Search my SOPs" /></li>
+          <FilterGroup label="Kind">
+            {(["written", "steps", "checklist", "recording"] as SopKind[]).map((k) => <FilterRow key={k} label={SOP_KIND_LABEL[k]} checked={kind === k} onCheckedChange={(on) => setParams({ kind: on ? k : null })} />)}
+          </FilterGroup>
+          <FilterGroup label="Mandatory">
+            <FilterRow label="Mandatory only" checked={mandatory} onCheckedChange={(on) => setParams({ mandatory: on ? "1" : null })} />
+          </FilterGroup>
+          <FilterGroup label="Due">
+            <FilterRow label="Date range" checked={!!(dueFrom || dueTo)} onCheckedChange={(on) => { if (!on) setParams({ dueFrom: null, dueTo: null }); else setParams({ dueTo: new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10) }); }}>
+              <div className="flex flex-col gap-1.5">
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">From</span><DateField size="sm" value={dueFrom ? dueFrom.slice(0, 10) : null} onChange={(v) => setParams({ dueFrom: v })} placeholder="Any" ariaLabel="From" className="min-w-0 flex-1" /></span>
+                <span className="flex items-center gap-2 text-sm text-ink-2"><span className="w-9 shrink-0">To</span><DateField size="sm" value={dueTo ? dueTo.slice(0, 10) : null} onChange={(v) => setParams({ dueTo: v })} placeholder="Any" ariaLabel="To" className="min-w-0 flex-1" /></span>
               </div>
-            )}
+            </FilterRow>
+          </FilterGroup>
+          <FilterGroup label="Status">
+            {(["ASSIGNED", "IN_PROGRESS", "COMPLETED"] as Status[]).map((s) => <FilterRow key={s} label={STATUS_LABEL[s]} checked={status === s} onCheckedChange={(on) => setParams({ status: on ? s : null })} />)}
+          </FilterGroup>
+        </FilterPanel>
 
-            {overdue.length > 0 && (
-              <Section title="Overdue" Icon={AlertCircle} count={overdue.length} hue="var(--os-c-red)">
-                {overdue.map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
-              </Section>
-            )}
-
-            <Section title="Active" Icon={Clock} count={active.length} hue="var(--os-c-orange)">
-              {active.length === 0 ? <div className="mys__empty-soft">Nothing active. Nice work.</div> : active.map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
-            </Section>
-
-            {done.length > 0 && (
-              <Section title="Completed" Icon={CheckCircle2} count={done.length} hue="var(--os-c-green)">
-                {(showAllDone ? done : done.slice(0, 10)).map((a) => <SopRow key={a.id} a={a} onAck={ack} acking={ackingId === a.id} />)}
-                {done.length > 10 && (
-                  <button
-                    type="button"
-                    onClick={() => setShowAllDone((v) => !v)}
-                    className="mt-1.5 text-sm text-zinc-500 hover:text-zinc-800 underline underline-offset-2"
-                  >
-                    {showAllDone ? "Show less" : `View all ${done.length}`}
-                  </button>
-                )}
-              </Section>
-            )}
-          </>
-        )}
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {summary ? <p className="text-sm text-ink-2">{summary}</p> : <p className="text-sm text-ink-2">&nbsp;</p>}
+          {loadError ? (
+            <OsEmptyView variant="error" context="docs" title="Couldn't load your SOPs" action={{ label: "Retry", onClick: () => void load() }} />
+          ) : rows && rows.length === 0 && !filteredEmpty && view !== "done" ? (
+            <OsEmptyView context="docs" title="Nothing to do" hint="When someone assigns you a SOP it shows up here." />
+          ) : (
+            <TableCard<Row>
+              ariaLabel={VIEW_LABEL[view]}
+              columns={columns}
+              rows={rows}
+              rowKey={(r) => r.id}
+              rowHref={(r) => `/sops/${r.sop.id}`}
+              empty={emptyNode}
+              footer={payload ? { total: payload.total, noun: "SOPs", from: payload.total === 0 ? 0 : 1, to: payload.total } : undefined}
+            />
+          )}
+        </div>
       </div>
+
+      {runFor ? (
+        <StartRunDialog open onClose={() => setRunFor(null)} sop={{ id: runFor.sop.id, title: runFor.sop.title }} defaultAssigneeId={boot.viewer.id} onStarted={(run) => { if (run.shareToken) window.open(`/run/${run.shareToken}`, "_blank", "noopener"); void load(); }} />
+      ) : null}
     </>
   );
 }
 
-function Section({ title, Icon, count, hue, children }: { title: string; Icon: typeof Clock; count: number; hue: string; children: React.ReactNode }) {
+function ActionButton({ icon: Icon, label, busy, onClick }: { icon: typeof Check; label: string; busy: boolean; onClick: () => void }) {
   return (
-    <section className="mys__section" style={{ ["--s-c" as unknown as string]: hue }}>
-      <header className="mys__section-head">
-        <span className="mys__section-tag"><Icon /> {title}</span>
-        <span className="mys__section-count">{count}</span>
-        <span className="mys__section-line" />
-      </header>
-      <div className="mys__list">{children}</div>
-    </section>
+    <button type="button" disabled={busy} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }} className="inline-flex h-7 items-center gap-1.5 rounded-md border border-line bg-raised px-2 text-sm font-medium text-ink hover:bg-hover disabled:opacity-60">
+      {busy ? <Dots variant="pending" /> : <Icon className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden />}
+      {label}
+    </button>
   );
 }
 
-function SopRow({ a, onAck, acking }: { a: ApiAssignment; onAck: (assignmentId: string) => void; acking: boolean }) {
-  const Type = a.sop?.sopType ? TYPE_ICON[a.sop.sopType] : FileText;
-  const hue = a.sop?.sopType ? TYPE_HUE[a.sop.sopType] : "var(--os-ink-3)";
-  const chip = dueChip(a);
-  const pct = a.stepsTotal > 0 ? Math.round((a.stepsCompleted / a.stepsTotal) * 100) : 0;
-  return (
-    <Link href={a.sop?.id ? `/sops/${a.sop.id}` : "/sops"} className={`mys__row${a.status === "COMPLETED" ? " is-done" : ""}`} style={{ ["--r-c" as unknown as string]: hue }}>
-      <span className="mys__row-icon"><Type /></span>
-      <div className="mys__row-main">
-        <div className="mys__row-title">
-          {a.sop?.title ?? "Untitled SOP"}
-          {a.mandatory && a.status !== "COMPLETED" && <span className="mys__row-mand"><BadgeAlert /> Mandatory</span>}
-        </div>
-        <div className="mys__row-meta">
-          {a.sop?.sopType && <span>{TYPE_LABEL[a.sop.sopType]}</span>}
-          {a.sop?.category && <span>· {a.sop.category}</span>}
-          {a.sop?.version && <span>· v{a.sop.version}</span>}
-        </div>
-        {a.status !== "COMPLETED" && a.stepsTotal > 0 && (
-          <div className="mys__row-bar"><div className="mys__row-bar-fill" style={{ width: `${pct}%` }} /></div>
-        )}
-      </div>
-      <div className="mys__row-right">
-        {a.status !== "COMPLETED" && a.stepsTotal > 0 && <span className="mys__row-pct">{pct}%</span>}
-        {chip && <span className={`mys__row-chip mys__row-chip--${chip.tone}`}>{chip.label}</span>}
-        {a.status !== "COMPLETED" && (
-          <button
-            type="button"
-            disabled={acking}
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onAck(a.id); }}
-            className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-200 px-2 text-xs text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 disabled:opacity-50"
-            title="Mark this SOP as read"
-          >
-            {acking ? <Dots variant="pending" /> : <CheckCircle2 className="h-3 w-3" />}
-            Acknowledge
-          </button>
-        )}
-      </div>
-    </Link>
-  );
-}
-
-function KpiTile({ accent, Icon, label, value, sub }: { accent: string; Icon: typeof BookCopy; label: string; value: string; sub: string }) {
-  return (
-    <div className="mys__kpi" style={{ ["--kpi-accent" as unknown as string]: accent }}>
-      <span className="mys__kpi-accent" aria-hidden="true" />
-      <div className="mys__kpi-row">
-        <div className="mys__kpi-icon"><Icon /></div>
-        <div className="mys__kpi-label">{label}</div>
-      </div>
-      <div className="mys__kpi-value">{value}</div>
-      <div className="mys__kpi-sub">{sub}</div>
-    </div>
-  );
+function SearchField({ value, onChange, placeholder, inputRef }: { value: string; onChange: (v: string) => void; placeholder: string; inputRef: React.MutableRefObject<HTMLInputElement | null> }) {
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) { setSeen(value); setDraft(value); }
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft.trim()), 300);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
+  return <input ref={inputRef} type="search" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); (e.currentTarget as HTMLInputElement).blur(); } }} placeholder={placeholder} aria-label={placeholder} className="h-9 w-full rounded-md border border-line-strong bg-raised px-3 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand" />;
 }

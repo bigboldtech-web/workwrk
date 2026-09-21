@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
 import { getSessionOrFail, getOrgId, isManager, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
 
@@ -20,11 +21,17 @@ export async function GET(
   });
   if (!sop) return jsonError("SOP not found", 404);
 
-  const versions = await prisma.sOPVersion.findMany({
+  const rows = await prisma.sOPVersion.findMany({
     where: { sopId: id },
     orderBy: { version: "desc" },
     select: { id: true, version: true, title: true, description: true, createdAt: true, publishedBy: true },
   });
+  // `publishedBy` is a user id; the History tab reads "Published by Anita",
+  // so the names ride along (one query, nothing per row).
+  const ids = Array.from(new Set(rows.map((r) => r.publishedBy).filter((x): x is string => !!x)));
+  const people = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, firstName: true, lastName: true, email: true } }) : [];
+  const nameById = new Map(people.map((u) => [u.id, `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email || null]));
+  const versions = rows.map((r) => ({ ...r, publishedByName: r.publishedBy ? nameById.get(r.publishedBy) ?? null : null }));
 
   return jsonSuccess({ currentVersion: sop.version, versions });
 }
@@ -60,7 +67,7 @@ export async function POST(
   // ran more than once), rollback would propagate the bug instead of
   // recovering from it.
   if (isSOPTitleEmpty(version.title) || isSOPContentEmpty(version.content)) {
-    return jsonError("That version is empty — pick a different one to roll back to.");
+    return jsonError("That version is empty. Pick a different one to roll back to.");
   }
 
   // Save current as a version snapshot before rollback
@@ -70,7 +77,7 @@ export async function POST(
       version: sop.version,
       title: sop.title,
       description: sop.description,
-      content: sop.content as any,
+      content: sop.content as Prisma.InputJsonValue,
       publishedBy: getUserId(session),
     },
   });
@@ -81,7 +88,7 @@ export async function POST(
     data: {
       title: version.title,
       description: version.description,
-      content: version.content as any,
+      content: version.content as Prisma.InputJsonValue,
       version: sop.version + 1,
     },
   });

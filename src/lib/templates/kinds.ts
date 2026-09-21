@@ -61,9 +61,9 @@ export const TEMPLATE_KINDS: readonly TemplateKindDef[] = [
   { key: "LIST", label: "List", plural: "Lists", art: "row", target: "space-or-folder", emptyHint: "Save one from a list's … menu." },
   { key: "FOLDER", label: "Folder", plural: "Folders", art: "shelf", target: "space", emptyHint: "Save one from a folder's … menu." },
   { key: "SPACE", label: "Space", plural: "Spaces", art: "grid", target: "none", emptyHint: "Save one from a Space's … menu." },
-  { key: "DOC", label: "Doc", plural: "Docs", art: "page", target: "space", emptyHint: "Doc templates ship with the product; saving your own is not built yet." },
+  { key: "DOC", label: "Doc", plural: "Docs", art: "page", target: "space", emptyHint: "Save one from a doc's … menu." },
   { key: "VIEW", label: "View", plural: "Views", art: "column", target: "list", emptyHint: "View templates ship with the product; saving your own is not built yet." },
-  { key: "WHITEBOARD", label: "Canvas", plural: "Canvases", art: "cluster", target: "space", emptyHint: "Canvas templates ship with the product; saving your own is not built yet." },
+  { key: "WHITEBOARD", label: "Canvas", plural: "Canvases", art: "cluster", target: "space", emptyHint: "Save one from a canvas's … menu." },
   { key: "KIT", label: "Starter kit", plural: "Starter kits", art: "kit", target: "none", emptyHint: "Starter kits ship with the product." },
 ] as const;
 

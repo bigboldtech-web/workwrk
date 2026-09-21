@@ -1,12 +1,14 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getSessionOrFail, getOrgId, getUserId, isManager, isOrgAdmin, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
+import { Prisma } from "@/generated/prisma";
+import { getSessionOrFail, getOrgId, getUserId, hasPermission, isOrgAdmin, jsonError, jsonSuccess, requirePermission } from "@/lib/api-helpers";
 import { broadcastWebhook } from "@/lib/webhooks";
 import { enrichScribeScreenshots } from "@/lib/scribe-enrich";
 import { presignBlocksImagesAndFiles } from "@/lib/doc-block-enrich";
 import { syncLinksFromBlocks } from "@/lib/doc-link-extract";
-import { canWriteToFolder } from "@/lib/sop-access";
+import { canWriteToFolder, folderGrantRole, resolveSopViewerRole } from "@/lib/sop-access";
 import { isSOPContentEmpty, isSOPTitleEmpty } from "@/lib/sop-content";
+import { getSopKind, getSopLayout } from "@/lib/sop-kind";
 import { moveToTrash } from "@/lib/trash";
 
 export async function GET(
@@ -29,34 +31,68 @@ export async function GET(
         },
         orderBy: { createdAt: "desc" },
       },
+      createdBy: { select: { id: true, firstName: true, lastName: true, email: true, avatar: true } },
+      folder: { select: { id: true, name: true, color: true, parentId: true } },
     },
   });
 
   if (!sop) return jsonError("SOP not found", 404);
 
-  // Folder-scoped visibility. Admin sees all; everyone else must either
-  // be looking at an unfoldered SOP or have been granted folder access.
-  if (sop.folderId && !isOrgAdmin(session)) {
-    const access = await prisma.sOPFolderAccess.findUnique({
-      where: { folderId_userId: { folderId: sop.folderId, userId: (session.user as any).id } },
-      select: { role: true },
-    });
-    if (!access) return jsonError("SOP not found", 404);
-    // Within a folder, consumers (VIEWER) only see PUBLISHED SOPs; drafts
-    // are visible to the author, folder Editors/Owners, and admins.
-    if (sop.status !== "PUBLISHED"
-        && sop.createdById !== (session.user as any).id
-        && access.role !== "EDITOR" && access.role !== "OWNER") {
-      return jsonError("SOP not found", 404);
+  // The viewer's own assignment and active run (spec-process section 2
+  // `/sops/[id]` Data: `myAssignment`, `myRun`, `access.role`), so the page
+  // decides its one blue button from the payload instead of a second hop.
+  const userId = getUserId(session);
+
+  // Visibility: the same rule as the list (sopVisibilityWhere). Admins see
+  // everything; the author sees their own; an assignee sees what was
+  // assigned to them; a filed SOP needs a grant on its folder OR an
+  // ancestor (grants cascade), and a Can view grant reads published SOPs
+  // only; an unfiled SOP reads for everyone once published (or archived),
+  // and before that only for the people who could edit it.
+  if (!isOrgAdmin(session) && sop.createdById !== userId) {
+    const assigned = !!(await prisma.sOPAssignment.findUnique({ where: { sopId_userId: { sopId: id, userId } }, select: { id: true } }));
+    if (!assigned) {
+      const readable = sop.status === "PUBLISHED" || sop.status === "ARCHIVED";
+      if (sop.folderId) {
+        const grant = await folderGrantRole(session, sop.folderId);
+        if (!grant) return jsonError("SOP not found", 404);
+        if (!readable && grant === "VIEWER") return jsonError("SOP not found", 404);
+      } else if (!readable && !(await hasPermission(session, "sops", "edit"))) {
+        return jsonError("SOP not found", 404);
+      }
     }
   }
 
-  const enriched = await enrichScribeScreenshots(sop as any);
+  const [myAssignment, myRun] = await Promise.all([
+    prisma.sOPAssignment.findUnique({
+      where: { sopId_userId: { sopId: id, userId } },
+      select: { id: true, status: true, dueDate: true, mandatory: true, completedAt: true, stepsTotal: true, stepsCompleted: true },
+    }),
+    sop.sopType === "CHECKLIST"
+      ? prisma.processRun.findFirst({
+          where: { sopId: id, assigneeId: userId, status: { in: ["ACTIVE", "OVERDUE"] } },
+          orderBy: { createdAt: "desc" },
+          select: { id: true, shareToken: true, progress: true, status: true, dueDate: true, title: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  const role = await resolveSopViewerRole(session, sop, !!myAssignment);
+
+  const enriched = await enrichScribeScreenshots(sop as Parameters<typeof enrichScribeScreenshots>[0]);
   // For blocks-format WRITTEN SOPs, also refresh image / file URLs.
   const final = enriched && enriched.content
     ? { ...enriched, content: await presignBlocksImagesAndFiles(enriched.content) }
     : enriched;
-  return jsonSuccess(final);
+  return jsonSuccess({
+    ...final,
+    kind: getSopKind(sop.sopType, sop.content),
+    layout: getSopLayout(sop.content),
+    myAssignment: myAssignment
+      ? { assignmentId: myAssignment.id, status: myAssignment.status, dueDate: myAssignment.dueDate, mandatory: myAssignment.mandatory, completedAt: myAssignment.completedAt, stepsTotal: myAssignment.stepsTotal, stepsCompleted: myAssignment.stepsCompleted }
+      : null,
+    myRun,
+    access: { role },
+  });
 }
 
 export async function PATCH(
@@ -90,6 +126,10 @@ export async function PATCH(
   // not accepted: changing it post-create would orphan the content
   // shape.
   const { title: rawTitle, description: rawDescription, category, subcategory, content, status, folderId, tags, kraId } = body;
+  // Publish confirm switch "Require everyone to acknowledge again"
+  // (spec-process section 2): a fresh acknowledgement round resets every
+  // completed assignment to Assigned. Only read alongside a publish.
+  const reacknowledge = body?.reacknowledge === true;
 
   // Same trim rule as POST. Treat a whitespace-only string as an
   // intentional blank, which the PUBLISHED guard below will catch.
@@ -191,7 +231,7 @@ export async function PATCH(
           version: existing.version,
           title: existing.title,
           description: existing.description,
-          content: existing.content as any,
+          content: existing.content as Prisma.InputJsonValue,
           publishedBy: getUserId(session),
         },
       });
@@ -233,7 +273,7 @@ export async function PATCH(
             version: existing.version,
             title: existing.title,
             description: existing.description,
-            content: existing.content as any,
+            content: existing.content as Prisma.InputJsonValue,
             publishedBy: getUserId(session),
           },
         });
@@ -260,6 +300,13 @@ export async function PATCH(
     },
   });
 
+  if (status === "PUBLISHED" && reacknowledge) {
+    await prisma.sOPAssignment.updateMany({
+      where: { sopId: id, status: "COMPLETED" },
+      data: { status: "ASSIGNED", completedAt: null, stepsCompleted: 0 },
+    });
+  }
+
   if (status === "PUBLISHED" && existing.status !== "PUBLISHED") {
     broadcastWebhook({
       organizationId: getOrgId(session),
@@ -283,8 +330,8 @@ export async function PATCH(
     });
   }
 
-  const enriched = await enrichScribeScreenshots(updated as any);
-  return jsonSuccess(enriched);
+  const enriched = await enrichScribeScreenshots(updated as Parameters<typeof enrichScribeScreenshots>[0]);
+  return jsonSuccess({ ...enriched, kind: getSopKind(updated.sopType, updated.content), layout: getSopLayout(updated.content) });
 }
 
 export async function DELETE(

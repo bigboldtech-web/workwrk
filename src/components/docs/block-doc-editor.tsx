@@ -14,14 +14,12 @@
  */
 
 import { Dots } from "@/components/ui/dots";
-import { SkeletonRows, SkeletonLines } from "@/components/ui/skeleton";
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { SkeletonLines } from "@/components/ui/skeleton";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Link as LinkIcon,
   Sparkles,
-  Table as TableIcon,
   ImagePlus,
   Smile,
   Trash2,
@@ -29,7 +27,6 @@ import {
   ListTree,
   X,
   Send,
-  Star,
   ArrowDownLeft,
   FileText,
   BookCopy,
@@ -38,7 +35,6 @@ import {
   RotateCcw,
   MoreHorizontal,
   Download,
-  Copy,
   PanelRightOpen,
   Search,
   ArrowUp,
@@ -47,13 +43,12 @@ import {
   Type as TypeIcon,
   MoveHorizontal,
   Lock,
-  ChevronRight,
   Paperclip,
   FilePlus,
   ChevronUp,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { ImageLightbox, KeyboardShortcutsOverlay, LinkPromptOverlay, type Block, type Comment, type CommentsByBlock } from "./block-editor";
+import type { Block, Comment, CommentsByBlock } from "./block-types";
 import { collectLegacyCustomEmbeds, rehydrateMirrorWithLegacyEmbeds } from "./legacy-embed-preserve";
 import dynamic from "next/dynamic";
 import { BlockNoteCanvas } from "./blocknote-canvas";
@@ -65,7 +60,25 @@ import { useConfirm } from "@/components/ui/dialog-provider";
 import { renderNoteIcon } from "./note-icon";
 import { DocShareModal } from "./doc-share-modal";
 import { useDocTree, createChildPage } from "./doc-pages-panel";
-import { MenuList } from "@/components/ui/menu";
+import { MenuList, MenuItem, MenuSeparator, MenuSubmenu } from "@/components/ui/menu";
+import { MorePortal } from "@/components/layout/os/more-portal";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { useOsShell } from "@/components/layout/os/shell-context";
+import { useViewer } from "@/lib/access/use-access";
+import { AutosaveIndicator } from "@/components/ui/autosave-indicator";
+import type { AutosaveStatus } from "@/hooks/use-autosave";
+import { ConflictStrip } from "@/components/ui/conflict-strip";
+import { canSend, noConflict, onConflict, onDismissConflict } from "@/lib/save-conflict";
+import { DraftRestoreStrip } from "@/components/ui/draft-restore-strip";
+import { useLocalDraft } from "@/hooks/use-local-draft";
+import { ReadOnlyBanner } from "@/components/access/read-only-banner";
+import { ShareOrRoleChip } from "@/components/access/share-or-role-chip";
+import { DocRowMenu } from "./doc-row-menu";
+import { EntityTile } from "@/components/ui/entity-tile";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { readDocsOutline } from "@/lib/docs-prefs";
+import { formatRelative } from "@/lib/format/date";
+import { apiFetch } from "@/lib/api-fetch";
 
 // Lazy-load the full icon picker so its ~1MB emoji dataset only ships when
 // the writer actually opens the picker — keeps the doc page light + fast.
@@ -100,7 +113,13 @@ type DocPayload = {
   updatedAt: string;
   createdAt: string;
   createdById?: string | null;
+  parentId?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
 };
+
+type DocLock = { byId: string; byName: string | null; at: string | null };
+type DraftPayload = { title: string; bnDoc: PartialBlock[] | null; blocks: Block[]; meta: DocMeta };
 
 type MeUser = { id: string; firstName?: string | null; lastName?: string | null; email?: string; avatar?: string | null };
 
@@ -122,42 +141,23 @@ function htmlToBlocks(html: string): Block[] {
   return lines.map((t) => ({ id: newId(), kind: "paragraph" as const, text: t }));
 }
 
-// Curated gradient palette — matches the rest of the OS shell tone-set.
-const COVER_GRADIENTS: { key: string; label: string; css: string }[] = [
-  // key stays "indigo" so saved docs keep their cover; values are brand blue
-  // now (violet is off-palette).
-  { key: "indigo",  label: "Blue",    css: "linear-gradient(135deg, #0073EA, #4BA3F5)" },
-  { key: "blue",    label: "Blue",    css: "linear-gradient(135deg, #2563eb, #06b6d4)" },
-  { key: "teal",    label: "Teal",    css: "linear-gradient(135deg, #14b8a6, #22c55e)" },
-  { key: "amber",   label: "Amber",   css: "linear-gradient(135deg, #f59e0b, #ef4444)" },
-  { key: "pink",    label: "Pink",    css: "linear-gradient(135deg, #ec4899, #f43f5e)" },
-  { key: "slate",   label: "Slate",   css: "linear-gradient(135deg, #475569, #1e293b)" },
-];
+// Covers (spec-docs-knowledge section 2, /docs/[id]): an uploaded image, or
+// one of the eight pale hue washes from design-system 1.7 (the
+// --os-status-user-N-bg tokens). No gradients and no Unsplash hotlinks: the
+// twelve hardcoded photo ids are gone, and the six legacy gradient keys a
+// saved doc may still carry each map to the nearest wash so no cover goes
+// blank.
+const COVER_HUES: { key: string; label: string; css: string }[] = Array.from({ length: 8 }, (_, i) => ({
+  key: `hue-${i + 1}`,
+  label: `Wash ${i + 1}`,
+  css: `var(--os-status-user-${i + 1}-bg)`,
+}));
+const LEGACY_COVER_KEY: Record<string, string> = { indigo: "hue-1", blue: "hue-1", teal: "hue-2", amber: "hue-4", pink: "hue-6", slate: "hue-7" };
 
 function gradientCSS(key?: string): string {
-  return COVER_GRADIENTS.find((g) => g.key === key)?.css ?? COVER_GRADIENTS[0].css;
+  const k = key && LEGACY_COVER_KEY[key] ? LEGACY_COVER_KEY[key] : key;
+  return COVER_HUES.find((g) => g.key === k)?.css ?? COVER_HUES[0].css;
 }
-
-// Curated cover-image gallery — work / focus / calm photos from the Unsplash
-// CDN (stable, free, no API key; Unsplash license permits hotlinking). The
-// picsum seeds this replaces returned random, often-failing thumbnails. The
-// full cover uses a wide crop; the picker shows a small one.
-const COVER_IMAGES: { id: string; label: string }[] = [
-  { id: "1499750310107-5fef28a66643", label: "Focused desk" },
-  { id: "1497215728101-856f4ea42174", label: "Modern office" },
-  { id: "1524758631624-e2822e304c36", label: "Workspace" },
-  { id: "1531403009284-440f080d1e12", label: "Collaboration" },
-  { id: "1454165804606-c3d57bc86b40", label: "Planning" },
-  { id: "1497436072909-60f360e1d4b1", label: "Forest light" },
-  { id: "1470071459604-3b5ec3a7fe05", label: "Calm mountains" },
-  { id: "1506905925346-21bda4d32df4", label: "Mountain lake" },
-  { id: "1441974231531-c6227db76b6e", label: "Quiet forest" },
-  { id: "1557682250-33bd709cbe85", label: "Soft gradient" },
-  { id: "1451187580459-43490279c0fa", label: "Deep focus" },
-  { id: "1519681393784-d120267933ba", label: "Night sky" },
-];
-const coverImageUrl = (id: string, w: number, h: number) =>
-  `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&h=${h}&q=70`;
 
 interface Props {
   docId: string;
@@ -204,7 +204,9 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // open at a time so they never overlap or fight for focus. The
   // Comments variant carries the block id it belongs to.
   const [panel, setPanel] = useState<null | { kind: "ask" } | { kind: "history" } | { kind: "comments"; blockId: string }>(null);
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  // "Show outline" is remembered per user in home.docs.outline (off until
+  // asked for). null = not toggled this session, so the preference decides.
+  const [outlineOverride, setOutlineOverride] = useState<boolean | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [favorited, setFavorited] = useState<boolean | null>(null);
   const [readingMode, setReadingMode] = useState(false);
@@ -213,9 +215,42 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // Per-doc role from GET /api/docs/[id] (settings.docSharing). Missing
   // myRole (older cached responses) defaults to "edit" — zero behavior
   // change for existing docs.
-  const [myRole, setMyRole] = useState<"edit" | "view">("edit");
+  // "comment" = a locked doc below Full access (change request A4): the
+  // content is read-only, the comment composer stays.
+  const [myRole, setMyRole] = useState<"edit" | "comment" | "view">("edit");
   const [shareOpen, setShareOpen] = useState(false);
   const shareBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Lock page (change request A4), Full access, the anchor and the owner,
+  // all from GET /api/docs/[id].
+  const [lock, setLock] = useState<DocLock | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [location, setLocation] = useState<{ type: string; name: string; icon: string | null; color: string | null; href: string | null } | null>(null);
+  const [parentDoc, setParentDoc] = useState<{ id: string; title: string } | null>(null);
+  const [owner, setOwner] = useState<{ id: string; name: string | null } | null>(null);
+  // The AutosaveIndicator (design-system 5.17) observes persist(); it never
+  // changes what persist() does. `saveStuck` holds the retry after the
+  // budget is spent, so the word becomes "Not saved" with a Retry link.
+  const [saveStatus, setSaveStatus] = useState<AutosaveStatus>("idle");
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [saveStuck, setSaveStuck] = useState<(() => void) | null>(null);
+  const [serverUpdatedAt, setServerUpdatedAt] = useState<string | null>(null);
+  // The local draft mirror ("workwrk:draft:doc:<id>"), written before every
+  // save and cleared on a 200; the restore strip renders when it is newer
+  // than the server row.
+  const draft = useLocalDraft<DraftPayload>("doc", docId, serverUpdatedAt);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const { railApps, prefs, patchPrefs } = useOsShell();
+  const aiOn = railApps.some((a) => a.key === "ai");
+  const outlineOpen = outlineOverride ?? readDocsOutline(prefs.home);
+  const setOutlineOpen = useCallback((next: boolean) => {
+    setOutlineOverride(next);
+    void patchPrefs({ home: { docs: { outline: next } } });
+  }, [patchPrefs]);
+  const viewer = useViewer();
+  const fmt = useFormat();
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null);
+  const morePanelRef = useRef<HTMLDivElement | null>(null);
   // Subpage tree data — used ONLY for the breadcrumb ancestor chain here.
   // The page tree itself lives in the DOCS SIDEBAR (Notion-style nesting),
   // not in a second in-editor panel. Peek panes (null) skip the fetch.
@@ -223,7 +258,6 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // Ref on the content column so the bottom word-count pill can pin
   // itself to the column's left edge.
   const contentColRef = useRef<HTMLDivElement | null>(null);
-  const inSplit = !!searchParams.get("peek");
 
   // Load current user for the comment author identity.
   useEffect(() => {
@@ -287,8 +321,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   useEffect(() => {
     if (!moreOpen) return;
     function onDocClick(e: MouseEvent) {
-      const t = e.target as Element | null;
-      if (!t || !t.closest(".bdoc__more")) setMoreOpen(false);
+      const t = e.target as Node | null;
+      if (!t) return;
+      if (moreBtnRef.current?.contains(t) || morePanelRef.current?.contains(t)) return;
+      setMoreOpen(false);
     }
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") setMoreOpen(false); }
     document.addEventListener("mousedown", onDocClick);
@@ -299,13 +335,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     };
   }, [moreOpen]);
 
-  // Register this note with the open-note tab strip (DocTabsBar). Fires on
-  // load and whenever the title or icon changes, so the tab stays in sync.
-  // Only the primary editor announces tabs — peek panes don't open a tab.
+  // Register this doc with the open-doc strip (DocTabsBar). Fires on load and
+  // whenever the title or icon changes, so the tab stays in sync. Only the
+  // primary pane announces a tab: a peek pane never opens one.
   useEffect(() => {
     if (!doc || pane === "peek") return;
     window.dispatchEvent(new CustomEvent("workwrk:doc-tab:open", {
-      detail: { id: docId, title: title || "Untitled note", icon: meta.icon },
+      detail: { id: docId, title: title || "Untitled doc", icon: meta.icon },
     }));
   }, [doc, pane, docId, title, meta.icon]);
 
@@ -324,33 +360,6 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     return () => { cancelled = true; };
   }, [docId]);
 
-  async function toggleFavorite() {
-    const optimistic = !(favorited ?? false);
-    setFavorited(optimistic);
-    try {
-      // Phase 82 — use the focused /api/me/favorites/docs endpoint so
-      // we benefit from its atomic set semantics + the sidebar refresh
-      // event. The old GET+PATCH dance via /api/preferences had a race
-      // when multiple toggles fired simultaneously.
-      const res = await fetch("/api/me/favorites/docs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ docId, on: optimistic }),
-      });
-      if (!res.ok) {
-        setFavorited(!optimistic);
-        toast("Couldn't update favorite");
-        return;
-      }
-      if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
-      }
-      toast(optimistic ? "Starred" : "Removed from favorites");
-    } catch {
-      setFavorited(!optimistic);
-      toast("Couldn't update favorite");
-    }
-  }
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The doc's updatedAt as last observed by this tab. Each PUT echoes
   // the new value; the next PUT carries it back so the server can
@@ -360,6 +369,10 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // title actually changes, not on every body-autosave.
   const lastSyncedTitleRef = useRef<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  // While a 409 is unanswered the editor stops sending. See
+  // src/lib/save-conflict.ts for why: the old behaviour re-sent the buffer and
+  // destroyed the other person's committed version without saying a word.
+  const conflictHoldRef = useRef(noConflict);
 
   const refetchComments = useCallback(async () => {
     try {
@@ -382,7 +395,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         const d: DocPayload = data.doc ?? data;
         setDoc(d);
         setTitle(d.title ?? "");
-        setMyRole(data.myRole === "view" ? "view" : "edit");
+        setMyRole(data.myRole === "view" ? "view" : data.myRole === "comment" ? "comment" : "edit");
+        setLock(data.lock ?? null);
+        setCanManage(!!data.canManage);
+        setLocation(data.location ?? null);
+        setParentDoc(data.parent ?? null);
+        setOwner(data.owner ?? null);
+        setServerUpdatedAt(d.updatedAt ?? null);
         lastUpdatedAtRef.current = d.updatedAt ?? null;
         const c = d.content;
         setMeta((c?.meta as DocMeta) ?? {});
@@ -491,12 +510,25 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     // View-only members never fire PUTs — the server would 403 every
     // attempt and the retry loop would burn 4 tries + a scary save toast.
     // Ref read (not a closure) so the guard is never stale.
-    if (myRoleRef.current === "view") return;
+    if (myRoleRef.current !== "edit") return;
+    // A 409 nobody has answered yet: keep mirroring to the local draft so not
+    // one keystroke is lost, but do not overwrite the version that beat us.
+    // The ConflictStrip is on screen and the indicator reads unsaved, so this
+    // is a visible hold, never a silent drop.
+    if (!canSend(conflictHoldRef.current)) {
+      draftRef.current.write({ title: titleRef.current, bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta });
+      setSaveStatus("dirty");
+      return;
+    }
     if (saveInFlightRef.current) {
       pendingPersistRef.current = { bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta, excerpt: nextExcerpt };
       return;
     }
     saveInFlightRef.current = true;
+    // The indicator and the draft mirror observe the save; nothing below
+    // changes the retry, keepalive or 409 behaviour of the path itself.
+    setSaveStatus("saving");
+    if (attempt === 0) draftRef.current.write({ title: titleRef.current, bnDoc: nextBnDoc, blocks: nextBlocks, meta: nextMeta });
     try {
       const text = (nextExcerpt ?? nextBlocks
         .map((b) => "text" in b ? (b as { text: string }).text : "")
@@ -518,32 +550,52 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         keepalive: attempt === 0,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: titleRef.current.trim() || "Untitled note",
+          title: titleRef.current.trim() || "Untitled doc",
           content,
           excerpt: text || null,
           knownUpdatedAt: lastUpdatedAtRef.current,
         }),
       });
       if (res.status === 409) {
-        // Recover instead of dropping the edit: re-sync to the server's current
-        // version, then re-save our content once. Only a still-conflicting
-        // retry surfaces the banner (a genuine concurrent peer edit).
-        if (attempt < 1) {
-          try {
-            const fresh = await fetch(`/api/docs/${docId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
-            const live = fresh?.doc?.updatedAt ?? fresh?.updatedAt ?? null;
-            if (live) lastUpdatedAtRef.current = live;
-          } catch { /* ignore */ }
-          setTimeout(() => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, attempt + 1); }, 150);
-          return;
-        }
+        // Somebody else committed a version while this one was being typed.
+        // Every save of ours updates lastUpdatedAtRef and only one is ever in
+        // flight, so a 409 here is always a real peer, never our own stale
+        // timestamp. It is NOT re-sent: re-sending is what silently destroyed
+        // the peer's version. Hold the writes, raise the strip, keep the draft.
+        try {
+          const fresh = await fetch(`/api/docs/${docId}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+          const live = fresh?.doc?.updatedAt ?? fresh?.updatedAt ?? null;
+          if (live) { lastUpdatedAtRef.current = live; setServerUpdatedAt(live); }
+        } catch { /* the strip does not need the timestamp to be right */ }
+        conflictHoldRef.current = onConflict();
         setConflict(true);
+        setSaveStatus("dirty");
+        // The header's Retry is the same deliberate "mine wins" the strip's
+        // Dismiss is, so the person always has a way through.
+        setSaveStuck(() => () => {
+          conflictHoldRef.current = onDismissConflict();
+          setConflict(false);
+          void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0);
+        });
+        return;
+      }
+      if (res.status === 403) {
+        // Read-only, or locked since the page loaded: retrying cannot help,
+        // and the draft holds the typed text. Say so once.
+        setSaveStatus("error");
+        setSaveStuck(() => () => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0); });
+        const err = await res.json().catch(() => null);
+        toast(err?.message ?? "You need Can edit for that. Ask the owner.", { tone: "danger" });
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => null);
-      if (data?.doc?.updatedAt) lastUpdatedAtRef.current = data.doc.updatedAt;
-      const savedTitle = titleRef.current.trim() || "Untitled note";
+      if (data?.doc?.updatedAt) { lastUpdatedAtRef.current = data.doc.updatedAt; setServerUpdatedAt(data.doc.updatedAt); }
+      setSaveStatus("saved");
+      setLastSavedAt(new Date());
+      setSaveStuck(null);
+      draftRef.current.clear();
+      const savedTitle = titleRef.current.trim() || "Untitled doc";
       if (savedTitle !== lastSyncedTitleRef.current) {
         lastSyncedTitleRef.current = savedTitle;
         refreshSidebar();
@@ -552,10 +604,13 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       // Network failure or a >64KB keepalive rejection — retry with backoff
       // (dropping keepalive won't matter for in-editor autosaves) so a
       // transient failure never silently loses the edit. Mandate: never drop.
+      setSaveStatus("error");
       if (attempt < 3) {
         setTimeout(() => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, attempt + 1); }, 800 * Math.pow(2, attempt));
       } else {
-        toast("Couldn't save — check your connection and keep this tab open");
+        const retry = () => { void persist(nextBnDoc, nextBlocks, nextMeta, nextExcerpt, 0); };
+        setSaveStuck(() => retry);
+        toast("Not saved. Check your connection and keep this tab open.", { tone: "danger", action: { label: "Retry", onClick: retry } });
       }
     }
     finally {
@@ -566,6 +621,36 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       if (queued) void persist(queued.bnDoc, queued.blocks, queued.meta, queued.excerpt);
     }
   }, [docId, toast]);
+
+  // The updatedAt check that feeds the conflict strip (spec-docs-knowledge
+  // section 2, Realtime): every 30 s while the tab is visible, a read of the
+  // row's updatedAt; when it has moved past what this tab last saw and no
+  // save of ours is in flight, someone else saved. It never writes.
+  useEffect(() => {
+    if (pane !== "primary" || !doc) return;
+    const iv = setInterval(async () => {
+      if (document.visibilityState !== "visible" || saveInFlightRef.current || !lastUpdatedAtRef.current) return;
+      const r = await apiFetch<{ doc?: { updatedAt?: string } }>(`/api/docs/${docId}`, { cache: "no-store" });
+      if (!r.ok) return;
+      const live = r.data.doc?.updatedAt;
+      if (live && lastUpdatedAtRef.current && new Date(live).getTime() > new Date(lastUpdatedAtRef.current).getTime()) {
+        setConflict(true);
+      }
+    }, 30_000);
+    return () => clearInterval(iv);
+  }, [docId, pane, doc]);
+
+  // Lock page (change request A4): POST /api/docs/[id]/lock, Full access
+  // only. Unlocking also clears the legacy content flag so a doc locked the
+  // old way opens again for everyone the server allows.
+  async function toggleLock() {
+    const next = !lock;
+    const r = await apiFetch<{ lockedById: string | null; lockedAt: string | null }>(`/api/docs/${docId}/lock`, { method: "POST", json: { locked: next } });
+    if (!r.ok) { toast(r.error || "Couldn't change the lock", { tone: "danger" }); return; }
+    setLock(next ? { byId: r.data.lockedById ?? (me?.id ?? ""), byName: me ? [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || null : null, at: r.data.lockedAt } : null);
+    if (!next && meta.locked) void saveMeta({ locked: undefined });
+    toast(next ? "Page locked" : "Page unlocked");
+  }
 
   // Called by BlockNoteCanvas on every (debounced) edit. We update both the
   // BN source of truth and the derived legacy mirror, then persist.
@@ -637,6 +722,32 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     else toast("Couldn't create page");
   }
 
+  // The doc page chords (spec-docs-knowledge section 2, Keyboard): cmd L copy
+  // link, cmd D duplicate, cmd S save now, cmd shift C comments, cmd shift A
+  // Ask AI. cmd 1..9 no longer switch doc tabs; the hubs own G 1..8.
+  useEffect(() => {
+    if (pane !== "primary") return;
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const k = e.key.toLowerCase();
+      if (k === "l" && !e.shiftKey) { e.preventDefault(); copyLink(); }
+      else if (k === "s" && !e.shiftKey) { e.preventDefault(); if (myRoleRef.current === "edit") void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current); }
+      else if (k === "d" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        void (async () => {
+          const r = await apiFetch<{ doc?: { id: string } }>(`/api/docs/${docId}/duplicate`, { method: "POST" });
+          if (r.ok && r.data.doc?.id) router.push(`/docs/${r.data.doc.id}`); else toast("Couldn't duplicate", { tone: "danger" });
+        })();
+      }
+      else if (k === "c" && e.shiftKey) { e.preventDefault(); setCommentOpen(true); }
+      else if (k === "a" && e.shiftKey && aiOn) { e.preventDefault(); setPanel((p) => (p?.kind === "ask" ? null : { kind: "ask" })); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane, docId, aiOn]);
+
   // Copy the whole page as Markdown — reuses the export endpoint so the
   // clipboard content matches an exported file exactly.
   async function copyContents() {
@@ -647,18 +758,6 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
       await navigator.clipboard.writeText(text);
       toast("Page contents copied");
     } catch { toast("Couldn't copy contents"); }
-  }
-
-  // Soft-archive (DELETE = move to Trash; the row + versions persist).
-  async function trashDoc() {
-    if (!(await confirm({ title: "Move to Trash", description: "Move this note to Trash? You can restore it later.", destructive: true, confirmLabel: "Move to Trash" }))) return;
-    try {
-      const res = await fetch(`/api/docs/${docId}`, { method: "DELETE" });
-      if (!res.ok) { toast("Couldn't move to Trash"); return; }
-      notifyDocsChanged();
-      toast("Moved to Trash");
-      router.push("/docs");
-    } catch { toast("Couldn't move to Trash"); }
   }
 
   const [summarizing, setSummarizing] = useState(false);
@@ -700,18 +799,29 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
     finally { setExtracting(false); }
   }
 
+  // The BackButton target (spec-docs-knowledge section 1, Back / close):
+  // /docs/[parentId] for a sub-doc, else the anchor page for an anchored
+  // doc, else /docs. The label is the parent's name.
+  const backTarget = parentDoc
+    ? { href: `/docs/${parentDoc.id}`, label: parentDoc.title || "Untitled doc" }
+    : location?.href
+      ? { href: location.href, label: location.name }
+      : { href: "/docs", label: "Docs" };
+
   if (loadError) {
     return (
-      <div className="bdoc__error">
-        <p>Couldn&apos;t load doc: {loadError}</p>
+      <div className="os-chrome mx-auto flex max-w-md flex-col items-center gap-3 px-6 pt-16 text-center">
+        <p className="text-row text-ink-2">Couldn&apos;t open this doc</p>
+        <button type="button" onClick={() => window.location.reload()} className="text-base font-medium text-brand-deep hover:underline">Retry</button>
         <BackButton fallbackHref="/docs" label="Docs" />
       </div>
     );
   }
   if (!doc) {
     return (
-      <div className="bdoc__loading">
-        <SkeletonRows rows={6} />
+      <div className="os-prose-col os-chrome flex flex-col gap-3 px-6 pt-10" aria-busy="true" aria-label="Loading">
+        <span className="h-6 w-[60%] rounded bg-skeleton os-skeleton-pulse" />
+        {["80%", "60%", "40%", "80%", "60%", "70%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}
       </div>
     );
   }
@@ -720,11 +830,11 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
   // open deleted pages as if nothing happened. Offer restore or a way out.
   if (doc.archivedAt) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-24 px-6 text-center">
-        <Trash2 className="w-8 h-8 text-zinc-300" />
-        <p className="text-base font-semibold text-zinc-900">This page is in Trash</p>
-        <p className="max-w-sm text-base leading-snug text-zinc-500">
-          &ldquo;{doc.title || "Untitled"}&rdquo; was deleted. Restore it to keep editing, or head back to your docs.
+      <div className="os-chrome flex flex-col items-center justify-center gap-3 px-6 py-24 text-center">
+        <Trash2 className="h-8 w-8 text-ink-3" strokeWidth={1.5} aria-hidden />
+        <p className="text-row font-medium text-ink">This doc is in the Trash</p>
+        <p className="max-w-sm text-base leading-snug text-ink-2">
+          &ldquo;{doc.title || "Untitled doc"}&rdquo; was moved to Trash. Restore it to keep editing.
         </p>
         <div className="mt-2 flex items-center gap-2">
           <button
@@ -742,17 +852,12 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
                 setRestoring(false);
               }
             }}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-zinc-900 px-3 text-base font-semibold text-white hover:bg-zinc-800 disabled:opacity-60"
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-brand px-4 text-base font-medium text-white hover:bg-brand-hover disabled:opacity-60"
           >
             {restoring ? <Dots variant="pending" /> : null}
-            Restore page
+            Restore
           </button>
-          <Link
-            href="/docs"
-            className="inline-flex h-8 items-center rounded-md border border-zinc-200 px-3 text-base font-medium text-zinc-700 hover:bg-zinc-50"
-          >
-            Back to Docs
-          </Link>
+          <BackButton fallbackHref="/docs" label="Docs" />
         </div>
       </div>
     );
@@ -765,9 +870,24 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
 
   return (
     <>
-    <ImageLightbox />
-    <KeyboardShortcutsOverlay />
-    <LinkPromptOverlay />
+    {/* The bar's location row (spec-shell 2.1): "Docs › {anchor or parent
+        doc} › {title}"; anchored docs read "Work › {Space} › {doc}" through
+        the anchor's own href. The last crumb is the title, not clickable. */}
+    {pane === "primary" ? (
+      <Breadcrumb
+        items={[
+          // The bar prepends the hub crumb ("Docs") itself, so this declares
+          // only what comes after it: the anchor or the parent doc, then the
+          // title. A "Docs" crumb here read as "Docs > Docs > {title}".
+          ...(location?.href
+            ? [{ label: location.name, href: location.href }]
+            : parentDoc
+              ? [{ label: parentDoc.title || "Untitled doc", href: `/docs/${parentDoc.id}` }]
+              : []),
+          { label: title || "Untitled doc" },
+        ]}
+      />
+    ) : null}
     <div
       className={[
         "bdoc",
@@ -778,239 +898,191 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         meta.locked && !readingMode ? "bdoc--locked" : "",
       ].filter(Boolean).join(" ")}
     >
-      <header className="bdoc__head">
-        {/* ClickUp breadcrumb: "Docs / [icon] Title ☆" on the left. Peek
-            panes keep it minimal — DocSplitView provides Close + Swap. */}
-        {pane !== "peek" && (
-          <div className="flex min-w-0 items-center gap-1.5">
-            <BackButton fallbackHref="/docs" label="Docs" />
-            <button
-              type="button"
-              onClick={() => void addSubpage()}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-base font-medium text-[var(--os-ink-3)] hover:bg-[var(--os-surface-1)] hover:text-[var(--os-ink-2)]"
-            >
-              <FilePlus className="h-3.5 w-3.5" /> Add subpage
-            </button>
-            <Link href="/docs" className="text-base font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] shrink-0">
-              Docs
-            </Link>
-            <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
-            {/* Ancestor chain — root … direct parent. Long chains collapse to
-                "first / … / parent" so the breadcrumb never overflows. */}
-            {(tree.ancestors.length > 2
-              ? [tree.ancestors[0], null, tree.ancestors[tree.ancestors.length - 1]]
-              : tree.ancestors
-            ).map((a, i) => a === null ? (
-              <Fragment key={`bc-gap-${i}`}>
-                <span className="text-base text-[var(--os-ink-3)]" aria-hidden>…</span>
-                <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
-              </Fragment>
-            ) : (
-              <Fragment key={a.id}>
-                <Link
-                  href={`/docs/${a.id}`}
-                  className="text-base font-medium text-[var(--os-ink-2)] hover:text-[var(--os-ink)] truncate max-w-[140px]"
-                >
-                  {a.title || "Untitled"}
-                </Link>
-                <span className="text-[var(--os-ink-3)] mx-0.5" aria-hidden>/</span>
-              </Fragment>
-            ))}
-            <span className="inline-flex h-[15px] w-[15px] shrink-0 items-center justify-center [&_svg]:h-[15px] [&_svg]:w-[15px]">
-              {meta.icon ? renderNoteIcon(meta.icon) : <FileText className="text-[var(--os-ink-3)]" />}
-            </span>
-            <span className="truncate max-w-[320px] text-base font-semibold text-[var(--os-ink)]">
-              {title || "Untitled note"}
-            </span>
-            <button
-              type="button"
-              onClick={toggleFavorite}
-              title={favorited ? "Remove from favorites" : "Add to favorites"}
-              aria-pressed={!!favorited}
-              aria-label="Favorite"
-              className={`h-6 w-6 grid place-items-center rounded-md shrink-0 hover:bg-[var(--os-surface-1)] ${favorited ? "text-amber-500" : "text-[var(--os-ink-3)]"}`}
-            >
-              <Star className={`h-3.5 w-3.5 ${favorited ? "fill-amber-400" : ""}`} />
-            </button>
-          </div>
-        )}
+      <header className="bdoc__head os-chrome">
+        {/* Title row (design-system 4.4, doc pages): BackButton + the
+            AutosaveIndicator at the left; Ask AI, Share or the role chip,
+            Comments and the bordered "..." at the right. Peek panes keep the
+            indicator only; DocSplitView owns their header. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          {pane !== "peek" ? <BackButton fallbackHref={backTarget.href} label={backTarget.label} /> : null}
+          <AutosaveIndicator status={saveStatus} lastSavedAt={lastSavedAt} onRetry={saveStuck ?? undefined} />
+        </div>
 
-        {/* Right cluster: labeled Ask + dark Share, then quiet icon controls. */}
         <div className="bdoc__head-actions">
-          <button
-            type="button"
-            className={`bdoc__iact ${readingMode ? "is-on" : ""}`}
-            onClick={() => setReadingMode((r) => !r)}
-            title={readingMode ? "Switch back to editing" : "Reading mode"}
-            aria-pressed={readingMode}
-            aria-label="Reading mode"
-          >
-            <BookOpen />
-          </button>
-          <button
-            type="button"
-            className={`bdoc__iact ${outlineOpen ? "is-on" : ""}`}
-            onClick={() => setOutlineOpen((s) => !s)}
-            title={outlineOpen ? "Hide outline" : "Show outline"}
-            aria-pressed={outlineOpen}
-            aria-label="Outline"
-          >
-            <ListTree />
-          </button>
-          <span className="bdoc__iact-sep" aria-hidden />
-          {/* ClickUp order: labeled Ask ghost + dark Share pill, then icons. */}
-          <button
-            type="button"
-            onClick={() => setPanel(panel?.kind === "ask" ? null : { kind: "ask" })}
-            title="Chat with this note"
-            className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-base font-semibold hover:bg-[var(--os-surface-1)] ${panel?.kind === "ask" ? "text-[var(--os-brand)]" : "text-[var(--os-ink-2)]"}`}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> Ask
-          </button>
-          <button
-            type="button"
-            ref={shareBtnRef}
-            onClick={() => setShareOpen((s) => !s)}
-            title="Share"
-            aria-haspopup="dialog"
-            aria-expanded={shareOpen}
-            className="inline-flex h-7 items-center rounded-md bg-zinc-900 px-3 text-base font-semibold text-white hover:bg-zinc-800"
-          >
-            Share
-          </button>
+          {pane !== "peek" && aiOn ? (
+            <button
+              type="button"
+              onClick={() => setPanel(panel?.kind === "ask" ? null : { kind: "ask" })}
+              title="Ask AI (⌘⇧A)"
+              aria-pressed={panel?.kind === "ask"}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
+            >
+              <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Ask AI
+            </button>
+          ) : null}
+          {pane !== "peek" ? (
+            <span ref={shareBtnRef as React.RefObject<HTMLSpanElement | null>} className="inline-flex">
+              <ShareOrRoleChip role={canManage ? "FULL" : myRole === "view" ? "VIEW" : myRole === "comment" ? "COMMENT" : "EDIT"} onOpen={() => setShareOpen(true)} />
+            </span>
+          ) : null}
           <DocShareModal
             docId={docId}
-            docTitle={title || "Untitled note"}
+            docTitle={title || "Untitled doc"}
             createdById={doc.createdById ?? null}
             meId={me?.id ?? null}
             open={shareOpen}
             onClose={() => setShareOpen(false)}
             anchorRef={shareBtnRef}
-            viewerRole={myRole}
+            // The modal writes the member map only for Full access, the same
+            // rule the chip above renders (Can edit shares only under toggle
+            // 4, which no surface reads yet); everyone else gets it read-only.
+            viewerRole={canManage ? "edit" : "view"}
           />
           <button
             type="button"
-            className={`bdoc__iact ${panel?.kind === "history" ? "is-on" : ""}`}
-            onClick={() => setPanel(panel?.kind === "history" ? null : { kind: "history" })}
-            title="Version history"
-            aria-label="History"
+            onClick={() => setCommentOpen(true)}
+            title="Comments (⌘⇧C)"
+            aria-label="Comments"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
           >
-            <History />
+            <MessageSquare className="h-4 w-4" strokeWidth={1.5} aria-hidden />
           </button>
+          <button
+            ref={moreBtnRef}
+            type="button"
+            onClick={() => setMoreOpen((m) => !m)}
+            title="More"
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            aria-label="More"
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-md border border-line-strong text-ink-2 hover:bg-hover hover:text-ink ${moreOpen ? "bg-active text-ink" : ""}`}
+          >
+            <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+          </button>
+          <MorePortal anchorRef={moreBtnRef} panelRef={morePanelRef} width={260} open={moreOpen} placement="below">
+            <DocRowMenu
+              doc={{ id: docId, title, parentId: doc.parentId ?? null, entityType: doc.entityType ?? null, entityId: doc.entityId ?? null, favorite: !!favorited, role: canManage ? "full" : myRole, own: !!doc.createdById && doc.createdById === me?.id }}
+              context="editor"
+              onClose={() => setMoreOpen(false)}
+              onChanged={(kind) => { if (kind === "favorited") setFavorited((f) => !(f ?? false)); if (kind === "renamed" || kind === "moved") window.location.reload(); }}
+              onShare={() => setShareOpen(true)}
+              onRenameInline={() => { titleInputRef.current?.focus(); titleInputRef.current?.select(); }}
+              extraRows={
+                <>
+                  <MenuItem icon={ClipboardCopy} label="Copy page contents" onClick={() => { setMoreOpen(false); void copyContents(); }} />
+                  {pane !== "peek" ? <MenuItem icon={PanelRightOpen} label="Open another doc beside" onClick={() => { setMoreOpen(false); setPeekPickerOpen(true); }} /> : null}
+                  <MenuItem icon={ListTree} label="Show outline" selected={outlineOpen} onClick={() => { setOutlineOpen(!outlineOpen); }} />
+                  <MenuItem icon={BookOpen} label="Reading mode" selected={readingMode} onClick={() => { setMoreOpen(false); setReadingMode((r) => !r); }} />
+                  <MenuSeparator />
+                  {myRole === "edit" ? (
+                    <MenuSubmenu icon={TypeIcon} label="Page options" width={220}>
+                      <MenuItem label="System" leading={<span className="w-4 text-center text-xs font-medium text-ink-2">Aa</span>} selected={(meta.font ?? "default") === "default"} onClick={() => void saveMeta({ font: "default" })} />
+                      <MenuItem label="Serif" leading={<span className="w-4 text-center font-serif text-xs font-medium text-ink-2">Ss</span>} selected={meta.font === "serif"} onClick={() => void saveMeta({ font: "serif" })} />
+                      <MenuItem label="Mono" leading={<span className="w-4 text-center font-mono text-xs font-medium text-ink-2">00</span>} selected={meta.font === "mono"} onClick={() => void saveMeta({ font: "mono" })} />
+                      <MenuSeparator />
+                      <MenuItem icon={TypeIcon} label="Small text" selected={!!meta.smallText} onClick={() => void saveMeta({ smallText: !meta.smallText })} />
+                      <MenuItem icon={MoveHorizontal} label="Full width" selected={!!meta.fullWidth} onClick={() => void saveMeta({ fullWidth: !meta.fullWidth })} />
+                      {canManage ? <MenuItem icon={Lock} label="Lock page" selected={!!lock || !!meta.locked} onClick={() => { setMoreOpen(false); void toggleLock(); }} /> : null}
+                    </MenuSubmenu>
+                  ) : null}
+                  {!viewer.isAgent && viewer.orgRole !== "GUEST" ? <MenuItem icon={Download} label="Export as Markdown" onClick={() => { setMoreOpen(false); window.location.href = `/api/docs/${docId}/export?format=md`; }} /> : null}
+                  {/* Version history is FULL and EDIT only (spec-docs-knowledge section 2, /docs/[id]); a Can comment or Can view holder never sees the row. */}
+                  {myRole === "edit" ? <MenuItem icon={History} label="Version history" onClick={() => { setMoreOpen(false); setPanel({ kind: "history" }); }} /> : null}
+                </>
+              }
+            />
+          </MorePortal>
 
-          {/* Open another doc in a side pane. Hidden on peek panes — the
-              surrounding DocSplitView's own toolbar already lets the
-              writer swap or close from there. */}
-          {pane !== "peek" && (
+          {/* "Open another doc beside": the picker the menu row opens. */}
+          {pane !== "peek" && peekPickerOpen && (
             <div className="bdoc__peek-wrap">
-              <button
-                type="button"
-                className={`bdoc__iact bdoc__iact--peek ${peekPickerOpen ? "is-on" : ""}`}
-                onClick={() => setPeekPickerOpen((s) => !s)}
-                title="Open another note side-by-side"
-                aria-haspopup="dialog"
-                aria-expanded={peekPickerOpen}
-                aria-label="Open side pane"
-              >
-                <PanelRightOpen />
-              </button>
-              {peekPickerOpen && (
-                <div className="bdoc__peek-picker" role="dialog" aria-label="Pick a note to open in side pane">
-                  <div className="bdoc__peek-search">
-                    <Search />
-                    <input
-                      type="text"
-                      autoFocus
-                      placeholder="Search notes…"
-                      value={peekQuery}
-                      onChange={(e) => setPeekQuery(e.target.value)}
-                    />
-                  </div>
-                  <div className="bdoc__peek-list">
-                    {peekDocs === null ? (
-                      <div className="bdoc__peek-empty"><Dots variant="pending" /> Loading notes…</div>
-                    ) : (() => {
-                      const q = peekQuery.trim().toLowerCase();
-                      const rows = q
-                        ? peekDocs.filter((d) => (d.title || "").toLowerCase().includes(q))
-                        : peekDocs.slice(0, 12);
-                      if (rows.length === 0) {
-                        return <div className="bdoc__peek-empty">No matches</div>;
-                      }
-                      return rows.map((d) => (
-                        <button
-                          key={d.id}
-                          type="button"
-                          className="bdoc__peek-row"
-                          onClick={() => openPeek(d.id)}
-                        >
-                          <FileText />
-                          <span className="bdoc__peek-title">{d.title || "Untitled note"}</span>
-                        </button>
-                      ));
-                    })()}
-                  </div>
-                  {searchParams.get("peek") && (
-                    <button
-                      type="button"
-                      className="bdoc__peek-close-current"
-                      onClick={() => { setPeekPickerOpen(false); router.push(`/docs/${docId}`); }}
-                    >
-                      <X /> Close current side pane
-                    </button>
-                  )}
+              <div className="bdoc__peek-picker" role="dialog" aria-label="Pick a doc to open beside this one">
+                <div className="bdoc__peek-search">
+                  <Search />
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Search docs"
+                    value={peekQuery}
+                    onChange={(e) => setPeekQuery(e.target.value)}
+                  />
                 </div>
-              )}
+                <div className="bdoc__peek-list">
+                  {peekDocs === null ? (
+                    <div className="flex flex-col gap-2 px-3 py-2" aria-busy="true" aria-label="Loading">{["70%", "50%", "60%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}</div>
+                  ) : (() => {
+                    const q = peekQuery.trim().toLowerCase();
+                    const rows = q
+                      ? peekDocs.filter((d) => (d.title || "").toLowerCase().includes(q))
+                      : peekDocs.slice(0, 12);
+                    if (rows.length === 0) {
+                      return <div className="bdoc__peek-empty">No matches</div>;
+                    }
+                    return rows.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        className="bdoc__peek-row"
+                        onClick={() => openPeek(d.id)}
+                      >
+                        <FileText />
+                        <span className="bdoc__peek-title">{d.title || "Untitled doc"}</span>
+                      </button>
+                    ));
+                  })()}
+                </div>
+                {searchParams.get("peek") && (
+                  <button
+                    type="button"
+                    className="bdoc__peek-close-current"
+                    onClick={() => { setPeekPickerOpen(false); router.push(`/docs/${docId}`); }}
+                  >
+                    <X /> Close the pane
+                  </button>
+                )}
+              </div>
             </div>
           )}
-
-          {/* More menu: secondary AI + power-user actions go here so the
-              header stays calm at first glance. */}
-          <div className="bdoc__more">
-            <button
-              type="button"
-              className={`bdoc__iact ${moreOpen ? "is-on" : ""}`}
-              onClick={() => setMoreOpen((m) => !m)}
-              title="More actions"
-              aria-haspopup="menu"
-              aria-expanded={moreOpen}
-              aria-label="More"
-            >
-              <MoreHorizontal />
-            </button>
-            {moreOpen && (
-              <PageActionsMenu
-                meta={meta}
-                blocks={blocks}
-                doc={doc}
-                me={me}
-                summary={summary}
-                summarizing={summarizing}
-                extracting={extracting}
-                onClose={() => setMoreOpen(false)}
-                onSetMeta={(patch) => void saveMeta(patch)}
-                onCopyLink={copyLink}
-                onCopyContents={() => void copyContents()}
-                onExport={() => { window.location.href = `/api/docs/${docId}/export?format=md`; }}
-                onDuplicate={async () => {
-                  try {
-                    const res = await fetch(`/api/docs/${docId}/duplicate`, { method: "POST" });
-                    if (!res.ok) { toast("Couldn't duplicate"); return; }
-                    const d = await res.json();
-                    const id = d.doc?.id ?? d.data?.id ?? d.id;
-                    if (id) router.push(`/docs/${id}`);
-                  } catch { toast("Couldn't duplicate"); }
-                }}
-                onTrash={() => void trashDoc()}
-                onSummarize={() => void summarize()}
-                onExtractTable={() => void extractTable()}
-                onVersionHistory={() => setPanel({ kind: "history" })}
-                onShortcuts={() => window.dispatchEvent(new CustomEvent("workwrk:notes:shortcuts"))}
-              />
-            )}
-          </div>
         </div>
       </header>
+
+      {/* Read-only (access 5.4) and the lock (change request A4): one slim
+          strip under the title row instead of a silently read-only editor. */}
+      {pane !== "peek" && lock && !canManage ? (
+        <ReadOnlyBanner message={`Locked by ${lock.byName ?? "someone"}. Ask them to unlock.`} />
+      ) : pane !== "peek" && lock && canManage ? (
+        <ReadOnlyBanner message={`Locked by ${lock.byId === me?.id ? "you" : lock.byName ?? "someone"}. Everyone else can read and comment.`} onRequest={() => void toggleLock()} requestLabel="Unlock" />
+      ) : pane !== "peek" && myRole === "view" ? (
+        <ReadOnlyBanner ownerName={owner?.name} onRequest={() => setShareOpen(true)} />
+      ) : null}
+      {conflict ? (
+        <ConflictStrip
+          noun="doc"
+          onReload={() => window.location.reload()}
+          onDismiss={() => {
+            // "I have read it, keep going": writes resume and this version
+            // wins from here. Their version is still in the doc's history.
+            conflictHoldRef.current = onDismissConflict();
+            setConflict(false);
+            setSaveStuck(null);
+            void persist(bnDocRef.current, blocksRef.current ?? [], metaRef.current);
+          }}
+        />
+      ) : null}
+      {myRole === "edit" ? (
+        <DraftRestoreStrip
+          draft={draft}
+          onRestore={(p) => {
+            setTitle(p.title);
+            titleRef.current = p.title;
+            setBlocks(p.blocks);
+            setBnDoc(p.bnDoc);
+            setMeta(p.meta);
+            setRestoreNonce((n) => n + 1);
+            void persist(p.bnDoc, p.blocks, p.meta);
+          }}
+        />
+      ) : null}
 
       {/* Content column. The page tree lives in the docs sidebar now
           (Notion-style); the editor keeps only breadcrumbs + Add subpage. */}
@@ -1047,17 +1119,7 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         </div>
       )}
 
-      {conflict && (
-        <div className="bdoc__conflict" role="alert">
-          <span>
-            <strong>Edit conflict.</strong> Someone else updated this note while you were editing.
-            Reload to see the latest version before saving again.
-          </span>
-          <button type="button" onClick={() => window.location.reload()}>Reload</button>
-          <button type="button" className="bdoc__conflict-dismiss" onClick={() => setConflict(false)}>Dismiss</button>
-        </div>
-      )}
-      <div className={`bdoc__page mx-auto max-w-[920px] ${hasCover ? "has-cover" : ""} ${meta.icon ? "has-icon" : ""}`}>
+      <div className={`bdoc__page os-prose-col ${hasCover ? "has-cover" : ""} ${meta.icon ? "has-icon" : ""}`}>
         {/* Emoji + add-cover-row */}
         <div className="bdoc__chrome">
           {meta.icon ? (
@@ -1105,14 +1167,14 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <input
           type="text"
           ref={titleInputRef}
-          className="bdoc__title text-[40px]! font-semibold! tracking-[-0.02em]! pt-1.5! pb-2!"
+          className="bdoc__title text-xl! font-semibold! leading-7! pt-1! pb-1!"
           value={title}
           onChange={(e) => saveTitle(e.target.value)}
-          placeholder="Untitled note"
-          readOnly={readingMode || !!meta.locked || myRole === "view"}
+          placeholder="Untitled doc"
+          readOnly={readingMode || !!meta.locked || myRole !== "edit"}
         />
 
-        {blocks && <DocMetaStrip blocks={blocks} doc={doc} />}
+        {blocks && <DocMetaStrip blocks={blocks} doc={doc} ownerName={owner?.name ?? null} />}
 
         {!readingMode && (
           <PageComments docId={docId} me={me} open={commentOpen} onClose={() => setCommentOpen(false)} />
@@ -1129,33 +1191,35 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
           <div className="bdoc__legacy">
             <div className="bdoc__legacy-banner">
               <Sparkles />
-              <span>This note is in the old rich-text format.</span>
+              <span>This doc is in the old rich-text format.</span>
               <button type="button" onClick={convertLegacy}>Convert to blocks</button>
             </div>
             <div className="bdoc__legacy-body" dangerouslySetInnerHTML={{ __html: legacy }} />
           </div>
         ) : blocks === null ? (
-          <div className="bdoc__loading"><Dots variant="pending" /> Loading content…</div>
+          <div className="flex flex-col gap-3 py-4" aria-busy="true" aria-label="Loading">{["80%", "60%", "40%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}</div>
         ) : (
           // Key by docId + reading-mode + restoreNonce so the editor
           // force-remounts on doc switch, reading-mode toggle, or version
           // restore — never holds a stale in-memory document.
-          <BlockNoteCanvas
-            key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
-            initialBnDoc={bnDoc}
-            legacyBlocks={blocks}
-            readonly={readingMode || !!meta.locked || myRole === "view"}
-            onChange={handleEditorChange}
-            docId={docId}
-            onComment={(blockId) => setPanel({ kind: "comments", blockId })}
-            onAskAI={() => setPanel({ kind: "ask" })}
-          />
+          <div className="os-prose">
+            <BlockNoteCanvas
+              key={`${docId}:${readingMode ? "r" : "e"}:${meta.locked ? "l" : "u"}:${myRole}:${restoreNonce}`}
+              initialBnDoc={bnDoc}
+              legacyBlocks={blocks}
+              readonly={readingMode || !!meta.locked || myRole !== "edit"}
+              onChange={handleEditorChange}
+              docId={docId}
+              onComment={(blockId) => setPanel({ kind: "comments", blockId })}
+              onAskAI={() => setPanel({ kind: "ask" })}
+            />
+          </div>
         )}
 
         {/* Empty-doc hint row (ClickUp parity) — shown until the first real
             edit; both chips are backed (Ask panel / child-page create). It
             disappears automatically because `blocks` mirrors the canvas. */}
-        {pane === "primary" && !readingMode && !meta.locked && myRole !== "view" && legacy === null && blocks !== null &&
+        {pane === "primary" && !readingMode && !meta.locked && myRole === "edit" && legacy === null && blocks !== null &&
           (blocks.length === 0 ||
             (blocks.length === 1 && blocks[0].kind === "paragraph" && !(blocks[0] as { text: string }).text.trim())) && (
           <div
@@ -1165,25 +1229,31 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
             // child-of-child chains on every fresh page.
             className="mt-1 flex flex-wrap items-center gap-1.5"
           >
-            <button
-              type="button"
-              onClick={() => setPanel({ kind: "ask" })}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-zinc-200 px-2.5 text-base text-zinc-600 hover:bg-zinc-50"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Help me write
-            </button>
+            {aiOn ? (
+              <button
+                type="button"
+                onClick={() => setPanel({ kind: "ask" })}
+                className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink"
+              >
+                <Sparkles className="h-4 w-4" strokeWidth={1.5} aria-hidden /> Help me write
+              </button>
+            ) : null}
           </div>
         )}
+
+        {pane === "primary" ? (
+          <SubDocsList
+            rows={tree.childrenOf(docId)}
+            canEdit={myRole === "edit" && !readingMode}
+            onNew={() => void addSubpage()}
+            fmt={fmt}
+          />
+        ) : null}
 
         <BacklinksPanel kind="doc" id={docId} />
       </div>
       </div>
       </div>
-
-      {/* Bottom word-count pill — fixed at the content column's left edge. */}
-      {pane === "primary" && blocks && blocks.length > 0 && (
-        <WordCountPill blocks={blocks} containerRef={contentColRef} recomputeKey={inSplit} />
-      )}
 
       {/* Outline rail only when no slide-over panel is open and not in
           reading mode — keeps the right edge calm. */}
@@ -1191,7 +1261,15 @@ export function BlockDocEditor({ docId, pane = "primary" }: Props) {
         <OutlineRail blocks={blocks} onClose={() => setOutlineOpen(false)} />
       )}
       {panel?.kind === "ask" && (
-        <AskDocPanel docId={docId} docTitle={title} onClose={() => setPanel(null)} />
+        <AskDocPanel
+          docId={docId}
+          docTitle={title}
+          onClose={() => setPanel(null)}
+          quick={{
+            summarize: { label: summary ? "Re-summarize this doc" : "Summarize this doc", busy: summarizing, onClick: () => void summarize() },
+            extract: { label: "Extract a table", busy: extracting, onClick: () => void extractTable() },
+          }}
+        />
       )}
       {panel?.kind === "history" && (
         <VersionHistoryPanel
@@ -1416,53 +1494,16 @@ function CommentText({ text }: { text: string }) {
   );
 }
 
-// ───────── Doc meta strip (word count · read time · last edited) ─────────
-function DocMetaStrip({ blocks, doc }: { blocks: Block[]; doc: DocPayload }) {
-  const stats = useMemo(() => {
-    let words = 0;
-    for (const b of blocks) {
-      if (!("text" in b)) continue;
-      const text = (b as { text: string }).text;
-      // Strip HTML tags from text for an accurate word count.
-      const plain = text.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ");
-      words += plain.split(/\s+/).filter(Boolean).length;
-    }
-    const minutes = Math.max(1, Math.round(words / 220));
-    return { words, minutes };
-  }, [blocks]);
-
-  // ClickUp's owner row: "Last updated Today at 9:51 pm" (absolute, not
-  // relative). Same-day shows "Today at h:mm"; older shows "Mon D at h:mm".
-  const updated = useMemo(() => {
-    const d = new Date(doc.updatedAt);
-    const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    if (d.toDateString() === new Date().toDateString()) return `Today at ${time}`;
-    return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${time}`;
-  }, [doc.updatedAt]);
-
-  return (
-    <div className="bdoc__meta mb-6!">
-      <span>Last updated {updated}</span>
-      <span className="bdoc__meta-sep" aria-hidden>·</span>
-      <span>{stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}</span>
-    </div>
-  );
-}
-
-// ───────── Bottom word-count pill (ClickUp parity) ─────────
+// ───────── Meta line: "{owner} · Updated {smart date} · {n} words" ─────────
 //
-// A fixed rounded pill at the bottom-left of the content column showing the
-// live word count; clicking it opens a small stats popover (words /
-// characters / read time). Pure chrome — reads the `blocks` mirror only.
-function WordCountPill({ blocks, containerRef, recomputeKey }: {
-  blocks: Block[];
-  containerRef: React.RefObject<HTMLDivElement | null>;
-  recomputeKey: boolean;
-}) {
-  const [left, setLeft] = useState<number | null>(null);
+// The word count is a button: it opens the small stats popover (words,
+// characters, read time) that used to live in a floating pill at the bottom
+// of the page. One count on the page, not two, and the toast corner stays
+// free (design-system 5.7).
+function DocMetaStrip({ blocks, doc, ownerName }: { blocks: Block[]; doc: DocPayload; ownerName: string | null }) {
+  const fmt = useFormat();
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
   const stats = useMemo(() => {
     let words = 0;
     let chars = 0;
@@ -1475,18 +1516,6 @@ function WordCountPill({ blocks, containerRef, recomputeKey }: {
     const minutes = Math.max(1, Math.round(words / 220));
     return { words, chars, minutes };
   }, [blocks]);
-
-  // Pin to the content column's left edge; recompute on resize and whenever
-  // the Pages panel toggles (the column shifts sideways).
-  useLayoutEffect(() => {
-    const compute = () => {
-      const el = containerRef.current;
-      if (el) setLeft(el.getBoundingClientRect().left + 24);
-    };
-    compute();
-    window.addEventListener("resize", compute);
-    return () => window.removeEventListener("resize", compute);
-  }, [containerRef, recomputeKey]);
 
   useEffect(() => {
     if (!open) return;
@@ -1502,229 +1531,68 @@ function WordCountPill({ blocks, containerRef, recomputeKey }: {
     };
   }, [open]);
 
-  if (left === null) return null;
-
   return (
-    <div ref={wrapRef} className="fixed bottom-4 z-30" style={{ left }}>
-      {open && (
-        <div className="absolute bottom-full left-0 mb-1.5">
-          <MenuList className="w-[200px]">
-            <div className="flex items-center justify-between px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-              <span>Words</span><span>{stats.words.toLocaleString()}</span>
-            </div>
-            <div className="flex items-center justify-between px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-              <span>Characters</span><span>{stats.chars.toLocaleString()}</span>
-            </div>
-            <div className="flex items-center justify-between px-3 py-1.5 text-sm text-zinc-600 dark:text-zinc-300">
-              <span>Read time</span><span>{stats.minutes} min</span>
-            </div>
-          </MenuList>
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-haspopup="true"
-        className="inline-flex h-7 items-center gap-1 rounded-full border border-zinc-200 bg-white dark:bg-[#1B1F26] px-2.5 text-xs font-medium text-zinc-500 shadow-sm hover:text-zinc-700"
-      >
-        {stats.words.toLocaleString()} word{stats.words === 1 ? "" : "s"}
-        <ChevronUp className={`h-3 w-3 transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
+    <div className="bdoc__meta mb-6!">
+      {ownerName ? <><span>{ownerName}</span><span className="bdoc__meta-sep" aria-hidden>·</span></> : null}
+      <span title={fmt.title(doc.updatedAt)}>Updated {fmt.date(doc.updatedAt)}</span>
+      <span className="bdoc__meta-sep" aria-hidden>·</span>
+      <span ref={wrapRef} className="relative inline-flex">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-haspopup="true"
+          title="Doc stats"
+          className="inline-flex items-center gap-1 rounded-md hover:text-ink"
+        >
+          {fmt.count(stats.words)} word{stats.words === 1 ? "" : "s"}
+          <ChevronUp className={`h-3 w-3 transition-transform ${open ? "" : "rotate-180"}`} aria-hidden />
+        </button>
+        {open && (
+          <div className="absolute start-0 top-full z-30 mt-1.5">
+            <MenuList className="w-[200px]">
+              <div className="flex items-center justify-between px-3 py-1.5 text-sm text-ink-2">
+                <span>Words</span><span>{fmt.count(stats.words)}</span>
+              </div>
+              <div className="flex items-center justify-between px-3 py-1.5 text-sm text-ink-2">
+                <span>Characters</span><span>{fmt.count(stats.chars)}</span>
+              </div>
+              <div className="flex items-center justify-between px-3 py-1.5 text-sm text-ink-2">
+                <span>Read time</span><span>{stats.minutes} min</span>
+              </div>
+            </MenuList>
+          </div>
+        )}
+      </span>
     </div>
   );
 }
 
-// A plain action row in the page menu: icon · label · optional shortcut hint.
-function PamRow({ icon, label, kbd, onClick, danger, disabled }: {
-  icon: ReactNode; label: string; kbd?: string; onClick: () => void; danger?: boolean; disabled?: boolean;
-}) {
+// ───────── "Docs inside": the sub-docs list under the body ─────────
+function SubDocsList({ rows, canEdit, onNew, fmt }: { rows: { id: string; title: string; emoji: string | null; updatedAt: string }[]; canEdit: boolean; onNew: () => void; fmt: ReturnType<typeof useFormat> }) {
+  if (rows.length === 0 && !canEdit) return null;
   return (
-    <button
-      type="button" role="menuitem" disabled={disabled}
-      className={`bdoc-pam__row ${danger ? "is-danger" : ""}`}
-      onClick={onClick}
-    >
-      <span className="bdoc-pam__ico">{icon}</span>
-      <span className="bdoc-pam__lbl">{label}</span>
-      {kbd && <span className="bdoc-pam__kbd">{kbd}</span>}
-    </button>
-  );
-}
-
-// A toggle row: icon · label · switch. Stays open after toggling.
-function PamToggle({ icon, label, on, onToggle }: {
-  icon: ReactNode; label: string; on: boolean; onToggle: () => void;
-}) {
-  return (
-    <button type="button" role="menuitemcheckbox" aria-checked={on} className="bdoc-pam__row" onClick={onToggle}>
-      <span className="bdoc-pam__ico">{icon}</span>
-      <span className="bdoc-pam__lbl">{label}</span>
-      <span className={`bdoc-pam__sw ${on ? "is-on" : ""}`} aria-hidden><span /></span>
-    </button>
-  );
-}
-
-// ───────── Page actions menu (the top-right "…") ─────────
-//
-// Notion's page-level menu, in our own tone: a searchable list of page
-// actions, a font switcher, view toggles (Small text / Full width / Lock),
-// an inline "Use with AI" group, and a live word-count + last-edited footer.
-// Every item is wired to something real — no decorative dead rows.
-function PageActionsMenu({
-  meta, blocks, doc, me, summary, summarizing, extracting,
-  onClose, onSetMeta, onCopyLink, onCopyContents, onExport, onDuplicate,
-  onTrash, onSummarize, onExtractTable, onVersionHistory, onShortcuts,
-}: {
-  meta: DocMeta;
-  blocks: Block[] | null;
-  doc: DocPayload;
-  me: MeUser | null;
-  summary: string | null;
-  summarizing: boolean;
-  extracting: boolean;
-  onClose: () => void;
-  onSetMeta: (patch: Partial<DocMeta>) => void;
-  onCopyLink: () => void;
-  onCopyContents: () => void;
-  onExport: () => void;
-  onDuplicate: () => void;
-  onTrash: () => void;
-  onSummarize: () => void;
-  onExtractTable: () => void;
-  onVersionHistory: () => void;
-  onShortcuts: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [aiOpen, setAiOpen] = useState(false);
-  const needle = q.trim().toLowerCase();
-  const match = (label: string) => !needle || label.toLowerCase().includes(needle);
-
-  // Live word count (same logic as the meta strip) for the footer.
-  const words = useMemo(() => {
-    if (!blocks) return 0;
-    let n = 0;
-    for (const b of blocks) {
-      if (!("text" in b)) continue;
-      const plain = (b as { text: string }).text.replace(/<[^>]+>/g, " ").replace(/&[a-z]+;/g, " ");
-      n += plain.split(/\s+/).filter(Boolean).length;
-    }
-    return n;
-  }, [blocks]);
-
-  const editorName = me
-    ? [me.firstName, me.lastName].filter(Boolean).join(" ") || me.email || "you"
-    : "you";
-  const editedAt = new Date(doc.updatedAt).toLocaleString("en-US", {
-    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-  });
-
-  const font: DocFont = meta.font ?? "default";
-  // Keys stay "default"/"serif"/"mono" — persisted meta compat. Labels +
-  // per-card glyphs match ClickUp (System Aa / Serif Ss / Mono 00).
-  const FONTS: { key: DocFont; label: string; glyph: string; cls: string }[] = [
-    { key: "default", label: "System", glyph: "Aa", cls: "is-default" },
-    { key: "serif", label: "Serif", glyph: "Ss", cls: "is-serif" },
-    { key: "mono", label: "Mono", glyph: "00", cls: "is-mono" },
-  ];
-
-  // Wrap an action so selecting it also dismisses the menu (Notion behaviour
-  // for actions; toggles stay open).
-  const act = (fn: () => void) => () => { onClose(); fn(); };
-
-  const grp1 = ["copy link", "copy page contents", "duplicate", "move to trash"].some(match);
-  const grp2 = ["small text", "full width", "lock page"].some(match);
-  const grp3 = ["use with ai", "summarize", "re-summarize", "extract table"].some(match);
-  const grp4 = ["export", "version history", "keyboard shortcuts"].some(match);
-
-  return (
-    <div className="bdoc__more-menu bdoc-pam" role="menu" onMouseDown={(e) => e.preventDefault()}>
-      <div className="bdoc-pam__search">
-        <Search />
-        <input
-          type="text" autoFocus placeholder="Search actions…"
-          value={q} onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}
-        />
-      </div>
-
-      <div className="bdoc-pam__scroll">
-        {!needle && (
-          <div className="bdoc-pam__fonts">
-            {FONTS.map((f) => (
-              <button
-                key={f.key} type="button"
-                className={`bdoc-pam__font ${f.cls} ${font === f.key ? "is-active" : ""}`}
-                onClick={() => onSetMeta({ font: f.key })}
-              >
-                <span className="bdoc-pam__font-ag">{f.glyph}</span>
-                <span className="bdoc-pam__font-lbl">{f.label}</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {grp1 && (
-          <div className="bdoc-pam__grp">
-            {match("Copy link") && <PamRow icon={<LinkIcon />} label="Copy link" kbd="⌘L" onClick={act(onCopyLink)} />}
-            {match("Copy page contents") && <PamRow icon={<ClipboardCopy />} label="Copy page contents" onClick={act(onCopyContents)} />}
-            {match("Duplicate") && <PamRow icon={<Copy />} label="Duplicate" kbd="⌘D" onClick={act(onDuplicate)} />}
-            {match("Move to Trash") && <PamRow icon={<Trash2 />} label="Move to Trash" danger onClick={act(onTrash)} />}
-          </div>
-        )}
-
-        {grp2 && (
-          <div className="bdoc-pam__grp">
-            {match("Small text") && <PamToggle icon={<TypeIcon />} label="Small text" on={!!meta.smallText} onToggle={() => onSetMeta({ smallText: !meta.smallText })} />}
-            {match("Full width") && <PamToggle icon={<MoveHorizontal />} label="Full width" on={!!meta.fullWidth} onToggle={() => onSetMeta({ fullWidth: !meta.fullWidth })} />}
-            {match("Lock page") && <PamToggle icon={<Lock />} label="Lock page" on={!!meta.locked} onToggle={() => onSetMeta({ locked: !meta.locked })} />}
-          </div>
-        )}
-
-        {grp3 && (
-          <div className="bdoc-pam__grp">
-            {match("Use with AI") && (
-              <button type="button" className="bdoc-pam__row" aria-expanded={aiOpen} onClick={() => setAiOpen((s) => !s)}>
-                <span className="bdoc-pam__ico"><Sparkles /></span>
-                <span className="bdoc-pam__lbl">Use with AI</span>
-                <ChevronRight className={`bdoc-pam__chev ${aiOpen ? "is-open" : ""}`} />
-              </button>
-            )}
-            {(aiOpen || needle) && (
-              <>
-                {match("Summarize") && (
-                  <PamRow
-                    icon={summarizing ? <Dots variant="pending" /> : <Sparkles />}
-                    label={summary ? "Re-summarize" : "Summarize with AI"}
-                    disabled={summarizing} onClick={act(onSummarize)}
-                  />
-                )}
-                {match("Extract table") && (
-                  <PamRow
-                    icon={extracting ? <Dots variant="pending" /> : <TableIcon />}
-                    label="Extract table" disabled={extracting} onClick={act(onExtractTable)}
-                  />
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {grp4 && (
-          <div className="bdoc-pam__grp">
-            {match("Export") && <PamRow icon={<Download />} label="Export as Markdown" onClick={act(onExport)} />}
-            {match("Version history") && <PamRow icon={<History />} label="Version history" onClick={act(onVersionHistory)} />}
-            {match("Keyboard shortcuts") && <PamRow icon={<TypeIcon />} label="Keyboard shortcuts" kbd="?" onClick={act(onShortcuts)} />}
-          </div>
-        )}
-      </div>
-
-      <div className="bdoc-pam__foot">
-        <span>{words.toLocaleString()} word{words === 1 ? "" : "s"}</span>
-        <span className="bdoc-pam__foot-line">Last edited by {editorName}</span>
-        <span className="bdoc-pam__foot-line">{editedAt}</span>
-      </div>
-    </div>
+    <section className="os-chrome mt-8" aria-label="Docs inside">
+      {rows.length > 0 ? <h2 className="mb-1 text-lg font-semibold text-ink">Docs inside</h2> : null}
+      <ul className="flex flex-col">
+        {rows.map((r) => (
+          <li key={r.id}>
+            <Link href={`/docs/${r.id}`} className="flex h-9 items-center gap-3 rounded-md px-2 text-row text-ink hover:bg-hover">
+              <span className="grid h-5 w-5 shrink-0 place-items-center [&_svg]:h-4 [&_svg]:w-4">{r.emoji ? renderNoteIcon(r.emoji) : <EntityTile size="sm" name={r.title} fallback="doc" />}</span>
+              <span className="min-w-0 flex-1 truncate">{r.title || "Untitled doc"}</span>
+              {r.updatedAt ? <span className="shrink-0 text-xs text-ink-2" title={fmt.title(r.updatedAt)}>{fmt.date(r.updatedAt)}</span> : null}
+            </Link>
+          </li>
+        ))}
+        {canEdit ? (
+          <li>
+            <button type="button" onClick={onNew} className="flex h-9 items-center gap-2 rounded-md px-2 text-row text-ink-2 hover:bg-hover hover:text-ink">
+              <FilePlus className="h-4 w-4" strokeWidth={1.5} aria-hidden /> New doc inside
+            </button>
+          </li>
+        ) : null}
+      </ul>
+    </section>
   );
 }
 
@@ -1837,7 +1705,13 @@ function OutlineRail({ blocks, onClose }: { blocks: Block[]; onClose: () => void
 // ───────── Ask-this-note slide-over ─────────
 type ChatTurn = { role: "user" | "assistant"; content: string };
 
-function AskDocPanel({ docId, docTitle, onClose }: { docId: string; docTitle: string; onClose: () => void }) {
+function AskDocPanel({ docId, docTitle, onClose, quick }: {
+  docId: string;
+  docTitle: string;
+  onClose: () => void;
+  /** The three quick actions as 36px rows above the thread (design-system 4.5 Ask AI). */
+  quick?: { summarize: { label: string; busy: boolean; onClick: () => void }; extract: { label: string; busy: boolean; onClick: () => void } };
+}) {
   const { toast } = useOsToast();
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -1892,11 +1766,21 @@ function AskDocPanel({ docId, docTitle, onClose }: { docId: string; docTitle: st
       <header className="bdoc__ask-head">
         <Sparkles />
         <div>
-          <h2>Ask this note</h2>
-          <p>Chat about &ldquo;{docTitle || "Untitled note"}&rdquo;</p>
+          <h2>Ask AI</h2>
+          <p>About &ldquo;{docTitle || "Untitled doc"}&rdquo;</p>
         </div>
         <button type="button" className="bdoc__ask-x" onClick={onClose} aria-label="Close"><X /></button>
       </header>
+      {quick ? (
+        <div className="os-chrome flex flex-col border-b border-line px-2 py-1">
+          <button type="button" onClick={quick.summarize.onClick} disabled={quick.summarize.busy} className="flex h-9 items-center gap-2 rounded-md px-2 text-base text-ink hover:bg-hover disabled:opacity-60">
+            {quick.summarize.busy ? <Dots variant="pending" /> : <Sparkles className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />} {quick.summarize.label}
+          </button>
+          <button type="button" onClick={quick.extract.onClick} disabled={quick.extract.busy} className="flex h-9 items-center gap-2 rounded-md px-2 text-base text-ink hover:bg-hover disabled:opacity-60">
+            {quick.extract.busy ? <Dots variant="pending" /> : <Sparkles className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />} {quick.extract.label}
+          </button>
+        </div>
+      ) : null}
       <div className="bdoc__ask-scroll" ref={scrollRef}>
         {turns.length === 0 && (
           <div className="bdoc__ask-empty">
@@ -2087,7 +1971,7 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder={me ? `Comment as ${meName}…` : "Loading user…"}
+          placeholder={me ? `Comment as ${meName}…` : "Add a comment…"}
           rows={2}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -2106,16 +1990,7 @@ function CommentsPanel({ docId, blockId, initialThread, me, onClose, onThreadCha
 }
 
 function relTimeShort(iso: string): string {
-  const d = new Date(iso);
-  const diff = Date.now() - d.getTime();
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return formatRelative(iso);
 }
 
 // ───────── Version history slide-over ─────────
@@ -2133,6 +2008,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
   onRestore: (blocks: Block[], meta: DocMeta, title: string) => void;
 }) {
   const { toast } = useOsToast();
+  const fmt = useFormat();
   const confirm = useConfirm();
   const [versions, setVersions] = useState<VersionMeta[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -2224,7 +2100,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
                     <span className="bdoc__hist-num">v{v.version}{idx === 0 ? " · current" : ""}</span>
                     <span className="bdoc__hist-title">{v.title || "Untitled"}</span>
                     <span className="bdoc__hist-meta">
-                      {v.authorName ?? "Unknown"} · {new Date(v.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                      {v.authorName ?? "Unknown"} · <span title={fmt.title(v.createdAt)}>{fmt.date(v.createdAt, "datetime")}</span>
                     </span>
                   </button>
                 </li>
@@ -2237,7 +2113,7 @@ function VersionHistoryPanel({ docId, onClose, onRestore }: {
           {!selectedId ? (
             <div className="bdoc__hist-hint">Pick a version on the left to preview it here.</div>
           ) : previewLoading || !preview ? (
-            <div className="bdoc__hist-loading"><Dots variant="pending" /> Loading preview…</div>
+            <div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label="Loading">{["60%", "90%", "75%", "80%"].map((w, i) => <span key={i} className="h-3.5 rounded bg-skeleton os-skeleton-pulse" style={{ width: w }} />)}</div>
           ) : preview.blocks ? (
             <>
               <div className="bdoc__hist-preview-title">{preview.title || "Untitled"}</div>
@@ -2388,35 +2264,14 @@ function CoverPicker({ meta, onPick, onClear }: { meta: DocMeta; onPick: (m: Par
         {uploading ? <><Dots variant="pending" /> Uploading…</> : <><ImagePlus /> Upload from device</>}
       </div>
 
-      {/* Image gallery — real photo thumbnails */}
-      <div className="bdoc__cover-sec">Gallery</div>
-      <div className="bdoc__cover-grid bdoc__cover-grid--img">
-        {COVER_IMAGES.map((img) => {
-          const full = coverImageUrl(img.id, 1600, 400);
-          return (
-            <button
-              key={img.id}
-              type="button"
-              className={`bdoc__cover-cell bdoc__cover-cell--img ${meta.coverUrl === full ? "is-current" : ""}`}
-              onClick={() => onPick({ coverUrl: full, coverGradient: undefined })}
-              aria-label={`Cover: ${img.label}`}
-              title={img.label}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverImageUrl(img.id, 240, 90)} alt="" loading="lazy" />
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Solid gradients */}
-      <div className="bdoc__cover-sec">Gradients</div>
+      {/* The eight pale washes (design-system 1.7). */}
+      <div className="bdoc__cover-sec">Colours</div>
       <div className="bdoc__cover-grid">
-        {COVER_GRADIENTS.map((g) => (
+        {COVER_HUES.map((g) => (
           <button
             key={g.key}
             type="button"
-            className={`bdoc__cover-cell ${meta.coverGradient === g.key && !meta.coverUrl ? "is-current" : ""}`}
+            className={`bdoc__cover-cell ${gradientCSS(meta.coverGradient) === g.css && !meta.coverUrl ? "is-current" : ""}`}
             onClick={() => onPick({ coverGradient: g.key, coverUrl: undefined })}
             style={{ background: g.css }}
             aria-label={g.label}

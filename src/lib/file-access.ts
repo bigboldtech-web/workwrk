@@ -66,3 +66,24 @@ export async function readableFileIds(args: {
     return [];
   }
 }
+
+/**
+ * The same rule for ONE file row, for the per-file routes (GET /api/files/[id],
+ * /[id]/url, PATCH, DELETE). The /files list admits a Space file when the viewer
+ * reads its Space OR holds a grant on its Space folder; the per-file routes used
+ * to check the Space alone, so a folder-only grantee saw a row in /files whose
+ * Preview and Download then answered 404. One rule, one answer.
+ */
+export async function canReadFile(
+  file: { spaceId: string | null; spaceFolderId: string | null },
+  userId: string,
+  accessLevel: string | null | undefined,
+): Promise<boolean> {
+  if (!file.spaceId) return true;
+  const level = accessLevel ?? "EMPLOYEE";
+  const [visible, folders] = await Promise.all([
+    visibleSpaceIds([file.spaceId], userId, level),
+    file.spaceFolderId ? accessibleFolderIds(userId) : Promise.resolve(new Set<string>()),
+  ]);
+  return visible.has(file.spaceId) || (!!file.spaceFolderId && folders.has(file.spaceFolderId));
+}

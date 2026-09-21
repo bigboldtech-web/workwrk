@@ -11,12 +11,15 @@
 // the matrix read-only.
 
 import { useEffect, useState } from "react";
-import { ShieldCheck, ChevronRight, Check, AlertCircle, Loader2, Lock } from "lucide-react";
+import { ShieldCheck, ChevronRight, Check, AlertCircle, Lock } from "lucide-react";
+import { SkeletonRows } from "@/components/ui/skeleton";
+import { Dots } from "@/components/ui/dots";
 import { useRole } from "@/hooks/use-role";
 import {
   PERMISSION_MODULES, ACCESS_LEVELS, PROTECTED_ADMIN_ROLES, checkPermission,
   type AccessLevel, type PermissionModule, type PermissionMatrix,
 } from "@/lib/permissions";
+import { PublicLinksCard } from "@/components/settings/public-links-card";
 
 const SHORT: Record<AccessLevel, string> = {
   SUPER_ADMIN: "Super", COMPANY_ADMIN: "Admin", C_LEVEL: "C-Lvl", VP: "VP",
@@ -93,13 +96,18 @@ export default function PermissionsPage() {
       <p className="mb-5 max-w-2xl text-base text-zinc-500">
         Control exactly who can do what. Each column is an access level; tick a capability to grant it.
         Super&nbsp;Admin and Company&nbsp;Admin always have full access.
-        {canEdit ? "" : " You need Company Admin to make changes — this view is read-only."}
+        {canEdit ? "" : " You need Company Admin to make changes; this view is read-only."}
       </p>
 
+      {/* Access toggle 10. The share dialogs on SOPs and docs send admins
+          here when a public link is refused, so the control lives on the
+          same page as the rest of the access rules. */}
+      <div className="mb-5 max-w-2xl">
+        <PublicLinksCard canEdit={canEdit} />
+      </div>
+
       {loading ? (
-        <div className="flex items-center gap-2 text-base text-zinc-400">
-          <Loader2 className="h-4 w-4 animate-spin" /> Loading permissions…
-        </div>
+        <div className="max-w-2xl"><SkeletonRows rows={5} rowHeight="44px" /></div>
       ) : (
         <div className="space-y-2.5 pb-4">
           {modules.map(([mod, def]) => {
@@ -179,7 +187,7 @@ export default function PermissionsPage() {
             disabled={!dirty || saving}
             className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--os-brand)] px-3 text-sm font-medium text-white hover:bg-[var(--os-brand-hover)] disabled:opacity-40"
           >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            {saving ? <Dots variant="pending" /> : null}
             {saving ? "Saving…" : "Save changes"}
           </button>
           {dirty && !saving ? <span className="text-sm text-amber-600">Unsaved changes</span> : null}

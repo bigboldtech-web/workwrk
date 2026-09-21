@@ -19,11 +19,18 @@ const bodySchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-const OWNER_FIELD: Record<string, "space" | "board" | "folder" | null> = {
+const OWNER_FIELD: Record<string, "space" | "board" | "folder" | "sop" | "sop_folder" | "contract" | null> = {
   space: "space",
   board: "board",
   list: "board",
   folder: "folder",
+  // The process unit's read-only banner (spec-process section 1): a Can
+  // view / Can comment viewer of a SOP asks its author (a filed SOP asks
+  // the folder's managers, who are the org admins today).
+  sop: "sop",
+  sop_folder: "sop_folder",
+  // A Member party on /agreements/[id] asks the contract's sender.
+  contract: "contract",
 };
 
 type RequestTarget = { ownerId: string | null; link: string | null };
@@ -49,6 +56,18 @@ async function targetFor(type: string, id: string, organizationId: string): Prom
     if (model === "folder") {
       const f = await prisma.folder.findFirst({ where, select: { ownerId: true } });
       return { ownerId: f?.ownerId ?? null, link: f ? `/folders/${id}` : null };
+    }
+    if (model === "sop") {
+      const s = await prisma.sOP.findFirst({ where, select: { createdById: true } });
+      return { ownerId: s?.createdById ?? null, link: s ? `/sops/${id}` : null };
+    }
+    if (model === "sop_folder") {
+      const f = await prisma.sOPFolder.findFirst({ where, select: { id: true } });
+      return { ownerId: null, link: f ? "/sops/manage?tab=sop-folders" : null };
+    }
+    if (model === "contract") {
+      const a = await prisma.agreement.findFirst({ where, select: { createdById: true } });
+      return { ownerId: a?.createdById ?? null, link: a ? `/agreements/${id}` : null };
     }
   } catch {
     // A model without ownerId, or a table this org never wrote: fall through.

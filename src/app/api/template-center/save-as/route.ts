@@ -1,7 +1,13 @@
-// POST /api/template-center/save-as: snapshot a List, Folder or Space as a Template.
-//   body { source: "LIST",   boardId,  name?, description?, complexity?, category?, useCases?, tags? }
-//   body { source: "FOLDER", folderId, name?, ... }
-//   body { source: "SPACE",  spaceId,  name?, ... }
+// POST /api/template-center/save-as: snapshot a List, Folder, Space, Doc or Canvas as a Template.
+//   body { source: "LIST",       boardId,      name?, description?, complexity?, category?, useCases?, tags? }
+//   body { source: "FOLDER",     folderId,     name?, ... }
+//   body { source: "SPACE",      spaceId,      name?, ... }
+//   body { source: "DOC",        docId,        name?, ... }   (spec-docs-knowledge section 2, "Save as template")
+//   body { source: "WHITEBOARD", whiteboardId, name?, ... }
+//
+// DOC and WHITEBOARD need Full access on the source (the creator or an org
+// admin; the canvas owner or an admin): a template is published to everyone
+// in the org, so the bar is the management gate, as it is for Lists.
 //
 // FOLDER is here because the Folder "…" menu has always posted it: the schema
 // accepted LIST and SPACE only, so that menu row 400d on every click with the
@@ -18,14 +24,18 @@ import { canEditSpace, getSpaceForReader } from "@/lib/space";
 import { folderReadable } from "@/lib/folder";
 import { snapshotBoard, snapshotFolder, snapshotSpace } from "@/lib/template-center";
 import { templatesAppGate } from "@/lib/templates/gate";
+import { docAccessible } from "@/lib/doc-access";
+import { isDocFull } from "@/lib/doc-sharing";
 
 const COMPLEXITY = ["BEGINNER", "INTERMEDIATE", "ADVANCED"] as const;
 
 const schema = z.object({
-  source: z.enum(["LIST", "FOLDER", "SPACE"]),
+  source: z.enum(["LIST", "FOLDER", "SPACE", "DOC", "WHITEBOARD"]),
   boardId: z.string().optional(),
   folderId: z.string().optional(),
   spaceId: z.string().optional(),
+  docId: z.string().optional(),
+  whiteboardId: z.string().optional(),
   name: z.string().min(1).max(120).optional(),
   description: z.string().max(2000).optional(),
   complexity: z.enum(COMPLEXITY).optional(),
@@ -48,10 +58,32 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return jsonError("Invalid body", 400);
   const input = parsed.data;
 
-  let kind: "LIST" | "FOLDER" | "SPACE";
+  let kind: "LIST" | "FOLDER" | "SPACE" | "DOC" | "WHITEBOARD";
   let snap: { name: string; payload: object } | null;
 
-  if (input.source === "LIST") {
+  if (input.source === "DOC") {
+    if (!input.docId) return jsonError("docId is required", 400);
+    const doc = await prisma.doc.findFirst({
+      where: { id: input.docId, organizationId: orgId, archivedAt: null },
+      select: { id: true, title: true, content: true, entityType: true, entityId: true, createdById: true },
+    });
+    if (!doc || !(await docAccessible(doc, userId, accessLevel))) return jsonError("Doc not found", 404);
+    if (!isDocFull({ userId, accessLevel }, { createdById: doc.createdById })) return jsonError("Forbidden", 403);
+    kind = "DOC";
+    snap = { name: doc.title, payload: { title: doc.title, content: doc.content ?? {} } };
+  } else if (input.source === "WHITEBOARD") {
+    if (!input.whiteboardId) return jsonError("whiteboardId is required", 400);
+    const wb = await prisma.whiteboard.findFirst({
+      where: { id: input.whiteboardId, organizationId: orgId, archivedAt: null },
+      select: { id: true, name: true, description: true, scene: true, ownerId: true, spaceId: true },
+    });
+    if (!wb) return jsonError("Canvas not found", 404);
+    if (wb.spaceId && !(await getSpaceForReader(wb.spaceId, userId, accessLevel))) return jsonError("Canvas not found", 404);
+    const isAdmin = ["COMPANY_ADMIN", "SUPER_ADMIN"].includes(accessLevel);
+    if (wb.ownerId !== userId && !isAdmin) return jsonError("Forbidden", 403);
+    kind = "WHITEBOARD";
+    snap = { name: wb.name, payload: { scene: wb.scene ?? {}, description: wb.description ?? undefined } };
+  } else if (input.source === "LIST") {
     if (!input.boardId) return jsonError("boardId is required", 400);
     const board = await getBoardForReader(input.boardId, userId, accessLevel);
     if (!board) return jsonError("List not found", 404);

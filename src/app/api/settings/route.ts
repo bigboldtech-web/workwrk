@@ -10,6 +10,14 @@ import {
   validateScoreWeights,
   validateScoringBands,
 } from "@/lib/review-cadence";
+import { accessSettingsSchema, parseAccessSettings } from "@/lib/access/settings";
+import { parseProcessSettings, processSettingsPatchSchema } from "@/lib/process-settings";
+import { canManageProcess } from "@/lib/process-scope";
+
+type SessionUser = { id: string; organizationId: string; accessLevel?: string };
+/** Organization.settings is an untyped JSON blob; every section reads its own keys off it. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SettingsBlob = Record<string, any>;
 
 export async function GET() {
   try {
@@ -18,7 +26,7 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const orgId = (session.user as any).organizationId;
+    const orgId = (session.user as SessionUser).organizationId;
 
     const org = await prisma.organization.findUnique({
       where: { id: orgId },
@@ -45,7 +53,7 @@ export async function GET() {
       return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
-    const settings = (org.settings as any) || {};
+    const settings = (org.settings as SettingsBlob | null) || {};
 
     return NextResponse.json({
       organization: {
@@ -99,6 +107,13 @@ export async function GET() {
           sessionTimeout: 30,
           twoFactorEnabled: false,
         },
+        // The ten access toggles (access-model-spec section 8), defaults
+        // filled in, so a settings surface can render them without a
+        // second parse.
+        access: parseAccessSettings(settings.access),
+        // The process taxonomies and acknowledgement defaults (Organize).
+        // Seeding on first read happens in GET /api/settings/process.
+        process: parseProcessSettings(settings.process).value,
       },
       usage: {
         users: org._count.users,
@@ -119,14 +134,23 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const accessLevel = (session.user as any).accessLevel;
-    if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
-    }
-
-    const orgId = (session.user as any).organizationId;
+    const accessLevel = (session.user as SessionUser).accessLevel ?? "";
+    const orgId = (session.user as SessionUser).organizationId;
     const body = await req.json();
     const { section, data, companyProfile } = body;
+
+    // The `process` section is the one OrgAction `manage_process` gates
+    // (spec-process section 1: Owner, Admin, People team; never Guests or
+    // Agents). The People team (HR) may write it; every other section keeps
+    // the admin-only gate below. ONE rule, lib/process-scope canManageProcess,
+    // shared with rename-category and rename-folder.
+    if (section === "process") {
+      if (!canManageProcess(session)) {
+        return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+      }
+    } else if (!["COMPANY_ADMIN", "SUPER_ADMIN", "C_LEVEL"].includes(accessLevel)) {
+      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 });
+    }
 
     // Get current org and settings
     const org = await prisma.organization.findUnique({
@@ -137,7 +161,7 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Organization not found" }, { status: 404 });
     }
 
-    const currentSettings = (org.settings as any) || {};
+    const currentSettings = (org.settings as SettingsBlob | null) || {};
 
     // Handle company profile update directly
     if (companyProfile) {
@@ -152,12 +176,12 @@ export async function PATCH(req: Request) {
 
     switch (section) {
       case "general": {
-        const updateData: any = {};
+        const updateData: { name?: string; domain?: string | null; settings?: SettingsBlob } = {};
         if (data.name) updateData.name = data.name;
         if (data.domain !== undefined) updateData.domain = data.domain;
 
         // Also store extended general settings in JSON
-        const generalSettings: any = {};
+        const generalSettings: SettingsBlob = {};
         if (data.timezone !== undefined) generalSettings.timezone = data.timezone;
         if (data.currency !== undefined) generalSettings.currency = data.currency;
         if (data.fiscalYearStart !== undefined) generalSettings.fiscalYearStart = data.fiscalYearStart;
@@ -181,7 +205,7 @@ export async function PATCH(req: Request) {
         // Editable Scoring & reviews config (weights, bands, cadences,
         // behavioral anchors). Validate the numeric invariants so a bad
         // payload can't silently corrupt the composite-score engine.
-        const scoring: any = {};
+        const scoring: SettingsBlob = {};
         if (data.reviewFrequency !== undefined) scoring.reviewFrequency = data.reviewFrequency;
         if (data.scoreWeights !== undefined) {
           const v = validateScoreWeights(data.scoreWeights);
@@ -246,6 +270,45 @@ export async function PATCH(req: Request) {
         break;
       }
 
+      case "access": {
+        // The access toggles (access-model-spec section 8). A partial patch
+        // is merged over the stored values; every key is validated by the
+        // same zod schema the gates parse with, so a bad value is a 400
+        // here rather than a silent default inside a gate. Today the one
+        // surface that writes it is the Public links row on the Access
+        // settings page (toggle 10), which the public SOP and doc links
+        // and the share dialogs read.
+        const partial = accessSettingsSchema.partial().strict().safeParse(data ?? {});
+        if (!partial.success) {
+          return NextResponse.json({ error: "Invalid access settings" }, { status: 400 });
+        }
+        const merged = { ...parseAccessSettings(currentSettings.access), ...partial.data };
+        await prisma.organization.update({
+          where: { id: orgId },
+          data: { settings: { ...currentSettings, access: merged } },
+        });
+        break;
+      }
+
+      case "process": {
+        // spec-process section 2 `/sops/manage` (Organize): the policy
+        // category list, the contract folder list and the three
+        // acknowledgement defaults. Strict zod, so a stray key is a 400
+        // that names it rather than a silent strip; a partial patch is
+        // merged over the seeded value.
+        const partial = processSettingsPatchSchema.safeParse(data ?? {});
+        if (!partial.success) {
+          const issue = partial.error.issues[0];
+          return NextResponse.json({ error: `Invalid process settings${issue ? `: ${issue.path.join(".") || "body"} ${issue.message}` : ""}` }, { status: 400 });
+        }
+        const merged = { ...parseProcessSettings(currentSettings.process).value, ...partial.data };
+        await prisma.organization.update({
+          where: { id: orgId },
+          data: { settings: { ...currentSettings, process: merged } },
+        });
+        break;
+      }
+
       default:
         return NextResponse.json({ error: "Invalid section" }, { status: 400 });
     }
@@ -253,10 +316,11 @@ export async function PATCH(req: Request) {
     // Audit-log every org-settings change. The section name + a list
     // of changed keys is enough for SOC 2 / compliance review; we
     // don't store the full body to avoid bloating ActivityLog with
-    // large JSON blobs.
+    // large JSON blobs. The process section is audited under the name
+    // spec-process section 2 gives it.
     logAuditEvent({
-      type: `settings.update.${section}`,
-      actorId: (session.user as any).id,
+      type: section === "process" ? "settings.updated.process" : `settings.update.${section}`,
+      actorId: (session.user as SessionUser).id,
       organizationId: orgId,
       description: `Updated org settings: ${section}`,
       targetType: "Organization",

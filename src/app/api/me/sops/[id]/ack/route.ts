@@ -92,3 +92,47 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   return NextResponse.json({ assignment: updated });
 }
+
+// DELETE /api/me/sops/[id]/ack (spec-process section 2 `/sops/my-sops`, the
+// "Acknowledged · Undo" toast): reverse an acknowledgement within the undo
+// window. The assignment goes back to ASSIGNED and the mirrored compliance
+// row is reopened; the attestation note stays in the progress JSON.
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const u = session.user as { id?: string; organizationId?: string };
+  if (!u.id || !u.organizationId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const assignment = await prisma.sOPAssignment.findUnique({
+    where: { id },
+    select: { id: true, sopId: true, userId: true, status: true, progress: true },
+  });
+  if (!assignment || assignment.userId !== u.id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  if (assignment.status !== "COMPLETED") {
+    return NextResponse.json({ assignment, alreadyOpen: true });
+  }
+
+  const priorProgress = (assignment.progress && typeof assignment.progress === "object")
+    ? (assignment.progress as Record<string, unknown>)
+    : {};
+  const updated = await prisma.sOPAssignment.update({
+    where: { id },
+    data: {
+      status: "ASSIGNED",
+      completedAt: null,
+      stepsCompleted: 0,
+      progress: { ...priorProgress, ackUndoneAt: new Date().toISOString() } as object,
+    },
+  });
+  const existingCompliance = await prisma.sOPCompliance.findFirst({
+    where: { sopId: assignment.sopId, userId: u.id },
+    select: { id: true },
+  });
+  if (existingCompliance) {
+    await prisma.sOPCompliance.update({ where: { id: existingCompliance.id }, data: { completedAt: null, stepsCompleted: 0, score: null } });
+  }
+  return NextResponse.json({ assignment: updated });
+}

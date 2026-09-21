@@ -104,6 +104,13 @@ export interface CreateAction {
   /** `{ module, action }` from src/lib/permissions.ts. Hide, never 403. */
   requiredPermission?: { module: PermissionModule; action: string };
   /**
+   * App keys that must be on this viewer's rail for the row to render.
+   * Settings > Admin > Apps can hide or floor any app, and a module can be
+   * off, either of which makes the destination render a denial view. A row
+   * whose page would answer AppOff is a door locked from the inside.
+   */
+  requiredApps?: string[];
+  /**
    * Draw a 1px rule ABOVE this row. Used where a menu carries two kinds of
    * thing: the Docs "+" separates the hub's own content creates from the
    * PROCESS creates (sidebar-map section 6). The rule is dropped when the row
@@ -1523,21 +1530,18 @@ export const APPS: AppEntry[] = [
     // step 3.
     createActions: [
       { label: "New doc", icon: FileText, event: "docs-new-page" },
-      { label: "New canvas", icon: Frame, href: "/canvas?new=1" },
-      { label: "Upload file", icon: Upload, href: "/files?upload=1" },
-      { label: "Paste a transcript", icon: Mic, href: "/notetaker" },
+      { label: "New canvas", icon: Frame, href: "/canvas?new=1", requiredApps: ["docs"] },
+      { label: "Upload file", icon: Upload, href: "/files?upload=1", requiredApps: ["library"] },
+      // /notetaker gates on the AI module and the clips app; the row goes
+      // with them (sidebar-map section 6, row 8).
+      { label: "Paste a transcript", icon: Mic, href: "/notetaker", requiredApps: ["clips", "ai"] },
       { label: "Browse templates", icon: LayoutTemplate, href: "/templates?kind=doc" },
       { label: "New SOP", icon: ScrollText, event: "sop-kind-chooser", separatorBefore: true, requiredPermission: { module: "sops", action: "create" } },
-      // /policies, not /policies?new=1, and that is deliberate. The policies
-      // page has no ?new= latch, and its own "New policy" primary is broken
-      // end to end today: it POSTs `content: ""` while the API requires a
-      // non-empty trimmed content (api/policies/route.ts), so the create
-      // 400s, and even on success GET /api/policies returns PUBLISHED rows
-      // only, so the draft would be invisible. Both are the list-pages
-      // step's to fix (spec-process step 4); promising a create here that
-      // cannot happen would be a dead control. The row lands on the page,
-      // beside the primary it will become.
-      { label: "New policy", icon: ShieldCheck, href: "/policies", requiredAccess: "hr-admin" },
+      // /policies?new=1 opens the New policy modal on the list (spec-process
+      // section 2: the Docs "+" menu's "New policy" opens the modal; the page
+      // holds the ?new= latch the way /agreements does, and POST /api/policies
+      // now takes the title from the modal instead of writing "Untitled").
+      { label: "New policy", icon: ShieldCheck, href: "/policies?new=1", requiredAccess: "hr-admin" },
       { label: "New contract", icon: FileSignature, href: "/agreements?new=1", requiredAccess: "hr-admin" },
     ] },
   { key: "tables", label: "Tables", Icon: Table2, defaultHref: "/tables", category: "Core", defaultPinned: true,

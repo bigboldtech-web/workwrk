@@ -1,671 +1,601 @@
 "use client";
 
-/* Docs — ClickUp-style "All Docs" home.
+/* /docs (spec-docs-knowledge section 2): every doc I can open, in one table,
+ * with the views I actually use.
  *
- * In-page tabs (All docs / Recent / Mine / Shared with me / Favorites) plus
- * the Docs sidebar both set ?view=; this page reads it and
- * renders the matching set as a rich table (Name / Location / Date updated /
- * Date viewed / Contributors) above a row of starter Templates.
+ *   header   title "Docs" · views All · Recent · Mine · Shared with me ·
+ *            Favorites (each with its count) · toolbar Filter, Sort, search,
+ *            Display, the one blue "New doc" split, the bordered "..."
+ *   body     TableCard: checkbox · Name · Location · Date updated · Date viewed
+ *            · Owner (· Contributors behind Display) · row "..."
+ *            (DocRowMenu, the one doc menu); bulk bar; footer with the real
+ *            total and cursor pages
  *
- *   GET  /api/docs                list  (?archived=1 for the Archived view)
- *   POST /api/docs                { title, content }
- *   GET  /api/me/recent-docs      recently-viewed ids + timestamps
+ *   GET  /api/docs?view=&q=&location=&owner=&updatedFrom=&updatedTo=
+ *        &includeChildren=&sort=&dir=&cursor=&limit=   server views, filters,
+ *        sort and pages; the 200-row cap and the client-side filtering are gone
+ *   POST /api/docs                                     { title: "Untitled doc" }
+ *
+ * Every view, filter and sort is in the URL, so a filtered page is a link.
  */
 
-import { Dots } from "@/components/ui/dots";
-import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useSession } from "next-auth/react";
 import {
-  FileText,
-  Plus,
-  ChevronDown,
-  ChevronUp,
-  Check,
-  MoreHorizontal,
-  Search,
-  ListFilter,
-  ArrowUpDown,
-  Import as ImportIcon,
-  Link2,
-  Star,
-  Pencil,
-  Clock,
-  User,
-  Users,
-  Rocket,
-  NotebookPen,
-  BookOpen,
+  Clock, FileText, FolderInput, LayoutTemplate, Search, SlidersHorizontal, Star, Trash2, User, Users, Import as ImportIcon,
 } from "lucide-react";
+import { Breadcrumb } from "@/components/layout/os/top-bar/breadcrumb";
+import { OsPageHeader } from "@/components/layout/os/page-header";
+import { OsEmptyView } from "@/components/layout/os/empty-view";
 import { useOsShell } from "@/components/layout/os/shell-context";
 import { useRetiredView } from "@/components/layout/os/use-retired-view";
 import { useOsToast } from "@/components/layout/os/toast";
-import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
-import { renderNoteIcon } from "@/components/docs/note-icon";
+import { useConfirm } from "@/components/ui/dialog-provider";
+import { ViewTab } from "@/components/ui/view-tabs";
+import { FilterGroup, FilterPanel, FilterRow } from "@/components/ui/filter-panel";
+import { Picker, type PickerOption } from "@/components/ui/picker";
+import { MenuItem, MenuSeparator } from "@/components/ui/menu";
+import { BulkAction, RowMoreButton, TableCard, type TableColumn } from "@/components/ui/table-card";
+import { SplitPrimary } from "@/components/ui/split-primary";
+import { ComingSoonRow, UpcomingOnly } from "@/components/ui/coming-soon-row";
 import { EntityTile, type EntityTileFallback } from "@/components/ui/entity-tile";
-import { ViewTabStrip, ViewTab } from "@/components/ui/view-tabs";
-import { ErrorState } from "@/components/ui/error-state";
-import { SkeletonRows } from "@/components/ui/skeleton";
-import { PersonAvatar, type PersonRef } from "@/components/board-view/assignee-picker";
+import { PersonAvatar, PersonAvatarStack, type PersonRef } from "@/components/board-view/assignee-picker";
+import { renderNoteIcon } from "@/components/docs/note-icon";
+import { DocRowMenuHost, useDocRowMenu, dispatchDocsChanged, type DocMenuTarget } from "@/components/docs/doc-row-menu";
+import { DocShareModal } from "@/components/docs/doc-share-modal";
+import { useBoot } from "@/components/layout/os/boot-context";
+import { apiFetch } from "@/lib/api-fetch";
+import { useFormat } from "@/lib/format/use-date-prefs";
+import { DOCS_COLUMNS, readDocsColumns, type DocsColumnKey } from "@/lib/docs-prefs";
+import type { DocsSort, DocsView } from "@/lib/docs-list";
+import { cn } from "@/lib/utils";
 
-type ApiDoc = {
+/* ───────────────────────────── types ───────────────────────────── */
+
+type Loc = { type: string; name: string; icon: string | null; color: string | null; href: string | null };
+type DocRow = {
   id: string;
   title: string;
-  excerpt?: string | null;
-  entityType?: string | null;
-  entityId?: string | null;
-  emoji?: string | null;
-  location?: { type: string; name: string; icon: string | null; color: string | null; href: string | null } | null;
-  createdById?: string | null;
-  createdBy?: { name: string | null; avatar?: string | null } | null;
-  contributors?: PersonRef[];
-  parentId?: string | null;
-  createdAt: string;
+  emoji: string | null;
+  parentId: string | null;
+  parentTitle: string | null;
+  childCount: number;
+  location: Loc | null;
+  entityType: string | null;
+  entityId: string | null;
+  ownerId: string | null;
+  owner: (PersonRef & { name: string | null }) | null;
   updatedAt: string;
+  viewedAt: string | null;
+  favorite: boolean;
+  contributors?: PersonRef[];
+  myRole: "edit" | "view";
+  canManage: boolean;
 };
+type ListResponse = { data: DocRow[]; total: number; nextCursor: string | null; counts?: Record<DocsView, number> };
+type SpaceRow = { id: string; name: string; slug?: string; icon?: string | null; color?: string | null };
 
-type SortCol = "title" | "location" | "updated";
-const SORT_OPTIONS: Array<{ col: SortCol; label: string }> = [
-  { col: "updated", label: "Date updated" },
-  { col: "title", label: "Name" },
-  { col: "location", label: "Location" },
-];
-
-type ViewKey = "all" | "recent" | "favorites" | "my" | "shared" | "private" | "meeting" | "archived";
-
-// ONE LABEL PER DESTINATION (naming-canon; spec-docs-knowledge section 1
-// "Views on /docs: All docs, Recent, Mine, Shared with me, Favorites").
-//
-// /docs?view=my used to read "Mine" in the sidebar, "My Docs" in the
-// breadcrumb and the H1, and "Created by me" in the tab row: four names for
-// one URL, on one screen. The canon retires "Created by me" and "My Docs".
-// This table is now the only place any of these five views is named, and the
-// tab row below reads from it, so a label cannot drift again.
-const VIEW_LABEL: Record<ViewKey, string> = {
-  all: "All docs",
+const VIEW_LABEL: Record<DocsView, string> = {
+  all: "All",
   recent: "Recent",
-  favorites: "Favorites",
   my: "Mine",
   shared: "Shared with me",
-  private: "Private",
-  meeting: "Meeting Notes",
-  archived: "Archived",
+  favorites: "Favorites",
 };
-
-// The in-page views row: the same five the spec lists, in its order. Four of
-// them are sidebar rows too (Favorites is the section above them), which is
-// the specified arrangement and not a duplicate surface: the sidebar is the
-// hub's index and this row is the page's own view switcher. They agree
-// because both read VIEW_LABEL.
-const HUB_TABS: Array<{ key: ViewKey; label: string; Icon: typeof FileText }> = [
-  { key: "all", label: VIEW_LABEL.all, Icon: FileText },
-  { key: "recent", label: VIEW_LABEL.recent, Icon: Clock },
-  { key: "my", label: VIEW_LABEL.my, Icon: User },
-  { key: "shared", label: VIEW_LABEL.shared, Icon: Users },
-  { key: "favorites", label: VIEW_LABEL.favorites, Icon: Star },
+const VIEWS: Array<{ key: DocsView; Icon: typeof FileText }> = [
+  { key: "all", Icon: FileText },
+  { key: "recent", Icon: Clock },
+  { key: "my", Icon: User },
+  { key: "shared", Icon: Users },
+  { key: "favorites", Icon: Star },
 ];
+const SORTS: Array<{ key: DocsSort; label: string }> = [
+  { key: "updated", label: "Date updated" },
+  { key: "viewed", label: "Date viewed" },
+  { key: "name", label: "Name" },
+  { key: "location", label: "Location" },
+  { key: "owner", label: "Owner" },
+];
+const COLUMN_LABEL: Record<DocsColumnKey, string> = {
+  location: "Location",
+  updated: "Date updated",
+  viewed: "Date viewed",
+  owner: "Owner",
+  contributors: "Contributors",
+};
+const PAGE_SIZES = [40, 100];
 
-// "Just now" / "Jun 29" / "Aug 24, 2024" — ClickUp's date column style.
-function smartDate(iso: string | null | undefined): string {
-  if (!iso) return "–";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "–";
-  if (Date.now() - d.getTime() < 60_000) return "Just now";
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
-}
-
-// Fallback glyph for a location whose entity has no icon of its own.
 function locationFallback(type: string): EntityTileFallback | null {
   if (type === "BOARD") return "board";
   if (type === "FOLDER") return "folder";
   if (type === "BOARD_ITEM") return "list";
   return null;
 }
+function personName(p: PersonRef | null | undefined): string {
+  if (!p) return "";
+  return `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim() || p.email || "";
+}
+const isView = (v: string | null): v is DocsView => !!v && v in VIEW_LABEL;
+const isSort = (v: string | null): v is DocsSort => !!v && SORTS.some((s) => s.key === v);
 
-// The three starter templates shown as cards (matches ClickUp's Docs home).
-const TEMPLATES: Array<{ key: string; title: string; hint: string; Icon: typeof Rocket; tint: string; emoji: string; verified?: boolean }> = [
-  { key: "project", title: "Project Overview", hint: "Summarize goals, scope, and milestones", Icon: Rocket, tint: "#F97316", emoji: "🚀" },
-  { key: "meeting", title: "Meeting Notes", hint: "Capture an agenda, notes, and action items", Icon: NotebookPen, tint: "#F59E0B", emoji: "📝" },
-  { key: "wiki", title: "Wiki", hint: "Organize information in one place", Icon: BookOpen, tint: "#3B82F6", emoji: "📚", verified: true },
-];
+/* ───────────────────────────── page ───────────────────────────── */
 
 export default function DocsPage() {
   const router = useRouter();
   const params = useSearchParams();
-  // Two retired views land here with their old query on: ?view=meeting (a
-  // title regex, never a real view) and ?view=private (which meant "mine and
-  // unanchored", i.e. Mine plus a Location filter). Both are normalised in the
-  // URL rather than in next.config.ts, because the path does not change and a
-  // config row would ride its own query along and loop. See retired-views.ts.
+  // Two retired views land here with their old query on: ?view=meeting and
+  // ?view=private. Both are normalised in the URL (retired-views.ts).
   useRetiredView();
-  const { data: session } = useSession();
-  const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
-  const view = (params.get("view") as ViewKey) || "all";
-
-  const [rows, setRows] = useState<ApiDoc[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [favIds, setFavIds] = useState<Set<string>>(new Set());
-  const [recentViews, setRecentViews] = useState<Map<string, string>>(new Map()); // docId → ISO viewed-at
-  const [creating, setCreating] = useState(false);
-  const [newMenu, setNewMenu] = useState(false);
-  const [sort, setSort] = useState<{ col: SortCol; dir: "asc" | "desc" }>({ col: "updated", dir: "desc" });
-  const [locFilter, setLocFilter] = useState<Set<string>>(new Set()); // location names; empty = all
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-  const { rowVersion } = useOsShell();
+  const { rowVersion, prefs, patchPrefs, openTemplateCenter } = useOsShell();
+  const { boot } = useBoot();
   const { toast } = useOsToast();
-  const noteMenu = useNoteMenu();
+  const confirm = useConfirm();
+  const fmt = useFormat();
+
+  /* ── URL state ── */
+  const view: DocsView = isView(params.get("view")) ? (params.get("view") as DocsView) : "all";
+  const q = params.get("q") ?? "";
+  const sort: DocsSort = isSort(params.get("sort")) ? (params.get("sort") as DocsSort) : view === "recent" ? "viewed" : "updated";
+  const dir: "asc" | "desc" = params.get("dir") === "asc" || params.get("dir") === "desc" ? (params.get("dir") as "asc" | "desc") : (sort === "name" || sort === "location" || sort === "owner" ? "asc" : "desc");
+  const location = params.get("location");
+  const owner = params.get("owner");
+  const updatedFrom = params.get("updatedFrom");
+  const updatedTo = params.get("updatedTo");
+  const includeChildren = params.get("includeChildren") === "1";
+  const cursor = params.get("cursor");
+  const limitRaw = Number(params.get("limit"));
+  const limit = PAGE_SIZES.includes(limitRaw) ? limitRaw : PAGE_SIZES[0];
+
+  // The cursors of the pages before this one (state, so the footer can read
+  // its length in render); a filter or sort change resets it in setParams.
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const pageIndex = cursorStack.length;
+  const setParams = useCallback((patch: Record<string, string | null>, opts?: { keepCursor?: boolean }) => {
+    const next = new URLSearchParams(params.toString());
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null || v === "") next.delete(k);
+      else next.set(k, v);
+    }
+    if (!opts?.keepCursor) { next.delete("cursor"); setCursorStack([]); }
+    const s = next.toString();
+    router.push(s ? `/docs?${s}` : "/docs");
+  }, [params, router]);
+
+  const activeFilters = [location, owner, updatedFrom || updatedTo ? "updated" : null, includeChildren ? "children" : null].filter(Boolean).length;
+
+  /* ── data ── */
+  const [rows, setRows] = useState<DocRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState<Record<DocsView, number> | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const queryString = useMemo(() => {
+    const qs = new URLSearchParams({ view, sort, dir, limit: String(limit) });
+    if (q) qs.set("q", q);
+    if (location) qs.set("location", location);
+    if (owner) qs.set("owner", owner);
+    if (updatedFrom) qs.set("updatedFrom", updatedFrom);
+    if (updatedTo) qs.set("updatedTo", updatedTo);
+    if (includeChildren) qs.set("includeChildren", "1");
+    if (cursor) qs.set("cursor", cursor);
+    return qs.toString();
+  }, [view, sort, dir, limit, q, location, owner, updatedFrom, updatedTo, includeChildren, cursor]);
 
   const load = useCallback(async () => {
-    try {
-      const [res, prefRes, recentRes] = await Promise.all([
-        fetch(`/api/docs${view === "archived" ? "?archived=1" : ""}`, { cache: "no-store" }),
-        fetch("/api/preferences", { cache: "no-store" }).catch(() => null),
-        fetch("/api/me/recent-docs", { cache: "no-store" }).catch(() => null),
-      ]);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setRows(data.docs ?? data.data ?? (Array.isArray(data) ? data : []));
-      setLoadError(null);
-      // Star state — same read path as DocsSidebar (effective.home.favoriteDocIds).
-      if (prefRes?.ok) {
-        const p = await prefRes.json();
-        setFavIds(new Set<string>(p.effective?.home?.favoriteDocIds ?? []));
-      }
-      // Recently-viewed markers → Recent tab + "Date viewed" column.
-      if (recentRes?.ok) {
-        const r = await recentRes.json();
-        const views: Array<{ id: string; at: string }> = Array.isArray(r?.views) ? r.views : [];
-        setRecentViews(new Map(views.map((x) => [x.id, x.at])));
-      }
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "load failed");
-    }
-  }, [view]);
-  useEffect(() => { void load(); }, [load]);
-  const v = rowVersion("docs");
-  useEffect(() => { if (v > 0) void load(); }, [v, load]);
+    const r = await apiFetch<ListResponse>(`/api/docs?${queryString}`, { cache: "no-store" });
+    if (!r.ok) { setLoadError(true); return; }
+    setLoadError(false);
+    setRows(r.data.data);
+    setTotal(r.data.total);
+    setNextCursor(r.data.nextCursor);
+    if (r.data.counts) setCounts(r.data.counts);
+    setSelected(new Set());
+  }, [queryString]);
+  // A tick after the effect, so the loader's own setState never runs inside
+  // an effect body (the same shape src/components/access/who-has-access.tsx uses).
+  useEffect(() => { const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [load]);
+  const rv = rowVersion("docs");
+  useEffect(() => { if (rv <= 0) return; const t = setTimeout(() => void load(), 0); return () => clearTimeout(t); }, [rv, load]);
   useEffect(() => {
     const onChange = () => { void load(); };
     window.addEventListener("workwrk:docs-changed", onChange);
     window.addEventListener("workwrk:favs-changed", onChange);
+    window.addEventListener("focus", onChange);
     return () => {
       window.removeEventListener("workwrk:docs-changed", onChange);
       window.removeEventListener("workwrk:favs-changed", onChange);
+      window.removeEventListener("focus", onChange);
     };
   }, [load]);
 
-  // Child-count per doc → the little "page count" badge next to a title.
-  const childCount = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const d of rows ?? []) {
-      if (d.parentId) m.set(d.parentId, (m.get(d.parentId) ?? 0) + 1);
-    }
-    return m;
-  }, [rows]);
+  /* ── pagination ── */
+  const from = total === 0 ? 0 : pageIndex * limit + 1;
+  const to = Math.min(total, pageIndex * limit + (rows?.length ?? 0));
+  const goNext = nextCursor ? () => { setCursorStack((st) => [...st, cursor ?? ""]); setParams({ cursor: nextCursor }, { keepCursor: true }); } : undefined;
+  const goPrev = cursor ? () => { const prev = cursorStack[cursorStack.length - 1] ?? ""; setCursorStack((st) => st.slice(0, -1)); setParams({ cursor: prev || null }, { keepCursor: true }); } : undefined;
 
-  const visible = useMemo(() => {
-    let base = rows ?? [];
-    if (view === "my") base = base.filter((d) => d.createdById && d.createdById === meId);
-    else if (view === "favorites") base = base.filter((d) => favIds.has(d.id));
-    else if (view === "recent") base = base.filter((d) => recentViews.has(d.id));
-    else if (view === "meeting") base = base.filter((d) => /meeting|minutes|stand.?up|1:1/i.test(d.title));
-    else if (view === "private") base = base.filter((d) => d.createdById === meId && !d.entityType);
-    else if (view === "shared") {
-      // "Shared with me" must not list what the viewer owns (spec-docs section
-      // 1 row 4: "access via a direct or group share, never ownership or
-      // Everyone"). Anchored-to-a-container is the closest thing the current
-      // /api/docs payload can answer, so the view narrows it by dropping the
-      // viewer's own docs; the full `via` rule needs the list API the /docs
-      // rebuild adds (section 2), and it is flagged there rather than faked
-      // here.
-      base = base.filter((d) => !!d.entityType && d.createdById !== meId);
-    }
-    const q = search.trim().toLowerCase();
-    if (!q) return base;
-    return base.filter((d) => d.title.toLowerCase().includes(q) || (d.excerpt ?? "").toLowerCase().includes(q));
-  }, [rows, view, meId, search, favIds, recentViews]);
+  /* ── filter options ── */
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterSearch, setFilterSearch] = useState("");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [ownerPickOpen, setOwnerPickOpen] = useState(false);
+  const [spaces, setSpaces] = useState<SpaceRow[] | null>(null);
+  const [people, setPeople] = useState<PersonRef[]>([]);
+  useEffect(() => {
+    if (!filterOpen || spaces !== null) return;
+    let live = true;
+    void (async () => {
+      const [s, p] = await Promise.all([
+        apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }),
+        apiFetch<{ data: PersonRef[] }>("/api/users?scope=all&limit=200", { cache: "no-store" }),
+      ]);
+      if (!live) return;
+      setSpaces(s.ok ? s.data.spaces ?? [] : []);
+      setPeople(p.ok && Array.isArray(p.data?.data) ? p.data.data : []);
+    })();
+    return () => { live = false; };
+  }, [filterOpen, spaces]);
 
-  // Distinct locations present in the current set → the Filters popover options.
-  const NO_LOC = "__none__";
-  const locations = useMemo(() => {
-    const m = new Map<string, { name: string; color: string | null; icon: string | null; type: string }>();
-    let hasNone = false;
-    for (const d of visible) {
-      if (d.location) m.set(d.location.name, { name: d.location.name, color: d.location.color, icon: d.location.icon, type: d.location.type });
-      else hasNone = true;
-    }
-    return { list: [...m.values()].sort((a, b) => a.name.localeCompare(b.name)), hasNone };
-  }, [visible]);
-
-  const toggleSort = (col: SortCol) =>
-    setSort((s) => (s.col === col ? { col, dir: s.dir === "asc" ? "desc" : "asc" } : { col, dir: col === "title" || col === "location" ? "asc" : "desc" }));
-
-  // Apply the Location filter + the active sort.
-  const displayed = useMemo(() => {
-    let base = visible;
-    if (locFilter.size > 0) base = base.filter((d) => locFilter.has(d.location?.name ?? NO_LOC));
-    // Recent keeps most-recently-VIEWED order under the default sort
-    // (ISO timestamps compare lexicographically).
-    if (view === "recent" && sort.col === "updated" && sort.dir === "desc") {
-      return [...base].sort((a, b) => (recentViews.get(b.id) ?? "").localeCompare(recentViews.get(a.id) ?? ""));
-    }
-    const sgn = sort.dir === "asc" ? 1 : -1;
-    return [...base].sort((a, b) => {
-      if (sort.col === "title") return sgn * (a.title || "").localeCompare(b.title || "");
-      if (sort.col === "location") return sgn * (a.location?.name ?? "").localeCompare(b.location?.name ?? "");
-      return sgn * (new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
-    });
-  }, [visible, locFilter, sort, view, recentViews]);
-
-  async function createDoc(template?: (typeof TEMPLATES)[number]) {
+  /* ── create ── */
+  const [creating, setCreating] = useState(false);
+  const createDoc = useCallback(async () => {
     if (creating) return;
     setCreating(true);
-    setNewMenu(false);
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          template
-            ? { title: template.title, content: { blocks: [], meta: { icon: template.emoji } } }
-            : { title: "New Doc", content: { blocks: [] } },
-        ),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        toast(`Couldn't create doc${err?.error ? ` — ${err.error}` : ""}`);
-        return;
-      }
-      const data = await res.json();
-      const d = data.doc ?? data.data ?? data;
-      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
-      if (d?.id) router.push(`/docs/${d.id}`);
-    } catch { toast("Couldn't create doc"); }
-    finally { setCreating(false); }
-  }
+    const r = await apiFetch<{ doc: { id: string } }>("/api/docs", { method: "POST", json: { title: "Untitled doc", content: { blocks: [] } } });
+    setCreating(false);
+    if (!r.ok) { toast(r.error || "Couldn't create doc", { tone: "danger" }); return; }
+    dispatchDocsChanged();
+    router.push(`/docs/${r.data.doc.id}?new=1`);
+  }, [creating, router, toast]);
 
-  // Name / Location / Date updated / Date viewed / Contributors / menu
-  const COLS = "grid grid-cols-[minmax(220px,1fr)_150px_130px_130px_110px_44px] items-center";
+  // `n` with no field focused = New doc (spec keyboard row).
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "n" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      e.preventDefault();
+      void createDoc();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [createDoc]);
+
+  /* ── favorites ── */
+  const toggleFav = useCallback(async (d: DocRow) => {
+    const next = !d.favorite;
+    setRows((prev) => prev?.map((r) => (r.id === d.id ? { ...r, favorite: next } : r)) ?? prev);
+    const r = await apiFetch("/api/me/favorites/docs", { method: "POST", json: { docId: d.id, on: next } });
+    if (!r.ok) { setRows((prev) => prev?.map((x) => (x.id === d.id ? { ...x, favorite: !next } : x)) ?? prev); toast("Couldn't update favorite", { tone: "danger" }); return; }
+    window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+  }, [toast]);
+
+  /* ── row menu + share ── */
+  const menu = useDocRowMenu();
+  const [shareFor, setShareFor] = useState<DocRow | null>(null);
+  const shareAnchor = useRef<HTMLButtonElement | null>(null);
+  const meId = boot.viewer.id;
+  const toTarget = (d: DocRow): DocMenuTarget => ({
+    id: d.id, title: d.title, parentId: d.parentId, entityType: d.entityType, entityId: d.entityId,
+    favorite: d.favorite, role: d.canManage ? "full" : d.myRole, own: d.ownerId === meId,
+  });
+
+  /* ── bulk ── */
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
+  const selectedRows = useMemo(() => (rows ?? []).filter((r) => selected.has(r.id)), [rows, selected]);
+  async function bulkFavorite() {
+    const ids = [...selected];
+    await Promise.allSettled(ids.map((id) => apiFetch("/api/me/favorites/docs", { method: "POST", json: { docId: id, on: true } })));
+    window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
+    toast(`Added ${ids.length} doc${ids.length === 1 ? "" : "s"} to favorites`);
+    setSelected(new Set());
+    void load();
+  }
+  async function bulkTrash() {
+    const ids = selectedRows.filter((r) => r.canManage || (r.myRole === "edit" && r.ownerId === meId)).map((r) => r.id);
+    if (ids.length === 0) { toast("You cannot move these docs to Trash"); return; }
+    const ok = await confirm({ title: `Move ${ids.length} doc${ids.length === 1 ? "" : "s"} to Trash?`, description: `You can restore them for ${boot.org.trashDays} days.`, destructive: true, confirmLabel: "Move to Trash" });
+    if (!ok) return;
+    const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "DELETE" })));
+    const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;
+    toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : "Moved to Trash", failed ? { tone: "danger" } : { action: { label: "View Trash", onClick: () => router.push("/trash?type=doc") } });
+    setSelected(new Set());
+    dispatchDocsChanged();
+    void load();
+  }
+  async function bulkMove(value: string) {
+    setBulkMoveOpen(false);
+    const ids = selectedRows.filter((r) => r.myRole !== "view").map((r) => r.id);
+    const body = value === "none" ? { entityType: null, entityId: null } : { entityType: "SPACE", entityId: value };
+    const results = await Promise.allSettled(ids.map((id) => apiFetch(`/api/docs/${id}`, { method: "PUT", json: body })));
+    const failed = results.filter((r) => r.status === "rejected" || !r.value.ok).length;
+    toast(failed ? `Moved ${ids.length - failed}, ${failed} failed` : `Moved ${ids.length} doc${ids.length === 1 ? "" : "s"}`, failed ? { tone: "danger" } : undefined);
+    setSelected(new Set());
+    dispatchDocsChanged();
+    void load();
+  }
+  useEffect(() => {
+    if (!bulkMoveOpen || spaces !== null) return;
+    void (async () => { const s = await apiFetch<{ spaces: SpaceRow[] }>("/api/spaces", { cache: "no-store" }); setSpaces(s.ok ? s.data.spaces ?? [] : []); })();
+  }, [bulkMoveOpen, spaces]);
+
+  /* ── columns (Display) ── */
+  const cols = readDocsColumns(prefs.home);
+  const [displayOpen, setDisplayOpen] = useState(false);
+  const toggleColumn = (key: string) => {
+    const next = { ...cols, [key]: !cols[key as DocsColumnKey] };
+    void patchPrefs({ home: { docs: { columns: next } } });
+  };
+
+  const columns = useMemo<TableColumn<DocRow>[]>(() => {
+    const out: TableColumn<DocRow>[] = [
+      {
+        key: "name", label: "Name", title: true, sortable: true, width: "minmax(240px,2fr)",
+        render: (d) => (
+          <span className="group/name flex min-w-0 flex-1 items-center gap-2">
+            <span className="grid h-5 w-5 shrink-0 place-items-center text-base [&_svg]:h-4 [&_svg]:w-4 [&_img]:h-5 [&_img]:w-5 [&_img]:rounded-sm">
+              {d.emoji ? renderNoteIcon(d.emoji) : <FileText className="text-ink-2" strokeWidth={1.5} aria-hidden />}
+            </span>
+            <span className="truncate">{d.title || "Untitled doc"}</span>
+            {d.childCount > 0 ? <span className="shrink-0 text-xs font-medium text-ink-2">· {d.childCount} sub-doc{d.childCount === 1 ? "" : "s"}</span> : null}
+            {includeChildren && d.parentTitle ? <span className="shrink-0 truncate text-xs text-ink-2">in {d.parentTitle}</span> : null}
+            <button
+              type="button"
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); void toggleFav(d); }}
+              aria-label={d.favorite ? "Remove from favorites" : "Add to favorites"}
+              aria-pressed={d.favorite}
+              title={d.favorite ? "Remove from favorites" : "Star"}
+              className={cn("ms-auto inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md hover:bg-active", d.favorite ? "text-ink" : "text-ink-3 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100")}
+            >
+              <Star className="h-4 w-4" strokeWidth={1.5} style={d.favorite ? { fill: "currentColor" } : undefined} aria-hidden />
+            </button>
+          </span>
+        ),
+      },
+    ];
+    if (cols.location) out.push({
+      key: "location", label: "Location", sortable: true, width: "minmax(140px,1fr)",
+      headerFilter: (
+        <button type="button" onClick={(e) => { e.stopPropagation(); setFilterOpen(true); }} className="text-sm font-normal text-ink-2 hover:text-ink">
+          {location ? (location === "none" ? "No location ▾" : "1 ▾") : "All ▾"}
+        </button>
+      ),
+      render: (d) => d.location ? (
+        d.location.href ? (
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-ink hover:underline" onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(d.location!.href!); }} title={d.location.name}>
+            <EntityTile size="xs" icon={d.location.icon} color={d.location.color} name={d.location.name} fallback={locationFallback(d.location.type)} />
+            <span className="truncate">{d.location.name}</span>
+          </span>
+        ) : (
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-ink" title={d.location.name}>
+            <EntityTile size="xs" icon={d.location.icon} color={d.location.color} name={d.location.name} fallback={locationFallback(d.location.type)} />
+            <span className="truncate">{d.location.name}</span>
+          </span>
+        )
+      ) : <span className="text-ink-3">No location</span>,
+    });
+    if (cols.updated) out.push({ key: "updated", label: "Date updated", sortable: true, width: "130px", render: (d) => <span className="tabular-nums text-ink-2" title={fmt.title(d.updatedAt)}>{fmt.date(d.updatedAt)}</span> });
+    if (cols.viewed) out.push({ key: "viewed", label: "Date viewed", sortable: true, width: "130px", render: (d) => d.viewedAt ? <span className="tabular-nums text-ink-2" title={fmt.title(d.viewedAt)}>{fmt.date(d.viewedAt)}</span> : <span className="text-ink-3">Never</span> });
+    if (cols.owner) out.push({
+      key: "owner", label: "Owner", sortable: true, width: "minmax(140px,1fr)",
+      headerFilter: (
+        <button type="button" onClick={(e) => { e.stopPropagation(); setFilterOpen(true); }} className="text-sm font-normal text-ink-2 hover:text-ink">{owner ? "1 ▾" : "All ▾"}</button>
+      ),
+      render: (d) => d.owner ? (
+        <span className="inline-flex min-w-0 items-center gap-2"><PersonAvatar person={d.owner} size={24} /><span className="truncate">{d.owner.name ?? personName(d.owner)}</span></span>
+      ) : <span className="text-ink-3">Nobody</span>,
+    });
+    if (cols.contributors) out.push({ key: "contributors", label: "Contributors", width: "120px", render: (d) => d.contributors && d.contributors.length > 0 ? <PersonAvatarStack people={d.contributors} size={20} max={4} /> : <span className="text-ink-3">None</span> });
+    return out;
+  }, [cols, includeChildren, location, owner, fmt, router, toggleFav]);
+
+  const filteredEmpty = !!(q || activeFilters);
+  const emptyNode = filteredEmpty ? (
+    <span className="inline-flex items-center gap-2">No results · <button type="button" onClick={() => setParams({ q: null, location: null, owner: null, updatedFrom: null, updatedTo: null, includeChildren: null })} className="font-medium text-brand-deep hover:underline">Clear filters</button></span>
+  ) : view === "recent" ? "Nothing opened yet"
+    : view === "shared" ? "Nothing has been shared with you yet"
+    : view === "favorites" ? "Star a doc and it shows up here"
+    : view === "my" ? <span className="inline-flex items-center gap-2">You have not created a doc yet · <button type="button" onClick={() => void createDoc()} className="font-medium text-brand-deep hover:underline">Create a doc</button></span>
+    : null;
+
+  const showQuietEmpty = rows !== null && rows.length === 0 && view === "all" && !filteredEmpty;
 
   return (
-    <div className="flex flex-col h-full bg-white text-zinc-900">
-      {/* One label per destination (principle 16): the view's name is the h1,
-          the second crumb and the tab title, spelled the same in all three.
-          Without a declaration the bar printed a lone "Docs" and the tab title
-          disagreed with the heading. */}
-      <Breadcrumb items={[{ label: VIEW_LABEL[view] }]} />
-      {/* Header */}
-      <div className="px-5 pt-3.5 pb-2 flex items-center justify-between gap-3">
-        <h1 className="text-[22px] font-semibold leading-tight text-zinc-900">{VIEW_LABEL[view]}</h1>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <div className="inline-flex items-stretch rounded-md overflow-hidden shadow-sm">
-              <button
-                type="button"
-                onClick={() => void createDoc()}
-                disabled={creating}
-                className="inline-flex items-center gap-1.5 h-8 pl-3 pr-2.5 bg-brand text-white text-base font-medium hover:bg-brand-hover disabled:opacity-60"
-              >
-                {creating ? <Dots variant="pending" /> : <Plus className="w-3.5 h-3.5" />} New Doc
-              </button>
-              <button
-                type="button"
-                onClick={() => setNewMenu((s) => !s)}
-                className="inline-flex items-center px-1.5 bg-brand text-white border-s border-white/25 hover:bg-brand-hover"
-                aria-label="New doc options"
-              >
-                <ChevronDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            {newMenu ? (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setNewMenu(false)} />
-                <div className="absolute right-0 top-9 z-50 w-[220px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
-                  <button type="button" onClick={() => void createDoc()} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50">
-                    <FileText className="w-4 h-4 text-zinc-400" /> Blank doc
-                  </button>
-                  <div className="h-px bg-zinc-100 my-1" />
-                  <div className="px-3 pt-0.5 pb-1 text-micro font-semibold uppercase tracking-wide text-zinc-400">From template</div>
-                  {TEMPLATES.map((t) => (
-                    <button key={t.key} type="button" onClick={() => void createDoc(t)} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50">
-                      <t.Icon className="w-4 h-4" style={{ color: t.tint }} /> {t.title}
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </div>
-
-      {/* The views row, named once in VIEW_LABEL so the tab, the H1 and the
-          sidebar row for one URL cannot drift apart again. */}
-      <ViewTabStrip className="px-5">
-        {HUB_TABS.map((t) => (
+    <>
+      {/* A single crumb, "Docs": the bar renders the hub label itself. */}
+      <Breadcrumb items={[]} />
+      <OsPageHeader
+        title="Docs"
+        views={VIEWS.map((v) => (
           <ViewTab
-            key={t.key}
-            icon={t.Icon}
-            label={t.label}
-            active={view === t.key}
-            onClick={() => router.push(t.key === "all" ? "/docs" : `/docs?view=${t.key}`)}
+            key={v.key}
+            icon={v.Icon}
+            label={VIEW_LABEL[v.key]}
+            active={view === v.key}
+            href={v.key === "all" ? "/docs" : `/docs?view=${v.key}`}
+            trailing={counts ? <span className={cn("text-xs font-medium tabular-nums", view === v.key ? "text-ink-strong" : "text-ink-2")}>{fmt.count(counts[v.key])}</span> : undefined}
           />
         ))}
-      </ViewTabStrip>
-
-      {/* Templates */}
-      <div className="px-5 pt-3 pb-3">
-        <div className="text-sm text-zinc-500 mb-1.5">Templates</div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {TEMPLATES.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => void createDoc(t)}
-              className="group flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3.5 py-3 text-left hover:border-zinc-300 hover:shadow-sm transition-all"
-            >
-              <span
-                className="inline-flex items-center justify-center w-10 h-10 rounded-lg shrink-0"
-                style={{ background: `color-mix(in srgb, ${t.tint} 15%, transparent)`, color: t.tint }}
-              >
-                <t.Icon className="w-5 h-5" />
-              </span>
-              <span className="min-w-0">
-                <span className="flex items-center gap-1 text-base font-semibold text-zinc-900">
-                  {t.title}
-                  {t.verified ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-500 text-white text-micro">✓</span> : null}
-                </span>
-                <span className="block text-sm text-zinc-500 truncate">{t.hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div className="px-5 py-2 flex items-center gap-1.5 border-b border-zinc-100">
-        {/* Filters — by Location */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setFilterOpen((s) => !s); setSortOpen(false); }}
-            className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-base ${locFilter.size > 0 ? "text-[var(--os-brand)] bg-[color-mix(in_srgb,var(--os-brand)_10%,transparent)]" : "text-zinc-600 hover:bg-zinc-100"}`}
-          >
-            <ListFilter className="w-3.5 h-3.5" /> Filters
-            {locFilter.size > 0 ? <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-[var(--os-brand)] text-white text-xs font-semibold">{locFilter.size}</span> : null}
-          </button>
-          {filterOpen ? (
+        toolbar={{
+          filter: { open: filterOpen, onToggle: () => setFilterOpen((o) => !o), count: activeFilters },
+          sort: { onClick: () => setSortOpen((o) => !o), label: SORTS.find((s) => s.key === sort)?.label, active: true },
+          left: (
+            <div className="relative">
+              <Picker
+                open={sortOpen}
+                onClose={() => setSortOpen(false)}
+                ariaLabel="Sort docs"
+                selected={sort}
+                onSelect={(v) => { setSortOpen(false); setParams(v === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: v, dir: null }); }}
+                sections={[{ options: SORTS.map((s) => ({ value: s.key, label: s.label, hint: s.key === sort ? (dir === "asc" ? "Ascending" : "Descending") : undefined })) }]}
+                width={240}
+              />
+            </div>
+          ),
+          right: (
             <>
-              <div className="fixed inset-0 z-40" onClick={() => setFilterOpen(false)} />
-              <div className="absolute left-0 top-8 z-50 w-[240px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
-                <div className="px-3 pt-1 pb-1.5 flex items-center justify-between">
-                  <span className="text-micro font-semibold uppercase tracking-wide text-zinc-400">Location</span>
-                  {locFilter.size > 0 ? (
-                    <button type="button" onClick={() => setLocFilter(new Set())} className="text-xs text-[var(--os-brand)] hover:underline">Clear</button>
-                  ) : null}
-                </div>
-                <div className="max-h-[280px] overflow-y-auto">
-                  {locations.list.length === 0 && !locations.hasNone ? (
-                    <div className="px-3 py-2 text-sm text-zinc-400">No locations</div>
-                  ) : null}
-                  {locations.list.map((l) => {
-                    const on = locFilter.has(l.name);
-                    return (
-                      <button
-                        key={l.name}
-                        type="button"
-                        onClick={() => setLocFilter((prev) => { const n = new Set(prev); if (n.has(l.name)) n.delete(l.name); else n.add(l.name); return n; })}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50"
-                      >
-                        <EntityTile size="xs" icon={l.icon} color={l.color} name={l.name} fallback={locationFallback(l.type)} />
-                        <span className="flex-1 truncate">{l.name}</span>
-                        {on ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
-                      </button>
-                    );
-                  })}
-                  {locations.hasNone ? (
-                    <button
-                      type="button"
-                      onClick={() => setLocFilter((prev) => { const n = new Set(prev); if (n.has(NO_LOC)) n.delete(NO_LOC); else n.add(NO_LOC); return n; })}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-500 hover:bg-zinc-50"
-                    >
-                      <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-zinc-100 text-zinc-400 text-xs shrink-0">–</span>
-                      <span className="flex-1 truncate">No location</span>
-                      {locFilter.has(NO_LOC) ? <Check className="w-3.5 h-3.5 text-[var(--os-brand)] shrink-0" /> : null}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
+              <SearchField value={q} onChange={(v) => setParams({ q: v || null })} placeholder="Search docs" />
+              {/* Display lives in the bordered "..." (spec /docs toolbar); the
+                  picker anchors here, at the end of the cluster, under it. */}
+              <span className="relative">
+                <Picker open={displayOpen} onClose={() => setDisplayOpen(false)} ariaLabel="Columns shown" multi selected={DOCS_COLUMNS.filter((k) => cols[k])} onSelect={toggleColumn} align="end" width={240}
+                  sections={[{ label: "Columns shown", options: DOCS_COLUMNS.map((k) => ({ value: k, label: COLUMN_LABEL[k] })) }]} />
+              </span>
+              <SplitPrimary label="New doc" onClick={() => void createDoc()} busy={creating}>
+                <MenuItem icon={FileText} label="Blank doc" onClick={() => void createDoc()} />
+                <MenuItem icon={LayoutTemplate} label="From template…" onClick={() => openTemplateCenter({ kind: "DOC" })} />
+                <UpcomingOnly>
+                  <MenuSeparator />
+                  <ComingSoonRow label="Import…" icon={ImportIcon} />
+                </UpcomingOnly>
+              </SplitPrimary>
             </>
-          ) : null}
-        </div>
+          ),
+          menu: [
+            { label: "Display", icon: SlidersHorizontal, onClick: () => setDisplayOpen(true) },
+            { label: "Browse templates", icon: LayoutTemplate, href: "/templates?kind=doc" },
+            { label: "Trash", icon: Trash2, href: "/trash?type=doc" },
+          ],
+        }}
+      />
 
-        {/* Sort */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setSortOpen((s) => !s); setFilterOpen(false); }}
-            className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-base text-zinc-600 hover:bg-zinc-100"
-          >
-            <ArrowUpDown className="w-3.5 h-3.5" /> Sort
-          </button>
-          {sortOpen ? (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
-              <div className="absolute left-0 top-8 z-50 w-[200px] rounded-lg border border-zinc-200 bg-white shadow-xl py-1">
-                {SORT_OPTIONS.map((o) => {
-                  const active = sort.col === o.col;
-                  return (
-                    <button
-                      key={o.col}
-                      type="button"
-                      onClick={() => { toggleSort(o.col); }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-base text-zinc-700 hover:bg-zinc-50"
-                    >
-                      <span className="flex-1">{o.label}</span>
-                      {active ? (sort.dir === "asc" ? <ChevronUp className="w-3.5 h-3.5 text-[var(--os-brand)]" /> : <ChevronDown className="w-3.5 h-3.5 text-[var(--os-brand)]" />) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
+      <div className="os-chrome flex min-h-0 flex-1 gap-4 px-6 pb-6 pt-2">
+        <FilterPanel
+          open={filterOpen}
+          onClose={() => setFilterOpen(false)}
+          objects="docs"
+          activeCount={activeFilters}
+          onClearAll={() => setParams({ location: null, owner: null, updatedFrom: null, updatedTo: null, includeChildren: null })}
+          search={{ value: filterSearch, onChange: setFilterSearch, placeholder: "Search fields" }}
+        >
+          {"location".includes(filterSearch.toLowerCase()) ? (
+            <FilterGroup label="Location">
+              <FilterRow label="No location" checked={location === "none"} onCheckedChange={(on) => setParams({ location: on ? "none" : null })} />
+              {(spaces ?? []).map((s) => (
+                <FilterRow key={s.id} label={<span className="inline-flex items-center gap-2"><EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" />{s.name}</span>} checked={location === `SPACE:${s.id}`} onCheckedChange={(on) => setParams({ location: on ? `SPACE:${s.id}` : null })} />
+              ))}
+            </FilterGroup>
           ) : null}
-        </div>
-        <div className="flex-1" />
-        <div className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md border border-zinc-200 focus-within:border-zinc-300">
-          <Search className="w-3.5 h-3.5 text-zinc-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search docs…"
-            className="w-[200px] text-base bg-transparent outline-none placeholder:text-zinc-400"
-          />
+          {"owner".includes(filterSearch.toLowerCase()) ? (
+            <FilterGroup label="Owner">
+              <FilterRow label="Filter by owner" checked={!!owner} onCheckedChange={(on) => { if (!on) setParams({ owner: null }); else setOwnerPickOpen(true); }}>
+                <OwnerPick people={people} value={owner} onChange={(id) => setParams({ owner: id })} open={ownerPickOpen} setOpen={setOwnerPickOpen} />
+              </FilterRow>
+            </FilterGroup>
+          ) : null}
+          {"updated".includes(filterSearch.toLowerCase()) ? (
+            <FilterGroup label="Updated">
+              <FilterRow label="Date range" checked={!!(updatedFrom || updatedTo)} onCheckedChange={(on) => { if (!on) setParams({ updatedFrom: null, updatedTo: null }); else setParams({ updatedFrom: new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10) }); }}>
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex items-center gap-2 text-sm text-ink-2">From <input type="date" value={(updatedFrom ?? "").slice(0, 10)} onChange={(e) => setParams({ updatedFrom: e.target.value || null })} className="h-8 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink" /></label>
+                  <label className="flex items-center gap-2 text-sm text-ink-2">To <input type="date" value={(updatedTo ?? "").slice(0, 10)} onChange={(e) => setParams({ updatedTo: e.target.value ? `${e.target.value}T23:59:59` : null })} className="h-8 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink" /></label>
+                </div>
+              </FilterRow>
+            </FilterGroup>
+          ) : null}
+          {"include sub-docs".includes(filterSearch.toLowerCase()) ? (
+            <FilterGroup label="Sub-docs">
+              <FilterRow label="Include sub-docs" checked={includeChildren} onCheckedChange={(on) => setParams({ includeChildren: on ? "1" : null })} />
+            </FilterGroup>
+          ) : null}
+        </FilterPanel>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          {loadError ? (
+            <OsEmptyView variant="error" context="docs" title="Couldn't load your docs" action={{ label: "Retry", onClick: () => void load() }} />
+          ) : showQuietEmpty ? (
+            <OsEmptyView context="docs" title="No docs yet" action={{ label: "Create a doc", onClick: () => void createDoc() }} />
+          ) : (
+            <TableCard<DocRow>
+              ariaLabel={VIEW_LABEL[view]}
+              columns={columns}
+              rows={rows}
+              rowKey={(d) => d.id}
+              rowHref={(d) => `/docs/${d.id}`}
+              selectable
+              selected={selected}
+              onSelectedChange={setSelected}
+              sort={{ key: sort, dir }}
+              onSort={(key) => setParams(key === sort ? { dir: dir === "asc" ? "desc" : "asc" } : { sort: key, dir: null })}
+              onRowContextMenu={(d, e) => menu.openAt(e, toTarget(d))}
+              rowMenu={(d) => <RowMenuTrigger onOpen={(ref) => menu.openFrom(ref, toTarget(d))} open={menu.state?.doc.id === d.id} />}
+              empty={emptyNode}
+              footer={{ total, noun: "docs", from, to, onPrev: goPrev, onNext: goNext, pageSize: limit, pageSizes: PAGE_SIZES, onPageSize: (n) => setParams({ limit: n === PAGE_SIZES[0] ? null : String(n) }) }}
+              bulkActions={
+                <>
+                  <span className="relative">
+                    <BulkAction icon={FolderInput} label="Move to…" onClick={() => setBulkMoveOpen((o) => !o)} />
+                    <Picker open={bulkMoveOpen} onClose={() => setBulkMoveOpen(false)} ariaLabel="Move selected docs" side="top" onSelect={(v) => void bulkMove(v)}
+                      sections={[{ options: [{ value: "none", label: "No location" }] }, { label: "Spaces", options: (spaces ?? []).map((s) => ({ value: s.id, label: s.name, glyph: <EntityTile size="xs" icon={s.icon} color={s.color} name={s.name} fallback="folder" /> })) }]} />
+                  </span>
+                  <BulkAction icon={Star} label="Add to favorites" onClick={() => void bulkFavorite()} />
+                  <BulkAction icon={Trash2} label="Move to Trash" destructive onClick={() => void bulkTrash()} />
+                </>
+              }
+            />
+          )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Column header — Name / Location / Date updated are click-to-sort */}
-        <div className={`${COLS} sticky top-0 z-10 bg-white border-b border-zinc-100 px-5 h-9 text-xs font-medium text-zinc-400`}>
-          <SortHeader label="Name" col="title" sort={sort} onSort={toggleSort} />
-          <SortHeader label="Location" col="location" sort={sort} onSort={toggleSort} />
-          <SortHeader label="Date updated" col="updated" sort={sort} onSort={toggleSort} />
-          <div>Date viewed</div>
-          <div>Contributors</div>
-          <div />
-        </div>
-
-        {loadError ? (
-          <ErrorState what="docs" onRetry={() => { setLoadError(null); void load(); }} />
-        ) : rows === null ? (
-          <SkeletonRows />
-        ) : displayed.length === 0 ? (
-          <div className="px-5 py-12 text-center">
-            <FileText className="w-8 h-8 mx-auto text-zinc-300" />
-            <p className="mt-2 text-base text-zinc-500">
-              {search.trim() || locFilter.size > 0
-                ? "Nothing matches these filters."
-                : view === "recent" ? "No recently viewed docs. Docs you open show up here."
-                : view === "favorites" ? "No favorite docs yet. Star a doc to pin it here."
-                : view === "my" ? "You haven't created any docs yet."
-                : view === "archived" ? "Nothing in Archived."
-                : `No docs in ${VIEW_LABEL[view]} yet.`}
-            </p>
-            {!search.trim() && locFilter.size === 0 && (view === "all" || view === "my") ? (
-              <button type="button" onClick={() => void createDoc()} className="mt-3 inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-zinc-300 bg-white text-zinc-700 text-base font-medium hover:bg-zinc-50">
-                <Plus className="w-3.5 h-3.5" /> New Doc
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          displayed.map((d) => {
-            const count = childCount.get(d.id) ?? 0;
-            const loc = d.location;
-            const fav = favIds.has(d.id);
-            const viewedAt = recentViews.get(d.id) ?? null;
-            return (
-              <div
-                key={d.id}
-                className={`${COLS} group px-5 h-11 border-b border-zinc-100 hover:bg-zinc-50/70 cursor-pointer text-base`}
-                onClick={() => router.push(`/docs/${d.id}`)}
-                onContextMenu={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: fav })}
-              >
-                {/* Name + hover actions */}
-                <div className="flex items-center gap-2 min-w-0 pr-2">
-                  <span className="inline-flex items-center justify-center w-5 h-5 shrink-0 text-blue-500">
-                    {d.emoji ? <span className="text-base leading-none">{renderNoteIcon(d.emoji)}</span> : <FileText className="w-[18px] h-[18px]" />}
-                  </span>
-                  <span className="truncate text-zinc-800">{d.title || "Untitled"}</span>
-                  {count > 0 ? (
-                    <span className="inline-flex items-center gap-0.5 text-xs text-zinc-400 shrink-0">
-                      <FileText className="w-3 h-3" />{count}
-                    </span>
-                  ) : null}
-                  <span className="ml-auto flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" onClick={(e) => e.stopPropagation()}>
-                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Copy link"
-                      onClick={async () => { try { await navigator.clipboard.writeText(`${window.location.origin}/docs/${d.id}`); toast("Link copied"); } catch { /* ignore */ } }}>
-                      <Link2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title={fav ? "Remove from favorites" : "Add to favorites"}
-                      onClick={async () => {
-                        try {
-                          const res = await fetch(`/api/me/favorites/docs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ docId: d.id, on: !fav }) });
-                          if (!res.ok) { toast("Couldn't update favorite"); return; }
-                          setFavIds((prev) => { const n = new Set(prev); if (fav) n.delete(d.id); else n.add(d.id); return n; });
-                          window.dispatchEvent(new CustomEvent("workwrk:favs-changed"));
-                          toast(fav ? "Removed from favorites" : "Added to favorites");
-                        } catch { toast("Couldn't update favorite"); }
-                      }}>
-                      <Star className={fav ? "w-3.5 h-3.5 text-amber-400 fill-current" : "w-3.5 h-3.5"} />
-                    </button>
-                    <button type="button" className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100" title="Open"
-                      onClick={() => router.push(`/docs/${d.id}`)}>
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
-                </div>
-
-                {/* Location — the real Space / Folder / Board / item it lives in */}
-                <div className="pr-2 min-w-0">
-                  {loc ? (
-                    loc.href ? (
-                      <span
-                        className="inline-flex items-center gap-1.5 max-w-full text-base text-zinc-700 hover:text-zinc-900 hover:underline"
-                        onClick={(e) => { e.stopPropagation(); router.push(loc.href!); }}
-                        title={loc.name}
-                      >
-                        <EntityTile size="xs" icon={loc.icon} color={loc.color} name={loc.name} fallback={locationFallback(loc.type)} />
-                        <span className="truncate">{loc.name}</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 max-w-full text-base text-zinc-700" title={loc.name}>
-                        <EntityTile size="xs" icon={loc.icon} color={loc.color} name={loc.name} fallback={locationFallback(loc.type)} />
-                        <span className="truncate">{loc.name}</span>
-                      </span>
-                    )
-                  ) : <span className="text-zinc-300">–</span>}
-                </div>
-
-                {/* Date updated */}
-                <div className="text-zinc-600 text-base">{smartDate(d.updatedAt)}</div>
-
-                {/* Date viewed — this viewer's last open (recent-docs marker) */}
-                <div>
-                  {viewedAt ? (
-                    <span className="text-zinc-600 text-base">{smartDate(viewedAt)}</span>
-                  ) : (
-                    <span className="text-zinc-300">–</span>
-                  )}
-                </div>
-
-                {/* Contributors — everyone who saved a version (creator fallback) */}
-                <div>
-                  {d.contributors && d.contributors.length > 0 ? (
-                    <div className="flex -space-x-1.5">
-                      {d.contributors.slice(0, 4).map((p) => (
-                        <span key={p.id} className="rounded-full ring-2 ring-white dark:ring-zinc-900">
-                          <PersonAvatar person={p} size={20} />
-                        </span>
-                      ))}
-                      {d.contributors.length > 4 ? (
-                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full ring-2 ring-white dark:ring-zinc-900 bg-zinc-100 text-zinc-500 text-xs font-medium">
-                          +{d.contributors.length - 4}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <span className="text-zinc-300">–</span>
-                  )}
-                </div>
-
-                {/* Row menu */}
-                <div className="flex justify-center" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center w-6 h-6 rounded-md text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-zinc-700 hover:bg-zinc-100 transition-opacity"
-                    aria-label="Doc actions"
-                    onClick={(e) => noteMenu.open(e, { id: d.id, title: d.title, favorite: fav })}
-                  >
-                    <MoreHorizontal className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {noteMenu.menu && (
-        <NoteActionMenu
-          target={noteMenu.menu.target}
-          x={noteMenu.menu.x}
-          y={noteMenu.menu.y}
-          onClose={noteMenu.close}
-          onChanged={() => void load()}
+      <DocRowMenuHost
+        menu={menu}
+        context="table"
+        onChanged={() => void load()}
+        onShare={(d) => { shareAnchor.current = (menu.state?.anchor?.current as HTMLButtonElement | null) ?? null; const row = rows?.find((r) => r.id === d.id) ?? null; setShareFor(row); }}
+      />
+      {shareFor ? (
+        <DocShareModal
+          docId={shareFor.id}
+          docTitle={shareFor.title || "Untitled doc"}
+          createdById={shareFor.ownerId}
+          meId={meId}
+          open
+          onClose={() => setShareFor(null)}
+          anchorRef={shareAnchor}
+          viewerRole={shareFor.myRole}
         />
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }
 
-function SortHeader({ label, col, sort, onSort }: {
-  label: string;
-  col: SortCol;
-  sort: { col: SortCol; dir: "asc" | "desc" };
-  onSort: (col: SortCol) => void;
-}) {
-  const active = sort.col === col;
+/* ───────────────────────────── bits ───────────────────────────── */
+
+function SearchField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const [draft, setDraft] = useState(value);
+  // Adopt a new URL value during render (the Picker pattern), never in an effect.
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) { setSeen(value); setDraft(value); }
+  useEffect(() => {
+    if (draft === value) return;
+    const t = setTimeout(() => onChange(draft.trim()), 350);
+    return () => clearTimeout(t);
+  }, [draft, value, onChange]);
   return (
-    <button
-      type="button"
-      onClick={() => onSort(col)}
-      className={`inline-flex items-center gap-1 text-left transition-colors hover:text-zinc-600 ${active ? "text-zinc-600" : ""}`}
-    >
-      {label}
-      {active ? (sort.dir === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : null}
-    </button>
+    <label className="relative block">
+      <Search className="pointer-events-none absolute start-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-3" strokeWidth={1.5} aria-hidden />
+      <input type="search" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+        className="h-9 w-[200px] max-md:w-36 rounded-md border border-line-strong bg-raised ps-8 pe-2 text-base text-ink placeholder:text-ink-3 focus:outline-none focus-visible:border-brand" />
+    </label>
+  );
+}
+
+function RowMenuTrigger({ onOpen, open }: { onOpen: (ref: React.RefObject<HTMLButtonElement | null>) => void; open?: boolean }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  return <RowMoreButton buttonRef={ref} open={open} onClick={() => onOpen(ref)} label="Doc actions" />;
+}
+
+function OwnerPick({ people, value, onChange, open, setOpen }: { people: PersonRef[]; value: string | null; onChange: (id: string) => void; open: boolean; setOpen: (v: boolean) => void }) {
+  const current = people.find((p) => p.id === value) ?? null;
+  const options: PickerOption[] = people.map((p) => ({ value: p.id, label: personName(p), description: p.email ?? undefined, glyph: <PersonAvatar person={p} size={20} /> }));
+  return (
+    <span className="relative block">
+      <button type="button" onClick={() => setOpen(!open)} className="inline-flex h-8 items-center gap-2 rounded-md border border-line-strong bg-raised px-2 text-sm text-ink">
+        {current ? <><PersonAvatar person={current} size={20} />{personName(current)}</> : <span className="text-ink-3">Choose a person</span>}
+      </button>
+      <Picker open={open} onClose={() => setOpen(false)} ariaLabel="Owner" searchPlaceholder="Find a person" selected={value} onSelect={(v) => { onChange(v); setOpen(false); }} sections={[{ options }]} />
+    </span>
   );
 }

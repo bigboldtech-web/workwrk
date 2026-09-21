@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Globe, Lock, X } from "lucide-react";
 import { MorePortal } from "@/components/layout/os/more-portal";
+import { useLayer } from "@/components/layout/os/shell-context";
 import { MenuItem, MenuList, MenuSeparator } from "@/components/ui/menu";
 import { Switch } from "@/components/ui/switch";
 import { useOsToast } from "@/components/layout/os/toast";
@@ -97,7 +98,21 @@ export function DocShareModal({
     return () => { cancelled = true; };
   }, [open, viewerRole]);
 
-  // Outside-click + Escape dismiss (same pattern as the peek picker in
+  // Escape goes through the shell's LayerStack (spec-shell section 1.5), so
+  // only the TOPMOST layer closes: with the command palette open over this
+  // popover, one Esc closes the palette and the popover stays. The role
+  // submenu is folded into the same layer (it is a child of this popover,
+  // not a layer of its own): Esc closes it first, then the popover.
+  useLayer(open, {
+    id: "doc-share",
+    kind: "popover",
+    close: () => {
+      if (roleMenuFor) setRoleMenuFor(null);
+      else onClose();
+    },
+  });
+
+  // Outside-click dismiss (same pattern as the peek picker in
   // block-doc-editor). The role submenu is its own portal, so clicks
   // inside it must not close the modal.
   useEffect(() => {
@@ -111,18 +126,11 @@ export function DocShareModal({
       setRoleMenuFor(null);
       onClose();
     }
-    function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
-      if (roleMenuFor) setRoleMenuFor(null);
-      else onClose();
-    }
     document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose, anchorRef, roleMenuFor]);
+  }, [open, onClose, anchorRef]);
 
   async function patchSharing(body: Record<string, unknown>): Promise<SharingState | null> {
     try {

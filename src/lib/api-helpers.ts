@@ -134,6 +134,6 @@ export async function requirePermission(
   action: string
 ) {
   const allowed = await hasPermission(session, module, action);
-  if (!allowed) return jsonError("Forbidden — insufficient permissions", 403);
+  if (!allowed) return jsonError("Forbidden: insufficient permissions", 403);
   return null;
 }

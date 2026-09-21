@@ -280,7 +280,7 @@ export const ROUTE_TITLES: Readonly<Record<string, string>> = {
   "/sops/new": "New SOP",
   "/sops/my-sops": "My SOPs",
   "/sops/compliance": "SOP compliance",
-  "/sops/manage": "Organize SOPs",
+  "/sops/manage": "Organize",
   "/policies/compliance": "Policy compliance",
 };
 

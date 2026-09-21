@@ -1,33 +1,42 @@
 "use client";
 
 /*
- * DocTabsBar — a browser-style strip of open-note tabs across the top of the
- * /docs area, mirroring Notion's desktop tabs.
+ * DocTabsBar: the strip of open docs across the top of the /docs area.
  *
- * Why a layout-level component: tabs must survive navigation between
- * /docs/<a> and /docs/<b>. Mounted from (dashboard)/docs/layout.tsx, this
- * component does NOT unmount as the [id] segment changes, so its state +
- * localStorage persistence stay intact across note switches.
+ * This is a capability the product already had and keeps. It was a Notion
+ * style tab strip on the pre refresh Docs area; it is now drawn on the
+ * refresh tokens (36px rows, --os-surface ground, --os-line rule, the same
+ * hover and active grammar as the rest of the chrome) instead of the deleted
+ * .doctabs CSS family. Behaviour is unchanged:
  *
- * How tabs get populated: BlockDocEditor dispatches `workwrk:doc-tab:open`
- * (and `…:meta` on rename / icon change) with { id, title, icon }. This bar
- * upserts that into its list. Open notes therefore self-register — no prop
- * threading through the router.
+ *   - Docs self register: BlockDocEditor dispatches "workwrk:doc-tab:open"
+ *     (and the same event on rename or icon change) so no props are threaded
+ *     through the router.
+ *   - Mounted from (dashboard)/docs/layout.tsx, so the strip survives
+ *     navigation between /docs/<a> and /docs/<b>.
+ *   - Alt (Option on a Mac) + 1 to 9 jumps to the Nth tab, Alt + ] and
+ *     Alt + [ step through them. Never Cmd: Cmd 1 to 8 are the hub rail.
+ *   - Each tab closes on its own x, and "+" opens a new doc.
+ *   - The list persists in localStorage ("workwrk:doc-tabs"), per viewer,
+ *     and is pruned against the live doc list when a doc is trashed.
  *
- * Keyboard: ⌘/Ctrl + 1–9 jumps to the Nth tab (Notion / browser parity).
+ * With nothing open the strip renders nothing at all, so /docs is clean
+ * until the first doc opens.
  */
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { X, Plus, FileText } from "lucide-react";
+import { apiFetch } from "@/lib/api-fetch";
+import { cn } from "@/lib/utils";
 import { renderNoteIcon } from "./note-icon";
 
 type DocTab = { id: string; title: string; icon?: string };
 const LS_KEY = "workwrk:doc-tabs";
 
-// Hydration-safe "are we on the client yet" flag. Server + first client render
-// both see `false` (matching HTML), then it flips to `true` post-hydration —
-// avoids a mismatch when tabs are restored from localStorage on the client.
+// Hydration safe "are we on the client yet" flag. Server and first client
+// render both see false (matching the HTML), then it flips to true, so the
+// localStorage restore never trips a hydration mismatch.
 const noopSubscribe = () => () => {};
 function useHydrated() {
   return useSyncExternalStore(noopSubscribe, () => true, () => false);
@@ -41,45 +50,40 @@ function loadTabs(): DocTab[] {
   } catch { return []; }
 }
 function persist(tabs: DocTab[]) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
+  try { localStorage.setItem(LS_KEY, JSON.stringify(tabs)); } catch { /* a private window simply forgets */ }
 }
 
 export function DocTabsBar() {
   const router = useRouter();
   const pathname = usePathname();
   const hydrated = useHydrated();
-  // Lazy-init from localStorage (repo convention — guarded for SSR). Avoids a
-  // synchronous setState-in-effect for hydration.
   const [tabs, setTabs] = useState<DocTab[]>(loadTabs);
   const [mod] = useState(() =>
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌥" : "Alt",
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Option" : "Alt",
   );
 
-  // The active doc id is the /docs/<id> segment (library + trash are not docs).
+  // The active doc id is the /docs/<id> segment. /docs and /docs/trash are
+  // not docs, so neither lights a tab.
   const activeId = (() => {
     const m = pathname?.match(/^\/docs\/([^/]+)$/);
     if (!m || m[1] === "trash") return null;
     return m[1];
   })();
 
-  // Persist on every change.
   useEffect(() => { persist(tabs); }, [tabs]);
 
-  // Publish the bar's height so the sticky doc header (.bdoc__head) can dock
-  // *below* it instead of being hidden under it when the note is scrolled.
-  // Cleared to 0 when there are no tabs (the bar renders nothing).
+  // Publish the strip's height so the sticky doc header docks below it
+  // instead of under it. Zero when the strip renders nothing.
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty("--doctabs-h", tabs.length > 0 ? "40px" : "0px");
+    root.style.setProperty("--doctabs-h", tabs.length > 0 ? "36px" : "0px");
     return () => { root.style.setProperty("--doctabs-h", "0px"); };
   }, [tabs.length]);
 
-  // Self-registration from the editor: add the note if new, merge title/icon
-  // if it already has a tab. Appends to the end (left-to-right open order).
   const upsert = useCallback((t: DocTab) => {
     setTabs((prev) => {
       const i = prev.findIndex((x) => x.id === t.id);
-      if (i === -1) return [...prev, { id: t.id, title: t.title || "Untitled note", icon: t.icon }];
+      if (i === -1) return [...prev, { id: t.id, title: t.title || "Untitled doc", icon: t.icon }];
       const next = prev.slice();
       next[i] = { ...next[i], title: t.title || next[i].title, icon: t.icon };
       return next;
@@ -99,19 +103,17 @@ export function DocTabsBar() {
     };
   }, [upsert]);
 
-  // Prune tabs for notes deleted/trashed anywhere in the app. The
+  // Prune tabs for docs trashed or deleted anywhere in the app. The
   // docs-changed event carries no id, so reconcile against the live list.
   useEffect(() => {
     function onChange() {
-      (async () => {
-        try {
-          const res = await fetch("/api/docs");
-          if (!res.ok) return;
-          const d = await res.json();
-          const rows: { id: string }[] = d.docs ?? d.data ?? d ?? [];
-          const live = new Set(rows.map((r) => r.id));
-          setTabs((prev) => prev.filter((t) => live.has(t.id)));
-        } catch { /* leave tabs as-is */ }
+      void (async () => {
+        const r = await apiFetch<{ docs?: { id: string }[]; data?: { id: string }[] }>("/api/docs", { cache: "no-store" });
+        if (!r.ok) return; // leave the tabs alone rather than guessing
+        const rows = r.data.docs ?? r.data.data ?? [];
+        if (!Array.isArray(rows)) return;
+        const live = new Set(rows.map((x) => x.id));
+        setTabs((prev) => prev.filter((t) => live.has(t.id)));
       })();
     }
     window.addEventListener("workwrk:docs-changed", onChange);
@@ -122,7 +124,7 @@ export function DocTabsBar() {
     setTabs((prev) => {
       const idx = prev.findIndex((x) => x.id === id);
       const next = prev.filter((x) => x.id !== id);
-      // Closing the active tab moves focus to a neighbour (right, else left).
+      // Closing the open doc moves to a neighbour (right, else left).
       if (id === activeId) {
         const fallback = next[idx] ?? next[idx - 1] ?? next[next.length - 1];
         router.push(fallback ? `/docs/${fallback.id}` : "/docs");
@@ -131,11 +133,9 @@ export function DocTabsBar() {
     });
   }, [activeId, router]);
 
-  // Tab switching lives on ⌥/Alt — NOT ⌘/Ctrl, which the shell already binds
-  // to "jump to the Nth pinned app" (the left rail). Keyed off e.code so the
-  // Mac Option-key remapping (⌥1 → "¡", ⌥] → "‘") doesn't break matching.
-  //   ⌥/Alt + 1–9     → jump to the Nth note tab
-  //   ⌥/Alt + ] / [   → next / previous tab
+  // Alt / Option, never Cmd: the shell binds Cmd 1 to 8 to the hub rail.
+  // Keyed off e.code so the Mac Option remapping (Option 1 gives "¡")
+  // does not break matching.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!e.altKey || e.metaKey || e.ctrlKey) return;
@@ -157,59 +157,72 @@ export function DocTabsBar() {
     return () => window.removeEventListener("keydown", onKey);
   }, [tabs, activeId, router]);
 
-  async function newNote() {
-    try {
-      const res = await fetch("/api/docs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Untitled note", content: {}, parentId: null }),
-      });
-      if (!res.ok) return;
-      const d = await res.json();
-      const id = d.doc?.id ?? d.data?.id ?? d.id;
-      if (!id) return;
-      upsert({ id, title: "Untitled note" });
-      window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
-      router.push(`/docs/${id}`);
-    } catch { /* ignore */ }
+  const [creating, setCreating] = useState(false);
+  async function newDoc() {
+    if (creating) return;
+    setCreating(true);
+    const r = await apiFetch<{ doc?: { id: string }; data?: { id: string }; id?: string }>("/api/docs", {
+      method: "POST",
+      json: { title: "Untitled doc", content: {}, parentId: null },
+    });
+    setCreating(false);
+    if (!r.ok) return;
+    const id = r.data.doc?.id ?? r.data.data?.id ?? r.data.id;
+    if (!id) return;
+    upsert({ id, title: "Untitled doc" });
+    window.dispatchEvent(new CustomEvent("workwrk:docs-changed"));
+    router.push(`/docs/${id}`);
   }
 
-  // Nothing open → no bar (keeps the library view clean until a note opens).
-  // Also render nothing until hydrated, so server + client HTML agree.
+  // Nothing open: no strip, and nothing rendered before hydration so the
+  // server and client HTML agree.
   if (!hydrated || tabs.length === 0) return null;
 
   return (
-    <div className="doctabs" role="tablist" aria-label="Open notes">
-      <div className="doctabs__scroll">
-        {tabs.map((t, i) => {
-          const active = t.id === activeId;
-          return (
-            <div
-              key={t.id}
-              role="tab"
-              tabIndex={0}
-              aria-selected={active}
-              className={`doctabs__tab ${active ? "is-active" : ""}`}
-              title={i < 9 ? `${t.title || "Untitled note"}  (${mod}${i + 1})` : t.title}
-              onClick={() => router.push(`/docs/${t.id}`)}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/docs/${t.id}`); } }}
+    <div
+      role="tablist"
+      aria-label="Open docs"
+      className="flex h-9 shrink-0 items-stretch gap-px overflow-x-auto border-b border-line bg-surface px-2"
+    >
+      {tabs.map((t, i) => {
+        const active = t.id === activeId;
+        return (
+          <div
+            key={t.id}
+            role="tab"
+            tabIndex={0}
+            aria-selected={active}
+            title={i < 9 ? `${t.title || "Untitled doc"}  (${mod} ${i + 1})` : t.title}
+            onClick={() => router.push(`/docs/${t.id}`)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/docs/${t.id}`); } }}
+            className={cn(
+              "group inline-flex min-w-0 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 self-center rounded-md px-2 py-1 text-sm",
+              active ? "bg-active font-medium text-ink" : "text-ink-2 hover:bg-hover hover:text-ink",
+            )}
+          >
+            <span className="grid h-4 w-4 shrink-0 place-items-center text-ink-3 [&_svg]:h-3.5 [&_svg]:w-3.5">
+              {renderNoteIcon(t.icon) ?? <FileText strokeWidth={1.5} aria-hidden />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{t.title || "Untitled doc"}</span>
+            <button
+              type="button"
+              aria-label={`Close ${t.title || "doc"}`}
+              onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
+              className="inline-grid h-4 w-4 shrink-0 place-items-center rounded text-ink-3 opacity-0 hover:bg-hover hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
             >
-              <span className="doctabs__ico">{renderNoteIcon(t.icon) ?? <FileText />}</span>
-              <span className="doctabs__title">{t.title || "Untitled note"}</span>
-              <button
-                type="button"
-                className="doctabs__close"
-                aria-label={`Close ${t.title || "note"}`}
-                onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}
-              >
-                <X />
-              </button>
-            </div>
-          );
-        })}
-      </div>
-      <button type="button" className="doctabs__new" onClick={newNote} title="New note" aria-label="New note">
-        <Plus />
+              <X className="h-3 w-3" strokeWidth={1.5} aria-hidden />
+            </button>
+          </div>
+        );
+      })}
+      <button
+        type="button"
+        onClick={() => void newDoc()}
+        title="New doc"
+        aria-label="New doc"
+        className="inline-grid h-7 w-7 shrink-0 self-center place-items-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+      >
+        <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </button>
     </div>
   );

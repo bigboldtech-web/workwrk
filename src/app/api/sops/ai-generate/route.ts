@@ -116,8 +116,8 @@ Rules:
       ],
     });
 
-    const textBlock = message.content.find((b: any) => b.type === "text");
-    const text = textBlock ? (textBlock as any).text : "";
+    const textBlock = message.content.find((b: { type: string }) => b.type === "text");
+    const text = textBlock && "text" in textBlock ? String((textBlock as { text?: string }).text ?? "") : "";
 
     // Parse JSON from response
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -127,9 +127,10 @@ Rules:
     }
 
     return jsonError("Failed to generate process. Try again.");
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("AI generation error:", err);
-    const msg = err?.error?.error?.message || err?.message || "AI generation failed. Try again.";
+    const e = err as { error?: { error?: { message?: string } }; message?: string } | null;
+    const msg = e?.error?.error?.message || e?.message || "AI generation failed. Try again.";
     return jsonError(`AI generation failed: ${msg}`);
   }
 }

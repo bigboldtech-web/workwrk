@@ -15,9 +15,10 @@
  */
 
 import { useCallback, useRef, useState } from "react";
-import { Signature, Type, Calendar, PenLine, Trash2, Mail, CheckSquare, ChevronDown, UserPlus, X, Plus, CheckCircle2 } from "lucide-react";
+import { Signature, Type, Calendar, PenLine, Trash2, Mail, CheckSquare, ChevronDown, X, Plus } from "lucide-react";
 import { BlockNoteCanvas } from "@/components/docs/blocknote-canvas";
 import { PdfPages } from "@/components/agreements/pdf-pages";
+import { partyHue } from "@/lib/contracts";
 
 export type FieldType = "signature" | "initials" | "text" | "email" | "date" | "checkbox" | "dropdown";
 export interface PlacedField {
@@ -33,10 +34,9 @@ export interface PlacedField {
 }
 export interface BuilderParty { id: string; name: string; role: string; email?: string; status?: string; token?: string; order?: number }
 
-const PARTY_COLORS = ["#f4a08c", "#f6c177", "#f2dd72", "#c8e06b", "#7fd4a8", "#6ec5d6", "#8ea2ee", "#c79df0"];
+/** The party's hue: lib/contracts PARTY_HUES, indexed by party order (one source). */
 export function partyColor(parties: BuilderParty[], partyId: string): string {
-  const i = Math.max(0, parties.findIndex((p) => p.id === partyId));
-  return PARTY_COLORS[i % PARTY_COLORS.length];
+  return partyHue(Math.max(0, parties.findIndex((p) => p.id === partyId)));
 }
 export function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"], v = n % 100;
@@ -65,20 +65,30 @@ interface Props {
   parties: BuilderParty[];
   fields: PlacedField[];
   onFieldsChange: (fields: PlacedField[]) => void;
-  onAddParty: () => void;
-  onRemoveParty: (id: string) => void;
-  onRenameParty: (id: string, name: string) => void;
+  /**
+   * spec-process section 2 `/agreements/[id]`: the parties and the field tools
+   * live in the 272 right panel (PartiesPanel), so the builder renders the
+   * document alone; the active party is controlled from outside and a
+   * `pendingTool` is placed where the document is clicked.
+   */
+  activePartyId?: string | null;
+  onActivePartyChange?: (id: string) => void;
+  pendingTool?: FieldType | null;
+  onToolPlaced?: () => void;
+  /** The document width; 720 in the app's column, 760 on the older layout. */
+  width?: number;
 }
 
 export function AgreementFieldBuilder({
   agreementId, content, sourceType, pdfUrl, parties, fields,
-  onFieldsChange, onAddParty, onRemoveParty, onRenameParty,
+  onFieldsChange,
+  activePartyId, pendingTool = null, onToolPlaced, width = 760,
 }: Props) {
-  const [activeParty, setActiveParty] = useState<string | null>(parties[0]?.id ?? null);
+  // The active party is owned by the page (PartiesPanel); a caller that does
+  // not control it gets the first party.
+  const activeParty = activePartyId !== undefined ? activePartyId : (parties[0]?.id ?? null);
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [dragType, setDragType] = useState<FieldType | null>(null);
-  const [editParty, setEditParty] = useState<string | null>(null);
-  const [draftName, setDraftName] = useState("");
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const selected = parties.find((p) => p.id === activeParty) ? activeParty : (parties[0]?.id ?? null);
@@ -145,8 +155,8 @@ export function AgreementFieldBuilder({
         key={f.id}
         onMouseDown={(e) => startMove(e, f)}
         onClick={(e) => { e.stopPropagation(); setSelectedField(f.id); }}
-        className={`group absolute flex cursor-move items-center justify-center rounded text-xs font-medium ${isSel ? "ring-2 ring-blue-400" : ""}`}
-        style={{ left: f.x, top: f.y, width: f.w, height: f.h, border: `1.5px dashed ${color}`, background: `${color}22`, color: "#3f3f46" }}
+        className={`group absolute flex cursor-move items-center justify-center rounded text-xs font-medium ${isSel ? "ring-2 ring-[var(--os-brand)]" : ""}`}
+        style={{ left: f.x, top: f.y, width: f.w, height: f.h, border: `1.5px dashed ${color}`, background: `${color}22`, color: "var(--os-ink)" }}
       >
         <span className="pointer-events-none flex items-center gap-1 truncate px-1">
           <Icon className="h-3.5 w-3.5" />
@@ -154,16 +164,16 @@ export function AgreementFieldBuilder({
         </span>
         <span className="pointer-events-none absolute -left-1.5 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-micro font-semibold text-white" style={{ background: color }}>{partyIdx + 1}</span>
         <button type="button" onClick={(e) => { e.stopPropagation(); removeField(f.id); }}
-          className="absolute -right-2 -top-2 hidden h-4 w-4 items-center justify-center rounded-full bg-white text-zinc-400 shadow group-hover:flex hover:text-red-500" style={{ border: `1px solid ${color}` }}>
+          className="absolute -right-2 -top-2 hidden h-4 w-4 items-center justify-center rounded-full bg-raised text-ink-2 shadow group-hover:flex hover:text-danger-text" style={{ border: `1px solid ${color}` }}>
           <Trash2 className="h-2.5 w-2.5" />
         </button>
         <span onMouseDown={(e) => startResize(e, f)} className="absolute -bottom-1 -right-1 h-3 w-3 cursor-se-resize rounded-full border border-white" style={{ background: color }} />
         {isSel && (
           <div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}
-            className="absolute left-0 top-full z-30 mt-2 w-52 rounded-lg border border-zinc-200 bg-white p-2.5 text-left shadow-lg" style={{ cursor: "default" }}>
+            className="absolute left-0 top-full z-30 mt-2 w-52 rounded-lg border border-line bg-raised p-2.5 text-left shadow-[var(--os-shadow-pop)]" style={{ cursor: "default" }}>
             <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-xs font-semibold text-zinc-500">{fieldLabel(f.type)} · {party?.name ?? "Party"}</span>
-              <button type="button" onClick={() => setSelectedField(null)} className="text-zinc-400 hover:text-zinc-700"><X className="h-3.5 w-3.5" /></button>
+              <span className="text-xs font-semibold text-ink-2">{fieldLabel(f.type)} · {party?.name ?? "Party"}</span>
+              <button type="button" onClick={() => setSelectedField(null)} className="text-ink-2 hover:text-ink"><X className="h-3.5 w-3.5" /></button>
             </div>
 
             {f.type === "dropdown" && (() => {
@@ -171,49 +181,49 @@ export function AgreementFieldBuilder({
               const setOpts = (next: string[]) => patchField(f.id, { options: next });
               return (
                 <div className="mb-2">
-                  <div className="mb-1 text-sm font-medium text-zinc-600">Options</div>
+                  <div className="mb-1 text-sm font-medium text-ink-2">Options</div>
                   <div className="space-y-1.5">
                     {opts.map((o, i) => (
                       <div key={i} className="flex items-center gap-1.5">
                         <input value={o} onChange={(e) => setOpts(opts.map((x, j) => (j === i ? e.target.value : x)))} placeholder={`Option ${i + 1}`}
-                          className="h-7 flex-1 rounded border border-zinc-200 px-2 text-sm outline-none focus:border-zinc-300" />
-                        {opts.length > 1 && <button type="button" onClick={() => setOpts(opts.filter((_, j) => j !== i))} className="text-zinc-300 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>}
+                          className="h-7 flex-1 rounded border border-line-strong bg-raised px-2 text-sm text-ink outline-none focus:border-brand" />
+                        {opts.length > 1 && <button type="button" onClick={() => setOpts(opts.filter((_, j) => j !== i))} className="text-ink-3 hover:text-danger-text"><X className="h-3.5 w-3.5" /></button>}
                       </div>
                     ))}
                   </div>
-                  <button type="button" onClick={() => setOpts([...opts, `Option ${opts.length + 1}`])} className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"><Plus className="h-3 w-3" /> Add option</button>
+                  <button type="button" onClick={() => setOpts([...opts, `Option ${opts.length + 1}`])} className="mt-1.5 inline-flex items-center gap-1 text-sm font-medium text-brand-deep hover:underline"><Plus className="h-3 w-3" /> Add option</button>
                 </div>
               );
             })()}
 
-            <label className="flex cursor-pointer items-center justify-between gap-2 text-sm text-zinc-700">
+            <label className="flex cursor-pointer items-center justify-between gap-2 text-sm text-ink">
               Required
               <button type="button" role="switch" aria-checked={!!f.required} onClick={() => patchField(f.id, { required: !f.required })}
-                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${f.required ? "bg-blue-600" : "bg-zinc-300"}`}>
+                className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${f.required ? "bg-brand" : "bg-line-strong"}`} style={{ background: f.required ? "var(--os-brand)" : "var(--os-line-strong)" }}>
                 <span className={`absolute top-0.5 h-3 w-3 rounded-full bg-white transition-all ${f.required ? "left-3.5" : "left-0.5"}`} />
               </button>
             </label>
 
             {(f.type === "text" || f.type === "email" || f.type === "dropdown") && (
               <div className="mt-2">
-                <div className="mb-1 text-sm font-medium text-zinc-600">Label</div>
+                <div className="mb-1 text-sm font-medium text-ink-2">Label</div>
                 <input value={f.label ?? ""} onChange={(e) => patchField(f.id, { label: e.target.value })} placeholder="Label / placeholder"
-                  className="h-7 w-full rounded border border-zinc-200 px-2 text-sm outline-none focus:border-zinc-300" />
+                  className="h-7 w-full rounded border border-line-strong bg-raised px-2 text-sm text-ink outline-none focus:border-brand" />
               </div>
             )}
 
             {f.type === "dropdown" && (
               <div className="mt-2">
-                <div className="mb-1 text-sm font-medium text-zinc-600">Default value</div>
+                <div className="mb-1 text-sm font-medium text-ink-2">Default value</div>
                 <select value={f.defaultValue ?? ""} onChange={(e) => patchField(f.id, { defaultValue: e.target.value })}
-                  className="h-8 w-full rounded border border-zinc-200 bg-white px-2 text-sm text-zinc-700 outline-none">
+                  className="h-8 w-full rounded border border-line-strong bg-raised px-2 text-sm text-ink outline-none">
                   <option value="">None</option>
                   {(f.options ?? []).map((o, i) => <option key={i} value={o}>{o}</option>)}
                 </select>
               </div>
             )}
 
-            <button type="button" onClick={() => removeField(f.id)} className="mt-2.5 inline-flex items-center gap-1 text-sm text-red-500 hover:text-red-600"><Trash2 className="h-3 w-3" /> Delete field</button>
+            <button type="button" onClick={() => removeField(f.id)} className="mt-2.5 inline-flex items-center gap-1 text-sm text-danger-text hover:underline"><Trash2 className="h-3 w-3" /> Delete field</button>
           </div>
         )}
       </div>
@@ -221,103 +231,45 @@ export function AgreementFieldBuilder({
   }
 
   // Drop+overlay layer for a page (PDF: absolute over the canvas; written: the box itself).
+  function placeAt(e: React.MouseEvent, pageIdx: number) {
+    const el = pageRefs.current.get(pageIdx);
+    if (!pendingTool || !selected || !el) return false;
+    const rect = el.getBoundingClientRect();
+    const spec = TOOL_BY_TYPE.get(pendingTool)!;
+    const x = Math.max(0, Math.min(rect.width - spec.w, e.clientX - rect.left - spec.w / 2));
+    const y = Math.max(0, Math.min(rect.height - spec.h, e.clientY - rect.top - spec.h / 2));
+    const f: PlacedField = { id: newId(), type: pendingTool, partyId: selected, page: pageIdx, x, y, w: spec.w, h: spec.h, required: pendingTool === "signature" || pendingTool === "initials" };
+    update([...fields, f]);
+    setSelectedField(f.id);
+    onToolPlaced?.();
+    return true;
+  }
   function pageDropProps(pageIdx: number) {
     return {
       ref: (el: HTMLDivElement | null) => registerPage(pageIdx, el),
       onDragOver: (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; },
       onDrop: (e: React.DragEvent) => dropOnPage(e, pageIdx),
-      onClick: () => setSelectedField(null),
+      onClick: (e: React.MouseEvent) => { if (!placeAt(e, pageIdx)) setSelectedField(null); },
+      style: pendingTool && selected ? ({ cursor: "crosshair" } as React.CSSProperties) : undefined,
     };
   }
 
-  return (
-    <div className="flex gap-4">
-      {/* ── Parties (left) ── */}
-      <aside className="w-56 shrink-0">
-        <div className="rounded-xl border border-zinc-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold text-zinc-500">Parties</span>
-            <span className="rounded bg-zinc-100 px-1.5 text-xs text-zinc-500">{parties.length}</span>
-          </div>
-          <div className="space-y-1.5">
-            {parties.map((p) => {
-              const on = selected === p.id;
-              const editing = editParty === p.id;
-              const color = partyColor(parties, p.id);
-              const commit = () => { onRenameParty(p.id, draftName.trim() || p.name); setEditParty(null); };
-              return (
-                <div key={p.id}
-                  onClick={() => { if (!editing) setActiveParty(p.id); }}
-                  onDoubleClick={() => { setEditParty(p.id); setDraftName(p.name); }}
-                  className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 transition-colors ${on ? "border-blue-300 bg-blue-50/40" : "border-zinc-200 hover:bg-zinc-50"}`}>
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-white" style={{ background: color }}><UserPlus className="h-3.5 w-3.5" /></span>
-                  {editing ? (
-                    <>
-                      <input autoFocus value={draftName} onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => setDraftName(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setEditParty(null); }}
-                        className="min-w-0 flex-1 rounded border border-blue-300 px-2 py-1 text-base font-medium text-zinc-800 outline-none" />
-                      <button type="button" onClick={(e) => { e.stopPropagation(); commit(); }} className="rounded-md bg-blue-600 px-2.5 py-1 text-sm font-medium text-white hover:bg-blue-500">Save</button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="min-w-0 flex-1 truncate text-base font-medium text-zinc-800">{p.name}</span>
-                      {p.status === "SIGNED" ? <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> : null}
-                      <button type="button" onClick={(e) => { e.stopPropagation(); onRemoveParty(p.id); }} className="rounded p-0.5 text-zinc-300 hover:text-red-500"><X className="h-3.5 w-3.5" /></button>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <button type="button" onClick={onAddParty} className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-300 px-2 py-1.5 text-base font-medium text-blue-600 hover:bg-blue-50">
-            <Plus className="h-3.5 w-3.5" /> Add new party
-          </button>
-        </div>
-        <p className="mt-2 px-1 text-xs leading-relaxed text-zinc-400">Click a party to select it, then drag a field from the right onto the document. Double-click a party to rename it.</p>
-      </aside>
-
-      {/* ── Document (center) ── */}
-      <div className="min-w-0 flex-1">
-        {isPdf ? (
-          <PdfPages url={pdfUrl!} width={760} renderPage={(i) => (
-            <div {...pageDropProps(i)} className={`absolute inset-0 ${dragType ? "ring-2 ring-inset ring-blue-300" : ""}`}>
-              {fields.filter((f) => (f.page ?? 0) === i).map(renderField)}
-            </div>
-          )} />
-        ) : (
-          <div {...pageDropProps(0)} className={`relative mx-auto w-[760px] max-w-full rounded-xl border bg-white px-10 py-7 ${dragType ? "border-blue-400 ring-2 ring-blue-200" : "border-zinc-200"}`}>
-            <div className="pointer-events-none select-none">
-              <BlockNoteCanvas key={`${agreementId}-build`} initialBnDoc={null} legacyBlocks={null} initialHtml={content || ""} readonly onChange={() => { /* readonly */ }} entity={{ type: "agreement", id: agreementId }} />
-            </div>
-            {fields.filter((f) => (f.page ?? 0) === 0).map(renderField)}
-          </div>
-        )}
+  const doc = isPdf ? (
+    <PdfPages url={pdfUrl!} width={width} renderPage={(i) => (
+      <div {...pageDropProps(i)} className={`absolute inset-0 ${dragType || (pendingTool && selected) ? "ring-2 ring-inset ring-[var(--os-brand-soft)]" : ""}`}>
+        {fields.filter((f) => (f.page ?? 0) === i).map(renderField)}
       </div>
-
-      {/* ── Fields (right) ── */}
-      <aside className="w-52 shrink-0">
-        <div className="rounded-xl border border-zinc-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="text-sm font-semibold text-zinc-500">Fields</span>
-            {selected ? <span className="inline-flex items-center gap-1 rounded-full px-1.5 text-xs font-medium text-white" style={{ background: partyColor(parties, selected) }}>{parties.findIndex((p) => p.id === selected) + 1}</span> : null}
-          </div>
-          {!selected ? <div className="mb-2 rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-700">Add &amp; select a party first.</div> : null}
-          <div className="space-y-1.5">
-            {FIELD_TOOLS.map((t) => (
-              <div key={t.type}
-                draggable={!!selected}
-                onDragStart={(e) => { e.dataTransfer.setData("fieldType", t.type); e.dataTransfer.effectAllowed = "copy"; setDragType(t.type); }}
-                onDragEnd={() => setDragType(null)}
-                className={`flex items-center gap-2 rounded-lg border border-zinc-200 px-2.5 py-2 text-base text-zinc-700 ${selected ? "cursor-grab hover:border-blue-300 hover:bg-blue-50 active:cursor-grabbing" : "cursor-not-allowed opacity-50"}`}
-                title={selected ? "Drag onto the document" : "Select a party first"}>
-                <t.Icon className="h-4 w-4 text-zinc-400" /> {t.label}
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-zinc-400">Drag a field onto the page. Click a placed field to set Required or delete it.</p>
-        </div>
-      </aside>
+    )} />
+  ) : (
+    <div {...pageDropProps(0)} className={`relative mx-auto max-w-full rounded-lg border bg-raised px-10 py-7 ${dragType || (pendingTool && selected) ? "border-brand ring-2 ring-[var(--os-brand-soft)]" : "border-line"}`} style={{ width, ...(pendingTool && selected ? { cursor: "crosshair" } : {}) }}>
+      <div className="pointer-events-none select-none os-prose">
+        <BlockNoteCanvas key={`${agreementId}-build`} initialBnDoc={null} legacyBlocks={null} initialHtml={content || ""} readonly onChange={() => { /* readonly */ }} entity={{ type: "agreement", id: agreementId }} />
+      </div>
+      {fields.filter((f) => (f.page ?? 0) === 0).map(renderField)}
     </div>
   );
+  // The parties and the field tools live in the 272 right panel
+  // (components/agreements/parties-panel.tsx, spec-process section 2
+  // `/agreements/[id]`); the builder renders the document alone.
+  return <div className="min-w-0 flex-1">{doc}</div>;
 }

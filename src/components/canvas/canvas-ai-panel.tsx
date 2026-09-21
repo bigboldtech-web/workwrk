@@ -1,13 +1,18 @@
 "use client";
 
-// CanvasAiPanel — the system-design copilot. A collapsible panel on the canvas:
-//   • Generate — describe a system, /api/canvas/generate returns a laid-out scene.
-//   • Templates — drop in a ready-made architecture (laid out locally, no call).
-//   • Explain / Critique — /api/canvas/analyze reads the current board and either
-//     walks through how it works or reviews it as a staff architect.
+// CanvasAiPanel (spec-docs-knowledge section 2, /canvas/[id]): the one Ask AI
+// door, a 360 right panel opened from the header's "Ask AI" slot. It is not a
+// floating button and holds no open state of its own: the page owns that.
+//   • Generate: describe a diagram, /api/canvas/generate returns a laid-out scene.
+//   • Templates: drop in a ready-made diagram (laid out locally, no call).
+//   • Explain / Review: /api/canvas/analyze reads the current board and either
+//     walks through how it works or reviews it.
+//   • Import / export a database schema, and a kit of pre-labelled shapes.
 
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, CornerDownLeft, Loader2, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check, ClipboardPaste } from "lucide-react";
+import { Sparkles, X, CornerDownLeft, LayoutTemplate, BookOpen, ShieldAlert, Boxes, Server, Network, Database, Zap, ListOrdered, Cloud, User, Globe, Table2, RotateCcw, Code2, Copy, Check, ClipboardPaste } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
+import { useLayer } from "@/components/layout/os/shell-context";
 import type { CanvasScene } from "@/lib/canvas/scene";
 import { specToScene, type NodeKind, type DiagramSpec } from "@/lib/canvas/from-spec";
 import type { SequenceSpec } from "@/lib/canvas/sequence";
@@ -37,7 +42,7 @@ function diffSummary(prev: PanelSpec, next: PanelSpec): string {
   return parts.length ? `Updated: ${parts.join("; ")}.` : "Updated the diagram.";
 }
 
-// Preset nodes for fast hand-drawing — each drops a pre-labelled, pre-styled
+// Preset nodes for fast hand-drawing. Each drops a pre-labelled, pre-styled
 // shape via the same specToScene mapping the AI uses, so a hand-built system
 // looks identical to a generated one.
 const SYSTEM_KIT: { kind: NodeKind; label: string; Icon: typeof Server }[] = [
@@ -52,21 +57,23 @@ const SYSTEM_KIT: { kind: NodeKind; label: string; Icon: typeof Server }[] = [
 ];
 
 const EXAMPLES = [
-  "Design a URL shortener with a cache and rate limiter",
-  "Flowchart for an order refund approval process",
-  "Sequence diagram for OAuth login: client, app, auth server",
-  "Database schema for a booking app",
+  "Flowchart for an order refund approval",
+  "How a new hire gets set up, week one",
+  "Sequence diagram for a customer sign-up",
+  "Diagram of a booking app's data",
 ];
 
 type Props = {
   onApply: (scene: CanvasScene) => string[];
   onReplace?: (oldIds: string[], scene: CanvasScene) => string[];
   getScene?: () => CanvasScene;
+  /** The header's Ask AI slot owns the open state; this closes the panel. */
+  onClose: () => void;
 };
 
 const inkT = { ink: "var(--os-ink, #1e293b)", ink2: "var(--os-ink-2, #52525b)", ink3: "var(--os-ink-3, #9aa3b2)", line: "var(--os-line, #e5e7eb)", surf1: "var(--os-surface-1, #f4f4f5)" };
 
-// Tiny markdown render — headings, bullets, inline **bold**. Enough for the
+// Tiny markdown render: headings, bullets, inline **bold**. Enough for the
 // analysis output without pulling in a markdown dependency.
 function renderInline(s: string, key: number) {
   const parts = s.split(/\*\*(.+?)\*\*/g);
@@ -96,8 +103,7 @@ function Markdown({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
-  const [open, setOpen] = useState(false);
+export function CanvasAiPanel({ onApply, onReplace, getScene, onClose }: Props) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -113,15 +119,22 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   // The last diagram the AI produced (spec + the element ids it put on the
-  // board) — the seed for the next refine. Refresh via refs so the async send
+  // board) is the seed for the next refine. Refresh via refs so the async send
   // always reads the latest without re-subscribing.
   const lastSpecRef = useRef<PanelSpec | null>(null);
   const lastIdsRef = useRef<string[]>([]);
-  const lastPromptRef = useRef<string>(""); // the original description — lets "redraw as…" re-run with a forced type
+  const lastPromptRef = useRef<string>(""); // the original description, so "redraw as" can re-run with a forced type
   const [hasDiagram, setHasDiagram] = useState(false);
   const [lastType, setLastType] = useState<DiagramType | null>(null);
 
   useEffect(() => { threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight }); }, [thread]);
+  // Esc closes this panel through the shell's LayerStack, so a Picker or
+  // dialog opened above it closes first (spec-docs-knowledge section 1).
+  useLayer(true, { id: "canvas-ai", kind: "panel", close: onClose });
+  useEffect(() => {
+    const t = setTimeout(() => taRef.current?.focus(), 0);
+    return () => clearTimeout(t);
+  }, []);
 
   const seed = (spec: PanelSpec, ids: string[]) => {
     lastSpecRef.current = spec; lastIdsRef.current = ids; setHasDiagram(true);
@@ -276,52 +289,28 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
     }
   };
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => { setOpen(true); requestAnimationFrame(() => taRef.current?.focus()); }}
-        title="Design with AI"
-        style={{
-          position: "absolute", top: 12, right: 12, zIndex: 8,
-          display: "inline-flex", alignItems: "center", gap: 7, padding: "9px 14px",
-          background: "linear-gradient(135deg, #6965db, #0073EA)", color: "#fff",
-          border: "none", borderRadius: 10, fontSize: 13.5, fontWeight: 600, cursor: "pointer",
-          boxShadow: "0 6px 20px rgba(20,34,60,.18)",
-        }}
-      >
-        <Sparkles style={{ width: 15, height: 15 }} /> Design with AI
-      </button>
-    );
-  }
-
-  const smallBtn = (active: boolean): React.CSSProperties => ({
-    flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5,
-    padding: "7px 8px", border: `1px solid ${inkT.line}`, borderRadius: 9, cursor: active ? "default" : "pointer",
-    background: inkT.surf1, color: inkT.ink2, fontSize: 12.5, fontWeight: 600,
-  });
+  const smallBtn = "inline-flex flex-1 items-center justify-center gap-1.5 rounded-md border border-line bg-subtle px-2 py-1.5 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:cursor-default disabled:opacity-60";
 
   return (
-    <div style={{
-      position: "absolute", top: 12, right: 12, zIndex: 8, width: "min(340px, calc(100vw - 24px))",
-      maxHeight: "calc(100vh - 24px)", display: "flex", flexDirection: "column",
-      background: "var(--os-surface, #fff)", border: `1px solid ${inkT.line}`,
-      borderRadius: 14, boxShadow: "0 16px 44px rgba(20,34,60,.18)", overflow: "hidden",
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", borderBottom: `1px solid ${inkT.line}` }}>
-        <Sparkles style={{ width: 15, height: 15, color: "#6965db" }} />
-        <strong style={{ flex: 1, fontSize: 13.5, color: inkT.ink }}>Design with AI</strong>
+    <aside
+      role="dialog"
+      aria-label="Ask AI"
+      className="os-chrome absolute bottom-0 end-0 top-0 z-30 flex w-[360px] max-w-full flex-col border-s border-line bg-raised shadow-[var(--os-shadow-modal)]"
+    >
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-4">
+        <Sparkles className="h-4 w-4 text-ink-2" strokeWidth={1.5} aria-hidden />
+        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold text-ink">Ask AI</h2>
         {hasDiagram ? (
-          <button type="button" onClick={resetConversation} title="Start a new design" style={{ display: "inline-flex", alignItems: "center", gap: 4, height: 24, padding: "0 8px", border: `1px solid ${inkT.line}`, background: inkT.surf1, borderRadius: 7, cursor: "pointer", color: inkT.ink2, fontSize: 11.5, fontWeight: 600 }}>
-            <RotateCcw style={{ width: 12, height: 12 }} /> New
+          <button type="button" onClick={resetConversation} title="Start a new diagram" className="inline-flex h-7 items-center gap-1 rounded-md border border-line px-2 text-sm font-medium text-ink-2 hover:bg-hover hover:text-ink">
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} aria-hidden /> New
           </button>
         ) : null}
-        <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ display: "grid", placeItems: "center", width: 26, height: 26, border: "none", background: "transparent", borderRadius: 7, cursor: "pointer", color: inkT.ink3 }}>
-          <X style={{ width: 15, height: 15 }} />
+        <button type="button" onClick={onClose} aria-label="Close" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink">
+          <X className="h-4 w-4" strokeWidth={1.5} aria-hidden />
         </button>
-      </div>
+      </header>
 
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10, overflowY: "auto" }}>
+      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto p-3">
         {thread.length > 0 ? (
           <div ref={threadRef} style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
             {thread.map((m, i) => (
@@ -332,7 +321,7 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                 {m.text}
               </div>
             ))}
-            {busy ? <div style={{ alignSelf: "flex-start", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: inkT.ink3, padding: "4px 2px" }}><Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> {hasDiagram ? "Updating…" : "Designing…"}</div> : null}
+            {busy ? <div className="inline-flex items-center gap-1.5 self-start px-0.5 py-1 text-sm text-ink-3"><Dots /> {hasDiagram ? "Updating" : "Drawing"}</div> : null}
           </div>
         ) : null}
 
@@ -357,16 +346,16 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
           style={{
             display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
             padding: "9px 12px", border: "none", borderRadius: 10, cursor: busy || !input.trim() ? "default" : "pointer",
-            background: busy || !input.trim() ? inkT.surf1 : "#0073EA",
+            background: busy || !input.trim() ? inkT.surf1 : "var(--os-brand)",
             color: busy || !input.trim() ? inkT.ink3 : "#fff", fontSize: 13.5, fontWeight: 600,
           }}
         >
-          {busy ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Sparkles style={{ width: 14, height: 14 }} />}
+          {busy ? <Dots /> : <Sparkles style={{ width: 14, height: 14 }} />}
           {busy ? (hasDiagram ? "Updating…" : "Designing…") : (hasDiagram ? "Update" : "Generate")}
           {!busy && input.trim() ? <span style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: 0.7, fontSize: 11 }}><CornerDownLeft style={{ width: 11, height: 11 }} /></span> : null}
         </button>
 
-        {err && thread.length === 0 ? <p style={{ margin: 0, fontSize: 12.5, color: "#E11D48" }}>{err}</p> : null}
+        {err && thread.length === 0 ? <p className="m-0 text-sm text-danger-text">{err}</p> : null}
 
         {/* Wrong format? Redraw the same design as another diagram type. */}
         {!busy && hasDiagram && lastType && lastPromptRef.current ? (
@@ -424,14 +413,14 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                   <textarea
                     value={importText}
                     onChange={(e) => setImportText(e.target.value)}
-                    placeholder={"CREATE TABLE users (\n  id uuid PRIMARY KEY,\n  ...\n);\n\n— or —\n\nmodel User { id String @id ... }"}
+                    placeholder={"CREATE TABLE users (\n  id uuid PRIMARY KEY,\n  ...\n);\n\nor\n\nmodel User { id String @id ... }"}
                     rows={5}
                     style={{ width: "100%", resize: "vertical", fontSize: 12, lineHeight: 1.4, padding: "8px 9px", border: `1px solid ${inkT.line}`, borderRadius: 9, outline: "none", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: inkT.ink, background: "var(--os-surface, #fff)" }}
                   />
-                  {importErr ? <p style={{ margin: 0, fontSize: 12, color: "#E11D48" }}>{importErr}</p> : null}
+                  {importErr ? <p className="m-0 text-sm text-danger-text">{importErr}</p> : null}
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" onClick={doImport} disabled={!importText.trim()}
-                      style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 10px", border: "none", borderRadius: 9, cursor: importText.trim() ? "pointer" : "default", background: importText.trim() ? "#0073EA" : inkT.surf1, color: importText.trim() ? "#fff" : inkT.ink3, fontSize: 12.5, fontWeight: 600 }}>
+                      style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 10px", border: "none", borderRadius: 9, cursor: importText.trim() ? "pointer" : "default", background: importText.trim() ? "var(--os-brand)" : inkT.surf1, color: importText.trim() ? "var(--os-on-brand, #fff)" : inkT.ink3, fontSize: 12.5, fontWeight: 600 }}>
                       <ClipboardPaste style={{ width: 13, height: 13 }} /> Add to canvas
                     </button>
                     <button type="button" onClick={() => { setImportOpen(false); setImportText(""); setImportErr(null); }}
@@ -467,19 +456,19 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
               <div style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: `1px solid ${inkT.line}`, paddingTop: 10 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".03em", color: inkT.ink3 }}>This board</span>
                 <div style={{ display: "flex", gap: 6 }}>
-                  <button type="button" onClick={() => void analyze("explain")} disabled={!!analyzing} style={smallBtn(!!analyzing)}>
-                    {analyzing === "explain" ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <BookOpen style={{ width: 13, height: 13 }} />} Explain
+                  <button type="button" onClick={() => void analyze("explain")} disabled={!!analyzing} className={smallBtn}>
+                    {analyzing === "explain" ? <Dots /> : <BookOpen style={{ width: 13, height: 13 }} />} Explain
                   </button>
-                  <button type="button" onClick={() => void analyze("critique")} disabled={!!analyzing} style={smallBtn(!!analyzing)}>
-                    {analyzing === "critique" ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <ShieldAlert style={{ width: 13, height: 13 }} />} Critique
+                  <button type="button" onClick={() => void analyze("critique")} disabled={!!analyzing} className={smallBtn}>
+                    {analyzing === "critique" ? <Dots /> : <ShieldAlert style={{ width: 13, height: 13 }} />} Review
                   </button>
-                  <button type="button" onClick={exportSchema} disabled={!!analyzing} style={smallBtn(!!analyzing)} title="Export ER tables as SQL / Prisma">
+                  <button type="button" onClick={exportSchema} disabled={!!analyzing} className={smallBtn} title="Export the tables on this canvas as SQL or Prisma">
                     <Code2 style={{ width: 13, height: 13 }} /> Schema
                   </button>
                 </div>
                 {analysis ? (
                   <div style={{ background: inkT.surf1, border: `1px solid ${inkT.line}`, borderRadius: 10, padding: "9px 11px", maxHeight: 240, overflowY: "auto" }}>
-                    <div style={{ fontSize: 10.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", color: "#6965db", marginBottom: 4 }}>{analysis.action === "critique" ? "Design review" : "How it works"}</div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-3">{analysis.action === "critique" ? "Review" : "How it works"}</div>
                     <Markdown text={analysis.text} />
                   </div>
                 ) : null}
@@ -489,7 +478,7 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
                       {(["sql", "prisma"] as const).map((tab) => (
                         <button key={tab} type="button" onClick={() => { setSchemaTab(tab); setCopied(false); }}
                           style={{ padding: "3px 8px", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11.5, fontWeight: 600,
-                            background: schemaTab === tab ? "#0073EA" : "transparent", color: schemaTab === tab ? "#fff" : inkT.ink2 }}>
+                            background: schemaTab === tab ? "var(--os-brand)" : "transparent", color: schemaTab === tab ? "var(--os-on-brand, #fff)" : inkT.ink2 }}>
                           {tab === "sql" ? "SQL" : "Prisma"}
                         </button>
                       ))}
@@ -508,6 +497,6 @@ export function CanvasAiPanel({ onApply, onReplace, getScene }: Props) {
           </>
         ) : null}
       </div>
-    </div>
+    </aside>
   );
 }

@@ -20,11 +20,12 @@
 import emojiData from "@emoji-mart/data";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  Search, Shuffle, Loader2, ImagePlus, Clock,
+  Search, Shuffle, ImagePlus, Clock,
   Smile, Leaf, Apple, Dumbbell, Plane, Lightbulb, Hash, Flag,
 } from "lucide-react";
 import { useOsToast } from "@/components/layout/os/toast";
 import { LUCIDE_MAP, LUCIDE_NAMES, renderNoteIcon } from "./note-icon";
+import { Dots } from "@/components/ui/dots";
 
 export { renderNoteIcon };
 
@@ -289,7 +290,7 @@ function UploadTab({ onPick }: { onPick: (v: string) => void }) {
         onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void upload(f); }}
       >
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
-        {busy ? <><Loader2 className="nipick__spin" /> Uploading…</> : <><ImagePlus /> Upload an image</>}
+        {busy ? <><Dots variant="pending" /> Uploading…</> : <><ImagePlus /> Upload an image</>}
       </div>
       <p className="nipick__upload-hint">Recommended: square image, at least 280×280px.</p>
     </div>

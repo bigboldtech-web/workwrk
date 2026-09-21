@@ -12,8 +12,7 @@
 // safe to embed everywhere without cluttering empty surfaces.
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, Save, Plus } from "lucide-react";
-import Link from "next/link";
+import { Loader2, Save } from "lucide-react";
 
 type FieldType = "TEXT" | "TEXTAREA" | "NUMBER" | "DATE" | "CHECKBOX" | "SELECT" | "MULTI_SELECT" | "URL" | "EMAIL";
 
@@ -33,8 +32,8 @@ interface Props {
   // Optional callback so a parent can react to saves (e.g. refresh
   // a parent list).
   onSaved?: () => void;
-  // When true, render an empty-state CTA pointing at /studio when the
-  // entity type has no custom fields defined. Default: false (silent).
+  // When true, render a short empty state when the entity type has no
+  // custom fields defined. Default: false (silent).
   showEmptyState?: boolean;
 }
 
@@ -93,15 +92,12 @@ export function CustomFieldsPanel({ entityType, entityId, onSaved, showEmptyStat
 
   if (!fields || fields.length === 0) {
     if (!showEmptyState) return null;
+    // No link out of here. There is no page to define a custom field on yet,
+    // and a button that lands on a URL that does not exist is worse than no
+    // button. When that page ships it becomes the action on this state.
     return (
-      <div className="rounded-lg border border-dashed border-border bg-surface-2 p-4 text-center">
-        <p className="text-xs text-muted-2 mb-2">No custom fields defined for {entityType.toLowerCase()} yet.</p>
-        <Link
-          href="/studio"
-          className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
-        >
-          <Plus size={11} /> Add custom fields in Studio
-        </Link>
+      <div className="rounded-md border border-dashed border-line bg-subtle p-4 text-center">
+        <p className="m-0 text-sm text-ink-2">No custom fields yet.</p>
       </div>
     );
   }

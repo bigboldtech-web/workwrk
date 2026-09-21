@@ -1,19 +1,17 @@
 "use client";
 
-/* SOP Walkthrough viewer — "Next Step" style.
+/* Present (spec-process section 1 naming canon: "Walk through" is renamed
+ * Present): the read-only stepper that plays a Step-by-step or Recording SOP
+ * one step at a time in a 720 modal with < > and "Step 3 of 9". Checklists
+ * are ticked on a run, not here, but the stepper still reads their sections
+ * when asked.
  *
- * Modal slide-over that walks the user through an SOP one step at a time.
- * Supports all three SOP variants we have today:
- *   - CHECKLIST   : sections[].steps[]  (title + notes)
- *   - RECORDED    : steps[]             (action + description + screenshot)
- *   - WRITTEN     : steps[]             (title + description HTML)
- *
- * Progress is held in local component state for v1 — a future ProcessRun
- * integration can persist it server-side and resume across sessions.
+ * Progress is held in local component state: a Present is a read, and the
+ * run history belongs to ProcessRun.
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, X, BookCopy, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, X, BookCopy } from "lucide-react";
 
 export type WalkthroughStep = {
   id: string;
@@ -108,13 +106,12 @@ export function SopWalkthrough({ sop, onClose }: Props) {
             <BookCopy />
             <div>
               <h2>{sop.title || "Untitled SOP"}</h2>
-              <p>Walkthrough</p>
+              <p>Present</p>
             </div>
             <button type="button" className="sopwalk__x" onClick={onClose} aria-label="Close"><X /></button>
           </header>
           <div className="sopwalk__empty">
-            <Loader2 className="bedit__spin" />
-            <p>No steps to walk through yet. Add steps in the editor first.</p>
+            <p>No steps to present yet. Add steps in the editor first.</p>
           </div>
         </div>
       </div>

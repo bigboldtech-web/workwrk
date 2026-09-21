@@ -18,8 +18,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X, ArrowLeftRight } from "lucide-react";
+import { X, ArrowLeftRight, Maximize2, FileText } from "lucide-react";
 import { BlockDocEditor } from "./block-doc-editor";
+import { apiFetch } from "@/lib/api-fetch";
 
 const RATIO_KEY = "workwrk:docs:splitRatio";
 const MIN_RATIO = 0.2;
@@ -58,6 +59,12 @@ export function DocSplitView({ primaryId, peekId }: Props) {
     setRatio(next);
   }, []);
 
+  // The pointerup listener is one stable function that calls the latest
+  // stopDrag through a ref, so the listener startDrag added is the one
+  // stopDrag removes even after `ratio` has changed underneath it.
+  const stopDragRef = useRef<() => void>(() => {});
+  const onPointerUp = useCallback(() => { stopDragRef.current(); }, []);
+
   const stopDrag = useCallback(() => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
@@ -65,8 +72,9 @@ export function DocSplitView({ primaryId, peekId }: Props) {
     document.body.style.userSelect = "";
     try { localStorage.setItem(RATIO_KEY, String(ratio)); } catch { /* ignore */ }
     window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", stopDrag);
-  }, [onPointerMove, ratio]);
+    window.removeEventListener("pointerup", onPointerUp);
+  }, [onPointerMove, onPointerUp, ratio]);
+  useEffect(() => { stopDragRef.current = stopDrag; }, [stopDrag]);
 
   const startDrag = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -74,8 +82,8 @@ export function DocSplitView({ primaryId, peekId }: Props) {
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
     window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", stopDrag);
-  }, [onPointerMove, stopDrag]);
+    window.addEventListener("pointerup", onPointerUp);
+  }, [onPointerMove, onPointerUp]);
 
   // Clean up listeners if the component unmounts mid-drag.
   useEffect(() => () => {
@@ -87,8 +95,23 @@ export function DocSplitView({ primaryId, peekId }: Props) {
     }
   }, [onPointerMove, stopDrag]);
 
+  // The peek pane's own 48px header names the doc (spec-docs-knowledge
+  // section 2, Split view): title, Swap, Open full, close.
+  const [peekTitle, setPeekTitle] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const r = await apiFetch<{ doc?: { title?: string } }>(`/api/docs/${peekId}`, { cache: "no-store" });
+      if (live) setPeekTitle(r.ok ? r.data.doc?.title ?? "" : "");
+    })();
+    return () => { live = false; };
+  }, [peekId]);
+
   function closePeek() {
     router.push(`/docs/${primaryId}`);
+  }
+  function openFull() {
+    router.push(`/docs/${peekId}`);
   }
   function swap() {
     router.push(`/docs/${peekId}?peek=${primaryId}`);
@@ -115,6 +138,10 @@ export function DocSplitView({ primaryId, peekId }: Props) {
 
       <div className="bdoc-split__pane bdoc-split__pane--peek" style={{ width: rightPct }}>
         <div className="bdoc-split__peek-bar">
+          <span className="flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-ink">
+            <FileText className="h-4 w-4 shrink-0 text-ink-2" strokeWidth={1.5} aria-hidden />
+            <span className="truncate">{peekTitle === null ? "" : peekTitle || "Untitled doc"}</span>
+          </span>
           <button
             type="button"
             className="bdoc-split__peek-act"
@@ -123,6 +150,15 @@ export function DocSplitView({ primaryId, peekId }: Props) {
             aria-label="Swap panes"
           >
             <ArrowLeftRight />
+          </button>
+          <button
+            type="button"
+            className="bdoc-split__peek-act"
+            onClick={openFull}
+            title="Open full"
+            aria-label="Open full"
+          >
+            <Maximize2 />
           </button>
           <button
             type="button"

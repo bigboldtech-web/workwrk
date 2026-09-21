@@ -21,7 +21,8 @@
 import { createReactBlockSpec } from "@blocknote/react";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, FileText, Loader2, Search } from "lucide-react";
+import { ChevronRight, FileText, Search } from "lucide-react";
+import { Dots } from "@/components/ui/dots";
 
 type DocRow = { id: string; title: string };
 
@@ -52,7 +53,7 @@ export const subpageBlockSpec = createReactBlockSpec(
         <SubpagePicker
           onPick={(row) => {
             editor.updateBlock(block, {
-              props: { childDocId: row.id, title: row.title || "Untitled note", emoji: "" },
+              props: { childDocId: row.id, title: row.title || "Untitled doc", emoji: "" },
             });
           }}
         />
@@ -94,7 +95,7 @@ function SubpageConfigured({
     return () => { cancelled = true; };
   }, [childDocId]);
 
-  const shown = liveTitle || "Untitled note";
+  const shown = liveTitle || "Untitled doc";
   return (
     <button
       type="button"
@@ -136,7 +137,7 @@ function SubpagePicker({ onPick }: { onPick: (row: DocRow) => void }) {
         const d = await res.json();
         const list: DocRow[] = (d.docs ?? d.data ?? d ?? []).map((r: { id: string; title: string }) => ({
           id: r.id,
-          title: r.title || "Untitled note",
+          title: r.title || "Untitled doc",
         }));
         if (!cancelled) setRows(list);
       } catch { if (!cancelled) setRows([]); }
@@ -165,7 +166,7 @@ function SubpagePicker({ onPick }: { onPick: (row: DocRow) => void }) {
         <Search />
         <input
           type="text"
-          placeholder="Search notes to link…"
+          placeholder="Search docs to link…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
@@ -174,8 +175,8 @@ function SubpagePicker({ onPick }: { onPick: (row: DocRow) => void }) {
       </div>
       <div className="bn-subpage__picker-list">
         {filtered === null ? (
-          <div className="bn-subpage__picker-empty">
-            <Loader2 className="bn-subpage__spin" /> Loading notes…
+          <div className="bn-subpage__picker-empty" aria-busy="true" aria-label="Loading">
+            <Dots variant="pending" />
           </div>
         ) : filtered.length === 0 ? (
           <div className="bn-subpage__picker-empty">No matches</div>

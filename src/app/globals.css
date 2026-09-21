@@ -42,6 +42,12 @@
   --text-rail--font-weight: 500;
   --text-prose: 15px;
   --text-prose--line-height: 24px;
+  /* The agreed extension of the reading exception (design-system 2.2,
+     spec-docs-knowledge section 3): the doc column's H1. It exists only
+     inside .os-prose; the lint rule allow-lists it there and nowhere else. */
+  --text-prose-h1: 18px;
+  --text-prose-h1--line-height: 24px;
+  --text-prose-h1--font-weight: 600;
 }
 
 /* ── Token aliases for Tailwind (design-system 8.3) ─────────────────

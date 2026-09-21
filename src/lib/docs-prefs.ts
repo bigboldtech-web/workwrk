@@ -16,17 +16,24 @@
 
 // ── Column toggles ────────────────────────────────────────────────
 
-/** The optional columns of the `/docs` table (spec section 2, `/docs`). */
-export type DocsColumnKey = "location" | "updated" | "viewed" | "owner";
+/**
+ * The optional columns of the `/docs` table (spec section 2, `/docs`).
+ * `contributors` is the column the old table had (every DocVersion author,
+ * real avatars): it stays available behind Display, off by default, because
+ * the spec's Owner column replaces it in the default view but a person who
+ * could see who edited a doc yesterday can still turn it on.
+ */
+export type DocsColumnKey = "location" | "updated" | "viewed" | "owner" | "contributors";
 
-export const DOCS_COLUMNS: readonly DocsColumnKey[] = ["location", "updated", "viewed", "owner"];
+export const DOCS_COLUMNS: readonly DocsColumnKey[] = ["location", "updated", "viewed", "owner", "contributors"];
 
-/** Shown unless the viewer turned it off. All four start on. */
+/** Shown unless the viewer turned it off. The spec's four start on. */
 export const DOCS_COLUMN_DEFAULTS: Readonly<Record<DocsColumnKey, boolean>> = {
   location: true,
   updated: true,
   viewed: true,
   owner: true,
+  contributors: false,
 };
 
 /** The optional columns of the `/canvas` list view. */
@@ -40,16 +47,22 @@ export const CANVAS_COLUMN_DEFAULTS: Readonly<Record<CanvasColumnKey, boolean>> 
   owner: true,
 };
 
-/** The optional columns of the `/files` list view. */
-export type FilesColumnKey = "size" | "uploaded" | "owner" | "location";
+/**
+ * The optional columns of the `/files` list view, plus the Display toggle
+ * "Show AI summaries" (`summary`), which is a row option rather than a column
+ * and rides in the same map so it has one home and one writer.
+ */
+export type FilesColumnKey = "type" | "size" | "uploaded" | "owner" | "location" | "summary";
 
-export const FILES_COLUMNS: readonly FilesColumnKey[] = ["size", "uploaded", "owner", "location"];
+export const FILES_COLUMNS: readonly FilesColumnKey[] = ["type", "size", "uploaded", "owner", "location", "summary"];
 
 export const FILES_COLUMN_DEFAULTS: Readonly<Record<FilesColumnKey, boolean>> = {
+  type: true,
   size: true,
   uploaded: true,
   owner: true,
   location: true,
+  summary: true,
 };
 
 // ── The readers ───────────────────────────────────────────────────
@@ -89,7 +102,7 @@ export function readDocsOutline(home: unknown): boolean {
   return typeof v === "boolean" ? v : false;
 }
 
-/** Card grid or table. `grid` on Canvases and Files, which are visual lists. */
+/** Card grid or table. `grid` on Canvases (a visual list), `list` on Files (a drive). */
 export type SurfaceViewType = "grid" | "list";
 
 function readViewType(stored: unknown, fallback: SurfaceViewType): SurfaceViewType {
@@ -106,9 +119,10 @@ export function readCanvasColumns(home: unknown): Record<CanvasColumnKey, boolea
   return readColumns(isRecord(canvas) ? canvas.columns : undefined, CANVAS_COLUMN_DEFAULTS);
 }
 
+/** The drive opens as a list (spec-docs-knowledge section 2, /files: "list default"). */
 export function readFilesViewType(home: unknown): SurfaceViewType {
   const files = isRecord(home) ? home.files : undefined;
-  return readViewType(isRecord(files) ? files.viewType : undefined, "grid");
+  return readViewType(isRecord(files) ? files.viewType : undefined, "list");
 }
 
 export function readFilesColumns(home: unknown): Record<FilesColumnKey, boolean> {

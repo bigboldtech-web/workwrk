@@ -1,4 +1,4 @@
-import type { Block } from "./block-editor";
+import type { Block } from "./block-types";
 
 // Shared embed-preservation helpers for the BlockNote-backed editors (Notes
 // AND Written SOPs). BlockNote can't render these legacy custom-embed kinds

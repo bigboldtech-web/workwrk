@@ -1,6 +1,6 @@
 "use client";
 
-// DocsSidebar — the Docs hub's secondary sidebar.
+// DocsSidebar: the Docs hub's secondary sidebar.
 //
 // Spec: docs/plans/ui-refresh/sidebar-map.md section 6 (the row table),
 // spec-docs-knowledge.md section 1 (hub sidebar contents) and spec-process.md
@@ -54,8 +54,7 @@
 // localStorage key "workwrk:docs:pages-open" is read ONCE on mount and
 // migrated, so nobody loses the tree they had open.
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import {
@@ -74,7 +73,10 @@ import {
   SidebarRow, SidebarGhostRow, SidebarSectionLabel, SidebarEmptyLine,
   SidebarErrorLine, SidebarSkeletonRows,
 } from "./sidebar-primitives";
-import { NoteActionMenu, useNoteMenu } from "@/components/docs/note-actions-menu";
+import { DocRowMenuHost, useDocRowMenu } from "@/components/docs/doc-row-menu";
+import { FileRowMenuHost, useFileRowMenu } from "@/components/files/file-row-menu";
+import { MorePortal } from "./more-portal";
+import { MenuItem, MenuList } from "@/components/ui/menu";
 import { createChildPage } from "@/components/docs/doc-pages-panel";
 import { renderNoteIcon } from "@/components/docs/note-icon";
 import { SopKindChooserHost } from "@/components/sops/sop-kind-chooser";
@@ -89,10 +91,42 @@ type DocRow = {
   title: string;
   emoji?: string | null;
   entityType?: string | null;
-  createdById?: string | null;
+  entityId?: string | null;
+  ownerId?: string | null;
   parentId?: string | null;
   updatedAt: string;
+  favorite?: boolean;
+  myRole?: "edit" | "comment" | "view";
+  canManage?: boolean;
 };
+
+type DocCounts = { all: number; recent: number; my: number; shared: number; favorites: number };
+
+/**
+ * ONE QUERY FOR THE TREE AND THE BADGES. The tree rows and the Mine /
+ * Shared with me counts come from the same GET /api/docs?view= the /docs page
+ * reads (spec-docs-knowledge section 2: "the sidebar badge counts and the
+ * page counts come from the same query"), paged through to the end so the
+ * tree is whole. The rows carry the viewer's role, so the row menu gates its
+ * rows exactly as the /docs table does.
+ */
+async function loadDocRows(): Promise<{ rows: DocRow[]; counts: DocCounts | null }> {
+  const rows: DocRow[] = [];
+  let counts: DocCounts | null = null;
+  let cursor: string | null = null;
+  for (let page = 0; page < 20; page += 1) {
+    const qs = new URLSearchParams({ view: "all", includeChildren: "1", sort: "name", dir: "asc", limit: "100" });
+    if (cursor) qs.set("cursor", cursor);
+    const res = await fetch(`/api/docs?${qs.toString()}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(String(res.status));
+    const d = await res.json() as { data?: DocRow[]; nextCursor?: string | null; counts?: DocCounts };
+    rows.push(...(d.data ?? []));
+    if (page === 0 && d.counts) counts = d.counts;
+    cursor = d.nextCursor ?? null;
+    if (!cursor) break;
+  }
+  return { rows, counts };
+}
 
 type FolderRow = {
   id: string;
@@ -120,10 +154,15 @@ const VIEW_ROWS: Array<{
  * CONTENT. "Library" and "Notes" are gone: the page is retired and both rows
  * pointed at lists the other three rows already carry.
  */
-const CONTENT_ROWS: Array<{ href: string; label: string; Icon: LucideIcon }> = [
-  { href: "/canvas", label: "Canvases", Icon: Frame },
-  { href: "/files", label: "Files", Icon: Folder },
-  { href: "/notetaker", label: "Notetaker", Icon: Mic },
+const CONTENT_ROWS: Array<{ href: string; label: string; Icon: LucideIcon; app: string; needsAi?: boolean }> = [
+  // The app key each row needs on the rail (sidebar-map section 6, rows 6 to
+  // 8). Hiding or flooring an app in Settings > Admin > Apps has to take its
+  // row with it: a row whose destination renders AppOff is a door that is
+  // locked from the inside. Notetaker also needs the AI module, which is what
+  // /notetaker itself gates on.
+  { href: "/canvas", label: "Canvases", Icon: Frame, app: "docs" },
+  { href: "/files", label: "Files", Icon: Folder, app: "library" },
+  { href: "/notetaker", label: "Notetaker", Icon: Mic, app: "clips", needsAi: true },
 ];
 
 /**
@@ -176,13 +215,27 @@ const PROCESS_ROWS: Array<{
 // page and each row inside it is gated on its own.
 const TRASH_ROW = { href: "/trash?type=doc", label: "Trash", Icon: Trash2 };
 
-const ALL_ROWS = [...VIEW_ROWS, ...CONTENT_ROWS, ...PROCESS_ROWS, TRASH_ROW];
+/**
+ * Favorites is a real /docs view with no row of its own: the FAVORITES section
+ * below lists the starred objects themselves. It is declared here anyway so
+ * `resolveActiveRow` sees it. Without it `/docs?view=favorites` matched the
+ * "All docs" row exactly (same path, no query declared) and lit it, which is
+ * the "exactly one row is active, or none" rule failing in the "wrong one"
+ * direction. With it, the longest-href tie-break picks this phantom and no
+ * visible row lights, which is the honest answer.
+ */
+const FAVORITES_VIEW_ROW = { href: "/docs?view=favorites", match: "exact" as const };
+
+const ALL_ROWS = [...VIEW_ROWS, ...CONTENT_ROWS, ...PROCESS_ROWS, TRASH_ROW, FAVORITES_VIEW_ROW];
 
 /** The localStorage key the doc tree used before it became a preference. */
 const LEGACY_TREE_LS = "workwrk:docs:pages-open";
 
 /** `sidebar.collapsedSections` is keyed `{hub}.{section}` for every hub. */
 const DOCS_SECTION_KEY = "docs.docs";
+const FAV_SECTION_KEY = "docs.favorites";
+const CONTENT_SECTION_KEY = "docs.content";
+const PROCESS_SECTION_KEY = "docs.process";
 
 export function DocsSidebar() {
   const router = useRouter();
@@ -193,11 +246,23 @@ export function DocsSidebar() {
   const isHrAdmin = canAccessTier("hr-admin", accessLevel);
   const isManager = canAccessTier("manager", accessLevel);
   const activeHref = useActiveRowHref(ALL_ROWS);
-  const noteMenu = useNoteMenu();
-  const { prefs, patchPrefs } = useOsShell();
-  const { counts } = useBoot();
+  const noteMenu = useDocRowMenu();
+  const { prefs, patchPrefs, launcherApps } = useOsShell();
+  // Every app this viewer can reach, RAIL PLUS FOLDED: `library` and `clips`
+  // are off-rail by design (they live inside this very sidebar), so they are
+  // never in railApps and gating on that list would hide Files and Notetaker
+  // from everyone. Settings > Admin > Apps can still hide or floor any of
+  // them, and the AI module can be off; a CONTENT row whose app is gone goes
+  // with it rather than landing on a denial view.
+  const appKeys = useMemo(() => new Set(launcherApps.map((a) => a.key)), [launcherApps]);
+  const { counts, boot } = useBoot();
+  // spec-process section 1: a Guest never sees the PROCESS rows; My SOPs
+  // renders for a Guest only while they hold an assignment. A row that
+  // lands on the in-shell 404 is the fabricated chrome this refresh removes.
+  const isGuest = boot.viewer.orgRole === "GUEST";
 
   const [docs, setDocs] = useState<DocRow[] | null>(null);
+  const [docCounts, setDocCounts] = useState<DocCounts | null>(null);
   const [docsError, setDocsError] = useState(false);
   const [favorites, setFavorites] = useState<FavoriteRow[] | null>(null);
   const [favError, setFavError] = useState(false);
@@ -207,10 +272,9 @@ export function DocsSidebar() {
   // The error flag is cleared on the success path instead.
   const loadDocs = useCallback(async () => {
     try {
-      const res = await fetch("/api/docs", { cache: "no-store" });
-      if (!res.ok) { setDocs(null); setDocsError(true); return; }
-      const d = await res.json();
-      setDocs((d.docs ?? d.data ?? []) as DocRow[]);
+      const { rows, counts } = await loadDocRows();
+      setDocs(rows);
+      setDocCounts(counts);
       setDocsError(false);
     } catch { setDocs(null); setDocsError(true); }
   }, []);
@@ -270,13 +334,16 @@ export function DocsSidebar() {
   // The hub search filters the personal block, FAVORITES, CONTENT and the
   // DOCS tree, and NEVER the PROCESS rows (spec-process section 1).
   const viewRows = VIEW_ROWS.filter((r) => matches(r.label));
-  const contentRows = CONTENT_ROWS.filter((r) => matches(r.label));
+  const contentRows = CONTENT_ROWS.filter(
+    (r) => matches(r.label) && appKeys.has(r.app) && (!r.needsAi || appKeys.has("ai")),
+  );
   const favRows = useMemo(
     () => (favorites ?? []).filter((f) => ["doc", "canvas", "file"].includes(f.kind) && matches(f.name)),
     [favorites, matches],
   );
   const processRows = PROCESS_ROWS.filter(
-    (r) => (isHrAdmin || !r.hrAdminOnly) && (isManager || !r.managerOnly),
+    (r) => (isHrAdmin || !r.hrAdminOnly) && (isManager || !r.managerOnly)
+      && (!isGuest || (r.badge === "mySops" && counts.mySops > 0)),
   );
 
   const badgeFor = (key?: "mySops" | "policiesToAck") =>
@@ -287,17 +354,14 @@ export function DocsSidebar() {
     [favorites],
   );
 
-  // Rows 3 and 4 carry a number. Both come from the doc list this sidebar has
-  // already loaded, so neither adds a request: Mine is what the viewer owns,
-  // and Shared with me is the same set /docs?view=shared lists.
+  // Rows 3 and 4 carry a number: the `counts` the same /api/docs query gives
+  // the page, so the badge and the view pill can never disagree. No count
+  // renders until the query answers (a 0 that means "not loaded" is a lie).
   const meId = (session?.user as { id?: string } | undefined)?.id ?? null;
-  const viewCounts = useMemo(() => {
-    const all = docs ?? [];
-    return {
-      mine: meId ? all.filter((d) => d.createdById === meId).length : 0,
-      shared: all.filter((d) => !!d.entityType && d.createdById !== meId).length,
-    };
-  }, [docs, meId]);
+  const viewCounts = useMemo(() => ({
+    mine: docCounts ? docCounts.my : null,
+    shared: docCounts ? docCounts.shared : null,
+  }), [docCounts]);
 
   // Section and row collapse, as preferences rather than as state that a
   // reload discards (sidebar-map section 0).
@@ -305,13 +369,23 @@ export function DocsSidebar() {
   const toggleDocsSection = useCallback(() => {
     void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, DOCS_SECTION_KEY) } });
   }, [prefs.sidebar, patchPrefs]);
+  // Every section label is a collapse control (sidebar-map section 0), the
+  // other three included; each keeps its state under the same
+  // `sidebar.collapsedSections` key as DOCS (spec-process section 1 for
+  // PROCESS: "collapse persisted under the docs unit's existing sidebar key").
+  const favCollapsed = isSectionCollapsed(prefs.sidebar, FAV_SECTION_KEY);
+  const contentCollapsed = isSectionCollapsed(prefs.sidebar, CONTENT_SECTION_KEY);
+  const processCollapsed = isSectionCollapsed(prefs.sidebar, PROCESS_SECTION_KEY);
+  const toggleSection = useCallback((key: string) => {
+    void patchPrefs({ sidebar: { collapsedSections: toggleSectionCollapsed(prefs.sidebar, key) } });
+  }, [prefs.sidebar, patchPrefs]);
 
   const filesOpenPref = readDocsFilesOpen(prefs.sidebar);
   const toggleFilesRow = useCallback(() => {
     void patchPrefs({ sidebar: { docsFilesOpen: !filesOpenPref } });
   }, [filesOpenPref, patchPrefs]);
 
-  const [favMenu, setFavMenu] = useState<{ row: FavoriteRow; x: number; y: number } | null>(null);
+  const [favMenu, setFavMenu] = useState<{ row: FavoriteRow; anchor: RefObject<HTMLElement | null> } | null>(null);
 
   return (
     <div className="flex flex-col">
@@ -337,13 +411,13 @@ export function DocsSidebar() {
           section is not a place to advertise a feature. */}
       {favError ? (
         <>
-          <SidebarSectionLabel>Favorites</SidebarSectionLabel>
-          <ul><SidebarErrorLine what="favorites" onRetry={() => void loadFavorites()} /></ul>
+          <SidebarSectionLabel collapsed={favCollapsed} onToggle={() => toggleSection(FAV_SECTION_KEY)}>Favorites</SidebarSectionLabel>
+          {!favCollapsed ? <ul><SidebarErrorLine what="favorites" onRetry={() => void loadFavorites()} /></ul> : null}
         </>
       ) : favRows.length > 0 ? (
         <>
-          <SidebarSectionLabel>Favorites</SidebarSectionLabel>
-          <ul className="flex flex-col gap-0.5">
+          <SidebarSectionLabel collapsed={favCollapsed} onToggle={() => toggleSection(FAV_SECTION_KEY)}>Favorites</SidebarSectionLabel>
+          {!favCollapsed ? <ul className="flex flex-col gap-0.5">
             {favRows.map((f) => (
               <SidebarRow
                 key={`${f.kind}-${f.id}`}
@@ -370,7 +444,7 @@ export function DocsSidebar() {
                 trailing={
                   <button
                     type="button"
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFavMenu({ row: f, x: e.clientX, y: e.clientY }); }}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setFavMenu({ row: f, anchor: { current: e.currentTarget } }); }}
                     aria-label={`Actions for ${f.name || "Untitled"}`}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
                   >
@@ -379,7 +453,7 @@ export function DocsSidebar() {
                 }
               />
             ))}
-          </ul>
+          </ul> : null}
         </>
       ) : null}
 
@@ -388,8 +462,8 @@ export function DocsSidebar() {
           used to leave the label and its rule sitting over empty space. */}
       {contentRows.length > 0 ? (
         <>
-          <SidebarSectionLabel>Content</SidebarSectionLabel>
-          <ul className="flex flex-col gap-0.5">
+          <SidebarSectionLabel collapsed={contentCollapsed} onToggle={() => toggleSection(CONTENT_SECTION_KEY)}>Content</SidebarSectionLabel>
+          {!contentCollapsed ? <ul className="flex flex-col gap-0.5">
             {contentRows.map((r) =>
               r.href === "/files" ? (
                 <FilesRow
@@ -404,7 +478,7 @@ export function DocsSidebar() {
                 <SidebarRow key={r.href} href={r.href} label={r.label} icon={r.Icon} active={r.href === activeHref} />
               ),
             )}
-          </ul>
+          </ul> : null}
         </>
       ) : null}
 
@@ -412,8 +486,8 @@ export function DocsSidebar() {
           that is none (a Guest with no assignment sees no label). */}
       {processRows.length > 0 ? (
         <>
-          <SidebarSectionLabel>Process</SidebarSectionLabel>
-          <ul className="flex flex-col gap-0.5">
+          <SidebarSectionLabel collapsed={processCollapsed} onToggle={() => toggleSection(PROCESS_SECTION_KEY)}>Process</SidebarSectionLabel>
+          {!processCollapsed ? <ul className="flex flex-col gap-0.5">
             {processRows.map((r) => (
               <SidebarRow
                 key={r.href}
@@ -424,7 +498,7 @@ export function DocsSidebar() {
                 count={badgeFor(r.badge)}
               />
             ))}
-          </ul>
+          </ul> : null}
         </>
       ) : null}
 
@@ -443,7 +517,12 @@ export function DocsSidebar() {
             prefs={prefs}
             patchPrefs={patchPrefs}
             onOpen={(id) => router.push(`/docs/${id}`)}
-            onMenu={(e, d) => noteMenu.open(e, { id: d.id, title: d.title, favorite: favIds.has(d.id) })}
+            onMenu={(e, d) => noteMenu.open(e, {
+              id: d.id, title: d.title, parentId: d.parentId ?? null, entityType: d.entityType ?? null, entityId: d.entityId ?? null,
+              favorite: favIds.has(d.id),
+              role: d.canManage ? "full" : d.myRole ?? "view",
+              own: !!meId && d.ownerId === meId,
+            })}
             onNewDoc={() => void newDoc(null)}
           />
         )
@@ -469,22 +548,13 @@ export function DocsSidebar() {
       {favMenu ? (
         <FavoriteRowMenu
           row={favMenu.row}
-          x={favMenu.x}
-          y={favMenu.y}
+          anchor={favMenu.anchor}
           onClose={() => setFavMenu(null)}
           onChanged={() => { void loadFavorites(); }}
         />
       ) : null}
 
-      {noteMenu.menu && (
-        <NoteActionMenu
-          target={noteMenu.menu.target}
-          x={noteMenu.menu.x}
-          y={noteMenu.menu.y}
-          onClose={noteMenu.close}
-          onChanged={() => { void loadDocs(); void loadFavorites(); }}
-        />
-      )}
+      <DocRowMenuHost menu={noteMenu} context="tree" onChanged={() => { void loadDocs(); void loadFavorites(); }} />
     </div>
   );
 }
@@ -498,9 +568,10 @@ export function DocsSidebar() {
  * way to unstar from the sidebar was to open the object and find its own star,
  * which is a trip out of the sidebar to undo something the sidebar shows.
  *
- * Portalled at the cursor, like the doc row menu, so an overflow-hidden
- * sidebar cannot clip it. It writes through the same per-kind favorite routes
- * the object pages use, so there is one toggle per kind and not two.
+ * Portalled and anchored to the row's "...", like the doc row menu, so an
+ * overflow-hidden sidebar cannot clip it. It writes through the same per-kind
+ * favorite routes the object pages use, so there is one toggle per kind and
+ * not two.
  */
 const FAVORITE_TOGGLE: Record<string, { url: string; idKey: string } | undefined> = {
   doc: { url: "/api/me/favorites/docs", idKey: "docId" },
@@ -509,38 +580,14 @@ const FAVORITE_TOGGLE: Record<string, { url: string; idKey: string } | undefined
 };
 
 function FavoriteRowMenu({
-  row, x, y, onClose, onChanged,
+  row, anchor, onClose, onChanged,
 }: {
   row: FavoriteRow;
-  x: number;
-  y: number;
+  anchor: RefObject<HTMLElement | null>;
   onClose: () => void;
   onChanged: () => void;
 }) {
   const { toast } = useOsToast();
-  const ref = useRef<HTMLDivElement | null>(null);
-  const [pos, setPos] = useState({ x, y });
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({
-      x: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
-      y: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)),
-    });
-  }, [x, y]);
-
-  useEffect(() => {
-    function onDown(e: MouseEvent) { if (!ref.current?.contains(e.target as Node)) onClose(); }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
 
   async function unstar() {
     const target = FAVORITE_TOGGLE[row.kind];
@@ -568,19 +615,15 @@ function FavoriteRowMenu({
     onClose();
   }
 
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div ref={ref} className="noteacts" style={{ top: pos.y, left: pos.x }} onClick={(e) => e.stopPropagation()} role="menu">
-      <div className="noteacts__title">{row.name || "Untitled"}</div>
-      <button type="button" className="noteacts__item" onClick={() => void unstar()}>
-        <Star /> Remove from favorites
-      </button>
-      <button type="button" className="noteacts__item" onClick={copyLink}>
-        <Link2 /> Copy link
-      </button>
-    </div>,
-    document.body,
+  // Anchored to the row's "..." (never the pointer), so a keyboard activation
+  // opens it beside the row; MorePortal owns Esc and the outside click.
+  return (
+    <MorePortal anchorRef={anchor} width={220} open placement="below" onClose={onClose}>
+      <MenuList aria-label={`Actions for ${row.name || "Untitled"}`}>
+        <MenuItem icon={Star} iconFilled label="Remove from favorites" onClick={() => void unstar()} />
+        <MenuItem icon={Link2} label="Copy link" onClick={copyLink} />
+      </MenuList>
+    </MorePortal>
   );
 }
 
@@ -646,6 +689,8 @@ function FilesRow({
     return () => window.removeEventListener("workwrk:files-changed", onChange);
   }, [expanded, load]);
 
+  const folderMenu = useFileRowMenu();
+
   const openIds = readDocsFoldersOpen(prefs.sidebar);
   const toggleFolder = (id: string) => {
     void patchPrefs({ sidebar: { docsFoldersOpen: toggleExpanded(openIds, id) } });
@@ -692,17 +737,33 @@ function FilesRow({
           depth={depth}
           active={activeFolder === f.id}
           count={f._count?.files ?? null}
-          trailing={kids.length > 0 ? (
-            <button
-              type="button"
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFolder(f.id); }}
-              aria-label={isOpen ? `Collapse ${f.name}` : `Expand ${f.name}`}
-              aria-expanded={isOpen}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
-            >
-              <ChevronRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : "rtl:rotate-180"}`} />
-            </button>
-          ) : undefined}
+          trailing={
+            // One "..." per row, the same control the DOCS tree rows carry
+            // (sidebar-map section 6, row 7: Rename, New folder inside, Move
+            // to Trash). Hover and focus reach it; right-click is never the
+            // only way in.
+            <span className="flex items-center">
+              {kids.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFolder(f.id); }}
+                  aria-label={isOpen ? `Collapse ${f.name}` : `Expand ${f.name}`}
+                  aria-expanded={isOpen}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+                >
+                  <ChevronRight className={`h-4 w-4 transition-transform ${isOpen ? "rotate-90" : "rtl:rotate-180"}`} />
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); folderMenu.openFolderAt(e, { id: f.id, name: f.name, parentId: f.parentId }); }}
+                aria-label={`Actions for ${f.name}`}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+              >
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            </span>
+          }
         />
       );
       return isOpen && kids.length > 0 ? [row, ...renderLevel(f.id, depth + 1, next)] : [row];
@@ -736,6 +797,7 @@ function FilesRow({
         : folders.length === 0 ? <SidebarEmptyLine>No folders yet</SidebarEmptyLine>
         : renderLevel(null, 1, new Set())
       ) : null}
+      <FileRowMenuHost menu={folderMenu} onChanged={() => void load()} />
     </>
   );
 }

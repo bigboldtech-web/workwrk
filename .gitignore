@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# local-disk upload fallback (src/app/api/upload/route.ts writes here when no
+# object storage is configured); dev and single-instance blobs never ship in git
+/public/uploads/

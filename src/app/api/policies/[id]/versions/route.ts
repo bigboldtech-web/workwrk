@@ -2,18 +2,22 @@ import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionOrFail, getOrgId, isManager, getUserId, jsonError, jsonSuccess } from "@/lib/api-helpers";
 
-// GET: list a policy's version history (manager-gated).
+// GET: a policy's version history. Readable by everyone who can read the
+// policy (spec-process section 2 `/policies/[id]`: the History tab is
+// read-only for viewers): a Member reaches a PUBLISHED policy, or an
+// unpublished one assigned to them; FULL viewers reach every policy.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { error, session } = await getSessionOrFail();
   if (error) return error;
-  if (!isManager(session)) return jsonError("Forbidden", 403);
 
   const { id } = await params;
+  const userId = getUserId(session);
   const policy = await prisma.policy.findFirst({
     where: { id, organizationId: getOrgId(session) },
-    select: { id: true, version: true },
+    select: { id: true, version: true, status: true, assignments: { where: { userId }, select: { id: true } } },
   });
   if (!policy) return jsonError("Policy not found", 404);
+  if (!isManager(session) && policy.status !== "PUBLISHED" && policy.assignments.length === 0) return jsonError("Policy not found", 404);
 
   const versions = await prisma.policyVersion.findMany({
     where: { policyId: id },
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   const version = await prisma.policyVersion.findFirst({ where: { id: versionId, policyId: id } });
   if (!version) return jsonError("Version not found", 404);
-  if (!version.title?.trim()) return jsonError("That version is empty — pick a different one to restore.");
+  if (!version.title?.trim()) return jsonError("That version is empty, pick a different one to restore.");
 
   // Snapshot the current state, then restore the chosen version + bump.
   await prisma.policyVersion.create({

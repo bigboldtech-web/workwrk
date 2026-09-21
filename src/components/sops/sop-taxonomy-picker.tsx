@@ -1,17 +1,20 @@
 "use client";
 
-// SopTaxonomyPicker — THE control for an SOP's Category / Subcategory.
+// SopTaxonomyPicker: THE control for a SOP's Folder / Subfolder (the naming
+// canon's words; spec-process section 1: Folder replaces Category).
 //
 // One taxonomy, one vocabulary: the SOPFolder tree is the data (top-level
-// folder = Category, child = Subcategory), and this picker writes `folderId`.
-// The API mirrors the names into the legacy category/subcategory strings, so
-// every older reader stays consistent. No surface should offer a separate
-// folder picker or a string-based category picker — this is the only door.
+// folder, child = subfolder), and this picker writes `folderId`. The API
+// mirrors the names into the legacy category/subcategory strings, so every
+// older reader stays consistent. No surface offers a separate folder picker
+// or a string-based category picker; this is the only door.
 //
-// Inline creation: admins get "+ New category / subcategory" right in the
+// Inline creation: admins get "+ New folder / subfolder" right in the
 // dropdowns (POST /api/sop-folders); non-admins see the API's 403 as a toast.
+// The footer row "Manage folders" opens Organize (/sops/manage).
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -26,7 +29,7 @@ export interface SopFolderNode {
 }
 
 interface SopTaxonomyPickerProps {
-  /** The SOP's folderId (category or subcategory node) — null = uncategorized. */
+  /** The SOP's folderId (a folder or subfolder node); null = Unfiled. */
   folderId: string | null;
   /** Fired with the new folderId (null clears). Parent persists it. */
   onChange: (folderId: string | null) => void | Promise<void>;
@@ -37,9 +40,11 @@ interface SopTaxonomyPickerProps {
 
 const NONE = "__none__";
 const CREATE = "__create__";
+const MANAGE = "__manage__";
 
 export function SopTaxonomyPicker({ folderId, onChange, disabled, stacked }: SopTaxonomyPickerProps) {
   const prompt = usePrompt();
+  const router = useRouter();
   const { error: toastError } = useToast();
   const [folders, setFolders] = useState<SopFolderNode[] | null>(null);
 
@@ -78,11 +83,11 @@ export function SopTaxonomyPicker({ folderId, onChange, disabled, stacked }: Sop
 
   async function createNode(parentId: string | null): Promise<void> {
     const name = await prompt({
-      title: parentId ? "New subcategory" : "New category",
+      title: parentId ? "New subfolder" : "New folder",
       description: parentId
         ? `Added under "${byId.get(parentId)?.name ?? ""}".`
-        : "Top-level category SOP authors can pick from.",
-      placeholder: parentId ? "Subcategory name" : "Category name",
+        : "A top-level folder SOP authors can file under.",
+      placeholder: parentId ? "Subfolder name" : "Folder name",
     });
     if (!name?.trim()) return;
     const res = await fetch("/api/sop-folders", {
@@ -108,18 +113,20 @@ export function SopTaxonomyPicker({ folderId, onChange, disabled, stacked }: Sop
         disabled={disabled || folders === null}
         onValueChange={(v) => {
           if (v === CREATE) { void createNode(null); return; }
+          if (v === MANAGE) { router.push("/sops/manage?tab=sop-folders"); return; }
           void onChange(v === NONE ? null : v);
         }}
       >
         <SelectTrigger className={stacked ? "h-8 text-xs" : "h-8 w-[170px] text-xs"}>
-          <SelectValue placeholder="Category" />
+          <SelectValue placeholder="Folder" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={NONE}>No category</SelectItem>
+          <SelectItem value={NONE}>Unfiled</SelectItem>
           {categories.map((c) => (
             <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
           ))}
-          <SelectItem value={CREATE}>+ New category…</SelectItem>
+          <SelectItem value={CREATE}>+ New folder…</SelectItem>
+          <SelectItem value={MANAGE}>Manage folders…</SelectItem>
         </SelectContent>
       </Select>
 
@@ -133,14 +140,14 @@ export function SopTaxonomyPicker({ folderId, onChange, disabled, stacked }: Sop
           }}
         >
           <SelectTrigger className={stacked ? "h-8 text-xs" : "h-8 w-[180px] text-xs"}>
-            <SelectValue placeholder="Subcategory" />
+            <SelectValue placeholder="Subfolder" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={NONE}>No subcategory</SelectItem>
+            <SelectItem value={NONE}>No subfolder</SelectItem>
             {subs.map((s) => (
               <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
             ))}
-            <SelectItem value={CREATE}>+ New subcategory…</SelectItem>
+            <SelectItem value={CREATE}>+ New subfolder…</SelectItem>
           </SelectContent>
         </Select>
       )}

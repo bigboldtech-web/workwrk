@@ -10,6 +10,7 @@
 // public/uploads (same as the previous implementation) so dev still
 // works without setting AWS keys.
 
+import { MAX_UPLOAD_BYTES } from "@/lib/upload-limits";
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir } from "fs/promises";
 import path from "path";
@@ -17,15 +18,32 @@ import { randomBytes } from "crypto";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { isS3Configured, getBucket, getS3Client, presignGetUrl } from "@/lib/s3";
 import { resolveSuiteContext } from "@/lib/suites/auth";
+import { prisma } from "@/lib/prisma";
 
-const MAX_SIZE = 25 * 1024 * 1024; // 25MB — bumped from 10 for PDFs/screencaps
+// The limit lives in src/lib/upload-limits.ts so the /files page prints the
+// same number this route enforces, never a typed copy of it.
+const MAX_SIZE = MAX_UPLOAD_BYTES;
 
 export async function POST(req: NextRequest) {
-  const ctx = await resolveSuiteContext();
-  if ("error" in ctx) return ctx.error;
-
   const formData = await req.formData().catch(() => null);
   if (!formData) return NextResponse.json({ error: "Missing form data" }, { status: 400 });
+
+  // A public run (spec-process section 2 `/run/[token]`, the File input) has
+  // no session: the run token is the credential, and it scopes the upload to
+  // the run's org. Only a live run (not completed, not cancelled) may upload.
+  const runToken = formData.get("runToken");
+  let orgId: string;
+  if (typeof runToken === "string" && runToken.length >= 8) {
+    const run = await prisma.processRun.findUnique({ where: { shareToken: runToken }, select: { organizationId: true, status: true } });
+    if (!run || run.status === "CANCELLED" || run.status === "COMPLETED") {
+      return NextResponse.json({ error: "This link is no longer available" }, { status: 404 });
+    }
+    orgId = run.organizationId;
+  } else {
+    const ctx = await resolveSuiteContext();
+    if ("error" in ctx) return ctx.error;
+    orgId = ctx.orgId;
+  }
 
   const file = formData.get("file") as File | null;
   if (!file) return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -37,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   // S3 path — org-scoped so per-org bucket policies remain an option.
   if (isS3Configured()) {
-    const key = `orgs/${ctx.orgId}/notes/${today}/${id}${ext ? "." + ext : ""}`;
+    const key = `orgs/${orgId}/notes/${today}/${id}${ext ? "." + ext : ""}`;
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
       await getS3Client().send(
